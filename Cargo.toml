@@ -1,0 +1,9 @@
+[package]
+name = "ch-client"
+version = "0.0.0"
+description = "clickhouse client"
+edition = "2018"
+publish = false
+license = "Proprietary"
+
+[dependencies]
