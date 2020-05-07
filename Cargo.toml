@@ -7,3 +7,9 @@ publish = false
 license = "Proprietary"
 
 [dependencies]
+thiserror = "1.0.16"
+serde = "1.0.106"
+bytes = "0.5.4"
+
+[dev-dependencies]
+serde = { version = "1.0.106", features = ["derive"] }
