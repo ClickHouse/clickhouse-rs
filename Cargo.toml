@@ -10,6 +10,9 @@ license = "Proprietary"
 thiserror = "1.0.16"
 serde = "1.0.106"
 bytes = "0.5.4"
+tokio = { version = "0.2.20", features = ["rt-core"] }
+hyper = "0.13.5"
+url = "2.1.1"
 
 [dev-dependencies]
 serde = { version = "1.0.106", features = ["derive"] }
