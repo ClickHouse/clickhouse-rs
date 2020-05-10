@@ -8,7 +8,7 @@ use url::Url;
 
 use self::error::{Error, Result};
 
-mod error;
+pub mod error;
 mod rowbinary;
 
 #[derive(Clone)]
