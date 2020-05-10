@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, panic};
 
 use bytes::BytesMut;
 use hyper::{self, body, client::HttpConnector, Body, Request, Response};
@@ -118,9 +118,14 @@ where
     }
 
     pub async fn end(&mut self) -> Result<()> {
-        // TODO: what about the cancellation case?
-        // TODO: what about panic propagation?
-        let response = (&mut self.handle).await.expect("task panicked")?;
+        let response = match (&mut self.handle).await {
+            Ok(res) => res?,
+            Err(err) if err.is_panic() => panic::resume_unwind(err.into_panic()),
+            Err(err) => {
+                // TODO
+                return Err(Error::Custom(format!("unexpected error: {}", err)));
+            }
+        };
 
         if !response.status().is_success() {
             let bytes = body::to_bytes(response.into_body()).await?;
