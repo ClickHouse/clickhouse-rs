@@ -121,7 +121,9 @@ where
         Ok(())
     }
 
-    pub async fn end(&mut self) -> Result<()> {
+    pub async fn end(mut self) -> Result<()> {
+        drop(self.sender);
+
         let response = match (&mut self.handle).await {
             Ok(res) => res?,
             Err(err) if err.is_panic() => panic::resume_unwind(err.into_panic()),
