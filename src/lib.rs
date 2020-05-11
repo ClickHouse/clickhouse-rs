@@ -135,7 +135,7 @@ where
 
         if !response.status().is_success() {
             let bytes = body::to_bytes(response.into_body()).await?;
-            let reason = String::from_utf8_lossy(&bytes).into_owned();
+            let reason = String::from_utf8_lossy(&bytes).trim().into();
 
             return Err(Error::BadResponse(reason));
         }
