@@ -7,8 +7,10 @@ use tokio::task::JoinHandle;
 use url::Url;
 
 use self::error::{Error, Result};
+pub use self::introspection::Reflection;
 
 pub mod error;
+mod introspection;
 mod rowbinary;
 
 #[derive(Clone)]
@@ -55,7 +57,7 @@ impl Client {
         self
     }
 
-    pub fn insert<T>(&self, table: &str) -> Result<Insert<T>> {
+    pub fn insert<T: Reflection>(&self, table: &str) -> Result<Insert<T>> {
         let mut url = Url::parse(&self.url).expect("TODO");
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -64,10 +66,12 @@ impl Client {
             pairs.append_pair("database", database);
         }
 
-        // TODO: add fields.
+        // TODO: cache field names.
+        let fields = introspection::collect_field_names::<T>().join(",");
+
         // TODO: what about escaping a table name?
         // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers
-        let query = format!("INSERT INTO {}({}) FORMAT RowBinary", table, "TODO");
+        let query = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields);
         pairs.append_pair("query", &query);
         drop(pairs);
 
