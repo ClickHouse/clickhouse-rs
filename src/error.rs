@@ -5,6 +5,7 @@ use serde::ser;
 pub type Result<T, E = Error> = result::Result<T, E>;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("invalid params: {0}")]
     InvalidParams(#[source] Box<dyn StdError>),
