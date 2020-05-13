@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, panic};
+use std::{marker::PhantomData, mem, panic};
 
 use bytes::BytesMut;
 use hyper::{self, body, client::HttpConnector, Body, Request, Response};
@@ -12,6 +12,9 @@ pub use self::introspection::Reflection;
 pub mod error;
 mod introspection;
 mod rowbinary;
+
+const BUFFER_SIZE: usize = 128 * 1024;
+const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
 
 #[derive(Clone)]
 pub struct Client {
@@ -95,7 +98,7 @@ impl Client {
         let handle = tokio::spawn(sending);
 
         Ok(Insert {
-            buffer: BytesMut::with_capacity(128 * 1024), // TODO
+            buffer: BytesMut::with_capacity(BUFFER_SIZE),
             sender,
             handle,
             _marker: PhantomData,
@@ -116,12 +119,12 @@ where
 {
     pub async fn write(&mut self, row: &T) -> Result<()> {
         rowbinary::serialize_into(&mut self.buffer, row)?;
-        let chunk = self.buffer.split().freeze();
-        self.sender.send_data(chunk).await?;
+        self.send_chunk_if_exceeds(MIN_CHUNK_SIZE).await?;
         Ok(())
     }
 
     pub async fn end(mut self) -> Result<()> {
+        self.send_chunk_if_exceeds(1).await?;
         drop(self.sender);
 
         let response = match (&mut self.handle).await {
@@ -138,6 +141,18 @@ where
             let reason = String::from_utf8_lossy(&bytes).trim().into();
 
             return Err(Error::BadResponse(reason));
+        }
+
+        Ok(())
+    }
+
+    async fn send_chunk_if_exceeds(&mut self, threshold: usize) -> Result<()> {
+        if self.buffer.len() >= threshold {
+            // Hyper uses non-trivial and inefficient (see benches) schema of buffering chunks.
+            // It's difficult to determine when allocations occur.
+            // So, instead we control it manually here and rely on the system allocator.
+            let chunk = mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE));
+            self.sender.send_data(chunk.freeze()).await?;
         }
 
         Ok(())
