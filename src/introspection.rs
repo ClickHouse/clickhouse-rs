@@ -212,16 +212,3 @@ fn it_supports_renaming() {
 
     assert_eq!(collect_field_names::<TopLevel>(), ["some.one"]);
 }
-
-#[test]
-fn it_renames_keywords() {
-    use serde::Serialize;
-
-    #[derive(Reflection, Serialize)]
-    #[allow(dead_code)]
-    struct TopLevel {
-        type_: u32,
-    }
-
-    assert_eq!(collect_field_names::<TopLevel>(), ["type"]);
-}
