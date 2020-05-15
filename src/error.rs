@@ -1,6 +1,6 @@
-use std::{error::Error as StdError, fmt, result};
+use std::{error::Error as StdError, fmt, result, str::Utf8Error};
 
-use serde::ser;
+use serde::{de, ser};
 
 pub type Result<T, E = Error> = result::Result<T, E>;
 
@@ -13,6 +13,14 @@ pub enum Error {
     Network(#[source] Box<dyn StdError>),
     #[error("sequences must have a knowable size ahead of time")]
     SequenceMustHaveLength,
+    #[error("`deserialize_any` is not supported")]
+    DeserializeAnyNotSupported,
+    #[error("not enough data. Probably a row type mismatches a database schema")]
+    NotEnoughData,
+    #[error("string is not valid utf8")]
+    InvalidUtf8Encoding(#[from] Utf8Error),
+    #[error("tag for enum is not valid")]
+    InvalidTagEncoding(usize),
     #[error("a custom error message from serde: {0}")]
     Custom(String),
     #[error("bad response: {0}")]
@@ -26,6 +34,12 @@ impl From<hyper::Error> for Error {
 }
 
 impl ser::Error for Error {
+    fn custom<T: fmt::Display>(msg: T) -> Self {
+        Self::Custom(msg.to_string())
+    }
+}
+
+impl de::Error for Error {
     fn custom<T: fmt::Display>(msg: T) -> Self {
         Self::Custom(msg.to_string())
     }

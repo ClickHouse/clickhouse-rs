@@ -6,18 +6,18 @@ use serde::{
 
 use crate::error::{Error, Result};
 
-/// A serializer for the RowBinary format.
-///
-/// See https://clickhouse.yandex/docs/en/interfaces/formats/#rowbinary for details.
-pub struct RowBinarySerializer<B> {
-    buffer: B,
-}
-
 /// Serializes `value` using the RowBinary format and writes to `buffer`.
 pub fn serialize_into(buffer: impl BufMut, value: &impl Serialize) -> Result<()> {
     let mut serializer = RowBinarySerializer { buffer };
     value.serialize(&mut serializer)?;
     Ok(())
+}
+
+/// A serializer for the RowBinary format.
+///
+/// See https://clickhouse.yandex/docs/en/interfaces/formats/#rowbinary for details.
+struct RowBinarySerializer<B> {
+    buffer: B,
 }
 
 impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
@@ -83,6 +83,8 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
         self.buffer.put_u64_le(v);
         Ok(())
     }
+
+    // TODO: support i128/u128.
 
     #[inline]
     fn serialize_f32(self, _v: f32) -> Result<()> {
@@ -308,7 +310,7 @@ fn it_serializes() {
         datetime: Timestamp,
         decimal: FixedPoint,
         string: &'a str,
-        #[serde(serialize_with = "serialize_as_bytes")]
+        #[serde(with = "serde_bytes")]
         bytes: &'a [u8],
         opt_fp: Option<FixedPoint>,
         opt_dt: Option<Timestamp>,
@@ -371,11 +373,4 @@ fn it_serializes() {
     serialize_into(&mut actual, &sample).unwrap();
 
     assert_eq!(actual, expected);
-
-    fn serialize_as_bytes<S: Serializer>(
-        bytes: impl AsRef<[u8]>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(bytes.as_ref())
-    }
 }

@@ -25,3 +25,4 @@ criterion = "0.3.2"
 serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "0.2.20", features = ["full"] }
 hyper = { version = "0.13.5", features = ["stream"] }
+serde_bytes = "0.11.4"
