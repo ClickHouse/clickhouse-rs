@@ -1,5 +1,3 @@
-#[cfg(test)]
-use std::io::Cursor;
 use std::{borrow::Cow, convert::TryFrom, mem, str};
 
 use bytes::Buf;
@@ -213,7 +211,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_map<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
         todo!();
     }
 
@@ -228,7 +226,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_identifier<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
         todo!();
     }
 
@@ -245,7 +243,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     fn deserialize_unit_struct<V: Visitor<'de>>(
         self,
         _name: &'static str,
-        visitor: V,
+        _visitor: V,
     ) -> Result<V::Value> {
         todo!();
     }
@@ -261,7 +259,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_ignored_any<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
         todo!();
     }
 
@@ -297,12 +295,14 @@ fn get_unsigned_leb128(mut buffer: impl Buf) -> Result<u64> {
 
 #[test]
 fn it_deserializes_unsigned_leb128() {
-    let mut vec = Cursor::new(vec![0xe5, 0x8e, 0x26]);
-    assert_eq!(get_unsigned_leb128(&mut vec).unwrap(), 624_485);
+    let buf = &[0xe5, 0x8e, 0x26][..];
+    assert_eq!(get_unsigned_leb128(buf).unwrap(), 624_485);
 }
 
 #[test]
 fn it_deserializes() {
+    use bytes::buf::BufExt;
+
     #[derive(Debug, PartialEq, Deserialize)]
     struct Timestamp(u32);
 
@@ -379,7 +379,11 @@ fn it_deserializes() {
     };
 
     let mut temp_buf = [0; 1024];
-    let actual: Sample<'_> = deserialize_from(input, &mut temp_buf).unwrap();
 
-    assert_eq!(actual, expected);
+    for i in 0..input.len() {
+        let (left, right) = input.split_at(i);
+        let buf = left.chain(right);
+        let actual: Sample<'_> = deserialize_from(buf, &mut temp_buf).unwrap();
+        assert_eq!(actual, expected);
+    }
 }
