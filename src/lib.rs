@@ -3,6 +3,7 @@ use hyper::{self, client::HttpConnector};
 use self::error::Result;
 pub use self::{insert::Insert, introspection::Reflection};
 
+mod buflist;
 pub mod error;
 mod insert;
 mod introspection;
