@@ -14,15 +14,15 @@ harness = false
 thiserror = "1.0.16"
 serde = "1.0.106"
 bytes = "0.5.4"
-tokio = { version = "0.2.20", features = ["rt-core"] }
+tokio = { version = "0.2.20", features = ["rt-core", "stream"] }
 hyper = "0.13.5"
 url = "2.1.1"
 reflection = "0.1.3"
 reflection_derive = "0.1.1"
+either = "1.5.3"
 
 [dev-dependencies]
 criterion = "0.3.2"
 serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "0.2.20", features = ["full"] }
-hyper = { version = "0.13.5", features = ["stream"] }
 serde_bytes = "0.11.4"

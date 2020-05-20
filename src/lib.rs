@@ -1,12 +1,17 @@
 use hyper::{self, client::HttpConnector};
 
 use self::error::Result;
-pub use self::{insert::Insert, introspection::Reflection};
+pub use self::{
+    insert::Insert,
+    introspection::Reflection,
+    query::{Cursor, Query},
+};
 
 mod buflist;
 pub mod error;
 mod insert;
 mod introspection;
+mod query;
 mod rowbinary;
 
 #[derive(Clone)]
@@ -55,5 +60,9 @@ impl Client {
 
     pub fn insert<T: Reflection>(&self, table: &str) -> Result<Insert<T>> {
         Insert::new(self, table)
+    }
+
+    pub fn query(&self, query: &str) -> Query {
+        Query::new(self, query)
     }
 }
