@@ -35,7 +35,26 @@ impl Query {
         self
     }
 
-    pub fn fetch<T: Reflection>(mut self) -> Result<Cursor<T>> {
+    pub async fn execute(self) -> Result<()> {
+        #[derive(Reflection)]
+        struct Dummy;
+
+        self.do_execute::<Dummy>()?.await?;
+        Ok(())
+    }
+
+    pub fn fetch<T: Reflection>(self) -> Result<Cursor<T>> {
+        let sending = self.do_execute::<T>()?;
+
+        Ok(Cursor {
+            buffer: vec![0; BUFFER_SIZE],
+            inner: Either::Left(sending),
+            pending: BufList::default(),
+            _marker: PhantomData,
+        })
+    }
+
+    fn do_execute<T: Reflection>(mut self) -> Result<ResponseFuture> {
         let mut url = Url::parse(&self.client.url).expect("TODO");
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -66,14 +85,8 @@ impl Query {
             .body(Body::empty())
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        let sending = self.client.client.request(request);
-
-        Ok(Cursor {
-            buffer: vec![0; BUFFER_SIZE],
-            inner: Either::Left(sending),
-            pending: BufList::default(),
-            _marker: PhantomData,
-        })
+        // TODO: check the status code.
+        Ok(self.client.client.request(request))
     }
 }
 
