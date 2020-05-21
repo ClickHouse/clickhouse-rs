@@ -35,7 +35,8 @@ impl<T> Insert<T> {
             pairs.append_pair("database", database);
         }
 
-        let fields = introspection::join_field_names::<T>();
+        let fields = introspection::join_field_names::<T>()
+            .expect("the row type must be a struct or a wrapper around it");
 
         // TODO: what about escaping a table name?
         // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers

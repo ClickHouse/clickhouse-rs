@@ -46,6 +46,8 @@ async fn select(client: &Client) -> Result<()> {
 }
 
 async fn delete(client: &Client) -> Result<()> {
+    use tokio::time;
+
     client
         .query("ALTER TABLE some DELETE WHERE no >= ?")
         .bind(500)
@@ -53,19 +55,14 @@ async fn delete(client: &Client) -> Result<()> {
         .await?;
 
     // Mutations are async, so we are waiting for some time.
-    tokio::time::delay_for(tokio::time::Duration::from_millis(100)).await;
+    time::delay_for(time::Duration::from_millis(100)).await;
     Ok(())
 }
 
 async fn select_count(client: &Client) -> Result<()> {
-    #[derive(Reflection, Deserialize)]
-    struct Row {
-        count: u64,
-    }
-
-    let mut cursor = client.query("SELECT count() FROM some").fetch::<Row>()?;
-    let row = cursor.next().await?.unwrap();
-    println!("count() = {}", row.count);
+    let mut cursor = client.query("SELECT count() FROM some").fetch::<u64>()?;
+    let count = cursor.next().await?.unwrap();
+    println!("count() = {}", count);
 
     Ok(())
 }

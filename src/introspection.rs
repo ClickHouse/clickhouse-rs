@@ -15,7 +15,7 @@ fn is_wrapper(schemas: &Schemas) -> bool {
 }
 
 /// Collects all field names in depth and joins them with comma.
-pub fn join_field_names<T: Reflection>() -> String {
+pub fn join_field_names<T: Reflection>() -> Option<String> {
     fn add_part(result: &mut String, path: &[&str], name: &str) {
         if !result.is_empty() {
             result.push(',');
@@ -63,8 +63,15 @@ pub fn join_field_names<T: Reflection>() -> String {
     }
 
     let mut result = String::new();
-    collect(&mut Path::new(), T::members(), &mut result);
-    result
+    let nodes = T::members();
+    collect(&mut Path::new(), nodes, &mut result);
+
+    // A dirty but simple and quite precise way to detect primitives and tuples.
+    if result.chars().next().map_or(false, char::is_alphabetic) {
+        Some(result)
+    } else {
+        None
+    }
 }
 
 #[test]
@@ -82,8 +89,8 @@ fn it_grabs_simple_struct() {
         two: u32,
     }
 
-    assert_eq!(join_field_names::<Simple1>(), "one");
-    assert_eq!(join_field_names::<Simple2>(), "one,two");
+    assert_eq!(join_field_names::<Simple1>().unwrap(), "one");
+    assert_eq!(join_field_names::<Simple2>().unwrap(), "one,two");
 }
 
 #[test]
@@ -110,7 +117,7 @@ fn it_handles_nested_struct() {
     }
 
     assert_eq!(
-        join_field_names::<TopLevel>(),
+        join_field_names::<TopLevel>().unwrap(),
         "one,nested.two,nested.three,nested.nested.four"
     );
 }
@@ -148,8 +155,8 @@ fn it_unwraps_newtype() {
     #[allow(dead_code)]
     struct Two3(i32);
 
-    assert_eq!(join_field_names::<TopLevel>(), "one,two");
-    assert_eq!(join_field_names::<TopLevelWrapper>(), "one,two");
+    assert_eq!(join_field_names::<TopLevel>().unwrap(), "one,two");
+    assert_eq!(join_field_names::<TopLevelWrapper>().unwrap(), "one,two");
 }
 
 #[test]
@@ -178,8 +185,8 @@ fn it_unwraps_rc() {
         foo: u32,
     }
 
-    assert_eq!(join_field_names::<TopLevel>(), "one.foo");
-    assert_eq!(join_field_names::<TopLevelWrapper>(), "one.foo");
+    assert_eq!(join_field_names::<TopLevel>().unwrap(), "one.foo");
+    assert_eq!(join_field_names::<TopLevelWrapper>().unwrap(), "one.foo");
 }
 
 #[test]
@@ -208,7 +215,7 @@ fn it_handles_arrays_as_terminals() {
         }
     }
 
-    assert_eq!(join_field_names::<TopLevel>(), "one,two");
+    assert_eq!(join_field_names::<TopLevel>().unwrap(), "one,two");
 }
 
 #[test]
@@ -222,5 +229,17 @@ fn it_supports_renaming() {
         one: u32,
     }
 
-    assert_eq!(join_field_names::<TopLevel>(), "some.one");
+    assert_eq!(join_field_names::<TopLevel>().unwrap(), "some.one");
+}
+
+#[test]
+fn it_rejects_other() {
+    #[derive(Reflection)]
+    struct NamedTuple(u32, u32);
+
+    assert_eq!(join_field_names::<u32>(), None);
+    assert_eq!(join_field_names::<(u32, u64)>(), None);
+    assert_eq!(join_field_names::<((u32, u64),)>(), None);
+    assert_eq!(join_field_names::<NamedTuple>(), None);
+    assert_eq!(join_field_names::<(NamedTuple,)>(), None);
 }

@@ -175,8 +175,9 @@ impl SqlBuilder {
 
     fn bind_fields<T: Reflection>(&mut self) {
         if let Self::InProgress { result } = self {
-            let fields = introspection::join_field_names::<T>();
-            *result = result.replace(FIELDS_PLACEHOLDER, &fields);
+            if let Some(fields) = introspection::join_field_names::<T>() {
+                *result = result.replace(FIELDS_PLACEHOLDER, &fields);
+            }
         }
     }
 
