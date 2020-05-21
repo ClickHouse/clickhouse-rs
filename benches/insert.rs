@@ -43,14 +43,14 @@ fn insert(c: &mut Criterion) {
 
     #[derive(Reflection, Serialize)]
     struct Row {
-        a: u32,
+        a: u64,
         b: i64,
-        c: u32,
-        d: i64,
+        c: i32,
+        d: u32,
     }
 
     async fn run(client: Client, iters: u64) -> Result<()> {
-        let mut insert = client.insert("table").unwrap();
+        let mut insert = client.insert("table")?;
 
         for _ in 0..iters {
             insert

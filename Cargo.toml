@@ -7,7 +7,11 @@ publish = false
 license = "Proprietary"
 
 [[bench]]
-name = "perf"
+name = "insert"
+harness = false
+
+[[bench]]
+name = "select"
 harness = false
 
 [dependencies]
@@ -26,3 +30,4 @@ criterion = "0.3.2"
 serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "0.2.20", features = ["full"] }
 serde_bytes = "0.11.4"
+futures = "0.3.5"
