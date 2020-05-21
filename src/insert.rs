@@ -35,8 +35,7 @@ impl<T> Insert<T> {
             pairs.append_pair("database", database);
         }
 
-        // TODO: cache field names.
-        let fields = introspection::collect_field_names::<T>().join(",");
+        let fields = introspection::join_field_names::<T>();
 
         // TODO: what about escaping a table name?
         // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers

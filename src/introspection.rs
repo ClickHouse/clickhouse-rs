@@ -1,6 +1,7 @@
 pub use reflection::Reflection;
 use reflection::{Member, Schemas, Type};
 pub use reflection_derive::Reflection;
+use smallvec::SmallVec;
 
 fn is_wrapper(schemas: &Schemas) -> bool {
     if schemas.degree() != 1 {
@@ -13,17 +14,28 @@ fn is_wrapper(schemas: &Schemas) -> bool {
     }
 }
 
-fn make_full_name(prefix: &str, name: &str) -> String {
-    if prefix.is_empty() {
-        name.into()
-    } else {
-        format!("{}.{}", prefix, name)
-    }
-}
+/// Collects all field names in depth and joins them with comma.
+pub fn join_field_names<T: Reflection>() -> String {
+    fn add_part(result: &mut String, path: &[&str], name: &str) {
+        if !result.is_empty() {
+            result.push(',');
+        }
 
-/// Collects all field names in depth.
-pub fn collect_field_names<T: Reflection>() -> Vec<String> {
-    fn collect(name: &str, nodes: Schemas, result: &mut Vec<String>) {
+        for part in path {
+            result.push_str(part);
+            result.push('.');
+        }
+
+        if name.is_empty() {
+            result.pop();
+        } else {
+            result.push_str(name);
+        }
+    }
+
+    type Path<'a> = SmallVec<[&'a str; 3]>;
+
+    fn collect(path: &mut Path<'_>, nodes: Schemas, result: &mut String) {
         let is_wrapper = is_wrapper(&nodes);
 
         for node in nodes {
@@ -36,22 +48,22 @@ pub fn collect_field_names<T: Reflection>() -> Vec<String> {
                     let nested = field.expander.unwrap()();
 
                     if is_wrapper {
-                        collect(name, nested, result);
+                        collect(path, nested, result);
                     } else {
-                        collect(&make_full_name(name, field.id), nested, result);
+                        path.push(field.id);
+                        collect(path, nested, result);
+                        path.pop();
                     }
                 }
-                Member::Field(_) if is_wrapper => result.push(name.into()),
-                Member::Field(field) => result.push(make_full_name(name, field.id)),
+                Member::Field(_) if is_wrapper => add_part(result, path, ""),
+                Member::Field(field) => add_part(result, path, field.id),
                 Member::Variant(_) => unimplemented!(),
             }
         }
     }
 
-    let mut result = Vec::new();
-
-    collect("", T::members(), &mut result);
-
+    let mut result = String::new();
+    collect(&mut Path::new(), T::members(), &mut result);
     result
 }
 
@@ -70,8 +82,8 @@ fn it_grabs_simple_struct() {
         two: u32,
     }
 
-    assert_eq!(collect_field_names::<Simple1>(), ["one"]);
-    assert_eq!(collect_field_names::<Simple2>(), ["one", "two"]);
+    assert_eq!(join_field_names::<Simple1>(), "one");
+    assert_eq!(join_field_names::<Simple2>(), "one,two");
 }
 
 #[test]
@@ -98,8 +110,8 @@ fn it_handles_nested_struct() {
     }
 
     assert_eq!(
-        collect_field_names::<TopLevel>(),
-        ["one", "nested.two", "nested.three", "nested.nested.four"]
+        join_field_names::<TopLevel>(),
+        "one,nested.two,nested.three,nested.nested.four"
     );
 }
 
@@ -136,8 +148,8 @@ fn it_unwraps_newtype() {
     #[allow(dead_code)]
     struct Two3(i32);
 
-    assert_eq!(collect_field_names::<TopLevel>(), ["one", "two"]);
-    assert_eq!(collect_field_names::<TopLevelWrapper>(), ["one", "two"]);
+    assert_eq!(join_field_names::<TopLevel>(), "one,two");
+    assert_eq!(join_field_names::<TopLevelWrapper>(), "one,two");
 }
 
 #[test]
@@ -166,8 +178,8 @@ fn it_unwraps_rc() {
         foo: u32,
     }
 
-    assert_eq!(collect_field_names::<TopLevel>(), ["one.foo"]);
-    assert_eq!(collect_field_names::<TopLevelWrapper>(), ["one.foo"]);
+    assert_eq!(join_field_names::<TopLevel>(), "one.foo");
+    assert_eq!(join_field_names::<TopLevelWrapper>(), "one.foo");
 }
 
 #[test]
@@ -196,7 +208,7 @@ fn it_handles_arrays_as_terminals() {
         }
     }
 
-    assert_eq!(collect_field_names::<TopLevel>(), ["one", "two"]);
+    assert_eq!(join_field_names::<TopLevel>(), "one,two");
 }
 
 #[test]
@@ -210,5 +222,5 @@ fn it_supports_renaming() {
         one: u32,
     }
 
-    assert_eq!(collect_field_names::<TopLevel>(), ["some.one"]);
+    assert_eq!(join_field_names::<TopLevel>(), "some.one");
 }
