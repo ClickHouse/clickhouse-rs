@@ -1,4 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::mem;
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use serde::Serialize;
 use tokio::{runtime::Runtime, time::Instant};
 
@@ -66,7 +68,9 @@ fn insert(c: &mut Criterion) {
         insert.end().await
     }
 
-    c.bench_function("insert", |b| {
+    let mut group = c.benchmark_group("insert");
+    group.throughput(Throughput::Bytes(mem::size_of::<Row>() as u64));
+    group.bench_function("insert", |b| {
         b.iter_custom(|iters| {
             let mut rt = Runtime::new().unwrap();
             let client = Client::default().with_url(format!("http://{}", addr));
@@ -75,6 +79,7 @@ fn insert(c: &mut Criterion) {
             start.elapsed()
         })
     });
+    group.finish();
 }
 
 criterion_group!(benches, insert);

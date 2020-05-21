@@ -1,4 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::mem;
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use serde::Deserialize;
 use tokio::{runtime::Runtime, time::Instant};
 
@@ -61,7 +63,9 @@ fn select(c: &mut Criterion) {
         Ok(())
     }
 
-    c.bench_function("select", |b| {
+    let mut group = c.benchmark_group("select");
+    group.throughput(Throughput::Bytes(mem::size_of::<Row>() as u64));
+    group.bench_function("select", |b| {
         b.iter_custom(|iters| {
             let mut rt = Runtime::new().unwrap();
             let client = Client::default().with_url(format!("http://{}", addr));
@@ -70,6 +74,7 @@ fn select(c: &mut Criterion) {
             start.elapsed()
         })
     });
+    group.finish();
 }
 
 criterion_group!(benches, select);
