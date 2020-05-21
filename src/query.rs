@@ -232,8 +232,20 @@ impl Bind for &str {
 
     #[inline]
     fn write(&self, mut dst: impl fmt::Write) -> fmt::Result {
-        // TODO: escape.
-        write!(dst, "{:?}", self)
+        dst.write_char('\'')?;
+
+        let mut parts = self.split_terminator('\'');
+
+        if let Some(part) = parts.next() {
+            dst.write_str(part)?;
+        }
+
+        for part in parts {
+            dst.write_str("''")?;
+            dst.write_str(part)?;
+        }
+
+        dst.write_char('\'')
     }
 }
 
@@ -251,12 +263,12 @@ fn it_builds_sql() {
     }
 
     let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE a = ? AND b < ?");
-    sql.bind_arg("kek");
+    sql.bind_arg("ke'k");
     sql.bind_arg(42);
     sql.bind_fields::<Row>();
 
     assert_eq!(
         sql.finish().unwrap(),
-        r#"SELECT a,b FROM test WHERE a = "kek" AND b < 42 FORMAT RowBinary"#
+        r"SELECT a,b FROM test WHERE a = 'ke''k' AND b < 42 FORMAT RowBinary"
     );
 }
