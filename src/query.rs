@@ -1,8 +1,7 @@
 use std::{fmt, marker::PhantomData};
 
 use bytes::Bytes;
-use either::Either;
-use hyper::{client::ResponseFuture, Body, Request};
+use hyper::{Body, Request};
 use serde::Deserialize;
 use tokio::stream::StreamExt;
 use url::Url;
@@ -11,6 +10,7 @@ use crate::{
     buflist::BufList,
     error::{Error, Result},
     introspection::{self, Reflection},
+    response::Response,
     rowbinary, Client,
 };
 
@@ -36,25 +36,21 @@ impl Query {
     }
 
     pub async fn execute(self) -> Result<()> {
-        #[derive(Reflection)]
-        struct Dummy;
-
-        self.do_execute::<Dummy>()?.await?;
+        // TODO: should we read the body?
+        let _ = self.do_execute::<()>()?.resolve().await?;
         Ok(())
     }
 
     pub fn fetch<T: Reflection>(self) -> Result<Cursor<T>> {
-        let sending = self.do_execute::<T>()?;
-
         Ok(Cursor {
+            response: self.do_execute::<T>()?,
             buffer: vec![0; BUFFER_SIZE],
-            inner: Either::Left(sending),
             pending: BufList::default(),
             _marker: PhantomData,
         })
     }
 
-    fn do_execute<T: Reflection>(mut self) -> Result<ResponseFuture> {
+    fn do_execute<T: Reflection>(mut self) -> Result<Response> {
         let mut url = Url::parse(&self.client.url).expect("TODO");
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -62,9 +58,6 @@ impl Query {
         if let Some(database) = &self.client.database {
             pairs.append_pair("database", database);
         }
-
-        // TODO: what about escaping a table name?
-        // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers
 
         self.sql.bind_fields::<T>();
         let query = self.sql.finish()?;
@@ -85,14 +78,13 @@ impl Query {
             .body(Body::empty())
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        // TODO: check the status code.
-        Ok(self.client.client.request(request))
+        Ok(self.client.client.request(request).into())
     }
 }
 
 pub struct Cursor<T> {
     buffer: Vec<u8>,
-    inner: Either<ResponseFuture, Body>,
+    response: Response,
     pending: BufList<Bytes>,
     _marker: PhantomData<T>,
 }
@@ -108,14 +100,7 @@ impl<T> Cursor<T> {
             unsafe { &mut *(ptr as *mut T) }
         }
 
-        let body = match &mut self.inner {
-            Either::Left(fut) => {
-                let body = fut.await?.into_body();
-                self.inner = Either::Right(body);
-                self.inner.as_mut().right().unwrap()
-            }
-            Either::Right(body) => body,
-        };
+        let body = self.response.resolve().await?;
 
         loop {
             let buffer = fuck_mut(&mut self.buffer);

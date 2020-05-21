@@ -8,9 +8,9 @@ pub type Result<T, E = Error> = result::Result<T, E>;
 #[non_exhaustive]
 pub enum Error {
     #[error("invalid params: {0}")]
-    InvalidParams(#[source] Box<dyn StdError>),
+    InvalidParams(#[source] Box<dyn StdError + Send>),
     #[error("network error: {0}")]
-    Network(#[source] Box<dyn StdError>),
+    Network(#[source] Box<dyn StdError + Send>),
     #[error("sequences must have a knowable size ahead of time")]
     SequenceMustHaveLength,
     #[error("`deserialize_any` is not supported")]

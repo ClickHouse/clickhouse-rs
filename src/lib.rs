@@ -12,6 +12,7 @@ pub mod error;
 mod insert;
 mod introspection;
 mod query;
+mod response;
 mod rowbinary;
 
 #[derive(Clone)]

@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, mem, panic};
 
 use bytes::BytesMut;
-use hyper::{self, body, Body, Request, Response};
+use hyper::{self, body, Body, Request};
 use serde::Serialize;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -9,6 +9,7 @@ use url::Url;
 use crate::{
     error::{Error, Result},
     introspection::{self, Reflection},
+    response::Response,
     rowbinary, Client,
 };
 
@@ -18,7 +19,7 @@ const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
 pub struct Insert<T> {
     buffer: BytesMut,
     sender: body::Sender,
-    handle: JoinHandle<hyper::Result<Response<Body>>>,
+    handle: JoinHandle<Result<()>>,
     _marker: PhantomData<T>,
 }
 
@@ -60,8 +61,12 @@ impl<T> Insert<T> {
             .body(body)
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        let sending = client.client.request(request);
-        let handle = tokio::spawn(sending);
+        let future = client.client.request(request);
+        let handle = tokio::spawn(async move {
+            // TODO: should we read the body?
+            let _ = Response::from(future).resolve().await?;
+            Ok(())
+        });
 
         Ok(Insert {
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
@@ -84,23 +89,14 @@ impl<T> Insert<T> {
         self.send_chunk_if_exceeds(1).await?;
         drop(self.sender);
 
-        let response = match (&mut self.handle).await {
-            Ok(res) => res?,
+        match (&mut self.handle).await {
+            Ok(res) => res,
             Err(err) if err.is_panic() => panic::resume_unwind(err.into_panic()),
             Err(err) => {
                 // TODO
-                return Err(Error::Custom(format!("unexpected error: {}", err)));
+                Err(Error::Custom(format!("unexpected error: {}", err)))
             }
-        };
-
-        if !response.status().is_success() {
-            let bytes = body::to_bytes(response.into_body()).await?;
-            let reason = String::from_utf8_lossy(&bytes).trim().into();
-
-            return Err(Error::BadResponse(reason));
         }
-
-        Ok(())
     }
 
     async fn send_chunk_if_exceeds(&mut self, threshold: usize) -> Result<()> {
