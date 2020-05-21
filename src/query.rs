@@ -141,10 +141,13 @@ enum SqlBuilder {
     Failed(fmt::Error),
 }
 
+// We replace "?fields" with this in order to avoid look-ahead parsing.
+const FIELDS_PLACEHOLDER: &str = "_#fields#_";
+
 impl SqlBuilder {
     fn new(template: &str) -> Self {
         SqlBuilder::InProgress {
-            result: template.trim().replace("?fields", "_#fields#_"),
+            result: template.trim().replace("?fields", FIELDS_PLACEHOLDER),
         }
     }
 
@@ -154,7 +157,7 @@ impl SqlBuilder {
 
             let (prefix, suffix) = match (iter.next(), iter.next()) {
                 (Some(prefix), Some(suffix)) => (prefix, suffix),
-                _ => panic!("invalid number of query arguments"),
+                _ => panic!("all query arguments are already bound"),
             };
 
             let mut next = String::with_capacity(result.len() + value.reserve() - 1);
@@ -173,14 +176,21 @@ impl SqlBuilder {
     fn bind_fields<T: Reflection>(&mut self) {
         if let Self::InProgress { result } = self {
             let fields = introspection::collect_field_names::<T>().join(",");
-            *result = result.replace("_#fields#_", &fields);
+            *result = result.replace(FIELDS_PLACEHOLDER, &fields);
         }
     }
 
     fn finish(self) -> Result<String> {
         match self {
             Self::InProgress { mut result } => {
-                // TODO: check the number of arguments.
+                if result.contains('?') {
+                    panic!("unbound query argument: ?");
+                }
+
+                if result.contains(FIELDS_PLACEHOLDER) {
+                    panic!("unbound query argument: ?fields");
+                }
+
                 result.push_str(" FORMAT RowBinary");
                 Ok(result)
             }
