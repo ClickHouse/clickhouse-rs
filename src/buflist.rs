@@ -5,13 +5,17 @@ use bytes::Buf;
 #[derive(Default)]
 pub struct BufList<T> {
     bufs: VecDeque<T>,
+    rem: usize,
 }
 
 impl<T: Buf> BufList<T> {
     #[inline]
     pub fn push(&mut self, buf: T) {
-        if buf.has_remaining() {
+        let rem = buf.remaining();
+
+        if rem > 0 {
             self.bufs.push_back(buf);
+            self.rem += rem;
         }
     }
 
@@ -24,7 +28,7 @@ impl<T: Buf> BufList<T> {
 impl<T: Buf> Buf for BufList<T> {
     #[inline]
     fn remaining(&self) -> usize {
-        self.bufs.iter().map(|buf| buf.remaining()).sum()
+        self.rem
     }
 
     #[inline]
@@ -34,6 +38,8 @@ impl<T: Buf> Buf for BufList<T> {
 
     #[inline]
     fn advance(&mut self, mut cnt: usize) {
+        self.rem -= cnt;
+
         while cnt > 0 {
             let front = &mut self.bufs[0];
             let rem = front.remaining();

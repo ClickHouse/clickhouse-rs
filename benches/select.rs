@@ -17,7 +17,7 @@ mod server {
 
     async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
         let _ = body::aggregate(req.into_body());
-        let chunk = Bytes::from_static(&[15; 145]);
+        let chunk = Bytes::from_static(&[15; 128 * 1024]);
         let stream = stream::repeat(Ok::<Bytes, &'static str>(chunk));
         let body = Body::wrap_stream(stream);
 
