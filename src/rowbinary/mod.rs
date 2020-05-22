@@ -3,3 +3,5 @@ pub use ser::serialize_into;
 
 mod de;
 mod ser;
+#[cfg(test)]
+mod tests;

@@ -20,6 +20,16 @@ struct RowBinarySerializer<B> {
     buffer: B,
 }
 
+macro_rules! impl_num {
+    ($ty:ty, $ser_method:ident, $writer_method:ident) => {
+        #[inline]
+        fn $ser_method(self, v: $ty) -> Result<()> {
+            self.buffer.$writer_method(v);
+            Ok(())
+        }
+    }
+}
+
 impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     type Ok = ();
     type Error = Error;
@@ -36,65 +46,18 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
         todo!();
     }
 
-    #[inline]
-    fn serialize_i8(self, v: i8) -> Result<()> {
-        self.buffer.put_i8(v);
-        Ok(())
-    }
-
-    #[inline]
-    fn serialize_i16(self, v: i16) -> Result<()> {
-        self.buffer.put_i16_le(v);
-        Ok(())
-    }
-
-    #[inline]
-    fn serialize_i32(self, v: i32) -> Result<()> {
-        self.buffer.put_i32_le(v);
-        Ok(())
-    }
-
-    #[inline]
-    fn serialize_i64(self, v: i64) -> Result<()> {
-        self.buffer.put_i64_le(v);
-        Ok(())
-    }
-
-    #[inline]
-    fn serialize_u8(self, v: u8) -> Result<()> {
-        self.buffer.put_u8(v);
-        Ok(())
-    }
-
-    #[inline]
-    fn serialize_u16(self, v: u16) -> Result<()> {
-        self.buffer.put_u16_le(v);
-        Ok(())
-    }
-
-    #[inline]
-    fn serialize_u32(self, v: u32) -> Result<()> {
-        self.buffer.put_u32_le(v);
-        Ok(())
-    }
-
-    #[inline]
-    fn serialize_u64(self, v: u64) -> Result<()> {
-        self.buffer.put_u64_le(v);
-        Ok(())
-    }
-
-    // TODO: support i128/u128.
-
-    #[inline]
-    fn serialize_f32(self, _v: f32) -> Result<()> {
-        todo!();
-    }
-
-    #[inline]
-    fn serialize_f64(self, _v: f64) -> Result<()> {
-        todo!();
-    }
+    impl_num!(i8, serialize_i8, put_i8);
+    impl_num!(i16, serialize_i16, put_i16_le);
+    impl_num!(i32, serialize_i32, put_i32_le);
+    impl_num!(i64, serialize_i64, put_i64_le);
+    impl_num!(i128, serialize_i128, put_i128_le);
+    impl_num!(u8, serialize_u8, put_u8);
+    impl_num!(u16, serialize_u16, put_u16_le);
+    impl_num!(u32, serialize_u32, put_u32_le);
+    impl_num!(u64, serialize_u64, put_u64_le);
+    impl_num!(u128, serialize_u128, put_u128_le);
+    impl_num!(f32, serialize_f32, put_f32_le);
+    impl_num!(f64, serialize_f64, put_f64_le);
 
     #[inline]
     fn serialize_char(self, _v: char) -> Result<()> {
@@ -289,88 +252,4 @@ fn it_serializes_unsigned_leb128() {
     put_unsigned_leb128(&mut vec, 624_485);
 
     assert_eq!(vec, [0xe5, 0x8e, 0x26]);
-}
-
-#[test]
-fn it_serializes() {
-    #[derive(Serialize)]
-    struct Timestamp(u32);
-
-    #[derive(Serialize)]
-    struct FixedPoint(i64);
-
-    #[derive(Serialize)]
-    struct Sample<'a> {
-        int64: i64,
-        int32: i32,
-        int8: i8,
-        uint64: u64,
-        uint32: u32,
-        uint8: u8,
-        datetime: Timestamp,
-        decimal: FixedPoint,
-        string: &'a str,
-        #[serde(with = "serde_bytes")]
-        bytes: &'a [u8],
-        opt_fp: Option<FixedPoint>,
-        opt_dt: Option<Timestamp>,
-        fixed: [u8; 4],
-        array: Vec<i8>,
-    }
-
-    let sample = Sample {
-        int64: -6442,
-        int32: -3242,
-        int8: -42,
-        uint64: 6442,
-        uint32: 3242,
-        uint8: 42,
-        datetime: Timestamp(2_301_990_162),
-        decimal: FixedPoint(4242 * 10_000_000),
-        string: "01234",
-        bytes: &[0, 1, 2, 3, 4],
-        opt_fp: None,
-        opt_dt: Some(Timestamp(2_301_990_162)),
-        fixed: [b'B', b'T', b'C', 0],
-        array: vec![-42, 42, -42, 42],
-    };
-
-    let expected = &[
-        // [Int64] -6442
-        0xd6, 0xe6, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, /**/
-        // [Int32] -3242
-        0x56, 0xf3, 0xff, 0xff, /**/
-        // [Int8] -42
-        0xd6, /**/
-        // [UInt64] 6442
-        0x2a, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /**/
-        // [UInt32] 3242
-        0xaa, 0x0c, 0x00, 0x00, /**/
-        // [UInt8] 42
-        0x2a, /**/
-        // [DateTime] 2042-12-12 12:42:42
-        //       (ts: 2301990162)
-        0x12, 0x95, 0x35, 0x89, /**/
-        // [Decimal64(9)] 42.420000000
-        0x00, 0xd5, 0x6d, 0xe0, 0x09, 0x00, 0x00, 0x00, /**/
-        // [String] 5 "01234"
-        0x05, 0x30, 0x31, 0x32, 0x33, 0x34, /**/
-        // [String] 5 [0, 1, 2, 3, 4]
-        0x05, 0x00, 0x01, 0x02, 0x03, 0x04, /**/
-        // [Nullable(Decimal64(9))] NULL
-        0x01, /**/
-        // [Nullable(DateTime)] 2042-12-12 12:42:42
-        //       (ts: 2301990162)
-        0x00, 0x12, 0x95, 0x35, 0x89, /**/
-        // [FixedString(4)] [b'B', b'T', b'C', 0]
-        0x42, 0x54, 0x43, 0x00, /**/
-        // [Array(Int32)] [-42, 42, -42, 42]
-        0x04, 0xd6, 0x2a, 0xd6, 0x2a, /**/
-    ][..];
-
-    let mut actual = Vec::new();
-
-    serialize_into(&mut actual, &sample).unwrap();
-
-    assert_eq!(actual, expected);
 }
