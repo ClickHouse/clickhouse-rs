@@ -9,6 +9,7 @@ pub use self::{
 
 mod buflist;
 pub mod error;
+mod escape;
 mod insert;
 mod introspection;
 mod query;
