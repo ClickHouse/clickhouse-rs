@@ -382,6 +382,11 @@ fn it_deserializes() {
 
     for i in 0..input.len() {
         let (left, right) = input.split_at(i);
+
+        // It shouldn't panic.
+        let _: Result<Sample<'_>> = deserialize_from(left, &mut temp_buf);
+        let _: Result<Sample<'_>> = deserialize_from(right, &mut temp_buf);
+
         let buf = left.chain(right);
         let actual: Sample<'_> = deserialize_from(buf, &mut temp_buf).unwrap();
         assert_eq!(actual, expected);
