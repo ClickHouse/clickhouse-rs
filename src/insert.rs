@@ -18,7 +18,7 @@ const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
 
 pub struct Insert<T> {
     buffer: BytesMut,
-    sender: body::Sender,
+    sender: Option<body::Sender>,
     handle: JoinHandle<Result<()>>,
     _marker: PhantomData<T>,
 }
@@ -70,7 +70,7 @@ impl<T> Insert<T> {
 
         Ok(Insert {
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
-            sender,
+            sender: Some(sender),
             handle,
             _marker: PhantomData,
         })
@@ -87,7 +87,7 @@ impl<T> Insert<T> {
 
     pub async fn end(mut self) -> Result<()> {
         self.send_chunk_if_exceeds(1).await?;
-        drop(self.sender);
+        drop(self.sender.take());
 
         match (&mut self.handle).await {
             Ok(res) => res,
@@ -105,9 +105,20 @@ impl<T> Insert<T> {
             // It's difficult to determine when allocations occur.
             // So, instead we control it manually here and rely on the system allocator.
             let chunk = mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE));
-            self.sender.send_data(chunk.freeze()).await?;
+
+            if let Some(sender) = &mut self.sender {
+                sender.send_data(chunk.freeze()).await?;
+            }
         }
 
         Ok(())
+    }
+}
+
+impl<T> Drop for Insert<T> {
+    fn drop(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            sender.abort();
+        }
     }
 }
