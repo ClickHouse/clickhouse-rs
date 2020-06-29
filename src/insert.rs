@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem, panic};
+use std::{future::Future, marker::PhantomData, mem, panic};
 
 use bytes::BytesMut;
 use hyper::{self, body, Body, Request};
@@ -20,7 +20,7 @@ pub struct Insert<T> {
     buffer: BytesMut,
     sender: Option<body::Sender>,
     handle: JoinHandle<Result<()>>,
-    _marker: PhantomData<T>,
+    _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
 }
 
 impl<T> Insert<T> {
@@ -76,13 +76,17 @@ impl<T> Insert<T> {
         })
     }
 
-    pub async fn write(&mut self, row: &T) -> Result<()>
+    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
     where
         T: Serialize,
     {
-        rowbinary::serialize_into(&mut self.buffer, row)?;
-        self.send_chunk_if_exceeds(MIN_CHUNK_SIZE).await?;
-        Ok(())
+        let result = rowbinary::serialize_into(&mut self.buffer, row);
+
+        async move {
+            result?;
+            self.send_chunk_if_exceeds(MIN_CHUNK_SIZE).await?;
+            Ok(())
+        }
     }
 
     pub async fn end(mut self) -> Result<()> {
