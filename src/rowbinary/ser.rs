@@ -27,7 +27,7 @@ macro_rules! impl_num {
             self.buffer.$writer_method(v);
             Ok(())
         }
-    }
+    };
 }
 
 impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {

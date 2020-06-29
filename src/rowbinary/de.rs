@@ -72,7 +72,7 @@ macro_rules! impl_num {
             let value = self.input.$reader_method();
             visitor.$visitor_method(value)
         }
-    }
+    };
 }
 
 impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B> {
