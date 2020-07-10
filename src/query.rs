@@ -84,8 +84,8 @@ impl Query {
 }
 
 pub struct Cursor<T> {
-    buffer: Vec<u8>,
     response: Response,
+    buffer: Vec<u8>,
     pending: BufList<Bytes>,
     _marker: PhantomData<T>,
 }
@@ -107,8 +107,13 @@ impl<T> Cursor<T> {
             let buffer = fuck_mut(&mut self.buffer);
 
             match rowbinary::deserialize_from(&mut self.pending, buffer) {
-                Ok(value) => return Ok(Some(value)),
-                Err(Error::NotEnoughData) => {}
+                Ok(value) => {
+                    self.pending.commit();
+                    return Ok(Some(value));
+                }
+                Err(Error::NotEnoughData) => {
+                    self.pending.rollback();
+                }
                 Err(err) => return Err(err),
             }
 
