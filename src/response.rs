@@ -1,10 +1,11 @@
+use futures::stream::{Fuse, StreamExt};
 use hyper::{body, client::ResponseFuture, Body, StatusCode};
 
 use crate::error::{Error, Result};
 
 pub enum Response {
     Waiting(ResponseFuture),
-    Loading(Body),
+    Loading(Fuse<Body>),
 }
 
 impl From<ResponseFuture> for Response {
@@ -14,7 +15,7 @@ impl From<ResponseFuture> for Response {
 }
 
 impl Response {
-    pub async fn resolve(&mut self) -> Result<&mut Body> {
+    pub async fn resolve(&mut self) -> Result<&mut Fuse<Body>> {
         if let Self::Waiting(response) = self {
             let response = response.await?;
 
@@ -26,7 +27,7 @@ impl Response {
             }
 
             let body = response.into_body();
-            *self = Self::Loading(body);
+            *self = Self::Loading(body.fuse());
         }
 
         match self {
