@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use hyper::{self, client::HttpConnector};
 
 use self::error::Result;
@@ -24,6 +26,7 @@ pub struct Client {
     database: Option<String>,
     user: Option<String>,
     password: Option<String>,
+    options: HashMap<String, String>,
 }
 
 impl Default for Client {
@@ -34,6 +37,7 @@ impl Default for Client {
             database: None,
             user: None,
             password: None,
+            options: HashMap::new(),
         }
     }
 }
@@ -57,6 +61,11 @@ impl Client {
 
     pub fn with_password(mut self, password: impl Into<String>) -> Self {
         self.password = Some(password.into());
+        self
+    }
+
+    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.options.insert(name.into(), value.into());
         self
     }
 
