@@ -63,6 +63,9 @@ impl Query {
         self.sql.bind_fields::<T>();
         let query = self.sql.finish()?;
         pairs.append_pair("query", &query);
+        for (name, value) in &self.client.options {
+            pairs.append_pair(name, value);
+        }
         drop(pairs);
 
         let mut builder = Request::get(url.as_str());
