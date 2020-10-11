@@ -50,7 +50,12 @@ impl Watch {
 
     fn cursor<T: Reflection>(self, only_events: bool) -> Result<RawCursor<T>> {
         let sql = self.sql.finish()?;
-        let view = make_live_view_name(&sql);
+        let (sql, view) = if is_table_name(&sql) {
+            (None, sql)
+        } else {
+            let view = make_live_view_name(&sql);
+            (Some(sql), view)
+        };
 
         Ok(RawCursor::Preparing {
             client: self.client,
@@ -86,7 +91,7 @@ impl<T> RowCursor<T> {
 enum RawCursor<T> {
     Preparing {
         client: Client,
-        sql: String,
+        sql: Option<String>,
         view: String,
         limit: Option<usize>,
         only_events: bool,
@@ -107,11 +112,13 @@ impl<T> RawCursor<T> {
             only_events,
         } = self
         {
-            let create_sql = format!(
-                "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT AS {}",
-                view, sql
-            );
-            client.query(&create_sql).execute().await?;
+            if let Some(sql) = sql {
+                let create_sql = format!(
+                    "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT AS {}",
+                    view, sql
+                );
+                client.query(&create_sql).execute().await?;
+            }
 
             let events = if *only_events { " EVENTS" } else { "" };
             let watch_sql = match limit {
@@ -128,6 +135,11 @@ impl<T> RawCursor<T> {
             RawCursor::Fetching(cursor) => Ok(cursor.next().await?),
         }
     }
+}
+
+fn is_table_name(sql: &str) -> bool {
+    // TODO: support quoted identifiers.
+    sql.split_ascii_whitespace().take(2).count() == 1
 }
 
 fn make_live_view_name(sql: &str) -> String {
