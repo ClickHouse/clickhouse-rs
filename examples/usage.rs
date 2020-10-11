@@ -88,7 +88,8 @@ async fn watch(client: &Client) -> Result<()> {
 
     // Or you can request only events without data.
     let mut cursor = client
-        .watch("SELECT max(no), argMax(name, no) FROM some")
+        // It's possible to specify a view name.
+        .watch("lv_e1d9c5dc4a1e7f5f2fb41398156d41c88ef9ab74")
         .limit(10)
         .events()?;
 
