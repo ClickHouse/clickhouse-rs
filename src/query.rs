@@ -43,7 +43,9 @@ impl Query {
         Ok(())
     }
 
-    pub fn fetch<T: Reflection>(self) -> Result<Cursor<T>> {
+    pub fn fetch<T: Reflection>(mut self) -> Result<Cursor<T>> {
+        self.sql.append(" FORMAT RowBinary");
+
         Ok(Cursor {
             response: self.do_execute::<T>()?,
             buffer: vec![0; BUFFER_SIZE],
@@ -63,13 +65,15 @@ impl Query {
 
         self.sql.bind_fields::<T>();
         let query = self.sql.finish()?;
+        pairs.append_pair("allow_experimental_live_view", "1"); // TODO: send only if it's required.
         pairs.append_pair("query", &query);
         for (name, value) in &self.client.options {
             pairs.append_pair(name, value);
         }
         drop(pairs);
 
-        let mut builder = Request::post(url.as_str()).header("Content-Length", "0");
+        let mut builder = Request::post(url.as_str()) // TODO: GET
+            .header("Content-Length", "0");
 
         if let Some(user) = &self.client.user {
             builder = builder.header("X-ClickHouse-User", user);

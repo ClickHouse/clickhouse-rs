@@ -67,6 +67,28 @@ async fn select_count(client: &Client) -> Result<()> {
     Ok(())
 }
 
+async fn watch(client: &Client) -> Result<()> {
+    let mut cursor = client
+        .watch("SELECT max(no), argMax(name, no) FROM some")
+        .rows::<Row<'_>>()?;
+
+    let (version, row) = cursor.next().await?.unwrap();
+    println!("version={}, row={:?}", version, row);
+
+    let mut insert = client.insert("some")?;
+    let row = Row {
+        no: row.no + 1,
+        name: "bar",
+    };
+    insert.write(&row).await?;
+    insert.end().await?;
+
+    let (version, row) = cursor.next().await?.unwrap();
+    println!("version={}, row={:?}", version, row);
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let client = Client::default().with_url("http://localhost:8123");
@@ -77,6 +99,7 @@ async fn main() -> Result<()> {
     select(&client).await?;
     delete(&client).await?;
     select_count(&client).await?;
+    watch(&client).await?;
 
     Ok(())
 }
