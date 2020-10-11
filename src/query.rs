@@ -43,10 +43,10 @@ impl Query {
         Ok(())
     }
 
-    pub fn fetch<T: Reflection>(mut self) -> Result<Cursor<T>> {
+    pub fn rows<T: Reflection>(mut self) -> Result<RowCursor<T>> {
         self.sql.append(" FORMAT RowBinary");
 
-        Ok(Cursor {
+        Ok(RowCursor {
             response: self.do_execute::<T>()?,
             buffer: vec![0; BUFFER_SIZE],
             pending: BufList::default(),
@@ -91,14 +91,14 @@ impl Query {
     }
 }
 
-pub struct Cursor<T> {
+pub struct RowCursor<T> {
     response: Response,
     buffer: Vec<u8>,
     pending: BufList<Bytes>,
     _marker: PhantomData<T>,
 }
 
-impl<T> Cursor<T> {
+impl<T> RowCursor<T> {
     #[allow(clippy::should_implement_trait)]
     pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
     where

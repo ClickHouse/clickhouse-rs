@@ -91,7 +91,7 @@ enum RawCursor<T> {
         limit: Option<usize>,
         only_events: bool,
     },
-    Fetching(query::Cursor<(T, Version)>),
+    Fetching(query::RowCursor<(T, Version)>),
 }
 
 impl<T> RawCursor<T> {
@@ -119,7 +119,7 @@ impl<T> RawCursor<T> {
                 None => format!("WATCH {}{}", view, events),
             };
 
-            let cursor = client.query(&watch_sql).fetch()?;
+            let cursor = client.query(&watch_sql).rows()?;
             *self = RawCursor::Fetching(cursor);
         }
 
