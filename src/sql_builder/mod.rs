@@ -54,9 +54,15 @@ impl SqlBuilder {
         }
     }
 
+    pub fn append(&mut self, suffix: &str) {
+        if let Self::InProgress { result } = self {
+            result.push_str(suffix);
+        }
+    }
+
     pub fn finish(self) -> Result<String> {
         match self {
-            Self::InProgress { mut result } => {
+            Self::InProgress { result } => {
                 if result.contains('?') {
                     panic!("unbound query argument: ?");
                 }
@@ -65,7 +71,6 @@ impl SqlBuilder {
                     panic!("unbound query argument: ?fields");
                 }
 
-                result.push_str(" FORMAT RowBinary");
                 Ok(result)
             }
             Self::Failed(err) => Err(Error::InvalidParams(Box::new(err))),
@@ -140,6 +145,6 @@ fn it_builds_sql() {
 
     assert_eq!(
         sql.finish().unwrap(),
-        r"SELECT a,b FROM test WHERE a = 'foo' AND b < 42 FORMAT RowBinary"
+        r"SELECT a,b FROM test WHERE a = 'foo' AND b < 42"
     );
 }

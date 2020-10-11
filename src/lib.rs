@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use hyper::{self, client::HttpConnector};
 
 use self::error::Result;
-pub use self::{insert::Insert, introspection::Reflection, query::Query};
+pub use self::{insert::Insert, introspection::Reflection, query::Query, watch::Watch};
 
 mod buflist;
 pub mod error;
@@ -13,6 +13,7 @@ mod query;
 mod response;
 mod rowbinary;
 mod sql_builder;
+mod watch;
 
 mod sealed {
     pub trait Sealed {}
@@ -75,5 +76,9 @@ impl Client {
 
     pub fn query(&self, query: &str) -> Query {
         Query::new(self, query)
+    }
+
+    pub fn watch(&self, query: &str) -> Watch {
+        Watch::new(self, query)
     }
 }
