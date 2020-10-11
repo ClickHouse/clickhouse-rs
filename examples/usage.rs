@@ -36,7 +36,7 @@ async fn select(client: &Client) -> Result<()> {
         .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
         .bind(500)
         .bind(504)
-        .fetch::<Row<'_>>()?;
+        .rows::<Row<'_>>()?;
 
     while let Some(row) = cursor.next().await? {
         println!("{:?}", row);
@@ -60,7 +60,7 @@ async fn delete(client: &Client) -> Result<()> {
 }
 
 async fn select_count(client: &Client) -> Result<()> {
-    let mut cursor = client.query("SELECT count() FROM some").fetch::<u64>()?;
+    let mut cursor = client.query("SELECT count() FROM some").rows::<u64>()?;
     let count = cursor.next().await?.unwrap();
     println!("count() = {}", count);
 
