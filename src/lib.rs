@@ -3,20 +3,20 @@ use std::collections::HashMap;
 use hyper::{self, client::HttpConnector};
 
 use self::error::Result;
-pub use self::{
-    insert::Insert,
-    introspection::Reflection,
-    query::{Cursor, Query},
-};
+pub use self::{insert::Insert, introspection::Reflection, query::Query};
 
 mod buflist;
 pub mod error;
-mod escape;
 mod insert;
 mod introspection;
 mod query;
 mod response;
 mod rowbinary;
+mod sql_builder;
+
+mod sealed {
+    pub trait Sealed {}
+}
 
 #[derive(Clone)]
 pub struct Client {
