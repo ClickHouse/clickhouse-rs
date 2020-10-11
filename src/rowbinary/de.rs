@@ -102,8 +102,9 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     impl_num!(f64, deserialize_f64, visit_f64, get_f64_le);
 
     #[inline]
-    fn deserialize_unit<V: Visitor<'de>>(self, _: V) -> Result<V::Value> {
-        todo!();
+    fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        // TODO: revise this.
+        visitor.visit_unit()
     }
 
     #[inline]

@@ -86,6 +86,14 @@ async fn watch(client: &Client) -> Result<()> {
     let (version, row) = cursor.next().await?.unwrap();
     println!("version={}, row={:?}", version, row);
 
+    // Or you can request only events without data.
+    let mut cursor = client
+        .watch("SELECT max(no), argMax(name, no) FROM some")
+        .limit(10)
+        .events()?;
+
+    println!("{:?}", cursor.next().await);
+
     Ok(())
 }
 

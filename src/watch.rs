@@ -39,40 +39,72 @@ impl Watch {
     }
 
     pub fn rows<T: Reflection>(self) -> Result<RowCursor<T>> {
+        Ok(RowCursor(self.cursor(false)?))
+    }
+
+    pub fn events(self) -> Result<EventCursor> {
+        Ok(EventCursor(self.cursor(true)?))
+    }
+
+    // TODO: `groups()` for `(Version, &[T])`.
+
+    fn cursor<T: Reflection>(self, only_events: bool) -> Result<RawCursor<T>> {
         let sql = self.sql.finish()?;
         let view = make_live_view_name(&sql);
 
-        Ok(RowCursor::Preparing {
+        Ok(RawCursor::Preparing {
             client: self.client,
             sql,
             view,
             limit: self.limit,
+            only_events,
         })
     }
 }
 
 pub type Version = u64; // TODO: NonZeroU64
 
-pub enum RowCursor<T> {
-    Preparing {
-        client: Client,
-        sql: String,
-        view: String,
-        limit: Option<usize>,
-    },
-    Fetching(query::Cursor<(T, Version)>),
+pub struct EventCursor(RawCursor<()>);
+
+impl EventCursor {
+    pub async fn next(&mut self) -> Result<Option<Version>> {
+        Ok(self.0.next().await?.map(|(_, version)| version))
+    }
 }
+
+pub struct RowCursor<T>(RawCursor<T>);
 
 impl<T> RowCursor<T> {
     pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<(Version, T)>>
     where
         T: Deserialize<'b> + Reflection,
     {
-        if let RowCursor::Preparing {
+        Ok(self.0.next().await?.map(|(row, version)| (version, row)))
+    }
+}
+
+enum RawCursor<T> {
+    Preparing {
+        client: Client,
+        sql: String,
+        view: String,
+        limit: Option<usize>,
+        only_events: bool,
+    },
+    Fetching(query::Cursor<(T, Version)>),
+}
+
+impl<T> RawCursor<T> {
+    pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<(T, Version)>>
+    where
+        T: Deserialize<'b> + Reflection,
+    {
+        if let RawCursor::Preparing {
             client,
             sql,
             view,
             limit,
+            only_events,
         } = self
         {
             let create_sql = format!(
@@ -81,18 +113,19 @@ impl<T> RowCursor<T> {
             );
             client.query(&create_sql).execute().await?;
 
+            let events = if *only_events { " EVENTS" } else { "" };
             let watch_sql = match limit {
-                Some(limit) => format!("WATCH {} LIMIT {}", view, limit),
-                None => format!("WATCH {}", view),
+                Some(limit) => format!("WATCH {}{} LIMIT {}", view, events, limit),
+                None => format!("WATCH {}{}", view, events),
             };
 
             let cursor = client.query(&watch_sql).fetch()?;
-            *self = RowCursor::Fetching(cursor);
+            *self = RawCursor::Fetching(cursor);
         }
 
         match self {
-            RowCursor::Preparing { .. } => unreachable!(),
-            RowCursor::Fetching(cursor) => Ok(cursor.next().await?.map(|(val, ver)| (ver, val))),
+            RawCursor::Preparing { .. } => unreachable!(),
+            RawCursor::Fetching(cursor) => Ok(cursor.next().await?),
         }
     }
 }
