@@ -36,12 +36,12 @@ async fn insert(client: &Client) -> Result<()> {
 async fn inserter(client: &Client) -> Result<()> {
     let mut inserter = client
         .inserter("some")?
-        .with_entry_threshold(100_000)
-        .with_time_threshold(Duration::from_secs(15));
+        .with_max_entries(100_000)
+        .with_max_duration(Duration::from_secs(15));
 
     for i in 0..1000 {
         if i == 500 {
-            inserter.set_entry_threshold(300);
+            inserter.set_max_entries(300);
         }
 
         inserter.write(&Row { no: i, name: "foo" }).await?;
