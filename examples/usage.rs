@@ -31,6 +31,17 @@ async fn insert(client: &Client) -> Result<()> {
     insert.end().await
 }
 
+async fn inserter(client: &Client) -> Result<()> {
+    let mut inserter = client.inserter("some")?;
+    for i in 0..1000 {
+        inserter.write(&Row { no: i, name: "foo" }).await?;
+        inserter.commit().await?;
+    }
+
+    inserter.end().await?;
+    Ok(())
+}
+
 async fn select(client: &Client) -> Result<()> {
     let mut cursor = client
         .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
@@ -104,6 +115,7 @@ async fn main() -> Result<()> {
 
     ddl(&client).await?;
     insert(&client).await?;
+    inserter(&client).await?;
     select_count(&client).await?;
     select(&client).await?;
     delete(&client).await?;

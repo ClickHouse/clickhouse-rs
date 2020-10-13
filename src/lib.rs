@@ -3,11 +3,14 @@ use std::collections::HashMap;
 use hyper::{self, client::HttpConnector};
 
 use self::error::Result;
-pub use self::{insert::Insert, introspection::Reflection, query::Query, watch::Watch};
+pub use self::{
+    insert::Insert, inserter::Inserter, introspection::Reflection, query::Query, watch::Watch,
+};
 
 mod buflist;
 pub mod error;
 mod insert;
+mod inserter;
 mod introspection;
 mod query;
 mod response;
@@ -72,6 +75,10 @@ impl Client {
 
     pub fn insert<T: Reflection>(&self, table: &str) -> Result<Insert<T>> {
         Insert::new(self, table)
+    }
+
+    pub fn inserter<T: Reflection>(&self, table: &str) -> Result<Inserter<T>> {
+        Inserter::new(self, table)
     }
 
     pub fn query(&self, query: &str) -> Query {
