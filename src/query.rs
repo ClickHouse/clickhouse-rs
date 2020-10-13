@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use bytes::Bytes;
-use hyper::{Body, Request};
+use hyper::{header::CONTENT_LENGTH, Body, Method, Request};
 use serde::Deserialize;
 use tokio::stream::StreamExt;
 use url::Url;
@@ -39,7 +39,7 @@ impl Query {
 
     pub async fn execute(self) -> Result<()> {
         // TODO: should we read the body?
-        let _ = self.do_execute::<()>()?.resolve().await?;
+        let _ = self.do_execute::<()>(Method::POST)?.resolve().await?;
         Ok(())
     }
 
@@ -47,14 +47,14 @@ impl Query {
         self.sql.append(" FORMAT RowBinary");
 
         Ok(RowCursor {
-            response: self.do_execute::<T>()?,
+            response: self.do_execute::<T>(Method::GET)?,
             buffer: vec![0; BUFFER_SIZE],
             pending: BufList::default(),
             _marker: PhantomData,
         })
     }
 
-    fn do_execute<T: Reflection>(mut self) -> Result<Response> {
+    fn do_execute<T: Reflection>(mut self, method: Method) -> Result<Response> {
         let mut url = Url::parse(&self.client.url).expect("TODO");
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -72,8 +72,10 @@ impl Query {
         }
         drop(pairs);
 
-        let mut builder = Request::post(url.as_str()) // TODO: GET
-            .header("Content-Length", "0");
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(url.as_str())
+            .header(CONTENT_LENGTH, "0");
 
         if let Some(user) = &self.client.user {
             builder = builder.header("X-ClickHouse-User", user);
