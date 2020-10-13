@@ -15,12 +15,12 @@ pub struct Inserter<T> {
     max_entries: u64,
     max_duration: Duration,
     insert: Insert<T>,
-    quantities: Quantities,
     next_insert_at: Instant,
+    committed: Quantities,
+    uncommitted_entries: u64,
 }
 
-//#[derive(Debug, Clone, Add, AddAssign, Sub, SubAssign, PartialEq, Eq, Serialize)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Quantities {
     pub entries: u64,
     pub transactions: u64,
@@ -44,8 +44,9 @@ where
             max_entries: DEFAULT_MAX_ENTRIES,
             max_duration: DEFAULT_MAX_DURATION,
             insert: client.insert(table)?,
-            quantities: Quantities::ZERO,
             next_insert_at: Instant::now() + DEFAULT_MAX_DURATION,
+            committed: Quantities::ZERO,
+            uncommitted_entries: 0,
         })
     }
 
@@ -77,13 +78,17 @@ where
     where
         T: Serialize,
     {
-        self.quantities.entries += 1;
+        self.uncommitted_entries += 1;
         let fut = self.insert.write(row);
         async move { fut.await }
     }
 
     pub async fn commit(&mut self) -> Result<Quantities> {
-        self.quantities.transactions += 1;
+        if self.uncommitted_entries > 0 {
+            self.committed.entries += self.uncommitted_entries;
+            self.committed.transactions += 1;
+            self.uncommitted_entries = 0;
+        }
 
         let now = Instant::now();
 
@@ -92,7 +97,7 @@ where
             let new_insert = self.client.insert(&self.table)?; // Actually it mustn't fail.
             let insert = mem::replace(&mut self.insert, new_insert);
             insert.end().await?;
-            mem::replace(&mut self.quantities, Quantities::ZERO)
+            mem::replace(&mut self.committed, Quantities::ZERO)
         } else {
             Quantities::ZERO
         })
@@ -100,11 +105,11 @@ where
 
     pub async fn end(self) -> Result<Quantities> {
         self.insert.end().await?;
-        Ok(self.quantities)
+        Ok(self.committed)
     }
 
     fn is_threshold_reached(&self, now: Instant) -> bool {
-        self.quantities.entries >= self.max_entries || now >= self.next_insert_at
+        self.committed.entries >= self.max_entries || now >= self.next_insert_at
     }
 }
 
