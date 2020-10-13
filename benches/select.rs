@@ -54,7 +54,7 @@ fn select(c: &mut Criterion) {
     }
 
     async fn run(client: Client, iters: u64) -> Result<()> {
-        let mut cursor = client.query("SELECT ?fields FROM some").fetch::<Row>()?;
+        let mut cursor = client.query("SELECT ?fields FROM some").rows::<Row>()?;
 
         for _ in 0..iters {
             black_box(cursor.next().await?);
