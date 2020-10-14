@@ -1,4 +1,0 @@
-include:
-  - project: 'shared/crates/template'
-    ref: 'master'
-    file: '.gitlab-ci-template.yml'

@@ -1,0 +1,12 @@
+language: rust
+rust:
+    - stable
+before_script:
+    - rustup component add clippy
+    - rustup component add rustfmt
+script:
+    - cargo clippy --version
+    - cargo clippy --all-targets --all-features -- -D warnings -D rust_2018_idioms
+    - cargo fmt --version
+    - cargo fmt -- --check
+    - cargo test
