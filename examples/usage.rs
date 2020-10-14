@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use ch_client::{error::Result, Client, Reflection};
+use typed_clickhouse::{error::Result, Client, Reflection};
 
 #[derive(Debug, Reflection, Serialize, Deserialize)]
 struct Row<'a> {

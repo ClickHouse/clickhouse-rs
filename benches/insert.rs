@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughpu
 use serde::Serialize;
 use tokio::{runtime::Runtime, time::Instant};
 
-use ch_client::{error::Result, Client, Reflection};
+use typed_clickhouse::{error::Result, Client, Reflection};
 
 mod server {
     use std::{convert::Infallible, net::SocketAddr, thread};
