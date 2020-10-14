@@ -6,6 +6,13 @@
 
 A typed client for ClickHouse.
 
+## Features
+* Uses `serde` for encoding/decoding rows.
+* Uses `RowBinary` encoding.
+* Provides API for selecting.
+* Provides API for infinite transactional (see below) inserting.
+* Provides API for watching live views.
+
 ## Examples
 See [more examples](examples/usage.rs).
 
