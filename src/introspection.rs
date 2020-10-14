@@ -8,10 +8,10 @@ fn is_wrapper(schemas: &Schemas) -> bool {
         return false;
     }
 
-    match &schemas.first().unwrap().data {
-        Member::Field(field) if field.id == "0" || field.id == "_" => true,
-        _ => false,
-    }
+    matches!(
+        &schemas.first().unwrap().data,
+        Member::Field(field) if field.id == "0" || field.id == "_"
+    )
 }
 
 /// Collects all field names in depth and joins them with comma.
