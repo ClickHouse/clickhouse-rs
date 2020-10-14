@@ -68,7 +68,7 @@ impl Query {
         }
         drop(pairs);
 
-        let mut builder = Request::get(url.as_str());
+        let mut builder = Request::post(url.as_str()).header("Content-Length", "0");
 
         if let Some(user) = &self.client.user {
             builder = builder.header("X-ClickHouse-User", user);
