@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use typed_clickhouse::{error::Result, Client, Reflection};
+use clickhouse::{error::Result, Client, Reflection};
 
 #[derive(Debug, Reflection, Serialize, Deserialize)]
 struct Row<'a> {

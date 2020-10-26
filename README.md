@@ -1,8 +1,8 @@
-# typed-clickhouse
+# clickhouse.rs
 
-[![Build status](https://travis-ci.org/loyd/typed-clickhouse.svg)](https://travis-ci.org/loyd/typed-clickhouse)
-[![Crate info](https://img.shields.io/crates/v/typed-clickhouse.svg)](https://crates.io/crates/typed-clickhouse)
-[![Documentation](https://docs.rs/typed-clickhouse/badge.svg)](https://docs.rs/typed-clickhouse)
+[![Build status](https://travis-ci.org/loyd/clickhouse.svg)](https://travis-ci.org/loyd/clickhouse)
+[![Crate info](https://img.shields.io/crates/v/clickhouse.svg)](https://crates.io/crates/clickhouse)
+[![Documentation](https://docs.rs/clickhouse/badge.svg)](https://docs.rs/clickhouse)
 
 A typed client for ClickHouse.
 
@@ -18,7 +18,7 @@ See [more examples](examples/usage.rs).
 
 ### Create `Client`
 ```rust
-use typed_clickhouse::Client;
+use clickhouse::Client;
 
 let client = Client::default()
     .with_url("http://localhost:8123")
@@ -32,7 +32,7 @@ let client = Client::default()
 ### Select rows
 ```rust
 use serde::Deserialize;
-use typed_clickhouse::Reflection;
+use clickhouse::Reflection;
 
 #[derive(Reflection, Deserialize)]
 struct Row<'a> {
