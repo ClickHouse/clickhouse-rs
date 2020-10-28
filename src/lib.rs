@@ -3,20 +3,18 @@ use std::collections::HashMap;
 use hyper::{self, client::HttpConnector};
 
 use self::error::Result;
-pub use self::{
-    insert::Insert, inserter::Inserter, introspection::Reflection, query::Query, watch::Watch,
-};
+pub use self::introspection::Reflection;
 
 mod buflist;
 pub mod error;
-mod insert;
-mod inserter;
+pub mod insert;
+pub mod inserter;
 mod introspection;
-mod query;
+pub mod query;
 mod response;
 mod rowbinary;
 mod sql_builder;
-mod watch;
+pub mod watch;
 
 mod sealed {
     pub trait Sealed {}
@@ -73,19 +71,19 @@ impl Client {
         self
     }
 
-    pub fn insert<T: Reflection>(&self, table: &str) -> Result<Insert<T>> {
-        Insert::new(self, table)
+    pub fn insert<T: Reflection>(&self, table: &str) -> Result<insert::Insert<T>> {
+        insert::Insert::new(self, table)
     }
 
-    pub fn inserter<T: Reflection>(&self, table: &str) -> Result<Inserter<T>> {
-        Inserter::new(self, table)
+    pub fn inserter<T: Reflection>(&self, table: &str) -> Result<inserter::Inserter<T>> {
+        inserter::Inserter::new(self, table)
     }
 
-    pub fn query(&self, query: &str) -> Query {
-        Query::new(self, query)
+    pub fn query(&self, query: &str) -> query::Query {
+        query::Query::new(self, query)
     }
 
-    pub fn watch(&self, query: &str) -> Watch {
-        Watch::new(self, query)
+    pub fn watch(&self, query: &str) -> watch::Watch {
+        watch::Watch::new(self, query)
     }
 }
