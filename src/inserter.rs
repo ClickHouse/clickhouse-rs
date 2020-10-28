@@ -37,7 +37,7 @@ impl<T> Inserter<T>
 where
     T: Reflection,
 {
-    pub fn new(client: &Client, table: &str) -> Result<Self> {
+    pub(crate) fn new(client: &Client, table: &str) -> Result<Self> {
         Ok(Self {
             client: client.clone(),
             table: table.into(),
