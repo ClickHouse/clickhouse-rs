@@ -57,7 +57,7 @@ async fn select(client: &Client) -> Result<()> {
         .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
         .bind(500)
         .bind(504)
-        .rows::<Row<'_>>()?;
+        .fetch::<Row<'_>>()?;
 
     while let Some(row) = cursor.next().await? {
         println!("{:?}", row);
@@ -81,8 +81,11 @@ async fn delete(client: &Client) -> Result<()> {
 }
 
 async fn select_count(client: &Client) -> Result<()> {
-    let mut cursor = client.query("SELECT count() FROM some").rows::<u64>()?;
-    let count = cursor.next().await?.unwrap();
+    let count = client
+        .query("SELECT count() FROM some")
+        .fetch_one::<u64>()
+        .await?;
+
     println!("count() = {}", count);
 
     Ok(())
@@ -91,7 +94,7 @@ async fn select_count(client: &Client) -> Result<()> {
 async fn watch(client: &Client) -> Result<()> {
     let mut cursor = client
         .watch("SELECT max(no), argMax(name, no) FROM some")
-        .rows::<Row<'_>>()?;
+        .fetch::<Row<'_>>()?;
 
     let (version, row) = cursor.next().await?.unwrap();
     println!("version={}, row={:?}", version, row);

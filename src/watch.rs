@@ -38,12 +38,22 @@ impl Watch {
         self
     }
 
-    pub fn rows<T: Reflection>(self) -> Result<RowCursor<T>> {
+    pub fn fetch<T: Reflection>(self) -> Result<RowCursor<T>> {
         Ok(RowCursor(self.cursor(false)?))
     }
 
-    pub fn events(self) -> Result<EventCursor> {
+    #[deprecated(since = "0.4.0", note = "use `Watch::fetch()` instead")]
+    pub fn rows<T: Reflection>(self) -> Result<RowCursor<T>> {
+        self.fetch()
+    }
+
+    pub fn fetch_events(self) -> Result<EventCursor> {
         Ok(EventCursor(self.cursor(true)?))
+    }
+
+    //#[deprecated(since = "0.4.0", note = "use `TODO` instead")]
+    pub fn events(self) -> Result<EventCursor> {
+        self.fetch_events()
     }
 
     // TODO: `groups()` for `(Version, &[T])`.
@@ -126,7 +136,7 @@ impl<T> RawCursor<T> {
                 None => format!("WATCH {}{}", view, events),
             };
 
-            let cursor = client.query(&watch_sql).rows()?;
+            let cursor = client.query(&watch_sql).fetch()?;
             *self = RawCursor::Fetching(cursor);
         }
 

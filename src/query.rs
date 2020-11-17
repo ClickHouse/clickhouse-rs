@@ -43,18 +43,7 @@ impl Query {
         Ok(())
     }
 
-    pub async fn fetch_one<T>(self) -> Result<T>
-    where
-        T: Reflection + for<'b> Deserialize<'b>,
-    {
-        match self.rows()?.next().await {
-            Ok(Some(row)) => Ok(row),
-            Ok(None) => Err(Error::RowNotFound),
-            Err(err) => Err(err),
-        }
-    }
-
-    pub fn rows<T: Reflection>(mut self) -> Result<RowCursor<T>> {
+    pub fn fetch<T: Reflection>(mut self) -> Result<RowCursor<T>> {
         self.sql.append(" FORMAT RowBinary");
 
         Ok(RowCursor {
@@ -63,6 +52,22 @@ impl Query {
             pending: BufList::default(),
             _marker: PhantomData,
         })
+    }
+
+    pub async fn fetch_one<T>(self) -> Result<T>
+    where
+        T: Reflection + for<'b> Deserialize<'b>,
+    {
+        match self.fetch()?.next().await {
+            Ok(Some(row)) => Ok(row),
+            Ok(None) => Err(Error::RowNotFound),
+            Err(err) => Err(err),
+        }
+    }
+
+    #[deprecated(since = "0.4.0", note = "use `Query::fetch()` instead")]
+    pub fn rows<T: Reflection>(self) -> Result<RowCursor<T>> {
+        self.fetch()
     }
 
     fn do_execute<T: Reflection>(mut self, method: Method) -> Result<Response> {

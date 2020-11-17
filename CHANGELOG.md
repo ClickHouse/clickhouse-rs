@@ -6,9 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.1]
+## [0.4.0]
 ### Added
 - `Query::fetch_one()`.
+- `Query::fetch()` as a replacement for `Query::rows()`.
+- `Watch::fetch()` as a replacement for `Watch::rows()`.
 
 ### Changed
 - `Error` is `StdError + Send + Sync + 'static` now.
@@ -23,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::watch()` for `LIVE VIEW` related queries.
 
 ### Changed
-- Renamed `Query::fetch` to `Query::rows`.
+- Renamed `Query::fetch()` to `Query::rows()`.
 - Use `GET` requests for `SELECT` statements.
 
 ## [0.1.0]

@@ -44,7 +44,7 @@ let mut cursor = client
     .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
     .bind(500)
     .bind(504)
-    .rows::<Row<'_>>()?;
+    .fetch::<Row<'_>>()?;
 
 while let Some(row) = cursor.next().await? { .. }
 ```
@@ -96,7 +96,7 @@ client.query("DROP TABLE IF EXISTS some").execute().await?;
 ```rust
 let mut cursor = client
     .watch("SELECT max(no), argMax(name, no) FROM some")
-    .rows::<Row<'_>>()?;
+    .fetch::<Row<'_>>()?;
 
 let (version, row) = cursor.next().await?.unwrap();
 println!("live view updated: version={}, row={:?}", version, row);
