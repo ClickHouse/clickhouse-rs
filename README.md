@@ -1,6 +1,6 @@
 # clickhouse.rs
 
-[![Build status](https://travis-ci.org/loyd/clickhouse.svg)](https://travis-ci.org/loyd/clickhouse)
+[![Build status](https://travis-ci.org/loyd/clickhouse.rs.svg)](https://travis-ci.org/loyd/clickhouse.rs)
 [![Crate info](https://img.shields.io/crates/v/clickhouse.svg)](https://crates.io/crates/clickhouse)
 [![Documentation](https://docs.rs/clickhouse/badge.svg)](https://docs.rs/clickhouse)
 
