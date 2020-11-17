@@ -4,28 +4,24 @@ use serde::Deserialize;
 use sha1::{Digest, Sha1};
 
 use crate::{
-    error::Result,
+    error::{Error, Result},
     introspection::Reflection,
     query,
     sql_builder::{Bind, SqlBuilder},
     Client,
 };
 
-pub struct Watch {
+pub struct Watch<V = Rows> {
     client: Client,
     sql: SqlBuilder,
     limit: Option<usize>,
+    _kind: V,
 }
 
-impl Watch {
-    pub(crate) fn new(client: &Client, template: &str) -> Self {
-        Self {
-            client: client.clone(),
-            sql: SqlBuilder::new(template),
-            limit: None,
-        }
-    }
+pub struct Rows;
+pub struct Events;
 
+impl<V> Watch<V> {
     pub fn bind(mut self, value: impl Bind) -> Self {
         self.sql.bind_arg(value);
         self
@@ -36,24 +32,6 @@ impl Watch {
     pub fn limit(mut self, limit: impl Into<Option<usize>>) -> Self {
         self.limit = limit.into();
         self
-    }
-
-    pub fn fetch<T: Reflection>(self) -> Result<RowCursor<T>> {
-        Ok(RowCursor(self.cursor(false)?))
-    }
-
-    #[deprecated(since = "0.4.0", note = "use `Watch::fetch()` instead")]
-    pub fn rows<T: Reflection>(self) -> Result<RowCursor<T>> {
-        self.fetch()
-    }
-
-    pub fn fetch_events(self) -> Result<EventCursor> {
-        Ok(EventCursor(self.cursor(true)?))
-    }
-
-    //#[deprecated(since = "0.4.0", note = "use `TODO` instead")]
-    pub fn events(self) -> Result<EventCursor> {
-        self.fetch_events()
     }
 
     // TODO: `groups()` for `(Version, &[T])`.
@@ -74,6 +52,65 @@ impl Watch {
             limit: self.limit,
             only_events,
         })
+    }
+}
+
+impl Watch<Rows> {
+    pub(crate) fn new(client: &Client, template: &str) -> Self {
+        Self {
+            client: client.clone(),
+            sql: SqlBuilder::new(template),
+            limit: None,
+            _kind: Rows,
+        }
+    }
+
+    #[deprecated(since = "0.4.0", note = "use `Watch::fetch()` instead")]
+    pub fn rows<T: Reflection>(self) -> Result<RowCursor<T>> {
+        self.fetch()
+    }
+
+    #[deprecated(since = "0.4.0", note = "use `Watch::only_events().fetch()` instead")]
+    pub fn events(self) -> Result<EventCursor> {
+        self.only_events().fetch()
+    }
+
+    pub fn only_events(self) -> Watch<Events> {
+        Watch {
+            client: self.client,
+            sql: self.sql,
+            limit: self.limit,
+            _kind: Events,
+        }
+    }
+
+    pub fn fetch<T: Reflection>(self) -> Result<RowCursor<T>> {
+        Ok(RowCursor(self.cursor(false)?))
+    }
+
+    pub async fn fetch_one<T>(self) -> Result<(Version, T)>
+    where
+        T: Reflection + for<'b> Deserialize<'b>,
+    {
+        match self.limit(1).fetch()?.next().await {
+            Ok(Some(row)) => Ok(row),
+            Ok(None) => Err(Error::RowNotFound),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl Watch<Events> {
+    pub fn fetch(self) -> Result<EventCursor> {
+        Ok(EventCursor(self.cursor(true)?))
+    }
+
+    pub async fn fetch_one(self) -> Result<Version> {
+        match self.limit(1).fetch()?.next().await {
+            Ok(Some(row)) => Ok(row),
+            Ok(None) => Err(Error::RowNotFound),
+            Err(err) => Err(err),
+        }
     }
 }
 

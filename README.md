@@ -101,8 +101,8 @@ let mut cursor = client
 let (version, row) = cursor.next().await?.unwrap();
 println!("live view updated: version={}, row={:?}", version, row);
 
-// Use `events()` to iterate over versions only.
-let mut cursor = client.watch("some_live_view").limit(20).events()?;
+// Use `only_events()` to iterate over versions only.
+let mut cursor = client.watch("some_live_view").limit(20).only_events().fetch()?;
 println!("live view updated: version={:?}", cursor.next().await?);
 ```
 

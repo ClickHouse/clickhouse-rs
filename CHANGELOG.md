@@ -8,9 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0]
 ### Added
-- `Query::fetch_one()`.
+- `Query::fetch_one()`, `Watch::fetch_one()`.
 - `Query::fetch()` as a replacement for `Query::rows()`.
 - `Watch::fetch()` as a replacement for `Watch::rows()`.
+- `Watch::only_events().fetch()` as a replacement for `Watch::events()`.
 
 ### Changed
 - `Error` is `StdError + Send + Sync + 'static` now.

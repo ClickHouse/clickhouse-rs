@@ -115,7 +115,8 @@ async fn watch(client: &Client) -> Result<()> {
         // It's possible to specify a view name.
         .watch("lv_e1d9c5dc4a1e7f5f2fb41398156d41c88ef9ab74")
         .limit(10)
-        .events()?;
+        .only_events()
+        .fetch()?;
 
     println!("{:?}", cursor.next().await);
 
