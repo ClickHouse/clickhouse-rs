@@ -12,6 +12,8 @@ pub enum Error {
     InvalidParams(#[source] Box<dyn StdError + Send + Sync>),
     #[error("network error: {0}")]
     Network(#[source] Box<dyn StdError + Send + Sync>),
+    #[error("no rows returned by a query that expected to return at least one row")]
+    RowNotFound,
     #[error("sequences must have a knowable size ahead of time")]
     SequenceMustHaveLength,
     #[error("`deserialize_any` is not supported")]

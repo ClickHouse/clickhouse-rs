@@ -43,6 +43,17 @@ impl Query {
         Ok(())
     }
 
+    pub async fn fetch_one<T>(self) -> Result<T>
+    where
+        T: Reflection + for<'b> Deserialize<'b>,
+    {
+        match self.rows()?.next().await {
+            Ok(Some(row)) => Ok(row),
+            Ok(None) => Err(Error::RowNotFound),
+            Err(err) => Err(err),
+        }
+    }
+
     pub fn rows<T: Reflection>(mut self) -> Result<RowCursor<T>> {
         self.sql.append(" FORMAT RowBinary");
 
