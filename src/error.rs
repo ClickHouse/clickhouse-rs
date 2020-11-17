@@ -1,6 +1,7 @@
 use std::{error::Error as StdError, fmt, result, str::Utf8Error};
 
 use serde::{de, ser};
+use static_assertions::assert_impl_all;
 
 pub type Result<T, E = Error> = result::Result<T, E>;
 
@@ -8,9 +9,9 @@ pub type Result<T, E = Error> = result::Result<T, E>;
 #[non_exhaustive]
 pub enum Error {
     #[error("invalid params: {0}")]
-    InvalidParams(#[source] Box<dyn StdError + Send>),
+    InvalidParams(#[source] Box<dyn StdError + Send + Sync>),
     #[error("network error: {0}")]
-    Network(#[source] Box<dyn StdError + Send>),
+    Network(#[source] Box<dyn StdError + Send + Sync>),
     #[error("sequences must have a knowable size ahead of time")]
     SequenceMustHaveLength,
     #[error("`deserialize_any` is not supported")]
@@ -26,6 +27,8 @@ pub enum Error {
     #[error("bad response: {0}")]
     BadResponse(String),
 }
+
+assert_impl_all!(Error: StdError, Send, Sync);
 
 impl From<hyper::Error> for Error {
     fn from(error: hyper::Error) -> Self {
