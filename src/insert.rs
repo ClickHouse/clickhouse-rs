@@ -10,7 +10,7 @@ use crate::{
     error::{Error, Result},
     introspection::{self, Reflection},
     response::Response,
-    rowbinary, Client,
+    rowbinary, Client, Compression,
 };
 
 const BUFFER_SIZE: usize = 128 * 1024;
@@ -64,7 +64,7 @@ impl<T> Insert<T> {
         let future = client.client.request(request);
         let handle = tokio::spawn(async move {
             // TODO: should we read the body?
-            let _ = Response::from(future).resolve().await?;
+            let _ = Response::new(future, Compression::None).resolve().await?;
             Ok(())
         });
 

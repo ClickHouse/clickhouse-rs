@@ -8,7 +8,7 @@ use crate::{
     introspection::Reflection,
     query,
     sql_builder::{Bind, SqlBuilder},
-    Client,
+    Client, Compression,
 };
 
 pub struct Watch<V = Rows> {
@@ -159,11 +159,17 @@ impl<T> RawCursor<T> {
             only_events,
         } = self
         {
+            // It seems `WATCH` and compression are incompatible.
+            if client.compression != Compression::None {
+                take_mut::take(client, |client| client.with_compression(Compression::None))
+            }
+
             if let Some(sql) = sql {
                 let create_sql = format!(
                     "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT AS {}",
                     view, sql
                 );
+
                 client.query(&create_sql).execute().await?;
             }
 

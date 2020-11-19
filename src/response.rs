@@ -1,22 +1,31 @@
-use futures::stream::{Fuse, StreamExt};
+use std::{
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
+use async_compression::stream::{BrotliDecoder, GzipDecoder, ZlibDecoder};
+use bytes::Bytes;
+use futures::stream::Stream;
 use hyper::{body, client::ResponseFuture, Body, StatusCode};
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    Compression,
+};
 
 pub enum Response {
-    Waiting(ResponseFuture),
-    Loading(Fuse<Body>),
-}
-
-impl From<ResponseFuture> for Response {
-    fn from(future: ResponseFuture) -> Self {
-        Self::Waiting(future)
-    }
+    Waiting(ResponseFuture, Compression),
+    Loading(Chunks),
 }
 
 impl Response {
-    pub async fn resolve(&mut self) -> Result<&mut Fuse<Body>> {
-        if let Self::Waiting(response) = self {
+    pub fn new(future: ResponseFuture, compression: Compression) -> Self {
+        Self::Waiting(future, compression)
+    }
+
+    pub async fn resolve(&mut self) -> Result<&mut Chunks> {
+        if let Self::Waiting(response, compression) = self {
             let response = response.await?;
 
             if response.status() != StatusCode::OK {
@@ -27,12 +36,95 @@ impl Response {
             }
 
             let body = response.into_body();
-            *self = Self::Loading(body.fuse());
+            let chunks = match compression {
+                Compression::None => Chunks(Inner::Plain(body)),
+                Compression::Gzip => {
+                    Chunks(Inner::Gzip(Box::new(GzipDecoder::new(BodyWrapper(body)))))
+                }
+                Compression::Zlib => {
+                    Chunks(Inner::Zlib(Box::new(ZlibDecoder::new(BodyWrapper(body)))))
+                }
+                Compression::Brotli => Chunks(Inner::Brotli(Box::new(BrotliDecoder::new(
+                    BodyWrapper(body),
+                )))),
+            };
+            *self = Self::Loading(chunks);
         }
 
         match self {
-            Self::Waiting(_) => unreachable!(),
-            Self::Loading(body) => Ok(body),
+            Self::Waiting(..) => unreachable!(),
+            Self::Loading(chunks) => Ok(chunks),
         }
+    }
+}
+
+pub struct Chunks(Inner);
+
+enum Inner {
+    Plain(Body),
+    Gzip(Box<GzipDecoder<BodyWrapper>>),
+    Zlib(Box<ZlibDecoder<BodyWrapper>>),
+    Brotli(Box<BrotliDecoder<BodyWrapper>>),
+    Empty,
+}
+
+impl Stream for Chunks {
+    type Item = Result<Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        use Inner::*;
+        let res = match self.0 {
+            Plain(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Into::into),
+            Gzip(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Error::decode_io),
+            Zlib(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Error::decode_io),
+            Brotli(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Error::decode_io),
+            Empty => Poll::Ready(None),
+        };
+
+        if let Poll::Ready(None) = res {
+            self.0 = Inner::Empty;
+        }
+
+        res
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        use Inner::*;
+        match &self.0 {
+            Plain(inner) => inner.size_hint(),
+            Gzip(inner) => inner.size_hint(),
+            Zlib(inner) => inner.size_hint(),
+            Brotli(inner) => inner.size_hint(),
+            Empty => (0, Some(0)),
+        }
+    }
+}
+
+pub struct BodyWrapper(Body);
+
+impl Stream for BodyWrapper {
+    type Item = io::Result<Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        map_poll_err(Pin::new(&mut self.0).poll_next(cx), |err| {
+            Error::from(err).into_io()
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+// XXX: https://github.com/rust-lang/rust/issues/63514
+fn map_poll_err<T, E, E2>(
+    poll: Poll<Option<Result<T, E>>>,
+    f: impl FnOnce(E) -> E2,
+) -> Poll<Option<Result<T, E2>>> {
+    match poll {
+        Poll::Ready(Some(Ok(val))) => Poll::Ready(Some(Ok(val))),
+        Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(f(err)))),
+        Poll::Ready(None) => Poll::Ready(None),
+        Poll::Pending => Poll::Pending,
     }
 }

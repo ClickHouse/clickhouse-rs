@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use clickhouse::{error::Result, Client, Reflection};
+use clickhouse::{error::Result, Client, Compression, Reflection};
 
 #[derive(Debug, Reflection, Serialize, Deserialize)]
 struct Row<'a> {
@@ -125,7 +125,9 @@ async fn watch(client: &Client) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let client = Client::default().with_url("http://localhost:8123");
+    let client = Client::default()
+        .with_url("http://localhost:8123")
+        .with_compression(Compression::Gzip);
 
     ddl(&client).await?;
     insert(&client).await?;

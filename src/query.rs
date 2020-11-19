@@ -1,7 +1,10 @@
 use std::marker::PhantomData;
 
 use bytes::Bytes;
-use hyper::{header::CONTENT_LENGTH, Body, Method, Request};
+use hyper::{
+    header::{ACCEPT_ENCODING, CONTENT_LENGTH},
+    Body, Method, Request,
+};
 use serde::Deserialize;
 use tokio::stream::StreamExt;
 use url::Url;
@@ -13,7 +16,7 @@ use crate::{
     response::Response,
     rowbinary,
     sql_builder::{Bind, SqlBuilder},
-    Client,
+    Client, Compression,
 };
 
 const BUFFER_SIZE: usize = 8 * 1024;
@@ -83,6 +86,14 @@ impl Query {
         let query = self.sql.finish()?;
         pairs.append_pair("allow_experimental_live_view", "1"); // TODO: send only if it's required.
         pairs.append_pair("query", &query);
+
+        match self.client.compression {
+            Compression::None => {}
+            Compression::Gzip | Compression::Zlib | Compression::Brotli => {
+                pairs.append_pair("enable_http_compression", "1");
+            }
+        }
+
         for (name, value) in &self.client.options {
             pairs.append_pair(name, value);
         }
@@ -101,11 +112,19 @@ impl Query {
             builder = builder.header("X-ClickHouse-Key", password);
         }
 
+        match self.client.compression {
+            Compression::None => {}
+            Compression::Gzip => builder = builder.header(ACCEPT_ENCODING, "gzip"),
+            Compression::Zlib => builder = builder.header(ACCEPT_ENCODING, "deflate"),
+            Compression::Brotli => builder = builder.header(ACCEPT_ENCODING, "br"),
+        }
+
         let request = builder
             .body(Body::empty())
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        Ok(self.client.client.request(request).into())
+        let future = self.client.client.request(request);
+        Ok(Response::new(future, self.client.compression))
     }
 }
 
@@ -127,7 +146,7 @@ impl<T> RowCursor<T> {
             unsafe { &mut *(ptr as *mut T) }
         }
 
-        let body = self.response.resolve().await?;
+        let chunks = self.response.resolve().await?;
 
         loop {
             let buffer = fuck_mut(&mut self.buffer);
@@ -143,7 +162,7 @@ impl<T> RowCursor<T> {
                 Err(err) => return Err(err),
             }
 
-            match body.try_next().await? {
+            match chunks.try_next().await? {
                 Some(chunk) => self.pending.push(chunk),
                 None if self.pending.bufs_cnt() > 0 => return Err(Error::NotEnoughData),
                 None => return Ok(None),

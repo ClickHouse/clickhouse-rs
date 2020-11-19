@@ -28,6 +28,7 @@ pub struct Client {
     database: Option<String>,
     user: Option<String>,
     password: Option<String>,
+    compression: Compression,
     options: HashMap<String, String>,
 }
 
@@ -39,6 +40,7 @@ impl Default for Client {
             database: None,
             user: None,
             password: None,
+            compression: Compression::None,
             options: HashMap::new(),
         }
     }
@@ -66,6 +68,11 @@ impl Client {
         self
     }
 
+    pub fn with_compression(mut self, compression: Compression) -> Self {
+        self.compression = compression;
+        self
+    }
+
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.options.insert(name.into(), value.into());
         self
@@ -86,4 +93,13 @@ impl Client {
     pub fn watch(&self, query: &str) -> watch::Watch {
         watch::Watch::new(self, query)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum Compression {
+    None,
+    Gzip,
+    Zlib,
+    Brotli,
 }
