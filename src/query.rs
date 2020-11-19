@@ -16,7 +16,7 @@ use crate::{
     response::Response,
     rowbinary,
     sql_builder::{Bind, SqlBuilder},
-    Client, Compression,
+    Client,
 };
 
 const BUFFER_SIZE: usize = 8 * 1024;
@@ -87,11 +87,8 @@ impl Query {
         pairs.append_pair("allow_experimental_live_view", "1"); // TODO: send only if it's required.
         pairs.append_pair("query", &query);
 
-        match self.client.compression {
-            Compression::None => {}
-            Compression::Gzip | Compression::Zlib | Compression::Brotli => {
-                pairs.append_pair("enable_http_compression", "1");
-            }
+        if self.client.compression.encoding().is_some() {
+            pairs.append_pair("enable_http_compression", "1");
         }
 
         for (name, value) in &self.client.options {
@@ -112,11 +109,8 @@ impl Query {
             builder = builder.header("X-ClickHouse-Key", password);
         }
 
-        match self.client.compression {
-            Compression::None => {}
-            Compression::Gzip => builder = builder.header(ACCEPT_ENCODING, "gzip"),
-            Compression::Zlib => builder = builder.header(ACCEPT_ENCODING, "deflate"),
-            Compression::Brotli => builder = builder.header(ACCEPT_ENCODING, "br"),
+        if let Some(encoding) = self.client.compression.encoding() {
+            builder = builder.header(ACCEPT_ENCODING, encoding);
         }
 
         let request = builder

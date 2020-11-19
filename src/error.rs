@@ -53,10 +53,12 @@ impl de::Error for Error {
 }
 
 impl Error {
+    #[allow(dead_code)]
     pub(crate) fn into_io(self) -> io::Error {
         io::Error::new(io::ErrorKind::Other, self)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn decode_io(err: io::Error) -> Self {
         if err.get_ref().map(|r| r.is::<Error>()).unwrap_or(false) {
             *err.into_inner().unwrap().downcast::<Error>().unwrap()

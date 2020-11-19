@@ -2,10 +2,12 @@ use std::collections::HashMap;
 
 use hyper::{self, client::HttpConnector};
 
+pub use self::compression::Compression;
 use self::error::Result;
 pub use self::introspection::Reflection;
 
 mod buflist;
+mod compression;
 pub mod error;
 pub mod insert;
 pub mod inserter;
@@ -93,13 +95,4 @@ impl Client {
     pub fn watch(&self, query: &str) -> watch::Watch {
         watch::Watch::new(self, query)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[non_exhaustive]
-pub enum Compression {
-    None,
-    Gzip,
-    Zlib,
-    Brotli,
 }

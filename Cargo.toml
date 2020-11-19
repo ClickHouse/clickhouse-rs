@@ -17,6 +17,11 @@ harness = false
 name = "select"
 harness = false
 
+[features]
+gzip = ["async-compression", "async-compression/gzip"]
+zlib = ["async-compression", "async-compression/zlib"]
+brotli = ["async-compression", "async-compression/brotli"]
+
 [dependencies]
 thiserror = "1.0.16"
 serde = "1.0.106"
@@ -30,7 +35,7 @@ smallvec = "1.4.0"
 futures = "0.3.5"
 sha-1 = "0.9.1"
 static_assertions = "1.1.0"
-async-compression = { version = "0.3.6", features = ["stream", "gzip",  "zlib", "brotli"] }
+async-compression = { version = "0.3.6", features = ["stream"], optional = true }
 take_mut = "0.2.2"
 
 [dev-dependencies]
