@@ -14,8 +14,8 @@ use futures::stream::Stream;
 use hyper::{body, client::ResponseFuture, Body, StatusCode};
 
 use crate::{
+    compression::{Compression, Lz4Decoder},
     error::{Error, Result},
-    Compression,
 };
 
 pub enum Response {
@@ -41,21 +41,18 @@ impl Response {
 
             let body = response.into_body();
             let chunks = match compression {
-                Compression::None => Chunks(Inner::Plain(body)),
+                Compression::None => Inner::Plain(body),
+                Compression::Lz4 => Inner::Lz4(Lz4Decoder::new(body)),
                 #[cfg(feature = "gzip")]
-                Compression::Gzip => {
-                    Chunks(Inner::Gzip(Box::new(GzipDecoder::new(BodyWrapper(body)))))
-                }
+                Compression::Gzip => Inner::Gzip(Box::new(GzipDecoder::new(BodyWrapper(body)))),
                 #[cfg(feature = "zlib")]
-                Compression::Zlib => {
-                    Chunks(Inner::Zlib(Box::new(ZlibDecoder::new(BodyWrapper(body)))))
-                }
+                Compression::Zlib => Inner::Zlib(Box::new(ZlibDecoder::new(BodyWrapper(body)))),
                 #[cfg(feature = "brotli")]
-                Compression::Brotli => Chunks(Inner::Brotli(Box::new(BrotliDecoder::new(
-                    BodyWrapper(body),
-                )))),
+                Compression::Brotli => {
+                    Inner::Brotli(Box::new(BrotliDecoder::new(BodyWrapper(body))))
+                }
             };
-            *self = Self::Loading(chunks);
+            *self = Self::Loading(Chunks(chunks));
         }
 
         match self {
@@ -69,6 +66,7 @@ pub struct Chunks(Inner);
 
 enum Inner {
     Plain(Body),
+    Lz4(Lz4Decoder<Body>),
     #[cfg(feature = "gzip")]
     Gzip(Box<GzipDecoder<BodyWrapper>>),
     #[cfg(feature = "zlib")]
@@ -85,6 +83,7 @@ impl Stream for Chunks {
         use Inner::*;
         let res = match self.0 {
             Plain(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Into::into),
+            Lz4(ref mut inner) => Pin::new(inner).poll_next(cx),
             #[cfg(feature = "gzip")]
             Gzip(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Error::decode_io),
             #[cfg(feature = "zlib")]
@@ -105,6 +104,7 @@ impl Stream for Chunks {
         use Inner::*;
         match &self.0 {
             Plain(inner) => inner.size_hint(),
+            Lz4(inner) => inner.size_hint(),
             #[cfg(feature = "gzip")]
             Gzip(inner) => inner.size_hint(),
             #[cfg(feature = "zlib")]

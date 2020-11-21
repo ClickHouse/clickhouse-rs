@@ -42,7 +42,7 @@ impl Default for Client {
             database: None,
             user: None,
             password: None,
-            compression: Compression::None,
+            compression: Compression::default(),
             options: HashMap::new(),
         }
     }
