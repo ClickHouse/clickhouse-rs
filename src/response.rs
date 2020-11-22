@@ -14,7 +14,7 @@ use futures::stream::Stream;
 use hyper::{body, client::ResponseFuture, Body, StatusCode};
 
 use crate::{
-    compression::{Compression, Lz4Decoder},
+    compression::{lz4::Lz4Decoder, Compression},
     error::{Error, Result},
 };
 
