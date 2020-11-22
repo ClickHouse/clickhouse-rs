@@ -6,7 +6,7 @@ use std::{
 
 use bytes::{Buf, BufMut, Bytes};
 use futures::{ready, stream::Stream};
-use lz4::liblz4::LZ4_decompress_safe;
+use lz4_sys::LZ4_decompress_safe;
 
 use crate::{
     buflist::BufList,

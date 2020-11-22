@@ -11,7 +11,6 @@ use url::Url;
 
 use crate::{
     buflist::BufList,
-    compression::Compression,
     error::{Error, Result},
     introspection::Reflection,
     response::Response,
@@ -88,9 +87,12 @@ impl Query {
         pairs.append_pair("allow_experimental_live_view", "1"); // TODO: send only if it's required.
         pairs.append_pair("query", &query);
 
-        if self.client.compression == Compression::Lz4 {
+        #[cfg(feature = "lz4")]
+        if self.client.compression == crate::Compression::Lz4 {
             pairs.append_pair("compress", "1");
-        } else if self.client.compression.encoding().is_some() {
+        }
+
+        if self.client.compression.encoding().is_some() {
             pairs.append_pair("enable_http_compression", "1");
         }
 

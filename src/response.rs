@@ -13,8 +13,10 @@ use bytes::Bytes;
 use futures::stream::Stream;
 use hyper::{body, client::ResponseFuture, Body, StatusCode};
 
+#[cfg(feature = "lz4")]
+use crate::compression::lz4::Lz4Decoder;
 use crate::{
-    compression::{lz4::Lz4Decoder, Compression},
+    compression::Compression,
     error::{Error, Result},
 };
 
@@ -42,6 +44,7 @@ impl Response {
             let body = response.into_body();
             let chunks = match compression {
                 Compression::None => Inner::Plain(body),
+                #[cfg(feature = "lz4")]
                 Compression::Lz4 => Inner::Lz4(Lz4Decoder::new(body)),
                 #[cfg(feature = "gzip")]
                 Compression::Gzip => Inner::Gzip(Box::new(GzipDecoder::new(BodyWrapper(body)))),
@@ -66,6 +69,7 @@ pub struct Chunks(Inner);
 
 enum Inner {
     Plain(Body),
+    #[cfg(feature = "lz4")]
     Lz4(Lz4Decoder<Body>),
     #[cfg(feature = "gzip")]
     Gzip(Box<GzipDecoder<BodyWrapper>>),
@@ -83,6 +87,7 @@ impl Stream for Chunks {
         use Inner::*;
         let res = match self.0 {
             Plain(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Into::into),
+            #[cfg(feature = "lz4")]
             Lz4(ref mut inner) => Pin::new(inner).poll_next(cx),
             #[cfg(feature = "gzip")]
             Gzip(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Error::decode_io),
@@ -104,6 +109,7 @@ impl Stream for Chunks {
         use Inner::*;
         match &self.0 {
             Plain(inner) => inner.size_hint(),
+            #[cfg(feature = "lz4")]
             Lz4(inner) => inner.size_hint(),
             #[cfg(feature = "gzip")]
             Gzip(inner) => inner.size_hint(),
