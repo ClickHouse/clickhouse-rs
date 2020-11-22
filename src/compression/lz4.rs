@@ -175,8 +175,31 @@ async fn it_decompress() {
         110, 103, 3, 97, 98, 99,
     ];
 
-    let input = stream::iter(vec![Ok::<_, Error>(source.into())]);
-    let mut decoder = Lz4Decoder::new(input);
-    let actual = decoder.try_next().await.unwrap();
-    assert_eq!(actual, Some(expected.into()));
+    async fn test(chunks: &[&[u8]], expected: &[u8]) {
+        let stream = stream::iter(
+            chunks
+                .iter()
+                .map(|s| Bytes::copy_from_slice(s))
+                .map(Ok::<_, Error>)
+                .collect::<Vec<_>>(),
+        );
+        let mut decoder = Lz4Decoder::new(stream);
+        let actual = decoder.try_next().await.unwrap();
+        assert_eq!(actual, Some(Bytes::copy_from_slice(expected)));
+    }
+
+    // 1 chunk.
+    test(&[&source], &expected).await;
+
+    // 2 chunks.
+    for i in 0..source.len() {
+        let (left, right) = source.split_at(i);
+        test(&[left, right], &expected).await;
+
+        // 3 chunks.
+        for j in i..source.len() {
+            let (right_a, right_b) = right.split_at(j - i);
+            test(&[left, right_a, right_b], &expected).await;
+        }
+    }
 }
