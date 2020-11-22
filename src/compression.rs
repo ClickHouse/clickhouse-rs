@@ -4,7 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes};
 use futures::{ready, stream::Stream};
 use lz4::liblz4::LZ4_decompress_safe;
 
@@ -53,7 +53,7 @@ const MAX_COMPRESSED_SIZE: u32 = 1024 * 1024 * 1024;
 pub struct Lz4Decoder<S> {
     inner: S,
     chunks: BufList<Bytes>,
-    header: Option<Lz4Header>,
+    meta: Option<Lz4Meta>,
 }
 
 impl<S, E> Stream for Lz4Decoder<S>
@@ -64,12 +64,11 @@ where
     type Item = Result<Bytes>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let header = loop {
+        let meta = loop {
             let size = self.chunks.remaining();
-            let required_size = self
-                .header
-                .as_ref()
-                .map_or(LZ4_HEADER_SIZE, |h| h.compressed_size as usize);
+            let required_size = self.meta.as_ref().map_or(LZ4_META_SIZE, |m| {
+                m.compressed_size as usize - LZ4_HEADER_SIZE
+            });
 
             if size < required_size {
                 let inner = Pin::new(&mut self.inner);
@@ -80,6 +79,7 @@ where
                     }
                     Some(Err(err)) => return Some(Err(err.into())).into(),
                     None if size > 0 => {
+                        println!("required={} size={}", required_size, size);
                         let err = Error::Decompression("malformed data".into());
                         return Poll::Ready(Some(Err(err)));
                     }
@@ -89,26 +89,30 @@ where
 
             assert!(size >= required_size);
 
-            match self.header.take() {
-                Some(header) => break header,
-                None => self.header = Some(self.read_header()?),
+            match self.meta.take() {
+                Some(meta) => break meta,
+                None => self.meta = Some(self.read_meta()?),
             };
         };
 
-        let bytes = self.read_data(header)?;
+        let bytes = self.read_data(meta)?;
+        self.chunks.commit();
         Poll::Ready(Some(Ok(bytes)))
     }
 
     // TODO: implement `size_hint`?
 }
 
+// Meta = checksum + header
 // - [16b] checksum
 // - [ 1b] magic number (0x82)
 // - [ 4b] compressed size
 // - [ 4b] uncompressed size
-const LZ4_HEADER_SIZE: usize = 25;
+const LZ4_META_SIZE: usize = 25;
+const LZ4_HEADER_SIZE: usize = 9;
+const LZ4_MAGIC: u8 = 0x82;
 
-struct Lz4Header {
+struct Lz4Meta {
     checksum: u128,
     compressed_size: u32,
     uncompressed_size: u32, // TODO: use NonZeroU32
@@ -119,19 +123,19 @@ impl<S> Lz4Decoder<S> {
         Self {
             inner: stream,
             chunks: BufList::default(),
-            header: None,
+            meta: None,
         }
     }
 
-    fn read_header(&mut self) -> Result<Lz4Header> {
-        assert!(self.chunks.remaining() >= LZ4_HEADER_SIZE);
+    fn read_meta(&mut self) -> Result<Lz4Meta> {
+        assert!(self.chunks.remaining() >= LZ4_META_SIZE);
 
         let checksum = self.chunks.get_u128_le();
         let magic = self.chunks.get_u8();
-        let compressed_size = self.chunks.get_u32_le() - 9;
+        let compressed_size = self.chunks.get_u32_le();
         let uncompressed_size = self.chunks.get_u32_le();
 
-        if magic != 0x82 {
+        if magic != LZ4_MAGIC {
             return Err(Error::Decompression("incorrect magic number".into()));
         }
 
@@ -139,38 +143,54 @@ impl<S> Lz4Decoder<S> {
             return Err(Error::Decompression("too big compressed data".into()));
         }
 
-        // TODO: check checksum.
-
-        Ok(Lz4Header {
+        Ok(Lz4Meta {
             checksum,
             compressed_size,
             uncompressed_size,
         })
     }
 
-    fn read_data(&mut self, header: Lz4Header) -> Result<Bytes> {
+    fn read_data(&mut self, header: Lz4Meta) -> Result<Bytes> {
+        assert!(self.chunks.remaining() >= header.compressed_size as usize - LZ4_HEADER_SIZE);
+
         // TODO: reuse buffers.
-        let mut compressed = vec![0u8; header.compressed_size as usize];
-        self.chunks.copy_to_slice(&mut compressed);
+        let mut compressed = Vec::with_capacity(header.compressed_size as usize);
+
+        compressed.clear();
+        compressed.put_u8(LZ4_MAGIC);
+        compressed.put_u32_le(header.compressed_size);
+        compressed.put_u32_le(header.uncompressed_size);
+        compressed.resize(header.compressed_size as usize, 0);
+
+        self.chunks
+            .copy_to_slice(&mut compressed[LZ4_HEADER_SIZE..]);
+
+        let actual_checksum = calc_checksum(&compressed);
+        if actual_checksum != header.checksum {
+            return Err(Error::Decompression("checksum mismatch".into()));
+        }
 
         let mut uncompressed = vec![0u8; header.uncompressed_size as usize];
         let status = unsafe {
             LZ4_decompress_safe(
-                compressed.as_ptr() as *const c_char,
+                compressed.as_ptr().add(LZ4_HEADER_SIZE) as *const c_char,
                 uncompressed.as_mut_ptr() as *mut c_char,
-                header.compressed_size as c_int,
-                header.uncompressed_size as c_int,
+                (compressed.len() - LZ4_HEADER_SIZE) as c_int,
+                uncompressed.len() as c_int,
             )
         };
 
         if status < 0 {
-            return Err(Error::Decompression(
-                format!("can't decompress data: {}", status).into(),
-            ));
+            return Err(Error::Decompression("can't decompress data".into()));
         }
 
         Ok(uncompressed.into())
     }
+}
+
+fn calc_checksum(buffer: &[u8]) -> u128 {
+    let hash = clickhouse_rs_cityhash_sys::city_hash_128(buffer);
+    u128::from(hash.hi) << 64 | u128::from(hash.lo)
 }
 
 #[tokio::test]

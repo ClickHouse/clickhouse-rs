@@ -41,7 +41,7 @@ static_assertions = "1.1.0"
 async-compression = { version = "0.3.6", features = ["stream"], optional = true }
 take_mut = "0.2.2"
 lz4 = "1.23.2"
-fasthash = "0.4.0"
+clickhouse-rs-cityhash-sys = "0.1.2"
 
 [dev-dependencies]
 criterion = "0.3.2"
