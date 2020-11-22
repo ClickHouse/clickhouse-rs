@@ -12,7 +12,7 @@ A typed client for ClickHouse.
 * Provides API for selecting.
 * Provides API for infinite transactional (see below) inserting.
 * Provides API for watching live views.
-* Decompression (gzip, zlib and brotli).
+* Decompression (lz4, gzip, zlib and brotli). lz4 by default.
 
 ## Examples
 See [more examples](examples/usage.rs).
