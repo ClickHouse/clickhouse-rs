@@ -67,16 +67,14 @@ async fn select(client: &Client) -> Result<()> {
 }
 
 async fn delete(client: &Client) -> Result<()> {
-    use tokio::time;
-
     client
+        .clone()
+        .with_option("mutations_sync", "1")
         .query("ALTER TABLE some DELETE WHERE no >= ?")
         .bind(500)
         .execute()
         .await?;
 
-    // Mutations are async, so we are waiting for some time.
-    time::delay_for(time::Duration::from_millis(100)).await;
     Ok(())
 }
 
