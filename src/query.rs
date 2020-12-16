@@ -84,7 +84,6 @@ impl Query {
 
         self.sql.bind_fields::<T>();
         let query = self.sql.finish()?;
-        pairs.append_pair("allow_experimental_live_view", "1"); // TODO: send only if it's required.
         pairs.append_pair("query", &query);
 
         #[cfg(feature = "lz4")]

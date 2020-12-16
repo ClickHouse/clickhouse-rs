@@ -58,7 +58,9 @@ impl<V> Watch<V> {
 impl Watch<Rows> {
     pub(crate) fn new(client: &Client, template: &str) -> Self {
         Self {
-            client: client.clone(),
+            client: client
+                .clone()
+                .with_option("allow_experimental_live_view", "1"),
             sql: SqlBuilder::new(template),
             limit: None,
             _kind: Rows,
