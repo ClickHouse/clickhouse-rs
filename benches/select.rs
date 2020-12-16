@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughpu
 use serde::Deserialize;
 use tokio::{runtime::Runtime, time::Instant};
 
-use clickhouse::{error::Result, Client, Reflection};
+use clickhouse::{error::Result, Client, Compression, Reflection};
 
 mod server {
     use std::{convert::Infallible, net::SocketAddr, thread};
@@ -68,7 +68,9 @@ fn select(c: &mut Criterion) {
     group.bench_function("select", |b| {
         b.iter_custom(|iters| {
             let mut rt = Runtime::new().unwrap();
-            let client = Client::default().with_url(format!("http://{}", addr));
+            let client = Client::default()
+                .with_url(format!("http://{}", addr))
+                .with_compression(Compression::None);
             let start = Instant::now();
             rt.block_on(run(client, iters)).unwrap();
             start.elapsed()
