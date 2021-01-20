@@ -54,11 +54,11 @@ impl<T: Buf> Buf for BufList<T> {
     }
 
     #[inline]
-    fn bytes(&self) -> &[u8] {
+    fn chunk(&self) -> &[u8] {
         let mut cnt = self.cursor;
 
         for buf in &self.bufs {
-            let bytes = buf.bytes();
+            let bytes = buf.chunk();
             if bytes.len() > cnt {
                 return &bytes[cnt..];
             }

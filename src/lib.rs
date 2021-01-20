@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use hyper::{self, client::HttpConnector};
+use hyper::client::connect::HttpConnector;
 
 pub use self::compression::Compression;
 use self::error::Result;

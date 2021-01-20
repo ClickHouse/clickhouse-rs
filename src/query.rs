@@ -1,12 +1,12 @@
 use std::marker::PhantomData;
 
 use bytes::Bytes;
+use futures::TryStreamExt;
 use hyper::{
     header::{ACCEPT_ENCODING, CONTENT_LENGTH},
     Body, Method, Request,
 };
 use serde::Deserialize;
-use tokio::stream::StreamExt;
 use url::Url;
 
 use crate::{

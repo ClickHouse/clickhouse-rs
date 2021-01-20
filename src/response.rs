@@ -47,12 +47,12 @@ impl Response {
                 #[cfg(feature = "lz4")]
                 Compression::Lz4 => Inner::Lz4(Lz4Decoder::new(body)),
                 #[cfg(feature = "gzip")]
-                Compression::Gzip => Inner::Gzip(Box::new(GzipDecoder::new(BodyWrapper(body)))),
+                Compression::Gzip => Inner::Gzip(Box::new(GzipDecoder::new(BodyAdapter(body)))),
                 #[cfg(feature = "zlib")]
-                Compression::Zlib => Inner::Zlib(Box::new(ZlibDecoder::new(BodyWrapper(body)))),
+                Compression::Zlib => Inner::Zlib(Box::new(ZlibDecoder::new(BodyAdapter(body)))),
                 #[cfg(feature = "brotli")]
                 Compression::Brotli => {
-                    Inner::Brotli(Box::new(BrotliDecoder::new(BodyWrapper(body))))
+                    Inner::Brotli(Box::new(BrotliDecoder::new(BodyAdapter(body))))
                 }
             };
             *self = Self::Loading(Chunks(chunks));
@@ -72,11 +72,11 @@ enum Inner {
     #[cfg(feature = "lz4")]
     Lz4(Lz4Decoder<Body>),
     #[cfg(feature = "gzip")]
-    Gzip(Box<GzipDecoder<BodyWrapper>>),
+    Gzip(Box<GzipDecoder<BodyAdapter>>),
     #[cfg(feature = "zlib")]
-    Zlib(Box<ZlibDecoder<BodyWrapper>>),
+    Zlib(Box<ZlibDecoder<BodyAdapter>>),
     #[cfg(feature = "brotli")]
-    Brotli(Box<BrotliDecoder<BodyWrapper>>),
+    Brotli(Box<BrotliDecoder<BodyAdapter>>),
     Empty,
 }
 
@@ -90,11 +90,11 @@ impl Stream for Chunks {
             #[cfg(feature = "lz4")]
             Lz4(ref mut inner) => Pin::new(inner).poll_next(cx),
             #[cfg(feature = "gzip")]
-            Gzip(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Error::decode_io),
+            Gzip(ref mut inner) => map_compression_poll(Pin::new(inner).poll_next(cx)),
             #[cfg(feature = "zlib")]
-            Zlib(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Error::decode_io),
+            Zlib(ref mut inner) => map_compression_poll(Pin::new(inner).poll_next(cx)),
             #[cfg(feature = "brotli")]
-            Brotli(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Error::decode_io),
+            Brotli(ref mut inner) => map_compression_poll(Pin::new(inner).poll_next(cx)),
             Empty => Poll::Ready(None),
         };
 
@@ -123,21 +123,34 @@ impl Stream for Chunks {
 }
 
 #[cfg(any(feature = "gzip", feature = "zlib", feature = "brotli"))]
-struct BodyWrapper(Body);
+struct BodyAdapter(Body);
 
 #[cfg(any(feature = "gzip", feature = "zlib", feature = "brotli"))]
-impl Stream for BodyWrapper {
-    type Item = std::io::Result<Bytes>;
+impl Stream for BodyAdapter {
+    type Item = std::io::Result<bytes_05::Bytes>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        map_poll_err(Pin::new(&mut self.0).poll_next(cx), |err| {
-            Error::from(err).into_io()
+        Pin::new(&mut self.0).poll_next(cx).map(|opt| {
+            opt.map(|res| {
+                res.map(to_bytes05)
+                    .map_err(|err| Error::from(err).into_io())
+            })
         })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.0.size_hint()
     }
+}
+
+#[cfg(feature = "bytes-05")]
+fn to_bytes05(bytes: Bytes) -> bytes_05::Bytes {
+    bytes.to_vec().into()
+}
+
+#[cfg(feature = "bytes-05")]
+fn from_bytes05(bytes: bytes_05::Bytes) -> Bytes {
+    bytes.to_vec().into()
 }
 
 // XXX: https://github.com/rust-lang/rust/issues/63514
@@ -148,6 +161,18 @@ fn map_poll_err<T, E, E2>(
     match poll {
         Poll::Ready(Some(Ok(val))) => Poll::Ready(Some(Ok(val))),
         Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(f(err)))),
+        Poll::Ready(None) => Poll::Ready(None),
+        Poll::Pending => Poll::Pending,
+    }
+}
+
+#[cfg(any(feature = "gzip", feature = "zlib", feature = "brotli"))]
+fn map_compression_poll(
+    poll: Poll<Option<std::io::Result<bytes_05::Bytes>>>,
+) -> Poll<Option<Result<Bytes>>> {
+    match poll {
+        Poll::Ready(Some(Ok(val))) => Poll::Ready(Some(Ok(from_bytes05(val)))),
+        Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(Error::decode_io(err)))),
         Poll::Ready(None) => Poll::Ready(None),
         Poll::Pending => Poll::Pending,
     }
