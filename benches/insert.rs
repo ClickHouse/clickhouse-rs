@@ -9,9 +9,10 @@ use clickhouse::{error::Result, Client, Reflection};
 mod server {
     use std::{convert::Infallible, net::SocketAddr, thread};
 
+    use futures::stream::StreamExt;
     use hyper::service::{make_service_fn, service_fn};
     use hyper::{Body, Request, Response, Server};
-    use tokio::{runtime, stream::StreamExt};
+    use tokio::runtime;
 
     async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
         let mut body = req.into_body();
@@ -25,8 +26,7 @@ mod server {
 
     pub fn start(addr: SocketAddr) {
         thread::spawn(move || {
-            runtime::Builder::new()
-                .basic_scheduler()
+            runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap()
@@ -72,7 +72,7 @@ fn insert(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(mem::size_of::<Row>() as u64));
     group.bench_function("insert", |b| {
         b.iter_custom(|iters| {
-            let mut rt = Runtime::new().unwrap();
+            let rt = Runtime::new().unwrap();
             let client = Client::default().with_url(format!("http://{}", addr));
             let start = Instant::now();
             rt.block_on(run(client, iters)).unwrap();

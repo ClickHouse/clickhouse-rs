@@ -26,8 +26,7 @@ mod server {
 
     pub fn start(addr: SocketAddr) {
         thread::spawn(move || {
-            runtime::Builder::new()
-                .basic_scheduler()
+            runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap()
@@ -67,7 +66,7 @@ fn select(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(mem::size_of::<Row>() as u64));
     group.bench_function("select", |b| {
         b.iter_custom(|iters| {
-            let mut rt = Runtime::new().unwrap();
+            let rt = Runtime::new().unwrap();
             let client = Client::default()
                 .with_url(format!("http://{}", addr))
                 .with_compression(Compression::None);

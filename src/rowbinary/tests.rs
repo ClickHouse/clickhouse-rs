@@ -112,7 +112,7 @@ fn it_serializes() {
 
 #[test]
 fn it_deserializes() {
-    use bytes::buf::BufExt;
+    use bytes::buf::Buf;
 
     let input = sample_serialized();
     let mut temp_buf = [0; 1024];
