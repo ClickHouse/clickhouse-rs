@@ -1,12 +1,11 @@
 use std::{
-    os::raw::{c_char, c_int},
     pin::Pin,
     task::{Context, Poll},
 };
 
 use bytes::{Buf, BufMut, Bytes};
 use futures::{ready, stream::Stream};
-use lz4_sys::LZ4_decompress_safe;
+use lz4_flex::decompress;
 
 use crate::{
     buflist::BufList,
@@ -132,8 +131,11 @@ impl<S> Lz4Decoder<S> {
             return Err(Error::Decompression("checksum mismatch".into()));
         }
 
-        let mut uncompressed = vec![0u8; header.uncompressed_size as usize];
-        decompress(&compressed[LZ4_HEADER_SIZE..], &mut uncompressed)?;
+        let uncompressed = decompress(
+            &compressed[LZ4_HEADER_SIZE..],
+            header.uncompressed_size as usize,
+        )
+        .map_err(|e| Error::Decompression(Box::new(e)))?;
         Ok(uncompressed.into())
     }
 }
@@ -141,23 +143,6 @@ impl<S> Lz4Decoder<S> {
 fn calc_checksum(buffer: &[u8]) -> u128 {
     let hash = clickhouse_rs_cityhash_sys::city_hash_128(buffer);
     u128::from(hash.hi) << 64 | u128::from(hash.lo)
-}
-
-fn decompress(compressed: &[u8], uncompressed: &mut [u8]) -> Result<()> {
-    let status = unsafe {
-        LZ4_decompress_safe(
-            compressed.as_ptr() as *const c_char,
-            uncompressed.as_mut_ptr() as *mut c_char,
-            compressed.len() as c_int,
-            uncompressed.len() as c_int,
-        )
-    };
-
-    if status < 0 {
-        return Err(Error::Decompression("can't decompress data".into()));
-    }
-
-    Ok(())
 }
 
 #[tokio::test]

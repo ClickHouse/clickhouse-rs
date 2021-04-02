@@ -23,7 +23,7 @@ debug = true
 [features]
 default = ["lz4"]
 
-lz4 = ["lz4-sys", "clickhouse-rs-cityhash-sys"]
+lz4 = ["lz4_flex", "clickhouse-rs-cityhash-sys"]
 gzip = ["async-compression", "async-compression/gzip", "bytes-05"]
 zlib = ["async-compression", "async-compression/zlib", "bytes-05"]
 brotli = ["async-compression", "async-compression/brotli", "bytes-05"]
@@ -44,7 +44,7 @@ sha-1 = "0.9.1"
 static_assertions = "1.1.0"
 async-compression = { version = "0.3.6", features = ["stream"], optional = true }
 take_mut = "0.2.2"
-lz4-sys = { version = "1.9.2", optional = true }
+lz4_flex = { version = "0.7.5", optional = true }
 clickhouse-rs-cityhash-sys = { version = "0.1.2", optional = true }
 
 [dev-dependencies]
