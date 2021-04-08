@@ -10,7 +10,7 @@ use async_compression::stream::GzipDecoder;
 #[cfg(feature = "zlib")]
 use async_compression::stream::ZlibDecoder;
 use bytes::Bytes;
-use futures::stream::Stream;
+use futures::stream::{self, Stream, TryStreamExt};
 use hyper::{body, client::ResponseFuture, Body, StatusCode};
 
 #[cfg(feature = "lz4")]
@@ -22,7 +22,7 @@ use crate::{
 
 pub enum Response {
     Waiting(ResponseFuture, Compression),
-    Loading(Chunks),
+    Loading(Chunks<Body>),
 }
 
 impl Response {
@@ -30,32 +30,35 @@ impl Response {
         Self::Waiting(future, compression)
     }
 
-    pub async fn resolve(&mut self) -> Result<&mut Chunks> {
+    pub async fn resolve(&mut self) -> Result<&mut Chunks<Body>> {
         if let Self::Waiting(response, compression) = self {
             let response = response.await?;
+            let status = response.status();
+            let body = response.into_body();
 
-            if response.status() != StatusCode::OK {
-                let bytes = body::to_bytes(response.into_body()).await?;
+            if status != StatusCode::OK {
+                // TODO(loyd): test decompression of error response
+                let bytes = body::to_bytes(body).await?;
+
+                let mut chunks = decompress_stream(
+                    {
+                        let bytes = bytes.clone();
+                        stream::once(Box::pin(async { Result::<_>::Ok(bytes) }))
+                    },
+                    *compression,
+                );
+                let bytes = match chunks.try_next().await {
+                    Ok(chunk) => chunk.unwrap_or_default(),
+                    // Original response is more useful than decompression error
+                    Err(_) => bytes,
+                };
+
                 let reason = String::from_utf8_lossy(&bytes).trim().into();
-
                 return Err(Error::BadResponse(reason));
             }
 
-            let body = response.into_body();
-            let chunks = match compression {
-                Compression::None => Inner::Plain(body),
-                #[cfg(feature = "lz4")]
-                Compression::Lz4 => Inner::Lz4(Lz4Decoder::new(body)),
-                #[cfg(feature = "gzip")]
-                Compression::Gzip => Inner::Gzip(Box::new(GzipDecoder::new(BodyAdapter(body)))),
-                #[cfg(feature = "zlib")]
-                Compression::Zlib => Inner::Zlib(Box::new(ZlibDecoder::new(BodyAdapter(body)))),
-                #[cfg(feature = "brotli")]
-                Compression::Brotli => {
-                    Inner::Brotli(Box::new(BrotliDecoder::new(BodyAdapter(body))))
-                }
-            };
-            *self = Self::Loading(Chunks(chunks));
+            let chunks = decompress_stream(body, *compression);
+            *self = Self::Loading(chunks);
         }
 
         match self {
@@ -65,22 +68,44 @@ impl Response {
     }
 }
 
-pub struct Chunks(Inner);
+fn decompress_stream<S, E>(stream: S, compression: Compression) -> Chunks<S>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+    Error: From<E>,
+{
+    Chunks(match compression {
+        Compression::None => Inner::Plain(stream),
+        #[cfg(feature = "lz4")]
+        Compression::Lz4 => Inner::Lz4(Lz4Decoder::new(stream)),
+        #[cfg(feature = "gzip")]
+        Compression::Gzip => Inner::Gzip(Box::new(GzipDecoder::new(BodyAdapter(stream)))),
+        #[cfg(feature = "zlib")]
+        Compression::Zlib => Inner::Zlib(Box::new(ZlibDecoder::new(BodyAdapter(stream)))),
+        #[cfg(feature = "brotli")]
+        Compression::Brotli => Inner::Brotli(Box::new(BrotliDecoder::new(BodyAdapter(stream)))),
+    })
+}
 
-enum Inner {
-    Plain(Body),
+pub struct Chunks<S>(Inner<S>);
+
+enum Inner<S> {
+    Plain(S),
     #[cfg(feature = "lz4")]
-    Lz4(Lz4Decoder<Body>),
+    Lz4(Lz4Decoder<S>),
     #[cfg(feature = "gzip")]
-    Gzip(Box<GzipDecoder<BodyAdapter>>),
+    Gzip(Box<GzipDecoder<BodyAdapter<S>>>),
     #[cfg(feature = "zlib")]
-    Zlib(Box<ZlibDecoder<BodyAdapter>>),
+    Zlib(Box<ZlibDecoder<BodyAdapter<S>>>),
     #[cfg(feature = "brotli")]
-    Brotli(Box<BrotliDecoder<BodyAdapter>>),
+    Brotli(Box<BrotliDecoder<BodyAdapter<S>>>),
     Empty,
 }
 
-impl Stream for Chunks {
+impl<S, E> Stream for Chunks<S>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+    Error: From<E>,
+{
     type Item = Result<Bytes>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -122,11 +147,16 @@ impl Stream for Chunks {
     }
 }
 
+// async-compression depends on bytes-0.5, therefore adapter to convert
 #[cfg(any(feature = "gzip", feature = "zlib", feature = "brotli"))]
-struct BodyAdapter(Body);
+struct BodyAdapter<S>(S);
 
 #[cfg(any(feature = "gzip", feature = "zlib", feature = "brotli"))]
-impl Stream for BodyAdapter {
+impl<S, E> Stream for BodyAdapter<S>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+    Error: From<E>,
+{
     type Item = std::io::Result<bytes_05::Bytes>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
