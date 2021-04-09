@@ -10,7 +10,10 @@ use async_compression::stream::GzipDecoder;
 #[cfg(feature = "zlib")]
 use async_compression::stream::ZlibDecoder;
 use bytes::Bytes;
-use futures::stream::{self, Stream, TryStreamExt};
+use futures::{
+    future,
+    stream::{self, Stream, TryStreamExt},
+};
 use hyper::{body, client::ResponseFuture, Body, StatusCode};
 
 #[cfg(feature = "lz4")]
@@ -41,10 +44,7 @@ impl Response {
                 let bytes = body::to_bytes(body).await?;
 
                 let mut chunks = decompress_stream(
-                    {
-                        let bytes = bytes.clone();
-                        stream::once(Box::pin(async { Result::<_>::Ok(bytes) }))
-                    },
+                    stream::once(future::ready(Result::<_>::Ok(bytes.clone()))),
                     *compression,
                 );
                 let bytes = match chunks.try_next().await {
