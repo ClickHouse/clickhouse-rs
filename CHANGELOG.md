@@ -10,19 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - compression: decompress error messages (@ods)
 
-## [0.6.0]
+## [0.6.0] - 2021-03-24
 ### Changed
 - Use tokio v1, hyper v0.14, bytes v1
 
-## [0.5.1]
+## [0.5.1] - 2020-11-22
 ### Added
 - Decompression: lz4.
 
-## [0.5.0]
+## [0.5.0] - 2020-11-19
 ### Added
 - Decompression: gzip, zlib and brotli.
 
-## [0.4.0]
+## [0.4.0] - 2020-11-17
 ### Added
 - `Query::fetch_one()`, `Watch::fetch_one()`.
 - `Query::fetch()` as a replacement for `Query::rows()`.
@@ -32,11 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `Error` is `StdError + Send + Sync + 'static` now.
 
-## [0.3.0]
+## [0.3.0] - 2020-10-28
 ### Added
 - Expose cursors (`query::RowCursor`, `watch::{RowCursor, EventCursor}`).
 
-## [0.2.0]
+## [0.2.0] - 2020-10-14
 ### Added
 - `Client::inserter()` for infinite inserting into tables.
 - `Client::watch()` for `LIVE VIEW` related queries.
@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed `Query::fetch()` to `Query::rows()`.
 - Use `GET` requests for `SELECT` statements.
 
-## [0.1.0]
+## [0.1.0] - 2020-10-14
 ### Added
 - Support basic types.
 - `Client::insert()` for inserting into tables.
