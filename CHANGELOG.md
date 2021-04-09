@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1]
+### Fixed
+- compression: decompress error messages (@ods)
+
 ## [0.6.0]
 ### Changed
 - Use tokio v1, hyper v0.14, bytes v1
