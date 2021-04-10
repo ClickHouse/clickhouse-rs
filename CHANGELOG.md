@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- Support for `bool` values ([quasiyoke](https://quasiyoke.me)).
+- Support for `array`s — useful at [`IN` operators](https://clickhouse.tech/docs/en/sql-reference/operators/in/), [etc](https://clickhouse.tech/docs/en/sql-reference/functions/array-functions/) ([quasiyoke](https://quasiyoke.me)).
 
 ## [0.6.2] - 2021-04-12
 ### Fixed

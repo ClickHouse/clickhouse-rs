@@ -83,11 +83,6 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
         Err(Error::DeserializeAnyNotSupported)
     }
 
-    #[inline]
-    fn deserialize_bool<V: Visitor<'de>>(self, _: V) -> Result<V::Value> {
-        todo!();
-    }
-
     impl_num!(i8, deserialize_i8, visit_i8, get_i8);
     impl_num!(i16, deserialize_i16, visit_i16, get_i16_le);
     impl_num!(i32, deserialize_i32, visit_i32, get_i32_le);
@@ -110,6 +105,16 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     #[inline]
     fn deserialize_char<V: Visitor<'de>>(self, _: V) -> Result<V::Value> {
         todo!();
+    }
+
+    #[inline]
+    fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        ensure_size(&mut self.input, 1)?;
+        match self.input.get_u8() {
+            0 => visitor.visit_bool(false),
+            1 => visitor.visit_bool(true),
+            v => Err(Error::InvalidTagEncoding(v as usize)),
+        }
     }
 
     #[inline]
