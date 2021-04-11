@@ -24,15 +24,14 @@ debug = true
 default = ["lz4"]
 
 lz4 = ["lz4-sys", "clickhouse-rs-cityhash-sys"]
-gzip = ["async-compression", "async-compression/gzip", "bytes-05"]
-zlib = ["async-compression", "async-compression/zlib", "bytes-05"]
-brotli = ["async-compression", "async-compression/brotli", "bytes-05"]
+gzip = ["async-compression", "async-compression/gzip", "tokio-util"]
+zlib = ["async-compression", "async-compression/zlib", "tokio-util"]
+brotli = ["async-compression", "async-compression/brotli", "tokio-util"]
 
 [dependencies]
 thiserror = "1.0.16"
 serde = "1.0.106"
 bytes = "1"
-bytes-05 = { package = "bytes", version = "0.5.0", optional = true }
 tokio = { version = "1.0.1", features = ["rt"] }
 hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream"] }
 url = "2.1.1"
@@ -42,7 +41,8 @@ smallvec = "1.4.0"
 futures = "0.3.5"
 sha-1 = "0.9.1"
 static_assertions = "1.1.0"
-async-compression = { version = "0.3.6", features = ["stream"], optional = true }
+async-compression = { version = "0.3.6", features = ["tokio"], optional = true }
+tokio-util = { version = "0.6.0", default-features = false, features = ["codec", "io"], optional = true }
 take_mut = "0.2.2"
 lz4-sys = { version = "1.9.2", optional = true }
 clickhouse-rs-cityhash-sys = { version = "0.1.2", optional = true }
