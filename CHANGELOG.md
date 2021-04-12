@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2021-04-12
+### Fixed
+- watch: bind fileds of the type param
+
 ## [0.6.1] - 2021-04-09
 ### Fixed
 - compression: decompress error messages (@ods)
