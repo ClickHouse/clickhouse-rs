@@ -36,7 +36,8 @@ impl<V> Watch<V> {
 
     // TODO: `groups()` for `(Version, &[T])`.
 
-    fn cursor<T: Reflection>(self, only_events: bool) -> Result<RawCursor<T>> {
+    fn cursor<T: Reflection>(mut self, only_events: bool) -> Result<RawCursor<T>> {
+        self.sql.bind_fields::<T>();
         let sql = self.sql.finish()?;
         let (sql, view) = if is_table_name(&sql) {
             (None, sql)
