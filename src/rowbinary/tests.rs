@@ -103,7 +103,7 @@ fn sample_serialized() -> Vec<u8> {
         // [Array(Int32)] [-42, 42, -42, 42]
         0x04, 0xd6, 0x2a, 0xd6, 0x2a, /**/
         // [Boolean] true
-        0x01,
+        0x01, /**/
     ]
 }
 
