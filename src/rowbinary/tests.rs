@@ -33,6 +33,7 @@ struct Sample<'a> {
     optional_datetime: Option<Timestamp32>,
     fixed_string: [u8; 4],
     array: Vec<i8>,
+    boolean: bool,
 }
 
 fn sample() -> Sample<'static> {
@@ -55,6 +56,7 @@ fn sample() -> Sample<'static> {
         optional_datetime: Some(Timestamp32(2_301_990_162)),
         fixed_string: [b'B', b'T', b'C', 0],
         array: vec![-42, 42, -42, 42],
+        boolean: true,
     }
 }
 
@@ -100,6 +102,8 @@ fn sample_serialized() -> Vec<u8> {
         0x42, 0x54, 0x43, 0x00, /**/
         // [Array(Int32)] [-42, 42, -42, 42]
         0x04, 0xd6, 0x2a, 0xd6, 0x2a, /**/
+        // [Boolean] true
+        0x01, /**/
     ]
 }
 

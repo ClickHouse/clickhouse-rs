@@ -41,11 +41,6 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     type SerializeStruct = Self;
     type SerializeStructVariant = Impossible<(), Error>;
 
-    #[inline]
-    fn serialize_bool(self, _v: bool) -> Result<()> {
-        todo!();
-    }
-
     impl_num!(i8, serialize_i8, put_i8);
     impl_num!(i16, serialize_i16, put_i16_le);
     impl_num!(i32, serialize_i32, put_i32_le);
@@ -58,6 +53,12 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     impl_num!(u128, serialize_u128, put_u128_le);
     impl_num!(f32, serialize_f32, put_f32_le);
     impl_num!(f64, serialize_f64, put_f64_le);
+
+    #[inline]
+    fn serialize_bool(self, v: bool) -> Result<()> {
+        self.buffer.put_u8(v as _);
+        Ok(())
+    }
 
     #[inline]
     fn serialize_char(self, _v: char) -> Result<()> {

@@ -129,22 +129,83 @@ impl Bind for &str {
     }
 }
 
-#[test]
-fn it_builds_sql() {
-    #[allow(dead_code)]
+impl Sealed for String {}
+
+impl Bind for String {
+    #[inline]
+    fn reserve(&self) -> usize {
+        self.len()
+    }
+
+    #[inline]
+    fn write(&self, dst: impl fmt::Write) -> fmt::Result {
+        escape::string(self, dst)
+    }
+}
+
+impl<'a, T: Bind> Sealed for &'a [T] {}
+
+impl<'a, T: Bind> Bind for &'a [T] {
+    #[inline]
+    fn reserve(&self) -> usize {
+        let commas_count = self.len().saturating_sub(1);
+        self.iter().map(Bind::reserve).sum::<usize>() + commas_count + 2
+    }
+
+    #[inline]
+    fn write(&self, mut dst: impl fmt::Write) -> fmt::Result {
+        write!(&mut dst, "[")?;
+        let mut iter = self.iter();
+        if let Some(item) = iter.next() {
+            item.write(&mut dst)?;
+        }
+        for item in iter {
+            write!(&mut dst, ",")?;
+            item.write(&mut dst)?;
+        }
+        write!(dst, "]")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[allow(unused)]
     #[derive(Reflection)]
     struct Row {
         a: u32,
         b: u32,
     }
 
-    let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE a = ? AND b < ?");
-    sql.bind_arg("foo");
-    sql.bind_arg(42);
-    sql.bind_fields::<Row>();
+    #[test]
+    fn it_builds_sql_with_bound_args() {
+        let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE a = ? AND b < ?");
+        sql.bind_arg("foo");
+        sql.bind_arg(42);
+        sql.bind_fields::<Row>();
+        assert_eq!(
+            sql.finish().unwrap(),
+            r"SELECT a,b FROM test WHERE a = 'foo' AND b < 42"
+        );
+    }
 
-    assert_eq!(
-        sql.finish().unwrap(),
-        r"SELECT a,b FROM test WHERE a = 'foo' AND b < 42"
-    );
+    #[test]
+    fn it_builds_sql_with_in_clause() {
+        fn t(arg: &[&str], expected: &str) {
+            let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE a IN ?");
+            sql.bind_arg(arg);
+            sql.bind_fields::<Row>();
+            assert_eq!(sql.finish().unwrap(), expected);
+        }
+
+        const ARGS: &[&str] = &["bar", "baz", "foobar"];
+        t(&ARGS[..0], r"SELECT a,b FROM test WHERE a IN []");
+        t(&ARGS[..1], r"SELECT a,b FROM test WHERE a IN ['bar']");
+        t(&ARGS[..2], r"SELECT a,b FROM test WHERE a IN ['bar','baz']");
+        t(
+            ARGS,
+            r"SELECT a,b FROM test WHERE a IN ['bar','baz','foobar']",
+        );
+    }
 }
