@@ -68,6 +68,22 @@ impl Query {
         }
     }
 
+    /// Executes the query and returns all the generated results, collected into a Vec.
+    /// Note that `T` must be owned.
+    pub async fn fetch_all<T>(self) -> Result<Vec<T>>
+    where
+        T: Reflection + for<'b> Deserialize<'b>,
+    {
+        let mut result = Vec::new();
+        let mut cursor = self.fetch::<T>()?;
+
+        while let Some(row) = cursor.next().await? {
+            result.push(row);
+        }
+
+        Ok(result)
+    }
+
     #[deprecated(since = "0.4.0", note = "use `Query::fetch()` instead")]
     pub fn rows<T: Reflection>(self) -> Result<RowCursor<T>> {
         self.fetch()

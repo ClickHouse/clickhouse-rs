@@ -10,6 +10,12 @@ struct Row<'a> {
     name: &'a str,
 }
 
+#[derive(Debug, Reflection, Serialize, Deserialize)]
+struct RowOwned {
+    no: u32,
+    name: String,
+}
+
 async fn ddl(client: &Client) -> Result<()> {
     client.query("DROP TABLE IF EXISTS some").execute().await?;
     client
@@ -52,7 +58,7 @@ async fn inserter(client: &Client) -> Result<()> {
     Ok(())
 }
 
-async fn select(client: &Client) -> Result<()> {
+async fn fetch(client: &Client) -> Result<()> {
     let mut cursor = client
         .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
         .bind(500)
@@ -62,6 +68,19 @@ async fn select(client: &Client) -> Result<()> {
     while let Some(row) = cursor.next().await? {
         println!("{:?}", row);
     }
+
+    Ok(())
+}
+
+async fn fetch_all(client: &Client) -> Result<()> {
+    let vec = client
+        .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
+        .bind(500)
+        .bind(504)
+        .fetch_all::<RowOwned>()
+        .await?;
+
+    println!("{:?}", vec);
 
     Ok(())
 }
@@ -129,7 +148,8 @@ async fn main() -> Result<()> {
     insert(&client).await?;
     inserter(&client).await?;
     select_count(&client).await?;
-    select(&client).await?;
+    fetch(&client).await?;
+    fetch_all(&client).await?;
     delete(&client).await?;
     select_count(&client).await?;
     watch(&client).await?;

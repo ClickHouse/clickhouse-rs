@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for `bool` values storage ([quasiyoke](https://quasiyoke.me)).
 - `array`s' binding to SQL queries — useful at [`IN` operators](https://clickhouse.tech/docs/en/sql-reference/operators/in/), [etc](https://clickhouse.tech/docs/en/sql-reference/functions/array-functions/) ([quasiyoke](https://quasiyoke.me)).
 - `String` values binding to SQL queries ([quasiyoke](https://quasiyoke.me)).
+- `Query::fetch_all()`
 
 ## [0.6.2] - 2021-04-12
 ### Fixed
