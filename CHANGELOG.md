@@ -6,10 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- Support for `bool` values storage ([quasiyoke](https://quasiyoke.me)).
-- `array`s' binding to SQL queries — useful at [`IN` operators](https://clickhouse.tech/docs/en/sql-reference/operators/in/), [etc](https://clickhouse.tech/docs/en/sql-reference/functions/array-functions/) ([quasiyoke](https://quasiyoke.me)).
-- `String` values binding to SQL queries ([quasiyoke](https://quasiyoke.me)).
+- Support for `bool` values storage ([@quasiyoke](https://quasiyoke.me)).
+- `array`s' binding to SQL queries — useful at [`IN` operators](https://clickhouse.tech/docs/en/sql-reference/operators/in/), [etc](https://clickhouse.tech/docs/en/sql-reference/functions/array-functions/) ([@quasiyoke](https://quasiyoke.me)).
+- `String` values binding to SQL queries ([@quasiyoke](https://quasiyoke.me)).
 - `Query::fetch_all()`
+
+### Changed
+- Expose `query::Bind` ([@ods](https://github.com/ods/))
 
 ## [0.6.2] - 2021-04-12
 ### Fixed
@@ -17,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.1] - 2021-04-09
 ### Fixed
-- compression: decompress error messages (@ods)
+- compression: decompress error messages ([@ods](https://github.com/ods/))
 
 ## [0.6.0] - 2021-03-24
 ### Changed
