@@ -53,6 +53,7 @@ while let Some(row) = cursor.next().await? { .. }
 * Placeholder `?fields` is replaced with `no, name` (fields of `Row`).
 * Placeholder `?` is replaced with values in following `bind()` calls.
 * Convenient `fetch_one::<Row>()` and `fetch_all::<Row>()` can be used to get a first row or all rows correspondingly.
+* [soa-derive](https://github.com/lumol-org/soa-derive) is useful for `Nested` types.
 
 ### Insert a batch
 ```rust
