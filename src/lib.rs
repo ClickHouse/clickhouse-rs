@@ -1,3 +1,5 @@
+#![warn(rust_2018_idioms, unreachable_pub)]
+
 use std::collections::HashMap;
 
 use hyper::client::connect::HttpConnector;

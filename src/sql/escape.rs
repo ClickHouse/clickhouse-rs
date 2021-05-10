@@ -1,7 +1,7 @@
 use std::fmt;
 
 // See https://clickhouse.tech/docs/en/sql-reference/syntax/#syntax-string-literal.
-pub fn string(src: &str, mut dst: impl fmt::Write) -> fmt::Result {
+pub(crate) fn string(src: &str, mut dst: impl fmt::Write) -> fmt::Result {
     dst.write_char('\'')?;
 
     for (idx, part) in src.split('\'').enumerate() {

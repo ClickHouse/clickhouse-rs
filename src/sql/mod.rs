@@ -20,13 +20,13 @@ pub(crate) enum SqlBuilder {
 const FIELDS_PLACEHOLDER: &str = "_#fields#_";
 
 impl SqlBuilder {
-    pub fn new(template: &str) -> Self {
+    pub(crate) fn new(template: &str) -> Self {
         SqlBuilder::InProgress {
             result: template.trim().replace("?fields", FIELDS_PLACEHOLDER),
         }
     }
 
-    pub fn bind_arg(&mut self, value: impl Bind) {
+    pub(crate) fn bind_arg(&mut self, value: impl Bind) {
         if let Self::InProgress { result } = self {
             let mut iter = result.splitn(2, '?');
 
@@ -48,7 +48,7 @@ impl SqlBuilder {
         }
     }
 
-    pub fn bind_fields<T: Reflection>(&mut self) {
+    pub(crate) fn bind_fields<T: Reflection>(&mut self) {
         if let Self::InProgress { result } = self {
             if let Some(fields) = introspection::join_field_names::<T>() {
                 *result = result.replace(FIELDS_PLACEHOLDER, &fields);
@@ -56,13 +56,13 @@ impl SqlBuilder {
         }
     }
 
-    pub fn append(&mut self, suffix: &str) {
+    pub(crate) fn append(&mut self, suffix: &str) {
         if let Self::InProgress { result } = self {
             result.push_str(suffix);
         }
     }
 
-    pub fn finish(self) -> Result<String> {
+    pub(crate) fn finish(self) -> Result<String> {
         match self {
             Self::InProgress { result } => {
                 if result.contains('?') {
