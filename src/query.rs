@@ -9,14 +9,13 @@ use hyper::{
 use serde::Deserialize;
 use url::Url;
 
-pub use crate::sql_builder::Bind;
 use crate::{
     buflist::BufList,
     error::{Error, Result},
     introspection::Reflection,
     response::Response,
     rowbinary,
-    sql_builder::SqlBuilder,
+    sql::{Bind, SqlBuilder},
     Client,
 };
 

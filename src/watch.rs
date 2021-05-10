@@ -7,7 +7,7 @@ use crate::{
     error::{Error, Result},
     introspection::Reflection,
     query,
-    sql_builder::{Bind, SqlBuilder},
+    sql::{Bind, SqlBuilder},
     Client, Compression,
 };
 
