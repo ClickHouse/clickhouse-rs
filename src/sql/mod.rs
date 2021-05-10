@@ -5,7 +5,7 @@ use crate::{
     introspection::{self, Reflection},
 };
 
-pub use bind::Bind;
+pub use bind::{Bind, Identifier};
 
 mod bind;
 mod escape;

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use clickhouse::{error::Result, Client, Reflection};
+use clickhouse::{error::Result, sql, Client, Reflection};
 
 #[derive(Debug, Reflection, Serialize, Deserialize)]
 struct Row<'a> {
@@ -74,7 +74,8 @@ async fn fetch(client: &Client) -> Result<()> {
 
 async fn fetch_all(client: &Client) -> Result<()> {
     let vec = client
-        .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
+        .query("SELECT ?fields FROM ? WHERE no BETWEEN ? AND ?")
+        .bind(sql::Identifier("some"))
         .bind(500)
         .bind(504)
         .fetch_all::<RowOwned>()

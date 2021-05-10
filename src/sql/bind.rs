@@ -91,3 +91,21 @@ impl<'a, T: Bind> Bind for &'a [T] {
         write!(dst, "]")
     }
 }
+
+/// Bound the provided string as an identifier.
+/// It can be used for table names, for instance.
+pub struct Identifier<'a>(pub &'a str);
+
+impl<'a> Sealed for Identifier<'a> {}
+
+impl<'a> Bind for Identifier<'a> {
+    #[inline]
+    fn reserve(&self) -> usize {
+        self.0.len() + 2
+    }
+
+    #[inline]
+    fn write(&self, dst: impl fmt::Write) -> fmt::Result {
+        escape::identifier(self.0, dst)
+    }
+}
