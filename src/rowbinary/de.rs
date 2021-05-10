@@ -9,7 +9,7 @@ use serde::{
 use crate::error::{Error, Result};
 
 /// Deserializes a value from `buffer` with a message encoded in the RowBinary format.
-pub fn deserialize_from<'de, T: Deserialize<'de>>(
+pub(crate) fn deserialize_from<'de, T: Deserialize<'de>>(
     input: impl Buf,
     temp_buf: &'de mut [u8],
 ) -> Result<T> {

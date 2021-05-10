@@ -15,7 +15,7 @@ use crate::{
 
 const MAX_COMPRESSED_SIZE: u32 = 1024 * 1024 * 1024;
 
-pub struct Lz4Decoder<S> {
+pub(crate) struct Lz4Decoder<S> {
     inner: S,
     chunks: BufList<Bytes>,
     meta: Option<Lz4Meta>,
@@ -82,7 +82,7 @@ struct Lz4Meta {
 }
 
 impl<S> Lz4Decoder<S> {
-    pub fn new(stream: S) -> Self {
+    pub(crate) fn new(stream: S) -> Self {
         Self {
             inner: stream,
             chunks: BufList::default(),

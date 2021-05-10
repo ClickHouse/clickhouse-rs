@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use bytes::Buf;
 
 #[derive(Default)]
-pub struct BufList<T> {
+pub(crate) struct BufList<T> {
     bufs: VecDeque<T>,
     rem: usize,
     cursor: usize,
@@ -11,7 +11,7 @@ pub struct BufList<T> {
 
 impl<T: Buf> BufList<T> {
     #[inline]
-    pub fn push(&mut self, buf: T) {
+    pub(crate) fn push(&mut self, buf: T) {
         let rem = buf.remaining();
 
         if rem > 0 {
@@ -21,11 +21,11 @@ impl<T: Buf> BufList<T> {
     }
 
     #[inline]
-    pub fn bufs_cnt(&self) -> usize {
+    pub(crate) fn bufs_cnt(&self) -> usize {
         self.bufs.len()
     }
 
-    pub fn commit(&mut self) {
+    pub(crate) fn commit(&mut self) {
         while self.cursor > 0 {
             let front = &mut self.bufs[0];
             let rem = front.remaining();
@@ -41,7 +41,7 @@ impl<T: Buf> BufList<T> {
         }
     }
 
-    pub fn rollback(&mut self) {
+    pub(crate) fn rollback(&mut self) {
         self.rem += self.cursor;
         self.cursor = 0;
     }

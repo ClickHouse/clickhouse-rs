@@ -3,13 +3,15 @@ use std::fmt;
 use crate::{
     error::{Error, Result},
     introspection::{self, Reflection},
-    sealed::Sealed,
 };
 
+pub use bind::{Bind, Identifier};
+
+mod bind;
 mod escape;
 
 #[derive(Clone)]
-pub enum SqlBuilder {
+pub(crate) enum SqlBuilder {
     InProgress { result: String },
     Failed(fmt::Error),
 }
@@ -18,13 +20,13 @@ pub enum SqlBuilder {
 const FIELDS_PLACEHOLDER: &str = "_#fields#_";
 
 impl SqlBuilder {
-    pub fn new(template: &str) -> Self {
+    pub(crate) fn new(template: &str) -> Self {
         SqlBuilder::InProgress {
             result: template.trim().replace("?fields", FIELDS_PLACEHOLDER),
         }
     }
 
-    pub fn bind_arg(&mut self, value: impl Bind) {
+    pub(crate) fn bind_arg(&mut self, value: impl Bind) {
         if let Self::InProgress { result } = self {
             let mut iter = result.splitn(2, '?');
 
@@ -46,7 +48,7 @@ impl SqlBuilder {
         }
     }
 
-    pub fn bind_fields<T: Reflection>(&mut self) {
+    pub(crate) fn bind_fields<T: Reflection>(&mut self) {
         if let Self::InProgress { result } = self {
             if let Some(fields) = introspection::join_field_names::<T>() {
                 *result = result.replace(FIELDS_PLACEHOLDER, &fields);
@@ -54,13 +56,13 @@ impl SqlBuilder {
         }
     }
 
-    pub fn append(&mut self, suffix: &str) {
+    pub(crate) fn append(&mut self, suffix: &str) {
         if let Self::InProgress { result } = self {
             result.push_str(suffix);
         }
     }
 
-    pub fn finish(self) -> Result<String> {
+    pub(crate) fn finish(self) -> Result<String> {
         match self {
             Self::InProgress { result } => {
                 if result.contains('?') {
@@ -75,95 +77,6 @@ impl SqlBuilder {
             }
             Self::Failed(err) => Err(Error::InvalidParams(Box::new(err))),
         }
-    }
-}
-
-pub trait Bind: Sealed {
-    #[doc(hidden)]
-    fn reserve(&self) -> usize;
-
-    #[doc(hidden)]
-    fn write(&self, dst: impl fmt::Write) -> fmt::Result;
-}
-
-macro_rules! impl_num {
-    ($ty:ty, $reserve:literal) => {
-        impl Sealed for $ty {}
-
-        impl Bind for $ty {
-            #[inline]
-            fn reserve(&self) -> usize {
-                $reserve
-            }
-
-            #[inline]
-            fn write(&self, mut dst: impl fmt::Write) -> fmt::Result {
-                write!(dst, "{}", self)
-            }
-        }
-    };
-}
-
-impl_num!(i8, 4);
-impl_num!(u8, 3);
-impl_num!(i16, 6);
-impl_num!(u16, 5);
-impl_num!(i32, 11);
-impl_num!(u32, 10);
-impl_num!(i64, 20);
-impl_num!(u64, 20);
-impl_num!(i128, 40);
-impl_num!(u128, 39);
-
-impl Sealed for &str {}
-
-impl Bind for &str {
-    #[inline]
-    fn reserve(&self) -> usize {
-        self.len()
-    }
-
-    #[inline]
-    fn write(&self, dst: impl fmt::Write) -> fmt::Result {
-        escape::string(self, dst)
-    }
-}
-
-impl Sealed for String {}
-
-impl Bind for String {
-    #[inline]
-    fn reserve(&self) -> usize {
-        self.len()
-    }
-
-    #[inline]
-    fn write(&self, dst: impl fmt::Write) -> fmt::Result {
-        escape::string(self, dst)
-    }
-}
-
-impl<'a, T: Bind> Sealed for &'a [T] {}
-
-impl<'a, T: Bind> Bind for &'a [T] {
-    #[inline]
-    fn reserve(&self) -> usize {
-        let commas_count = self.len().saturating_sub(1);
-        self.iter().map(Bind::reserve).sum::<usize>() + commas_count + 2
-    }
-
-    #[inline]
-    fn write(&self, mut dst: impl fmt::Write) -> fmt::Result {
-        write!(&mut dst, "[")?;
-        let mut iter = self.iter();
-        if let Some(item) = iter.next() {
-            item.write(&mut dst)?;
-        }
-        for item in iter {
-            write!(&mut dst, ",")?;
-            item.write(&mut dst)?;
-        }
-        write!(dst, "]")
     }
 }
 

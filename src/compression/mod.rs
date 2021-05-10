@@ -1,5 +1,5 @@
 #[cfg(feature = "lz4")]
-pub mod lz4;
+pub(crate) mod lz4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]

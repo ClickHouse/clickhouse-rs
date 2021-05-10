@@ -7,7 +7,7 @@ use crate::{
     error::{Error, Result},
     introspection::Reflection,
     query,
-    sql_builder::{Bind, SqlBuilder},
+    sql::{Bind, SqlBuilder},
     Client, Compression,
 };
 
@@ -150,7 +150,7 @@ enum RawCursor<T> {
 }
 
 impl<T> RawCursor<T> {
-    pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<(T, Version)>>
+    async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<(T, Version)>>
     where
         T: Deserialize<'b> + Reflection,
     {

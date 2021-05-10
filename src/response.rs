@@ -23,17 +23,17 @@ use crate::{
     error::{Error, Result},
 };
 
-pub enum Response {
+pub(crate) enum Response {
     Waiting(ResponseFuture, Compression),
     Loading(Chunks<Body>),
 }
 
 impl Response {
-    pub fn new(future: ResponseFuture, compression: Compression) -> Self {
+    pub(crate) fn new(future: ResponseFuture, compression: Compression) -> Self {
         Self::Waiting(future, compression)
     }
 
-    pub async fn resolve(&mut self) -> Result<&mut Chunks<Body>> {
+    pub(crate) async fn resolve(&mut self) -> Result<&mut Chunks<Body>> {
         if let Self::Waiting(response, compression) = self {
             let response = response.await?;
             let status = response.status();
@@ -86,7 +86,7 @@ where
     })
 }
 
-pub struct Chunks<S>(Inner<S>);
+pub(crate) struct Chunks<S>(Inner<S>);
 
 enum Inner<S> {
     Plain(S),

@@ -1,3 +1,5 @@
+#![warn(rust_2018_idioms, unreachable_pub)]
+
 use std::collections::HashMap;
 
 use hyper::client::connect::HttpConnector;
@@ -6,17 +8,18 @@ pub use self::compression::Compression;
 use self::error::Result;
 pub use self::introspection::Reflection;
 
-mod buflist;
-mod compression;
 pub mod error;
 pub mod insert;
 pub mod inserter;
-mod introspection;
 pub mod query;
+pub mod sql;
+pub mod watch;
+
+mod buflist;
+mod compression;
+mod introspection;
 mod response;
 mod rowbinary;
-mod sql_builder;
-pub mod watch;
 
 mod sealed {
     pub trait Sealed {}

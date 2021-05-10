@@ -7,7 +7,7 @@ use serde::{
 use crate::error::{Error, Result};
 
 /// Serializes `value` using the RowBinary format and writes to `buffer`.
-pub fn serialize_into(buffer: impl BufMut, value: &impl Serialize) -> Result<()> {
+pub(crate) fn serialize_into(buffer: impl BufMut, value: &impl Serialize) -> Result<()> {
     let mut serializer = RowBinarySerializer { buffer };
     value.serialize(&mut serializer)?;
     Ok(())
