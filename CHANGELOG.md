@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Expose `query::Bind` ([@ods](https://github.com/ods/)).
-- Hide `Compression::encoding()`.
+- Deprecate `Compression::encoding()`.
 
 ## [0.6.2] - 2021-04-12
 ### Fixed
