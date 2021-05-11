@@ -30,7 +30,7 @@ impl Default for Compression {
 }
 
 impl Compression {
-    pub fn encoding(&self) -> Option<&'static str> {
+    pub(crate) fn encoding(&self) -> Option<&'static str> {
         match self {
             Compression::None => Option::None,
             #[cfg(feature = "lz4")]
