@@ -14,6 +14,14 @@ A typed client for ClickHouse.
 * Provides API for watching live views.
 * Decompression (lz4, gzip, zlib and brotli). lz4 by default.
 
+## Usage
+To use the crate, add this to your `Cargo.toml`:
+```toml
+[dependencies]
+clickhouse = "0.6"
+reflection = "0.1" # will become unnecessary soon.
+```
+
 ## Examples
 See [more examples](examples/usage.rs).
 
