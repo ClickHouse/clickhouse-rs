@@ -13,19 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sql::Identifier`
 
 ### Changed
-- Expose `query::Bind` ([@ods](https://github.com/ods/))
+- Expose `query::Bind` ([@ods](https://github.com/ods/)).
+- Hide `Compression::encoding()`.
 
 ## [0.6.2] - 2021-04-12
 ### Fixed
-- watch: bind fileds of the type param
+- watch: bind fileds of the type param.
 
 ## [0.6.1] - 2021-04-09
 ### Fixed
-- compression: decompress error messages ([@ods](https://github.com/ods/))
+- compression: decompress error messages ([@ods](https://github.com/ods/)).
 
 ## [0.6.0] - 2021-03-24
 ### Changed
-- Use tokio v1, hyper v0.14, bytes v1
+- Use tokio v1, hyper v0.14, bytes v1.
 
 ## [0.5.1] - 2020-11-22
 ### Added
