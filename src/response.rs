@@ -4,17 +4,19 @@ use std::{
 };
 
 #[cfg(feature = "brotli")]
-use async_compression::stream::BrotliDecoder;
+use async_compression::tokio::bufread::BrotliDecoder;
 #[cfg(feature = "gzip")]
-use async_compression::stream::GzipDecoder;
+use async_compression::tokio::bufread::GzipDecoder;
 #[cfg(feature = "zlib")]
-use async_compression::stream::ZlibDecoder;
+use async_compression::tokio::bufread::ZlibDecoder;
 use bytes::Bytes;
 use futures::{
     future,
     stream::{self, Stream, TryStreamExt},
 };
 use hyper::{body, client::ResponseFuture, Body, StatusCode};
+#[cfg(any(feature = "brotli", feature = "gzip", feature = "zlib"))]
+use tokio_util::io::{ReaderStream, StreamReader};
 
 #[cfg(feature = "lz4")]
 use crate::compression::lz4::Lz4Decoder;
@@ -40,20 +42,7 @@ impl Response {
             let body = response.into_body();
 
             if status != StatusCode::OK {
-                // TODO(loyd): test decompression of error response
-                let bytes = body::to_bytes(body).await?;
-
-                let mut chunks = decompress_stream(
-                    stream::once(future::ready(Result::<_>::Ok(bytes.clone()))),
-                    *compression,
-                );
-                let bytes = match chunks.try_next().await {
-                    Ok(chunk) => chunk.unwrap_or_default(),
-                    // Original response is more useful than decompression error
-                    Err(_) => bytes,
-                };
-
-                let reason = String::from_utf8_lossy(&bytes).trim().into();
+                let reason = collect_bad_response(body, *compression).await?;
                 return Err(Error::BadResponse(reason));
             }
 
@@ -68,36 +57,59 @@ impl Response {
     }
 }
 
+async fn collect_bad_response(body: Body, compression: Compression) -> Result<String> {
+    let bytes = body::to_bytes(body).await?;
+
+    let mut chunks = decompress_stream(
+        stream::once(future::ready(Result::<_>::Ok(bytes.clone()))),
+        compression,
+    );
+    let bytes = match chunks.try_next().await {
+        Ok(chunk) => chunk.unwrap_or_default(),
+        // Original response is more useful than a decompression error.
+        Err(_) => bytes,
+    };
+
+    Ok(String::from_utf8_lossy(&bytes).trim().into())
+}
+
 fn decompress_stream<S, E>(stream: S, compression: Compression) -> Chunks<S>
 where
     S: Stream<Item = Result<Bytes, E>> + Unpin,
     Error: From<E>,
 {
-    Chunks(match compression {
+    Chunks(Box::new(match compression {
         Compression::None => Inner::Plain(stream),
         #[cfg(feature = "lz4")]
         Compression::Lz4 => Inner::Lz4(Lz4Decoder::new(stream)),
         #[cfg(feature = "gzip")]
-        Compression::Gzip => Inner::Gzip(Box::new(GzipDecoder::new(BodyAdapter(stream)))),
+        Compression::Gzip => Inner::Gzip(ReaderStream::new(GzipDecoder::new(StreamReader::new(
+            BodyAdapter(stream),
+        )))),
         #[cfg(feature = "zlib")]
-        Compression::Zlib => Inner::Zlib(Box::new(ZlibDecoder::new(BodyAdapter(stream)))),
+        Compression::Zlib => Inner::Zlib(ReaderStream::new(ZlibDecoder::new(StreamReader::new(
+            BodyAdapter(stream),
+        )))),
         #[cfg(feature = "brotli")]
-        Compression::Brotli => Inner::Brotli(Box::new(BrotliDecoder::new(BodyAdapter(stream)))),
-    })
+        Compression::Brotli => Inner::Brotli(ReaderStream::new(BrotliDecoder::new(
+            StreamReader::new(BodyAdapter(stream)),
+        ))),
+    }))
 }
 
-pub(crate) struct Chunks<S>(Inner<S>);
+// We use `Box<_>` here to reduce the size of cursors.
+pub(crate) struct Chunks<S>(Box<Inner<S>>);
 
 enum Inner<S> {
     Plain(S),
     #[cfg(feature = "lz4")]
     Lz4(Lz4Decoder<S>),
     #[cfg(feature = "gzip")]
-    Gzip(Box<GzipDecoder<BodyAdapter<S>>>),
+    Gzip(ReaderStream<GzipDecoder<StreamReader<BodyAdapter<S>, Bytes>>>),
     #[cfg(feature = "zlib")]
-    Zlib(Box<ZlibDecoder<BodyAdapter<S>>>),
+    Zlib(ReaderStream<ZlibDecoder<StreamReader<BodyAdapter<S>, Bytes>>>),
     #[cfg(feature = "brotli")]
-    Brotli(Box<BrotliDecoder<BodyAdapter<S>>>),
+    Brotli(ReaderStream<BrotliDecoder<StreamReader<BodyAdapter<S>, Bytes>>>),
     Empty,
 }
 
@@ -110,21 +122,21 @@ where
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         use Inner::*;
-        let res = match self.0 {
-            Plain(ref mut inner) => map_poll_err(Pin::new(inner).poll_next(cx), Into::into),
+        let res = match &mut *self.0 {
+            Plain(inner) => Pin::new(inner).poll_next(cx).map_err(Into::into),
             #[cfg(feature = "lz4")]
-            Lz4(ref mut inner) => Pin::new(inner).poll_next(cx),
+            Lz4(inner) => Pin::new(inner).poll_next(cx),
             #[cfg(feature = "gzip")]
-            Gzip(ref mut inner) => map_compression_poll(Pin::new(inner).poll_next(cx)),
+            Gzip(inner) => Pin::new(inner).poll_next(cx).map_err(Error::decode_io),
             #[cfg(feature = "zlib")]
-            Zlib(ref mut inner) => map_compression_poll(Pin::new(inner).poll_next(cx)),
+            Zlib(inner) => Pin::new(inner).poll_next(cx).map_err(Error::decode_io),
             #[cfg(feature = "brotli")]
-            Brotli(ref mut inner) => map_compression_poll(Pin::new(inner).poll_next(cx)),
+            Brotli(inner) => Pin::new(inner).poll_next(cx).map_err(Error::decode_io),
             Empty => Poll::Ready(None),
         };
 
         if let Poll::Ready(None) = res {
-            self.0 = Inner::Empty;
+            *self.0 = Inner::Empty;
         }
 
         res
@@ -132,7 +144,7 @@ where
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         use Inner::*;
-        match &self.0 {
+        match &*self.0 {
             Plain(inner) => inner.size_hint(),
             #[cfg(feature = "lz4")]
             Lz4(inner) => inner.size_hint(),
@@ -147,7 +159,7 @@ where
     }
 }
 
-// async-compression depends on bytes-0.5, therefore adapter to convert
+/// A stream wrapper that encodes the original error as `io::Error`.
 #[cfg(any(feature = "gzip", feature = "zlib", feature = "brotli"))]
 struct BodyAdapter<S>(S);
 
@@ -157,53 +169,15 @@ where
     S: Stream<Item = Result<Bytes, E>> + Unpin,
     Error: From<E>,
 {
-    type Item = std::io::Result<bytes_05::Bytes>;
+    type Item = std::io::Result<Bytes>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.0).poll_next(cx).map(|opt| {
-            opt.map(|res| {
-                res.map(to_bytes05)
-                    .map_err(|err| Error::from(err).into_io())
-            })
-        })
+        Pin::new(&mut self.0)
+            .poll_next(cx)
+            .map_err(|err| Error::from(err).into_io())
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.0.size_hint()
-    }
-}
-
-#[cfg(feature = "bytes-05")]
-fn to_bytes05(bytes: Bytes) -> bytes_05::Bytes {
-    bytes.to_vec().into()
-}
-
-#[cfg(feature = "bytes-05")]
-fn from_bytes05(bytes: bytes_05::Bytes) -> Bytes {
-    bytes.to_vec().into()
-}
-
-// XXX: https://github.com/rust-lang/rust/issues/63514
-fn map_poll_err<T, E, E2>(
-    poll: Poll<Option<Result<T, E>>>,
-    f: impl FnOnce(E) -> E2,
-) -> Poll<Option<Result<T, E2>>> {
-    match poll {
-        Poll::Ready(Some(Ok(val))) => Poll::Ready(Some(Ok(val))),
-        Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(f(err)))),
-        Poll::Ready(None) => Poll::Ready(None),
-        Poll::Pending => Poll::Pending,
-    }
-}
-
-#[cfg(any(feature = "gzip", feature = "zlib", feature = "brotli"))]
-fn map_compression_poll(
-    poll: Poll<Option<std::io::Result<bytes_05::Bytes>>>,
-) -> Poll<Option<Result<Bytes>>> {
-    match poll {
-        Poll::Ready(Some(Ok(val))) => Poll::Ready(Some(Ok(from_bytes05(val)))),
-        Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(Error::decode_io(err)))),
-        Poll::Ready(None) => Poll::Ready(None),
-        Poll::Pending => Poll::Pending,
     }
 }

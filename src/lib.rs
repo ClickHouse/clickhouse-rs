@@ -1,5 +1,8 @@
 #![warn(rust_2018_idioms, unreachable_pub)]
 
+#[macro_use]
+extern crate static_assertions;
+
 use std::collections::HashMap;
 
 use hyper::client::connect::HttpConnector;

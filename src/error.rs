@@ -1,7 +1,6 @@
 use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
 
 use serde::{de, ser};
-use static_assertions::assert_impl_all;
 
 pub type Result<T, E = Error> = result::Result<T, E>;
 
