@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2021-05-14
+### Fixed
+- Depend explicitly on `tokio/macros`.
+
 ## [0.6.3] - 2021-05-11
 ### Added
 - Support for `bool` values storage ([@quasiyoke](https://quasiyoke.me)).
@@ -67,7 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::insert()` for inserting into tables.
 - `Client::query()` for selecting from tables and DDL statements.
 
-[unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.6.3...HEAD
+[unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/loyd/clickhouse.rs/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/loyd/clickhouse.rs/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/loyd/clickhouse.rs/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/loyd/clickhouse.rs/compare/v0.6.0...v0.6.1
