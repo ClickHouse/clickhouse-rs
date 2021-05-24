@@ -68,6 +68,20 @@ impl Bind for String {
     }
 }
 
+impl Sealed for &String {}
+
+impl Bind for &String {
+    #[inline]
+    fn reserve(&self) -> usize {
+        self.len()
+    }
+
+    #[inline]
+    fn write(&self, dst: impl fmt::Write) -> fmt::Result {
+        escape::string(self, dst)
+    }
+}
+
 impl<'a, T: Bind> Sealed for &'a [T] {}
 
 impl<'a, T: Bind> Bind for &'a [T] {
