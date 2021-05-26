@@ -23,7 +23,7 @@ reflection = "0.1" # will become unnecessary soon.
 ```
 
 ## Examples
-See [more examples](examples/usage.rs).
+See [more examples](examples/).
 
 ### Create `Client`
 ```rust
