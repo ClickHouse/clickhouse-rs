@@ -11,6 +11,7 @@ use crate::{
     Client, Compression,
 };
 
+#[must_use]
 pub struct Watch<V = Rows> {
     client: Client,
     sql: SqlBuilder,

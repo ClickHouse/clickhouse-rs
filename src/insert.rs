@@ -16,6 +16,7 @@ use crate::{
 const BUFFER_SIZE: usize = 128 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
 
+#[must_use]
 pub struct Insert<T> {
     buffer: BytesMut,
     sender: Option<body::Sender>,

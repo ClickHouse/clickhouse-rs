@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `#[must_use]` for `Query`, `Watch`, `Insert` and `Inserter`.
+
 ## [0.6.5] - 2021-05-24
 ### Added
 - `&String` values binding to SQL queries.

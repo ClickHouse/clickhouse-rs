@@ -21,6 +21,7 @@ use crate::{
 
 const BUFFER_SIZE: usize = 8 * 1024;
 
+#[must_use]
 #[derive(Clone)]
 pub struct Query {
     client: Client,

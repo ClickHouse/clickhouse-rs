@@ -9,6 +9,7 @@ const DEFAULT_MAX_ENTRIES: u64 = 250_000;
 const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(10);
 const MAX_TIME_BIAS: f64 = 0.10; // % of `max_duration`
 
+#[must_use]
 pub struct Inserter<T> {
     client: Client,
     table: String,
