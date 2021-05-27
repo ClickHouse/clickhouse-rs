@@ -16,6 +16,8 @@ pub mod insert;
 pub mod inserter;
 pub mod query;
 pub mod sql;
+#[cfg(feature = "test-util")]
+pub mod test;
 pub mod watch;
 
 mod buflist;
@@ -77,7 +79,12 @@ impl Client {
     }
 
     pub fn with_compression(mut self, compression: Compression) -> Self {
-        self.compression = compression;
+        // TODO: remove when compression will be implemented.
+        self.compression = if cfg!(feature = "test-util") {
+            Compression::None
+        } else {
+            compression
+        };
         self
     }
 

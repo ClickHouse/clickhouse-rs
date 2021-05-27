@@ -17,12 +17,19 @@ harness = false
 name = "select"
 harness = false
 
+[[example]]
+name = "mock"
+required-features = ["test-util"]
+
 [profile.release]
 debug = true
 
 [features]
 default = ["lz4"]
 
+test-util = []
+
+# Compression
 lz4 = ["lz4-sys", "clickhouse-rs-cityhash-sys"]
 gzip = ["async-compression", "async-compression/gzip", "tokio-util"]
 zlib = ["async-compression", "async-compression/zlib", "tokio-util"]
