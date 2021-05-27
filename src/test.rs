@@ -16,7 +16,7 @@ use futures::{
     Stream, StreamExt,
 };
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
+use hyper::{Body, Request, Response, Server, StatusCode};
 use serde::Serialize;
 
 use crate::{error::Result, rowbinary};
@@ -87,6 +87,21 @@ pub trait Handler {
     fn handle(&mut self, req: Request<Body>) -> Response<Body>;
 }
 
+// List: https://github.com/ClickHouse/ClickHouse/blob/495c6e03aa9437dac3cd7a44ab3923390bef9982/src/Server/HTTPHandler.cpp#L132
+pub mod status {
+    use super::*;
+
+    pub const UNAUTHORIZED: StatusCode = StatusCode::UNAUTHORIZED;
+    pub const FORBIDDEN: StatusCode = StatusCode::FORBIDDEN;
+    pub const BAD_REQUEST: StatusCode = StatusCode::BAD_REQUEST;
+    pub const NOT_FOUND: StatusCode = StatusCode::NOT_FOUND;
+    pub const PAYLOAD_TOO_LARGE: StatusCode = StatusCode::PAYLOAD_TOO_LARGE;
+    pub const NOT_IMPLEMENTED: StatusCode = StatusCode::NOT_IMPLEMENTED;
+    pub const SERVICE_UNAVAILABLE: StatusCode = StatusCode::SERVICE_UNAVAILABLE;
+    pub const LENGTH_REQUIRED: StatusCode = StatusCode::LENGTH_REQUIRED;
+    pub const INTERNAL_SERVER_ERROR: StatusCode = StatusCode::INTERNAL_SERVER_ERROR;
+}
+
 pub struct OnSelect {
     response: Option<Response<Body>>,
 }
@@ -109,7 +124,17 @@ impl OnSelect {
         self
     }
 
-    // TODO: failure
+    pub fn failure(mut self, status: StatusCode) -> Self {
+        let reason = status.canonical_reason().unwrap_or("<unknown status code>");
+
+        self.response = Some(
+            Response::builder()
+                .status(status)
+                .body(Body::from(reason))
+                .expect("invalid builder"),
+        );
+        self
+    }
 }
 
 impl Handler for OnSelect {
