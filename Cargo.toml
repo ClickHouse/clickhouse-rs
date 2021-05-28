@@ -27,7 +27,7 @@ debug = true
 [features]
 default = ["lz4"]
 
-test-util = []
+test-util = ["hyper/server"]
 
 # Compression
 lz4 = ["lz4-sys", "clickhouse-rs-cityhash-sys"]
@@ -58,6 +58,6 @@ clickhouse-rs-cityhash-sys = { version = "0.1.2", optional = true }
 criterion = "0.3.2"
 serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "1.0.1", features = ["full", "test-util"] }
-hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream", "server"] }
+hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream"] }
 serde_bytes = "0.11.4"
 serde_repr = "0.1.7"
