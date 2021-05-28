@@ -20,6 +20,9 @@ To use the crate, add this to your `Cargo.toml`:
 [dependencies]
 clickhouse = "0.6"
 reflection = "0.1" # will become unnecessary soon.
+
+[dev-dependencies]
+clickhouse = { version = "0.6.6", features = ["test-util"] }
 ```
 
 ## Examples
