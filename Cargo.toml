@@ -9,6 +9,10 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 edition = "2018"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [[bench]]
 name = "insert"
 harness = false

@@ -17,6 +17,7 @@ pub mod inserter;
 pub mod query;
 pub mod sql;
 #[cfg(feature = "test-util")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub mod test;
 pub mod watch;
 
