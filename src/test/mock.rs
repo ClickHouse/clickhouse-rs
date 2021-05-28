@@ -18,13 +18,13 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::Server;
 use tokio::time::timeout;
 
-use super::Handler;
+use super::{Handler, HandlerFn};
 
 const MAX_WAIT_TIME: Duration = Duration::from_millis(150);
 
 pub struct Mock {
     url: String,
-    tx: UnboundedSender<Box<dyn Handler + Send>>,
+    tx: UnboundedSender<HandlerFn>,
     responses_left: Arc<AtomicUsize>,
     non_exhaustive: bool,
 }
@@ -38,7 +38,7 @@ impl Mock {
         let port = NEXT_PORT.fetch_add(1, Ordering::Relaxed);
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
-        let (tx, rx) = channel::mpsc::unbounded::<Box<dyn Handler + Send>>();
+        let (tx, rx) = channel::mpsc::unbounded::<HandlerFn>();
         let rx = Arc::new(Mutex::new(rx));
         let responses_left = Arc::new(AtomicUsize::new(0));
         let responses_left_0 = responses_left.clone();
@@ -54,7 +54,7 @@ impl Mock {
                     let rx3 = rx2.clone();
                     let responses_left = responses_left_2.clone();
                     async move {
-                        let mut handler = {
+                        let handler_fn = {
                             let mut rx = rx3.lock().await;
 
                             // TODO: should we use `std::time::Instant` instead?
@@ -66,7 +66,7 @@ impl Mock {
                                 _ => panic!("unexpected request, no predefined responses left"),
                             }
                         };
-                        Ok::<_, Infallible>(handler.handle(req))
+                        Ok::<_, Infallible>(handler_fn(req))
                     }
                 }))
             }
@@ -89,11 +89,13 @@ impl Mock {
         &self.url
     }
 
-    pub fn add(&self, handler: impl Handler) {
+    pub fn add<H: Handler>(&self, mut handler: H) -> H::Control {
+        let (h_fn, control) = handler.make();
         self.responses_left.fetch_add(1, Ordering::Relaxed);
         self.tx
-            .unbounded_send(Box::new(handler))
+            .unbounded_send(h_fn)
             .expect("the test server is down");
+        control
     }
 
     pub fn non_exhaustive(&mut self) {

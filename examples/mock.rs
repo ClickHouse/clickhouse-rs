@@ -15,21 +15,35 @@ async fn make_select(client: &Client) -> Result<Vec<Row>> {
         .await
 }
 
-async fn test_select() {
-    let mock = test::Mock::new();
-    let client = Client::default().with_url(mock.url());
-
-    let list = vec![Row { no: 1 }, Row { no: 2 }];
-    mock.add(test::handlers::provide(stream::iter(list.clone())));
-    let rows = make_select(&client).await.unwrap();
-    assert_eq!(rows, list);
-
-    mock.add(test::handlers::failure(test::status::FORBIDDEN));
-    let reason = make_select(&client).await;
-    assert_eq!(format!("{:?}", reason), r#"Err(BadResponse("Forbidden"))"#);
+async fn make_insert(client: &Client, data: &[Row]) -> Result<()> {
+    let mut insert = client.insert("who cares")?;
+    for row in data {
+        insert.write(&row).await?;
+    }
+    insert.end().await
 }
 
 #[tokio::main]
 async fn main() {
-    test_select().await;
+    let mock = test::Mock::new();
+    let client = Client::default().with_url(mock.url());
+
+    let list = vec![Row { no: 1 }, Row { no: 2 }];
+
+    // How to test SELECTs.
+    mock.add(test::handlers::provide(stream::iter(list.clone())));
+    let rows = make_select(&client).await.unwrap();
+    assert_eq!(rows, list);
+
+    // How to test failures.
+    mock.add(test::handlers::failure(test::status::FORBIDDEN));
+    let reason = make_select(&client).await;
+    assert_eq!(format!("{:?}", reason), r#"Err(BadResponse("Forbidden"))"#);
+
+    // How to test INSERTs.
+    let recording = mock.add(test::handlers::record());
+    make_insert(&client, &list).await.unwrap();
+
+    let rows: Vec<Row> = recording.collect().await;
+    assert_eq!(rows, list);
 }

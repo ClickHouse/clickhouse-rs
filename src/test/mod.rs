@@ -1,13 +1,19 @@
 use hyper::{Body, Request, Response, StatusCode};
 
 pub use self::mock::Mock;
+use crate::sealed::Sealed;
 
 pub mod handlers;
 mod mock;
 
-pub trait Handler: Send + 'static {
-    fn handle(&mut self, req: Request<Body>) -> Response<Body>;
+pub trait Handler: Sealed {
+    type Control;
+
+    #[doc(hidden)]
+    fn make(&mut self) -> (HandlerFn, Self::Control);
 }
+
+type HandlerFn = Box<dyn FnOnce(Request<Body>) -> Response<Body> + Send>;
 
 // List: https://github.com/ClickHouse/ClickHouse/blob/495c6e03aa9437dac3cd7a44ab3923390bef9982/src/Server/HTTPHandler.cpp#L132
 pub mod status {
