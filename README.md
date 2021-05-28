@@ -120,3 +120,10 @@ println!("live view updated: version={:?}", cursor.next().await?);
 
 * This code uses or creates if not exists a temporary live view named `lv_{sha1(query)}` to reuse the same live view by parallel watchers.
 * You can specify a name instead of a query.
+
+### Testing
+The crate provides utils for mocking CH server, both for SELECTs and INSERTs.
+
+The functionality can be enabled with the `test-util` feature. Use it only in dev-dependencies.
+
+See [the example](examples/mock.rs).
