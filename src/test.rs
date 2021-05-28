@@ -7,6 +7,7 @@ use std::{
         atomic::{AtomicU16, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use bytes::{Bytes, BytesMut};
@@ -18,8 +19,11 @@ use futures::{
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server, StatusCode};
 use serde::Serialize;
+use tokio::time::timeout;
 
 use crate::{error::Result, rowbinary};
+
+const MAX_WAIT_TIME: Duration = Duration::from_millis(150);
 
 pub struct Mock {
     url: String,
@@ -48,7 +52,11 @@ impl Mock {
                     async move {
                         let mut handler = {
                             let mut rx = rx3.lock().await;
-                            rx.next().await.expect("mock is dropped")
+                            // TODO: should we use `std::time::Instant` instead?
+                            match timeout(MAX_WAIT_TIME, rx.next()).await {
+                                Ok(Some(res)) => res,
+                                _ => panic!("unexpected request, no predefined responses left"),
+                            }
                         };
                         Ok::<_, Infallible>(handler.handle(req))
                     }
