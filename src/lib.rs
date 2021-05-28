@@ -1,4 +1,5 @@
 #![warn(rust_2018_idioms, unreachable_pub)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[macro_use]
 extern crate static_assertions;
