@@ -4,9 +4,10 @@ use std::{
     convert::Infallible,
     net::SocketAddr,
     sync::{
-        atomic::{AtomicU16, Ordering},
+        atomic::{AtomicU16, AtomicUsize, Ordering},
         Arc,
     },
+    thread,
     time::Duration,
 };
 
@@ -28,6 +29,7 @@ const MAX_WAIT_TIME: Duration = Duration::from_millis(150);
 pub struct Mock {
     url: String,
     tx: UnboundedSender<Box<dyn Handler + Send>>,
+    responses_left: Arc<AtomicUsize>,
     non_exhaustive: bool,
 }
 
@@ -41,20 +43,29 @@ impl Mock {
 
         let (tx, rx) = channel::mpsc::unbounded::<Box<dyn Handler + Send>>();
         let rx = Arc::new(Mutex::new(rx));
+        let responses_left = Arc::new(AtomicUsize::new(0));
+        let responses_left_0 = responses_left.clone();
 
         // Hm, here is one of the ugliest code that I've written ever.
         let make_service = make_service_fn(move |_conn| {
             let rx1 = rx.clone();
+            let responses_left_1 = responses_left.clone();
             async move {
                 let rx2 = rx1.clone();
+                let responses_left_2 = responses_left_1.clone();
                 Ok::<_, Infallible>(service_fn(move |req| {
                     let rx3 = rx2.clone();
+                    let responses_left = responses_left_2.clone();
                     async move {
                         let mut handler = {
                             let mut rx = rx3.lock().await;
+
                             // TODO: should we use `std::time::Instant` instead?
                             match timeout(MAX_WAIT_TIME, rx.next()).await {
-                                Ok(Some(res)) => res,
+                                Ok(Some(res)) => {
+                                    responses_left.fetch_sub(1, Ordering::Relaxed);
+                                    res
+                                }
                                 _ => panic!("unexpected request, no predefined responses left"),
                             }
                         };
@@ -70,8 +81,9 @@ impl Mock {
         tokio::spawn(server);
 
         Self {
-            tx,
             url: format!("http://{}", addr),
+            tx,
+            responses_left: responses_left_0,
             non_exhaustive: false,
         }
     }
@@ -81,6 +93,7 @@ impl Mock {
     }
 
     pub fn add(&self, handler: impl Handler + Send + 'static) {
+        self.responses_left.fetch_add(1, Ordering::Relaxed);
         self.tx
             .unbounded_send(Box::new(handler))
             .expect("the test server is down");
@@ -88,6 +101,17 @@ impl Mock {
 
     pub fn non_exhaustive(&mut self) {
         self.non_exhaustive = true;
+    }
+}
+
+impl Drop for Mock {
+    fn drop(&mut self) {
+        if !self.non_exhaustive
+            && !thread::panicking()
+            && self.responses_left.load(Ordering::Relaxed) > 0
+        {
+            panic!("test ended, but not all responses have been consumed");
+        }
     }
 }
 
