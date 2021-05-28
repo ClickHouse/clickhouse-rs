@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.7] - 2021-05-28
+### Fixed
+- docs: show features on docs.rs
+- Now `test-util` implies `hyper/server`.
+
 ## [0.6.6] - 2021-05-28
 ### Added
 - `test` module (available with the `test-util` feature).
@@ -80,7 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::insert()` for inserting into tables.
 - `Client::query()` for selecting from tables and DDL statements.
 
-[unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.6.6...HEAD
+[unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.6.7...HEAD
+[0.6.7]: https://github.com/loyd/clickhouse.rs/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/loyd/clickhouse.rs/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/loyd/clickhouse.rs/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/loyd/clickhouse.rs/compare/v0.6.3...v0.6.4
