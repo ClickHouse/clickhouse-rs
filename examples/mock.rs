@@ -8,7 +8,7 @@ struct Row {
     no: u32,
 }
 
-async fn make_request(client: &Client) -> Result<Vec<Row>> {
+async fn make_select(client: &Client) -> Result<Vec<Row>> {
     client
         .query("SELECT ?fields FROM `who cares`")
         .fetch_all::<Row>()
@@ -20,12 +20,12 @@ async fn test_select() {
     let client = Client::default().with_url(mock.url());
 
     let list = vec![Row { no: 1 }, Row { no: 2 }];
-    mock.add(test::OnSelect::new().success(stream::iter(list.clone())));
-    let rows = make_request(&client).await.unwrap();
+    mock.add(test::handlers::provide(stream::iter(list.clone())));
+    let rows = make_select(&client).await.unwrap();
     assert_eq!(rows, list);
 
-    mock.add(test::OnSelect::new().failure(test::status::FORBIDDEN));
-    let reason = make_request(&client).await;
+    mock.add(test::handlers::failure(test::status::FORBIDDEN));
+    let reason = make_select(&client).await;
     assert_eq!(format!("{:?}", reason), r#"Err(BadResponse("Forbidden"))"#);
 }
 
