@@ -2,16 +2,16 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use clickhouse::{error::Result, sql, Client, Reflection};
+use clickhouse::{error::Result, sql, Client, Row};
 
-#[derive(Debug, Reflection, Serialize, Deserialize)]
-struct Row<'a> {
+#[derive(Debug, Row, Serialize, Deserialize)]
+struct MyRow<'a> {
     no: u32,
     name: &'a str,
 }
 
-#[derive(Debug, Reflection, Serialize, Deserialize)]
-struct RowOwned {
+#[derive(Debug, Row, Serialize, Deserialize)]
+struct MyRowOwned {
     no: u32,
     name: String,
 }
@@ -33,7 +33,7 @@ async fn ddl(client: &Client) -> Result<()> {
 async fn insert(client: &Client) -> Result<()> {
     let mut insert = client.insert("some")?;
     for i in 0..1000 {
-        insert.write(&Row { no: i, name: "foo" }).await?;
+        insert.write(&MyRow { no: i, name: "foo" }).await?;
     }
 
     insert.end().await
@@ -50,7 +50,7 @@ async fn inserter(client: &Client) -> Result<()> {
             inserter.set_max_entries(300);
         }
 
-        inserter.write(&Row { no: i, name: "foo" }).await?;
+        inserter.write(&MyRow { no: i, name: "foo" }).await?;
         inserter.commit().await?;
     }
 
@@ -63,7 +63,7 @@ async fn fetch(client: &Client) -> Result<()> {
         .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
         .bind(500)
         .bind(504)
-        .fetch::<Row<'_>>()?;
+        .fetch::<MyRow<'_>>()?;
 
     while let Some(row) = cursor.next().await? {
         println!("{:?}", row);
@@ -78,7 +78,7 @@ async fn fetch_all(client: &Client) -> Result<()> {
         .bind(sql::Identifier("some"))
         .bind(500)
         .bind(504)
-        .fetch_all::<RowOwned>()
+        .fetch_all::<MyRowOwned>()
         .await?;
 
     println!("{:?}", vec);
@@ -112,13 +112,13 @@ async fn select_count(client: &Client) -> Result<()> {
 async fn watch(client: &Client) -> Result<()> {
     let mut cursor = client
         .watch("SELECT max(no), argMax(name, no) FROM some")
-        .fetch::<Row<'_>>()?;
+        .fetch::<MyRow<'_>>()?;
 
     let (version, row) = cursor.next().await?.unwrap();
     println!("version={}, row={:?}", version, row);
 
     let mut insert = client.insert("some")?;
-    let row = Row {
+    let row = MyRow {
         no: row.no + 1,
         name: "bar",
     };

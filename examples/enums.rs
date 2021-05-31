@@ -3,7 +3,7 @@ use std::time::UNIX_EPOCH;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use clickhouse::{error::Result, Client, Reflection};
+use clickhouse::{error::Result, Client, Row};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    #[derive(Debug, Serialize, Deserialize, Reflection)]
+    #[derive(Debug, Serialize, Deserialize, Row)]
     struct Event {
         timestamp: u64,
         message: String,
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
     }
 
     // How to define enums that map to `Enum8`/`Enum16`.
-    #[derive(Debug, Serialize_repr, Deserialize_repr, Reflection)]
+    #[derive(Debug, Serialize_repr, Deserialize_repr)]
     #[repr(u8)]
     enum Level {
         Debug = 1,

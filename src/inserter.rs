@@ -3,7 +3,7 @@ use std::{future::Future, mem};
 use serde::Serialize;
 use tokio::time::{Duration, Instant};
 
-use crate::{error::Result, insert::Insert, introspection::Reflection, Client};
+use crate::{error::Result, insert::Insert, row::Row, Client};
 
 const DEFAULT_MAX_ENTRIES: u64 = 250_000;
 const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(10);
@@ -36,7 +36,7 @@ impl Quantities {
 
 impl<T> Inserter<T>
 where
-    T: Reflection,
+    T: Row,
 {
     pub(crate) fn new(client: &Client, table: &str) -> Result<Self> {
         Ok(Self {
