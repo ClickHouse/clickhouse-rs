@@ -18,11 +18,10 @@ A typed client for ClickHouse.
 To use the crate, add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-clickhouse = "0.6"
-reflection = "0.1" # will become unnecessary soon.
+clickhouse = "0.7"
 
 [dev-dependencies]
-clickhouse = { version = "0.6.6", features = ["test-util"] }
+clickhouse = { version = "0.7", features = ["test-util"] }
 ```
 
 ## Examples
@@ -44,10 +43,10 @@ let client = Client::default()
 ### Select rows
 ```rust
 use serde::Deserialize;
-use clickhouse::Reflection;
+use clickhouse::Row;
 
-#[derive(Reflection, Deserialize)]
-struct Row<'a> {
+#[derive(Row, Deserialize)]
+struct MyRow<'a> {
     no: u32,
     name: &'a str,
 }
@@ -56,7 +55,7 @@ let mut cursor = client
     .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
     .bind(500)
     .bind(504)
-    .fetch::<Row<'_>>()?;
+    .fetch::<MyRow<'_>>()?;
 
 while let Some(row) = cursor.next().await? { .. }
 ```
