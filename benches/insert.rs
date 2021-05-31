@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughpu
 use serde::Serialize;
 use tokio::{runtime::Runtime, time::Instant};
 
-use clickhouse::{error::Result, Client, Reflection};
+use clickhouse::{error::Result, Client, Row};
 
 mod server {
     use std::{convert::Infallible, net::SocketAddr, thread};
@@ -43,8 +43,8 @@ fn insert(c: &mut Criterion) {
     let addr = "127.0.0.1:6543".parse().unwrap();
     server::start(addr);
 
-    #[derive(Reflection, Serialize)]
-    struct Row {
+    #[derive(Row, Serialize)]
+    struct SomeRow {
         a: u64,
         b: i64,
         c: i32,
@@ -56,7 +56,7 @@ fn insert(c: &mut Criterion) {
 
         for _ in 0..iters {
             insert
-                .write(&black_box(Row {
+                .write(&black_box(SomeRow {
                     a: 42,
                     b: 42,
                     c: 42,
@@ -69,7 +69,7 @@ fn insert(c: &mut Criterion) {
     }
 
     let mut group = c.benchmark_group("insert");
-    group.throughput(Throughput::Bytes(mem::size_of::<Row>() as u64));
+    group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
     group.bench_function("insert", |b| {
         b.iter_custom(|iters| {
             let rt = Runtime::new().unwrap();

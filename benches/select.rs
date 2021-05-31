@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughpu
 use serde::Deserialize;
 use tokio::{runtime::Runtime, time::Instant};
 
-use clickhouse::{error::Result, Client, Compression, Reflection};
+use clickhouse::{error::Result, Client, Compression, Row};
 
 mod server {
     use std::{convert::Infallible, net::SocketAddr, thread};
@@ -44,8 +44,8 @@ fn select(c: &mut Criterion) {
     server::start(addr);
 
     #[allow(dead_code)]
-    #[derive(Debug, Reflection, Deserialize)]
-    struct Row {
+    #[derive(Debug, Row, Deserialize)]
+    struct SomeRow {
         a: u64,
         b: i64,
         c: i32,
@@ -53,7 +53,9 @@ fn select(c: &mut Criterion) {
     }
 
     async fn run(client: Client, iters: u64) -> Result<()> {
-        let mut cursor = client.query("SELECT ?fields FROM some").fetch::<Row>()?;
+        let mut cursor = client
+            .query("SELECT ?fields FROM some")
+            .fetch::<SomeRow>()?;
 
         for _ in 0..iters {
             black_box(cursor.next().await?);
@@ -63,7 +65,7 @@ fn select(c: &mut Criterion) {
     }
 
     let mut group = c.benchmark_group("select");
-    group.throughput(Throughput::Bytes(mem::size_of::<Row>() as u64));
+    group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
     group.bench_function("select", |b| {
         b.iter_custom(|iters| {
             let rt = Runtime::new().unwrap();
