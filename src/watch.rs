@@ -5,8 +5,8 @@ use sha1::{Digest, Sha1};
 
 use crate::{
     error::{Error, Result},
-    introspection::Reflection,
     query,
+    row::Row,
     sql::{Bind, SqlBuilder},
     Client, Compression,
 };
@@ -37,7 +37,7 @@ impl<V> Watch<V> {
 
     // TODO: `groups()` for `(Version, &[T])`.
 
-    fn cursor<T: Reflection>(mut self, only_events: bool) -> Result<RawCursor<T>> {
+    fn cursor<T: Row>(mut self, only_events: bool) -> Result<RawCursor<T>> {
         self.sql.bind_fields::<T>();
         let sql = self.sql.finish()?;
         let (sql, view) = if is_table_name(&sql) {
@@ -70,7 +70,7 @@ impl Watch<Rows> {
     }
 
     #[deprecated(since = "0.4.0", note = "use `Watch::fetch()` instead")]
-    pub fn rows<T: Reflection>(self) -> Result<RowCursor<T>> {
+    pub fn rows<T: Row>(self) -> Result<RowCursor<T>> {
         self.fetch()
     }
 
@@ -88,13 +88,13 @@ impl Watch<Rows> {
         }
     }
 
-    pub fn fetch<T: Reflection>(self) -> Result<RowCursor<T>> {
+    pub fn fetch<T: Row>(self) -> Result<RowCursor<T>> {
         Ok(RowCursor(self.cursor(false)?))
     }
 
     pub async fn fetch_one<T>(self) -> Result<(Version, T)>
     where
-        T: Reflection + for<'b> Deserialize<'b>,
+        T: Row + for<'b> Deserialize<'b>,
     {
         match self.limit(1).fetch()?.next().await {
             Ok(Some(row)) => Ok(row),
@@ -133,7 +133,7 @@ pub struct RowCursor<T>(RawCursor<T>);
 impl<T> RowCursor<T> {
     pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<(Version, T)>>
     where
-        T: Deserialize<'b> + Reflection,
+        T: Deserialize<'b> + Row,
     {
         Ok(self.0.next().await?.map(|(row, version)| (version, row)))
     }
@@ -153,7 +153,7 @@ enum RawCursor<T> {
 impl<T> RawCursor<T> {
     async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<(T, Version)>>
     where
-        T: Deserialize<'b> + Reflection,
+        T: Deserialize<'b> + Row,
     {
         if let RawCursor::Preparing {
             client,

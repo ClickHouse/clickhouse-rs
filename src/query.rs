@@ -12,8 +12,8 @@ use url::Url;
 use crate::{
     buflist::BufList,
     error::{Error, Result},
-    introspection::Reflection,
     response::Response,
+    row::Row,
     rowbinary,
     sql::{Bind, SqlBuilder},
     Client,
@@ -47,7 +47,7 @@ impl Query {
         Ok(())
     }
 
-    pub fn fetch<T: Reflection>(mut self) -> Result<RowCursor<T>> {
+    pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.append(" FORMAT RowBinary");
 
         Ok(RowCursor {
@@ -60,7 +60,7 @@ impl Query {
 
     pub async fn fetch_one<T>(self) -> Result<T>
     where
-        T: Reflection + for<'b> Deserialize<'b>,
+        T: Row + for<'b> Deserialize<'b>,
     {
         match self.fetch()?.next().await {
             Ok(Some(row)) => Ok(row),
@@ -73,7 +73,7 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_all<T>(self) -> Result<Vec<T>>
     where
-        T: Reflection + for<'b> Deserialize<'b>,
+        T: Row + for<'b> Deserialize<'b>,
     {
         let mut result = Vec::new();
         let mut cursor = self.fetch::<T>()?;
@@ -86,11 +86,11 @@ impl Query {
     }
 
     #[deprecated(since = "0.4.0", note = "use `Query::fetch()` instead")]
-    pub fn rows<T: Reflection>(self) -> Result<RowCursor<T>> {
+    pub fn rows<T: Row>(self) -> Result<RowCursor<T>> {
         self.fetch()
     }
 
-    fn do_execute<T: Reflection>(mut self, method: Method) -> Result<Response> {
+    fn do_execute<T: Row>(mut self, method: Method) -> Result<Response> {
         let mut url = Url::parse(&self.client.url).expect("TODO");
         let mut pairs = url.query_pairs_mut();
         pairs.clear();

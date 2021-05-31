@@ -2,13 +2,13 @@ use std::fmt;
 
 use crate::{
     error::{Error, Result},
-    introspection::{self, Reflection},
+    row::{self, Row},
 };
 
 pub use bind::{Bind, Identifier};
 
 mod bind;
-mod escape;
+pub(crate) mod escape;
 
 #[derive(Clone)]
 pub(crate) enum SqlBuilder {
@@ -48,9 +48,9 @@ impl SqlBuilder {
         }
     }
 
-    pub(crate) fn bind_fields<T: Reflection>(&mut self) {
+    pub(crate) fn bind_fields<T: Row>(&mut self) {
         if let Self::InProgress { result } = self {
-            if let Some(fields) = introspection::join_field_names::<T>() {
+            if let Some(fields) = row::join_column_names::<T>() {
                 *result = result.replace(FIELDS_PLACEHOLDER, &fields);
             }
         }
@@ -84,8 +84,12 @@ impl SqlBuilder {
 mod test {
     use super::*;
 
+    // XXX: need for `derive(Row)`. Provide `row(crate = ..)` instead.
+    use crate as clickhouse;
+    use clickhouse_derive::Row;
+
     #[allow(unused)]
-    #[derive(Reflection)]
+    #[derive(Row)]
     struct Row {
         a: u32,
         b: u32,
@@ -99,7 +103,7 @@ mod test {
         sql.bind_fields::<Row>();
         assert_eq!(
             sql.finish().unwrap(),
-            r"SELECT a,b FROM test WHERE a = 'foo' AND b < 42"
+            r"SELECT `a`,`b` FROM test WHERE a = 'foo' AND b < 42"
         );
     }
 
@@ -113,12 +117,15 @@ mod test {
         }
 
         const ARGS: &[&str] = &["bar", "baz", "foobar"];
-        t(&ARGS[..0], r"SELECT a,b FROM test WHERE a IN []");
-        t(&ARGS[..1], r"SELECT a,b FROM test WHERE a IN ['bar']");
-        t(&ARGS[..2], r"SELECT a,b FROM test WHERE a IN ['bar','baz']");
+        t(&ARGS[..0], r"SELECT `a`,`b` FROM test WHERE a IN []");
+        t(&ARGS[..1], r"SELECT `a`,`b` FROM test WHERE a IN ['bar']");
+        t(
+            &ARGS[..2],
+            r"SELECT `a`,`b` FROM test WHERE a IN ['bar','baz']",
+        );
         t(
             ARGS,
-            r"SELECT a,b FROM test WHERE a IN ['bar','baz','foobar']",
+            r"SELECT `a`,`b` FROM test WHERE a IN ['bar','baz','foobar']",
         );
     }
 }

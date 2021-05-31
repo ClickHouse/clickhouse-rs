@@ -1,4 +1,3 @@
-#![warn(rust_2018_idioms, unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[macro_use]
@@ -8,9 +7,10 @@ use std::collections::HashMap;
 
 use hyper::client::connect::HttpConnector;
 
-pub use self::compression::Compression;
+pub use clickhouse_derive::Row;
+
 use self::error::Result;
-pub use self::introspection::Reflection;
+pub use self::{compression::Compression, row::Row};
 
 pub mod error;
 pub mod insert;
@@ -24,8 +24,8 @@ pub mod watch;
 
 mod buflist;
 mod compression;
-mod introspection;
 mod response;
+mod row;
 mod rowbinary;
 
 mod sealed {
@@ -95,11 +95,15 @@ impl Client {
         self
     }
 
-    pub fn insert<T: Reflection>(&self, table: &str) -> Result<insert::Insert<T>> {
+    /// Starts a new INSERT statement.
+    ///
+    /// # Panics
+    /// If `T` has unnamed fields, e.g. tuples.
+    pub fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
         insert::Insert::new(self, table)
     }
 
-    pub fn inserter<T: Reflection>(&self, table: &str) -> Result<inserter::Inserter<T>> {
+    pub fn inserter<T: Row>(&self, table: &str) -> Result<inserter::Inserter<T>> {
         inserter::Inserter::new(self, table)
     }
 

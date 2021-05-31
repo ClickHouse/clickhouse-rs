@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse"
-version = "0.6.8"
+version = "0.7.0"
 description = "a typed client for ClickHouse"
 keywords = ["clickhouse", "database", "driver", "tokio"]
 authors = ["Paul Loyd <pavelko95@gmail.com>"]
@@ -40,14 +40,14 @@ zlib = ["async-compression", "async-compression/zlib", "tokio-util"]
 brotli = ["async-compression", "async-compression/brotli", "tokio-util"]
 
 [dependencies]
+clickhouse-derive = { version = "0.1.0", path = "derive" }
+
 thiserror = "1.0.16"
 serde = "1.0.106"
 bytes = "1"
 tokio = { version = "1.0.1", features = ["rt", "macros"] }
 hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream"] }
 url = "2.1.1"
-reflection = "0.1.3"
-reflection_derive = "0.1.1"
 smallvec = "1.4.0"
 futures = "0.3.5"
 sha-1 = "0.9.1"

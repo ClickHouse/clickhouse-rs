@@ -8,8 +8,8 @@ use url::Url;
 
 use crate::{
     error::{Error, Result},
-    introspection::{self, Reflection},
     response::Response,
+    row::{self, Row},
     rowbinary, Client, Compression,
 };
 
@@ -27,7 +27,7 @@ pub struct Insert<T> {
 impl<T> Insert<T> {
     pub(crate) fn new(client: &Client, table: &str) -> Result<Self>
     where
-        T: Reflection,
+        T: Row,
     {
         let mut url = Url::parse(&client.url).expect("TODO");
         let mut pairs = url.query_pairs_mut();
@@ -37,7 +37,7 @@ impl<T> Insert<T> {
             pairs.append_pair("database", database);
         }
 
-        let fields = introspection::join_field_names::<T>()
+        let fields = row::join_column_names::<T>()
             .expect("the row type must be a struct or a wrapper around it");
 
         // TODO: what about escaping a table name?
