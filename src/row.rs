@@ -108,6 +108,35 @@ mod tests {
     }
 
     #[test]
+    fn it_supports_renaming() {
+        use serde::Serialize;
+
+        #[derive(Row, Serialize)]
+        #[allow(dead_code)]
+        struct TopLevel {
+            #[serde(rename = "two")]
+            one: u32,
+        }
+
+        assert_eq!(join_column_names::<TopLevel>().unwrap(), "`two`");
+    }
+
+    #[test]
+    fn it_skips_serializing() {
+        use serde::Serialize;
+
+        #[derive(Row, Serialize)]
+        #[allow(dead_code)]
+        struct TopLevel {
+            one: u32,
+            #[serde(skip_serializing)]
+            two: u32,
+        }
+
+        assert_eq!(join_column_names::<TopLevel>().unwrap(), "`one`");
+    }
+
+    #[test]
     fn it_rejects_other() {
         #[derive(Row)]
         struct NamedTuple(u32, u32);
