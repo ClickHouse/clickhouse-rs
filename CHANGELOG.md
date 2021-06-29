@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## Fixed
+- Get rid of "socket is not connected" errors (found by [@let4be](https://github.com/let4be)).
+
 ### Changed
 - Set TCP keepalive to 60 seconds.
 

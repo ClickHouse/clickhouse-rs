@@ -1,6 +1,7 @@
 use std::{future::Future, marker::PhantomData, mem, panic};
 
 use bytes::BytesMut;
+use futures::stream::TryStreamExt;
 use hyper::{self, body, Body, Request};
 use serde::Serialize;
 use tokio::task::JoinHandle;
@@ -64,8 +65,9 @@ impl<T> Insert<T> {
 
         let future = client.client.request(request);
         let handle = tokio::spawn(async move {
-            // TODO: should we read the body?
-            let _ = Response::new(future, Compression::None).resolve().await?;
+            let mut response = Response::new(future, Compression::None);
+            let chunks = response.resolve().await?;
+            while chunks.try_next().await?.is_some() {}
             Ok(())
         });
 
