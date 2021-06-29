@@ -3,7 +3,7 @@
 #[macro_use]
 extern crate static_assertions;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use hyper::client::connect::HttpConnector;
 
@@ -32,6 +32,8 @@ mod sealed {
     pub trait Sealed {}
 }
 
+const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
+
 #[derive(Clone)]
 pub struct Client {
     client: hyper::Client<HttpConnector>,
@@ -46,8 +48,13 @@ pub struct Client {
 
 impl Default for Client {
     fn default() -> Self {
+        let mut connector = HttpConnector::new();
+
+        // TODO: make configurable in `Client::builder()`.
+        connector.set_keepalive(Some(TCP_KEEPALIVE));
+
         Self {
-            client: hyper::Client::new(),
+            client: hyper::Client::builder().build(connector),
             url: String::new(),
             database: None,
             user: None,
