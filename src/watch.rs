@@ -1,4 +1,4 @@
-use std::fmt::Write;
+use std::{fmt::Write, time::Duration};
 
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
@@ -15,6 +15,7 @@ use crate::{
 pub struct Watch<V = Rows> {
     client: Client,
     sql: SqlBuilder,
+    refresh: Option<Duration>,
     limit: Option<usize>,
     _kind: V,
 }
@@ -35,6 +36,11 @@ impl<V> Watch<V> {
         self
     }
 
+    pub fn refresh(mut self, interval: impl Into<Option<Duration>>) -> Self {
+        self.refresh = interval.into();
+        self
+    }
+
     // TODO: `groups()` for `(Version, &[T])`.
 
     fn cursor<T: Row>(mut self, only_events: bool) -> Result<RawCursor<T>> {
@@ -51,6 +57,7 @@ impl<V> Watch<V> {
             client: self.client,
             sql,
             view,
+            refresh: self.refresh,
             limit: self.limit,
             only_events,
         })
@@ -64,6 +71,7 @@ impl Watch<Rows> {
                 .clone()
                 .with_option("allow_experimental_live_view", "1"),
             sql: SqlBuilder::new(template),
+            refresh: None,
             limit: None,
             _kind: Rows,
         }
@@ -83,6 +91,7 @@ impl Watch<Rows> {
         Watch {
             client: self.client,
             sql: self.sql,
+            refresh: self.refresh,
             limit: self.limit,
             _kind: Events,
         }
@@ -144,6 +153,7 @@ enum RawCursor<T> {
         client: Client,
         sql: Option<String>,
         view: String,
+        refresh: Option<Duration>,
         limit: Option<usize>,
         only_events: bool,
     },
@@ -159,6 +169,7 @@ impl<T> RawCursor<T> {
             client,
             sql,
             view,
+            refresh,
             limit,
             only_events,
         } = self
@@ -169,9 +180,12 @@ impl<T> RawCursor<T> {
             }
 
             if let Some(sql) = sql {
+                let refresh_sql =
+                    refresh.map_or_else(String::new, |d| format!("AND REFRESH {}", d.as_secs()));
+
                 let create_sql = format!(
-                    "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT AS {}",
-                    view, sql
+                    "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT {} AS {}",
+                    view, refresh_sql, sql
                 );
 
                 client.query(&create_sql).execute().await?;

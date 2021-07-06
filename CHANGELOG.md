@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `Watch::refresh()` to specify `REFRESH` clause.
+
 ## [0.7.1] - 2021-06-29
 ### Fixed
 - Get rid of "socket is not connected" errors (found by [@let4be](https://github.com/let4be)).
