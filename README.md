@@ -1,10 +1,20 @@
 # clickhouse.rs
 
-[![Build status](https://travis-ci.org/loyd/clickhouse.rs.svg)](https://travis-ci.org/loyd/clickhouse.rs)
-[![Crate info](https://img.shields.io/crates/v/clickhouse.svg)](https://crates.io/crates/clickhouse)
-[![Documentation](https://docs.rs/clickhouse/badge.svg)](https://docs.rs/clickhouse)
-
 A typed client for ClickHouse.
+
+[![Crates.io][crates-badge]][crates-url]
+[![Documentation][docs-badge]][docs-url]
+[![MIT licensed][mit-badge]][mit-url]
+[![Build Status][actions-badge]][actions-url]
+
+[crates-badge]: https://img.shields.io/crates/v/clickhouse.svg
+[crates-url]: https://crates.io/crates/clickhouse
+[docs-badge]: https://docs.rs/clickhouse/badge.svg
+[docs-url]: https://docs.rs/clickhouse
+[mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
+[mit-url]: https://github.com/loyd/clickhouse.rs/blob/master/LICENSE
+[actions-badge]: https://github.com/loyd/clickhouse.rs/workflows/CI/badge.svg
+[actions-url]: https://github.com/loyd/clickhouse.rs/actions?query=workflow%3ACI+branch%3Amaster
 
 ## Features
 * Uses `serde` for encoding/decoding rows.
