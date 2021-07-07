@@ -145,4 +145,19 @@ mod tests {
         assert_eq!(join_column_names::<(u32, u64)>(), None);
         assert_eq!(join_column_names::<NamedTuple>(), None);
     }
+
+    #[test]
+    fn it_handles_raw_identifiers() {
+        use serde::Serialize;
+
+        #[derive(Row, Serialize)]
+        #[allow(dead_code)]
+        struct MyRow {
+            r#type: u32,
+            #[serde(rename = "if")]
+            r#match: u32,
+        }
+
+        assert_eq!(join_column_names::<MyRow>().unwrap(), "`type`,`if`");
+    }
 }

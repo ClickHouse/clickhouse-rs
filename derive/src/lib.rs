@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use serde_derive_internals::{attr::get_serde_meta_items, Ctxt};
-use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields, Lit, Meta, NestedMeta};
+use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields, Ident, Lit, Meta, NestedMeta};
 
 /// Parses `#[serde(skip_serializing)]`
 fn serde_skipped(cx: &Ctxt, attrs: &[syn::Attribute]) -> bool {
@@ -51,6 +51,10 @@ fn serde_rename(cx: &Ctxt, field: &syn::Field) -> Option<String> {
     None
 }
 
+fn unraw(ident: &Ident) -> String {
+    ident.to_string().trim_start_matches("r#").to_owned()
+}
+
 fn column_names(data: &DataStruct) -> TokenStream {
     match &data.fields {
         Fields::Named(fields) => {
@@ -61,7 +65,7 @@ fn column_names(data: &DataStruct) -> TokenStream {
                 .filter(|f| !serde_skipped(&cx, &f.attrs))
                 .map(|f| match serde_rename(&cx, f) {
                     Some(name) => name,
-                    None => f.ident.as_ref().unwrap().to_string(),
+                    None => unraw(f.ident.as_ref().unwrap()),
                 });
 
             let tokens = quote! {
