@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse-derive"
-version = "0.1.0"
+version = "0.1.1"
 description = "A macro for deriving clickhouse::Row"
 authors = ["Paul Loyd <pavelko95@gmail.com>"]
 edition = "2018"

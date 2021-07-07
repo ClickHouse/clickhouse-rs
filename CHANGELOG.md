@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2021-05-07
 ### Added
 - `Watch::refresh()` to specify `REFRESH` clause.
 
@@ -109,7 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::insert()` for inserting into tables.
 - `Client::query()` for selecting from tables and DDL statements.
 
-[unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.7.1...HEAD
+[unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/loyd/clickhouse.rs/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/loyd/clickhouse.rs/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/loyd/clickhouse.rs/compare/v0.6.8...v0.7.0
 [0.6.8]: https://github.com/loyd/clickhouse.rs/compare/v0.6.7...v0.6.8

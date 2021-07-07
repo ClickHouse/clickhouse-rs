@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse"
-version = "0.7.1"
+version = "0.7.2"
 description = "a typed client for ClickHouse"
 keywords = ["clickhouse", "database", "driver", "tokio"]
 authors = ["Paul Loyd <pavelko95@gmail.com>"]
@@ -40,7 +40,7 @@ zlib = ["async-compression", "async-compression/zlib", "tokio-util"]
 brotli = ["async-compression", "async-compression/brotli", "tokio-util"]
 
 [dependencies]
-clickhouse-derive = { version = "0.1.0", path = "derive" }
+clickhouse-derive = { version = "0.1.1", path = "derive" }
 
 thiserror = "1.0.16"
 serde = "1.0.106"

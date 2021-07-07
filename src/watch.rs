@@ -36,6 +36,7 @@ impl<V> Watch<V> {
         self
     }
 
+    /// See [docs](https://clickhouse.tech/docs/en/sql-reference/statements/create/view/#live-view-with-refresh)
     pub fn refresh(mut self, interval: impl Into<Option<Duration>>) -> Self {
         self.refresh = interval.into();
         self
