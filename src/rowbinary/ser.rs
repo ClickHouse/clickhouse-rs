@@ -183,6 +183,11 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     ) -> Result<Self::SerializeStructVariant> {
         todo!();
     }
+
+    #[inline]
+    fn is_human_readable(&self) -> bool {
+        false
+    }
 }
 
 impl<'a, B: BufMut> SerializeStruct for &'a mut RowBinarySerializer<B> {

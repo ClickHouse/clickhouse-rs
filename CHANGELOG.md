@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2021-07-28
+### Fixed
+- `RowBinarySerializer::is_human_readable()` returns `false`.
+
 ## [0.7.2] - 2021-05-07
 ### Added
 - `Watch::refresh()` to specify `REFRESH` clause.
