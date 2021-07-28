@@ -114,7 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::insert()` for inserting into tables.
 - `Client::query()` for selecting from tables and DDL statements.
 
-[unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.7.2...HEAD
+[unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/loyd/clickhouse.rs/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/loyd/clickhouse.rs/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/loyd/clickhouse.rs/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/loyd/clickhouse.rs/compare/v0.6.8...v0.7.0
