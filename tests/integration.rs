@@ -26,13 +26,13 @@ async fn prepare(name: &str) -> Client {
 
 #[tokio::test]
 async fn it_writes_then_reads() {
+    let client = prepare("it_writes_then_reads").await;
+
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow<'a> {
         no: u32,
         name: &'a str,
     }
-
-    let client = prepare("it_writes_then_reads").await;
 
     // Create a table.
     client
@@ -73,4 +73,27 @@ async fn it_writes_then_reads() {
         assert_eq!(row.name, "foo");
         i += 1;
     }
+}
+
+// See #19.
+#[tokio::test]
+async fn it_requests_long_query() {
+    let client = prepare("it_requests_long_query").await;
+
+    client
+        .query("CREATE TABLE test(n String) ENGINE = MergeTree ORDER BY n")
+        .execute()
+        .await
+        .expect("cannot create a table");
+
+    let long_string = "A".repeat(100_000);
+
+    let got_string = client
+        .query("select ?")
+        .bind(&long_string)
+        .fetch_one::<String>()
+        .await
+        .expect("cannot query");
+
+    assert_eq!(got_string, long_string);
 }

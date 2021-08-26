@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Support `?` inside bound arguments, [#18](https://github.com/loyd/clickhouse.rs/issues/18).
+- Use the `POST` method if a query is bigger than 8KiB [#19](https://github.com/loyd/clickhouse.rs/issues/19).
 
 ## [0.8.0] - 2021-07-28
 ### Fixed

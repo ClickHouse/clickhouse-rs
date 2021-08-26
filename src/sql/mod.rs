@@ -155,6 +155,7 @@ mod test {
         );
     }
 
+    // See #18.
     #[test]
     fn it_builds_sql_with_question_marks_inside() {
         let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a IN ? AND b = ?");

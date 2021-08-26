@@ -20,6 +20,7 @@ use crate::{
 };
 
 const BUFFER_SIZE: usize = 8 * 1024;
+const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
 #[must_use]
 #[derive(Clone)]
@@ -43,7 +44,7 @@ impl Query {
 
     pub async fn execute(self) -> Result<()> {
         // TODO: should we read the body?
-        let _ = self.do_execute::<()>(Method::POST)?.resolve().await?;
+        let _ = self.do_execute::<()>(false)?.resolve().await?;
         Ok(())
     }
 
@@ -51,7 +52,7 @@ impl Query {
         self.sql.append(" FORMAT RowBinary");
 
         Ok(RowCursor {
-            response: self.do_execute::<T>(Method::GET)?,
+            response: self.do_execute::<T>(true)?,
             buffer: vec![0; BUFFER_SIZE],
             pending: BufList::default(),
             _marker: PhantomData,
@@ -90,7 +91,7 @@ impl Query {
         self.fetch()
     }
 
-    fn do_execute<T: Row>(mut self, method: Method) -> Result<Response> {
+    fn do_execute<T: Row>(mut self, read_only: bool) -> Result<Response> {
         let mut url = Url::parse(&self.client.url).expect("TODO");
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -101,7 +102,20 @@ impl Query {
 
         self.sql.bind_fields::<T>();
         let query = self.sql.finish()?;
-        pairs.append_pair("query", &query);
+
+        let use_post = !read_only || query.len() > MAX_QUERY_LEN_TO_USE_GET;
+        let method = if use_post { Method::POST } else { Method::GET };
+
+        let (body, content_length) = if use_post {
+            if read_only {
+                pairs.append_pair("readonly", "1");
+            }
+            let len = query.len();
+            (Body::from(query), len)
+        } else {
+            pairs.append_pair("query", &query);
+            (Body::empty(), 0)
+        };
 
         #[cfg(feature = "lz4")]
         if self.client.compression == crate::Compression::Lz4 {
@@ -118,10 +132,13 @@ impl Query {
         }
         drop(pairs);
 
-        let mut builder = Request::builder()
-            .method(method)
-            .uri(url.as_str())
-            .header(CONTENT_LENGTH, "0");
+        let mut builder = Request::builder().method(method).uri(url.as_str());
+
+        if content_length == 0 {
+            builder = builder.header(CONTENT_LENGTH, "0");
+        } else {
+            builder = builder.header(CONTENT_LENGTH, content_length.to_string());
+        }
 
         if let Some(user) = &self.client.user {
             builder = builder.header("X-ClickHouse-User", user);
@@ -137,7 +154,7 @@ impl Query {
         }
 
         let request = builder
-            .body(Body::empty())
+            .body(body)
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
         let future = self.client.client.request(request);
