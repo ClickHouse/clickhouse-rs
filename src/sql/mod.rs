@@ -12,68 +12,94 @@ pub(crate) mod escape;
 
 #[derive(Clone)]
 pub(crate) enum SqlBuilder {
-    InProgress { result: String },
+    InProgress { parts: Vec<Part>, size: usize },
     Failed(fmt::Error),
 }
 
-// We replace "?fields" with this in order to avoid look-ahead parsing.
-const FIELDS_PLACEHOLDER: &str = "_#fields#_";
+#[derive(Clone)]
+pub(crate) enum Part {
+    Arg,
+    Fields,
+    Text(String),
+}
 
 impl SqlBuilder {
     pub(crate) fn new(template: &str) -> Self {
-        SqlBuilder::InProgress {
-            result: template.trim().replace("?fields", FIELDS_PLACEHOLDER),
+        let mut iter = template.split('?');
+        let prefix = String::from(iter.next().unwrap());
+        let mut size = prefix.len();
+        let mut parts = vec![Part::Text(prefix)];
+
+        for s in iter {
+            let text = if let Some(text) = s.strip_prefix("fields") {
+                parts.push(Part::Fields);
+                text
+            } else {
+                parts.push(Part::Arg);
+                s
+            };
+
+            size += text.len();
+            parts.push(Part::Text(text.into()));
         }
+
+        SqlBuilder::InProgress { parts, size }
     }
 
     pub(crate) fn bind_arg(&mut self, value: impl Bind) {
-        if let Self::InProgress { result } = self {
-            let mut iter = result.splitn(2, '?');
+        if let Self::InProgress { parts, size } = self {
+            if let Some(part) = parts.iter_mut().find(|p| matches!(p, Part::Arg)) {
+                let mut s = String::with_capacity(value.reserve());
 
-            let (prefix, suffix) = match (iter.next(), iter.next()) {
-                (Some(prefix), Some(suffix)) => (prefix, suffix),
-                _ => panic!("all query arguments are already bound"),
-            };
+                if let Err(err) = value.write(&mut s) {
+                    *self = SqlBuilder::Failed(err);
+                    return;
+                }
 
-            let mut next = String::with_capacity(result.len() + value.reserve() - 1);
-            next.push_str(prefix);
-
-            if let Err(err) = value.write(&mut next) {
-                *self = SqlBuilder::Failed(err);
-                return;
+                *size += s.len();
+                *part = Part::Text(s);
+            } else {
+                panic!("all query arguments are already bound");
             }
-
-            next.push_str(suffix);
-            *result = next;
         }
     }
 
     pub(crate) fn bind_fields<T: Row>(&mut self) {
-        if let Self::InProgress { result } = self {
+        if let Self::InProgress { parts, size } = self {
             if let Some(fields) = row::join_column_names::<T>() {
-                *result = result.replace(FIELDS_PLACEHOLDER, &fields);
+                for part in parts.iter_mut().filter(|p| matches!(p, Part::Fields)) {
+                    *size += fields.len();
+                    *part = Part::Text(fields.clone());
+                }
             }
         }
     }
 
     pub(crate) fn append(&mut self, suffix: &str) {
-        if let Self::InProgress { result } = self {
-            result.push_str(suffix);
+        if let Self::InProgress { parts, size } = self {
+            if let Some(Part::Text(text)) = parts.last_mut() {
+                *size += suffix.len();
+                text.push_str(suffix);
+            } else {
+                unreachable!();
+            }
         }
     }
 
     pub(crate) fn finish(self) -> Result<String> {
         match self {
-            Self::InProgress { result } => {
-                if result.contains('?') {
-                    panic!("unbound query argument: ?");
-                }
-
-                if result.contains(FIELDS_PLACEHOLDER) {
-                    panic!("unbound query argument: ?fields");
-                }
-
-                Ok(result)
+            Self::InProgress { parts, size } => {
+                Ok(parts
+                    .into_iter()
+                    .fold(String::with_capacity(size), |mut res, part| {
+                        if let Part::Text(text) = part {
+                            debug_assert!(res.len() + text.len() <= res.capacity());
+                            res.push_str(&text);
+                            res
+                        } else {
+                            panic!("unbound query argument ? or ?fields");
+                        }
+                    }))
             }
             Self::Failed(err) => Err(Error::InvalidParams(Box::new(err))),
         }
@@ -126,6 +152,17 @@ mod test {
         t(
             ARGS,
             r"SELECT `a`,`b` FROM test WHERE a IN ['bar','baz','foobar']",
+        );
+    }
+
+    #[test]
+    fn it_builds_sql_with_question_marks_inside() {
+        let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a IN ? AND b = ?");
+        sql.bind_arg(&["a?b", "c?"][..]);
+        sql.bind_arg("a?");
+        assert_eq!(
+            sql.finish().unwrap(),
+            r"SELECT 1 FROM test WHERE a IN ['a?b','c?'] AND b = 'a?'"
         );
     }
 }

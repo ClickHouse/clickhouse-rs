@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Support `?` inside bound arguments, [#18](https://github.com/loyd/clickhouse.rs/issues/18).
+
 ## [0.8.0] - 2021-07-28
 ### Fixed
 - `RowBinarySerializer::is_human_readable()` returns `false`.
