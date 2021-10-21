@@ -1,32 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-use clickhouse::{sql, Client, Row};
+use clickhouse::Row;
 
-const HOST: &str = "localhost:8123";
-
-async fn prepare(name: &str) -> Client {
-    let client = Client::default().with_url(format!("http://{}", HOST));
-
-    client
-        .query("DROP DATABASE IF EXISTS ?")
-        .bind(sql::Identifier(name))
-        .execute()
-        .await
-        .expect("cannot drop db");
-
-    client
-        .query("CREATE DATABASE ?")
-        .bind(sql::Identifier(name))
-        .execute()
-        .await
-        .expect("cannot create db");
-
-    client.with_database(String::from(name))
-}
+mod common;
 
 #[tokio::test]
 async fn it_writes_then_reads() {
-    let client = prepare("it_writes_then_reads").await;
+    let client = common::prepare_database("it_writes_then_reads").await;
 
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow<'a> {
@@ -45,18 +25,15 @@ async fn it_writes_then_reads() {
         )
         .execute()
         .await
-        .expect("cannot create a table");
+        .unwrap();
 
     // Write to the table.
-    let mut insert = client.insert("some").expect("cannot insert");
+    let mut insert = client.insert("some").unwrap();
     for i in 0..1000 {
-        insert
-            .write(&MyRow { no: i, name: "foo" })
-            .await
-            .expect("cannot write()");
+        insert.write(&MyRow { no: i, name: "foo" }).await.unwrap();
     }
 
-    insert.end().await.expect("cannot end()");
+    insert.end().await.unwrap();
 
     // Read from the table.
     let mut cursor = client
@@ -64,11 +41,11 @@ async fn it_writes_then_reads() {
         .bind(500)
         .bind(504)
         .fetch::<MyRow<'_>>()
-        .expect("cannot fetch");
+        .unwrap();
 
     let mut i = 500;
 
-    while let Some(row) = cursor.next().await.expect("cannot next()") {
+    while let Some(row) = cursor.next().await.unwrap() {
         assert_eq!(row.no, i);
         assert_eq!(row.name, "foo");
         i += 1;
@@ -78,13 +55,13 @@ async fn it_writes_then_reads() {
 // See #19.
 #[tokio::test]
 async fn it_requests_long_query() {
-    let client = prepare("it_requests_long_query").await;
+    let client = common::prepare_database("it_requests_long_query").await;
 
     client
         .query("CREATE TABLE test(n String) ENGINE = MergeTree ORDER BY n")
         .execute()
         .await
-        .expect("cannot create a table");
+        .unwrap();
 
     let long_string = "A".repeat(100_000);
 
@@ -93,7 +70,7 @@ async fn it_requests_long_query() {
         .bind(&long_string)
         .fetch_one::<String>()
         .await
-        .expect("cannot query");
+        .unwrap();
 
     assert_eq!(got_string, long_string);
 }
