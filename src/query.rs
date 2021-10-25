@@ -37,9 +37,7 @@ impl Query {
     }
 
     pub async fn execute(self) -> Result<()> {
-        // TODO: should we read the body?
-        let _ = self.do_execute(false)?.resolve().await?;
-        Ok(())
+        self.do_execute(false)?.finish().await
     }
 
     /// TODO: docs, panics

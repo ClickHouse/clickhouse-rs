@@ -1,7 +1,6 @@
 use std::{future::Future, marker::PhantomData, mem, panic};
 
 use bytes::BytesMut;
-use futures::stream::TryStreamExt;
 use hyper::{self, body, Body, Request};
 use serde::Serialize;
 use tokio::task::JoinHandle;
@@ -64,12 +63,8 @@ impl<T> Insert<T> {
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
         let future = client.client.request(request);
-        let handle = tokio::spawn(async move {
-            let mut response = Response::new(future, Compression::None);
-            let chunks = response.resolve().await?;
-            while chunks.try_next().await?.is_some() {}
-            Ok(())
-        });
+        let handle =
+            tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
 
         Ok(Insert {
             buffer: BytesMut::with_capacity(BUFFER_SIZE),

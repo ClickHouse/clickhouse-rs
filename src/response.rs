@@ -35,7 +35,7 @@ impl Response {
         Self::Waiting(future, compression)
     }
 
-    pub(crate) async fn resolve(&mut self) -> Result<&mut Chunks<Body>> {
+    pub(crate) async fn chunks(&mut self) -> Result<&mut Chunks<Body>> {
         if let Self::Waiting(response, compression) = self {
             let response = response.await?;
             let status = response.status();
@@ -54,6 +54,12 @@ impl Response {
             Self::Waiting(..) => unreachable!(),
             Self::Loading(chunks) => Ok(chunks),
         }
+    }
+
+    pub(crate) async fn finish(&mut self) -> Result<()> {
+        let chunks = self.chunks().await?;
+        while chunks.try_next().await?.is_some() {}
+        Ok(())
     }
 }
 

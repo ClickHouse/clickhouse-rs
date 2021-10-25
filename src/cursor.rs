@@ -33,7 +33,7 @@ impl RawCursor {
         &mut self,
         mut f: impl FnMut(&mut BufList<Bytes>) -> ControlFlow<T>,
     ) -> Result<Option<T>> {
-        let chunks = self.response.resolve().await?;
+        let chunks = self.response.chunks().await?;
 
         loop {
             match f(&mut self.pending) {

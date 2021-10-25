@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Fixed
 - query: support borrowed long strings, [#22](https://github.com/loyd/clickhouse.rs/issues/22).
+- query: read the whole response of DDL queries.
 
 ### Changed
 - **BREAKING**: watch: require the `watch` feature.
