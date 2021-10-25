@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- mock: add `record_ddl` to test DDL queries.
+
 ## [0.9.0] - 2021-10-25
 ### Fixed
 - query: support borrowed long strings, [#22](https://github.com/loyd/clickhouse.rs/issues/22).

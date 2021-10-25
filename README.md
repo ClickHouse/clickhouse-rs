@@ -140,7 +140,7 @@ println!("live view updated: version={:?}", cursor.next().await?);
 * Only struct rows can be used. Avoid `fetch::<u64>()` and other without specified names.
 
 ### Mocking
-The crate provides utils for mocking CH server, both for SELECTs and INSERTs.
+The crate provides utils for mocking CH server and testing DDL, SELECT, INSERT and WATCH queries.
 
 The functionality can be enabled with the `test-util` feature. Use it only in dev-dependencies.
 

@@ -8,6 +8,10 @@ struct SomeRow {
     no: u32,
 }
 
+async fn make_create(client: &Client) -> Result<()> {
+    client.query("CREATE TABLE test").execute().await
+}
+
 async fn make_select(client: &Client) -> Result<Vec<SomeRow>> {
     client
         .query("SELECT ?fields FROM `who cares`")
@@ -27,10 +31,14 @@ async fn make_insert(client: &Client, data: &[SomeRow]) -> Result<()> {
 async fn main() {
     let mock = test::Mock::new();
     let client = Client::default().with_url(mock.url());
-
     let list = vec![SomeRow { no: 1 }, SomeRow { no: 2 }];
 
-    // How to test SELECTs.
+    // How to test DDL.
+    let recording = mock.add(test::handlers::record_ddl());
+    make_create(&client).await.unwrap();
+    assert!(recording.query().await.contains("CREATE TABLE"));
+
+    // How to test SELECT.
     mock.add(test::handlers::provide(stream::iter(list.clone())));
     let rows = make_select(&client).await.unwrap();
     assert_eq!(rows, list);
@@ -40,10 +48,9 @@ async fn main() {
     let reason = make_select(&client).await;
     assert_eq!(format!("{:?}", reason), r#"Err(BadResponse("Forbidden"))"#);
 
-    // How to test INSERTs.
+    // How to test INSERT.
     let recording = mock.add(test::handlers::record());
     make_insert(&client, &list).await.unwrap();
-
     let rows: Vec<SomeRow> = recording.collect().await;
     assert_eq!(rows, list);
 }

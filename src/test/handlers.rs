@@ -2,7 +2,7 @@ use std::{convert::Infallible, marker::PhantomData};
 
 use bytes::{Buf, Bytes, BytesMut};
 use futures::{
-    channel::{self, mpsc::UnboundedReceiver},
+    channel::{mpsc, oneshot},
     stream, Stream, StreamExt,
 };
 use hyper::{body, Body, Request, Response, StatusCode};
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::{Handler, HandlerFn};
 use crate::{error::Result, rowbinary, sealed::Sealed};
 
-// raw
+// === raw ===
 
 struct RawHandler<F>(Option<F>);
 
@@ -33,7 +33,7 @@ fn raw(f: impl FnOnce(Request<Body>) -> Response<Body> + Send + 'static) -> impl
     RawHandler(Some(f))
 }
 
-// failure
+// === failure ===
 
 pub fn failure(status: StatusCode) -> impl Handler {
     let reason = status.canonical_reason().unwrap_or("<unknown status code>");
@@ -45,7 +45,7 @@ pub fn failure(status: StatusCode) -> impl Handler {
     })
 }
 
-// provide
+// === provide ===
 
 pub fn provide<T>(rows: impl Stream<Item = T> + Send + 'static) -> impl Handler
 where
@@ -59,7 +59,7 @@ where
     raw(move |_req| Response::new(Body::wrap_stream(s)))
 }
 
-// record
+// === record ===
 
 struct RecordHandler<T>(PhantomData<T>);
 
@@ -71,7 +71,7 @@ where
 
     #[doc(hidden)]
     fn make(&mut self) -> (HandlerFn, Self::Control) {
-        let (tx, rx) = channel::mpsc::unbounded();
+        let (tx, rx) = mpsc::unbounded();
         let control = RecordControl(rx);
 
         let h = Box::new(move |req: Request<Body>| -> Response<Body> {
@@ -97,7 +97,7 @@ where
 
 impl<T> Sealed for RecordHandler<T> {}
 
-pub struct RecordControl<T>(UnboundedReceiver<T>);
+pub struct RecordControl<T>(mpsc::UnboundedReceiver<T>);
 
 impl<T> RecordControl<T> {
     pub async fn collect<C>(self) -> C
@@ -113,4 +113,46 @@ where
     T: for<'a> Deserialize<'a> + Send + 'static,
 {
     RecordHandler(PhantomData)
+}
+
+// === record_ddl ===
+
+struct RecordDdlHandler;
+
+impl Handler for RecordDdlHandler {
+    type Control = RecordDdlControl;
+
+    #[doc(hidden)]
+    fn make(&mut self) -> (HandlerFn, Self::Control) {
+        let (tx, rx) = oneshot::channel();
+        let control = RecordDdlControl(rx);
+
+        let h = Box::new(move |req: Request<Body>| -> Response<Body> {
+            let fut = async move {
+                let body = req.into_body();
+                let buf = body::to_bytes(body).await.expect("invalid request");
+                let _ = tx.send(buf);
+                Ok::<_, Infallible>("")
+            };
+
+            Response::new(Body::wrap_stream(stream::once(fut)))
+        });
+
+        (h, control)
+    }
+}
+
+impl Sealed for RecordDdlHandler {}
+
+pub struct RecordDdlControl(oneshot::Receiver<Bytes>);
+
+impl RecordDdlControl {
+    pub async fn query(self) -> String {
+        let buf = self.0.await.expect("query canceled");
+        String::from_utf8(buf.to_vec()).expect("query is not DDL")
+    }
+}
+
+pub fn record_ddl() -> impl Handler<Control = RecordDdlControl> {
+    RecordDdlHandler
 }
