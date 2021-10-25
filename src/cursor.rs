@@ -148,7 +148,6 @@ impl<T> JsonCursor<T> {
                     Ok(_) => {
                         let line = workaround_51132(line);
                         if let Some(line) = line.strip_suffix('\n') {
-                            println!(">>> |{}|", line);
                             match serde_json::from_str(line) {
                                 Ok(JsonRow::Row(value)) => ControlFlow::Yield(value),
                                 Ok(JsonRow::Progress { .. }) => ControlFlow::Skip,
