@@ -21,6 +21,10 @@ harness = false
 name = "select"
 harness = false
 
+[[test]]
+name = "test_watch"
+required-features = ["watch"]
+
 [[example]]
 name = "mock"
 required-features = ["test-util"]
@@ -29,9 +33,10 @@ required-features = ["test-util"]
 debug = true
 
 [features]
-default = ["lz4"] # TODO: watch-api + deprecated
+default = ["lz4"]
 
 test-util = ["hyper/server"]
+watch = ["sha-1", "serde_json"]
 
 # Compression
 lz4 = ["lz4-sys", "clickhouse-rs-cityhash-sys"]
@@ -44,14 +49,14 @@ clickhouse-derive = { version = "0.1.1", path = "derive" }
 
 thiserror = "1.0.16"
 serde = "1.0.106"
-serde_json = "1.0.68"
 bytes = "1"
 tokio = { version = "1.0.1", features = ["rt", "macros"] }
 hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream"] }
 url = "2.1.1"
 smallvec = "1.4.0"
 futures = "0.3.5"
-sha-1 = "0.9.1"
+sha-1 = { version = "0.9.1", optional = true }
+serde_json = { version = "1.0.68", optional = true }
 static_assertions = "1.1.0"
 async-compression = { version = "0.3.6", features = ["tokio"], optional = true }
 tokio-util = { version = "0.6.0", default-features = false, features = ["codec", "io"], optional = true }

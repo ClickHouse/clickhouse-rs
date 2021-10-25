@@ -109,6 +109,7 @@ async fn select_count(client: &Client) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "watch")]
 async fn watch(client: &Client) -> Result<()> {
     let mut cursor = client
         .watch("SELECT max(no) no, argMax(name, some.no) name FROM some")
@@ -153,6 +154,8 @@ async fn main() -> Result<()> {
     fetch_all(&client).await?;
     delete(&client).await?;
     select_count(&client).await?;
+
+    #[cfg(feature = "watch")]
     watch(&client).await?;
 
     Ok(())

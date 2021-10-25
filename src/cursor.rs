@@ -41,6 +41,7 @@ impl RawCursor {
                     self.pending.commit();
                     return Ok(Some(value));
                 }
+                #[cfg(feature = "serde_json")]
                 ControlFlow::Skip => {
                     self.pending.commit();
                     continue;
@@ -66,6 +67,7 @@ impl RawCursor {
 
 enum ControlFlow<T> {
     Yield(T),
+    #[cfg(feature = "serde_json")]
     Skip,
     Retry,
     Err(Error),
@@ -120,6 +122,7 @@ impl<T> RowBinaryCursor<T> {
 
 // === JsonCursor ===
 
+#[cfg(feature = "serde_json")]
 pub(crate) struct JsonCursor<T> {
     raw: RawCursor,
     line: String,
@@ -128,6 +131,7 @@ pub(crate) struct JsonCursor<T> {
 
 // We use `JSONEachRowWithProgress` to avoid infinite HTTP connections.
 // See https://github.com/ClickHouse/ClickHouse/issues/22996 for details.
+#[cfg(feature = "serde_json")]
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum JsonRow<T> {
@@ -135,6 +139,7 @@ enum JsonRow<T> {
     Progress {},
 }
 
+#[cfg(feature = "serde_json")]
 impl<T> JsonCursor<T> {
     pub(crate) fn new(response: Response) -> Self {
         Self {

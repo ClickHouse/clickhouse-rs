@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - query: support borrowed long strings, [#22](https://github.com/loyd/clickhouse.rs/issues/22).
 
 ### Changed
+- **BREAKING**: watch: require the `watch` feature.
+- **BREAKING**: watch: only struct rows are allowed because JSON requires names.
 - query: queries with invalid URLs fail with `Error::InvalidParams`.
 - watch: use `JSONEachRowWithProgress` because of [the issue](https://github.com/ClickHouse/ClickHouse/issues/22996), [#23](https://github.com/loyd/clickhouse.rs/issues/23).
-- watch: only struct rows are allowed because JSON requires names.
 
 ## [0.8.1] - 2021-08-26
 ### Fixed

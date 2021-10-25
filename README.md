@@ -118,6 +118,8 @@ client.query("DROP TABLE IF EXISTS some").execute().await?;
 ```
 
 ### Live views
+Requires the `watch` feature.
+
 ```rust
 let mut cursor = client
     .watch("SELECT max(no), argMax(name, no) FROM some")

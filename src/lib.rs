@@ -20,6 +20,8 @@ pub mod sql;
 #[cfg(feature = "test-util")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub mod test;
+#[cfg(feature = "watch")]
+#[cfg_attr(docsrs, doc(cfg(feature = "watch")))]
 pub mod watch;
 
 mod buflist;
@@ -119,6 +121,7 @@ impl Client {
         query::Query::new(self, query)
     }
 
+    #[cfg(feature = "watch")]
     pub fn watch(&self, query: &str) -> watch::Watch {
         watch::Watch::new(self, query)
     }
