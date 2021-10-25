@@ -27,14 +27,14 @@ async fn it_watches_changes() {
         .unwrap();
 
     let mut cursor1 = client
-        .watch("SELECT num FROM some ORDER BY num")
+        .watch("SELECT ?fields FROM some ORDER BY num")
         .limit(1)
         .fetch::<MyRow>()
         .unwrap();
 
     let mut cursor2 = client
-        .watch("SELECT sum(num) FROM some")
-        .fetch::<u64>()
+        .watch("SELECT sum(num) as num FROM some")
+        .fetch::<MyRow>()
         .unwrap();
 
     // Insert first batch.
@@ -45,7 +45,7 @@ async fn it_watches_changes() {
 
     assert_eq!(cursor1.next().await.unwrap(), Some((1, MyRow { num: 1 })));
     assert_eq!(cursor1.next().await.unwrap(), Some((1, MyRow { num: 2 })));
-    assert_eq!(cursor2.next().await.unwrap(), Some((1, 3)));
+    assert_eq!(cursor2.next().await.unwrap(), Some((1, MyRow { num: 3 })));
 
     // Insert second batch.
     let mut insert = client.insert("some").unwrap();
@@ -57,7 +57,7 @@ async fn it_watches_changes() {
     assert_eq!(cursor1.next().await.unwrap(), Some((2, MyRow { num: 2 })));
     assert_eq!(cursor1.next().await.unwrap(), Some((2, MyRow { num: 3 })));
     assert_eq!(cursor1.next().await.unwrap(), Some((2, MyRow { num: 4 })));
-    assert_eq!(cursor2.next().await.unwrap(), Some((2, 10)));
+    assert_eq!(cursor2.next().await.unwrap(), Some((2, MyRow { num: 10 })));
 
     // Insert third batch.
     let mut insert = client.insert("some").unwrap();
@@ -66,5 +66,7 @@ async fn it_watches_changes() {
     insert.end().await.unwrap();
 
     assert_eq!(cursor1.next().await.unwrap(), None);
-    assert_eq!(cursor2.next().await.unwrap(), Some((3, 21)));
+    assert_eq!(cursor2.next().await.unwrap(), Some((3, MyRow { num: 21 })));
 }
+
+// TODO: only_events

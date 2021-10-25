@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- watch: use `JSONEachRowWithProgress` because of [the issue](https://github.com/ClickHouse/ClickHouse/issues/22996).
+- watch: only struct rows are allowed because JSON requires names.
 
 ## [0.8.1] - 2021-08-26
 ### Fixed

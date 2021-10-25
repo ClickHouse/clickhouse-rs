@@ -4,8 +4,8 @@ use serde::Deserialize;
 use sha1::{Digest, Sha1};
 
 use crate::{
+    cursor::JsonCursor,
     error::{Error, Result},
-    query,
     row::Row,
     sql::{Bind, SqlBuilder},
     Client, Compression,
@@ -31,6 +31,7 @@ impl<V> Watch<V> {
 
     // TODO: `timeout()`.
 
+    /// Limits the number of updates after initial one.
     pub fn limit(mut self, limit: impl Into<Option<usize>>) -> Self {
         self.limit = limit.into();
         self
@@ -44,7 +45,7 @@ impl<V> Watch<V> {
 
     // TODO: `groups()` for `(Version, &[T])`.
 
-    fn cursor<T: Row>(mut self, only_events: bool) -> Result<RawCursor<T>> {
+    fn cursor<T: Row>(mut self, only_events: bool) -> Result<CursorWithInit<T>> {
         self.sql.bind_fields::<T>();
         let sql = self.sql.finish()?;
         let (sql, view) = if is_table_name(&sql) {
@@ -54,23 +55,30 @@ impl<V> Watch<V> {
             (Some(sql), view)
         };
 
-        Ok(RawCursor::Preparing {
-            client: self.client,
+        let params = WatchParams {
             sql,
             view,
             refresh: self.refresh,
             limit: self.limit,
             only_events,
-        })
+        };
+
+        Ok(CursorWithInit::Preparing(Some((self.client, params))))
     }
 }
 
 impl Watch<Rows> {
     pub(crate) fn new(client: &Client, template: &str) -> Self {
+        let client = client
+            .clone()
+            // TODO: check again.
+            // It seems `WATCH` and compression are incompatible.
+            .with_compression(Compression::None)
+            .with_option("allow_experimental_live_view", "1")
+            .with_option("output_format_json_quote_64bit_integers", "0");
+
         Self {
-            client: client
-                .clone()
-                .with_option("allow_experimental_live_view", "1"),
+            client,
             sql: SqlBuilder::new(template),
             refresh: None,
             limit: None,
@@ -98,7 +106,16 @@ impl Watch<Rows> {
         }
     }
 
+    /// # Panics
+    /// Panics if `T` are rows without specified names.
+    /// Only structs are supported in this API.
+    #[track_caller]
     pub fn fetch<T: Row>(self) -> Result<RowCursor<T>> {
+        assert!(
+            !T::COLUMN_NAMES.is_empty(),
+            "only structs are supported in the watch API"
+        );
+
         Ok(RowCursor(self.cursor(false)?))
     }
 
@@ -130,82 +147,116 @@ impl Watch<Events> {
 
 pub type Version = u64; // TODO: NonZeroU64
 
-pub struct EventCursor(RawCursor<()>);
+// === EventCursor ===
+
+/// A cursor that emits only versions.
+pub struct EventCursor(CursorWithInit<EventPayload>);
+
+#[derive(Deserialize)]
+struct EventPayload {
+    version: Version,
+}
+
+impl Row for EventPayload {
+    const COLUMN_NAMES: &'static [&'static str] = &[];
+}
 
 impl EventCursor {
+    /// Emits the next version.
     pub async fn next(&mut self) -> Result<Option<Version>> {
-        Ok(self.0.next().await?.map(|(_, version)| version))
+        Ok(self.0.next().await?.map(|payload| payload.version))
     }
 }
 
-pub struct RowCursor<T>(RawCursor<T>);
+// === RowCursor ===
+
+/// A cursor that emits `(Version, T)`.
+pub struct RowCursor<T>(CursorWithInit<RowPayload<T>>);
+
+#[derive(Deserialize)]
+struct RowPayload<T> {
+    _version: Version,
+    #[serde(flatten)]
+    data: T,
+}
+
+impl<T: Row> Row for RowPayload<T> {
+    const COLUMN_NAMES: &'static [&'static str] = T::COLUMN_NAMES;
+}
 
 impl<T> RowCursor<T> {
+    /// Emits the next row.
     pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<(Version, T)>>
     where
         T: Deserialize<'b> + Row,
     {
-        Ok(self.0.next().await?.map(|(row, version)| (version, row)))
+        Ok(self
+            .0
+            .next()
+            .await?
+            .map(|payload| (payload._version, payload.data)))
     }
 }
 
-enum RawCursor<T> {
-    Preparing {
-        client: Client,
-        sql: Option<String>,
-        view: String,
-        refresh: Option<Duration>,
-        limit: Option<usize>,
-        only_events: bool,
-    },
-    Fetching(query::RowCursor<(T, Version)>),
+// === CursorWithInit ===
+
+enum CursorWithInit<T> {
+    Preparing(Option<(Client, WatchParams)>),
+    Fetching(JsonCursor<T>),
 }
 
-impl<T> RawCursor<T> {
-    async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<(T, Version)>>
+struct WatchParams {
+    sql: Option<String>,
+    view: String,
+    refresh: Option<Duration>,
+    limit: Option<usize>,
+    only_events: bool,
+}
+
+impl<T> CursorWithInit<T> {
+    async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
     where
-        T: Deserialize<'b> + Row,
+        T: Deserialize<'b>,
     {
-        if let RawCursor::Preparing {
-            client,
-            sql,
-            view,
-            refresh,
-            limit,
-            only_events,
-        } = self
-        {
-            // It seems `WATCH` and compression are incompatible.
-            if client.compression != Compression::None {
-                take_mut::take(client, |client| client.with_compression(Compression::None))
-            }
-
-            if let Some(sql) = sql {
-                let refresh_sql =
-                    refresh.map_or_else(String::new, |d| format!("AND REFRESH {}", d.as_secs()));
-
-                let create_sql = format!(
-                    "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT {} AS {}",
-                    view, refresh_sql, sql
-                );
-
-                client.query(&create_sql).execute().await?;
-            }
-
-            let events = if *only_events { " EVENTS" } else { "" };
-            let watch_sql = match limit {
-                Some(limit) => format!("WATCH {}{} LIMIT {}", view, events, limit),
-                None => format!("WATCH {}{}", view, events),
-            };
-
-            let cursor = client.query(&watch_sql).fetch()?;
-            *self = RawCursor::Fetching(cursor);
+        if let Self::Preparing(pair) = self {
+            let (client, params) = pair.take().unwrap();
+            self.init(client, params).await?;
         }
 
         match self {
-            RawCursor::Preparing { .. } => unreachable!(),
-            RawCursor::Fetching(cursor) => Ok(cursor.next().await?),
+            Self::Fetching(cursor) => cursor.next().await,
+            Self::Preparing(_) => unreachable!(),
         }
+    }
+
+    #[cold]
+    async fn init(&mut self, client: Client, params: WatchParams) -> Result<()> {
+        if let Some(sql) = params.sql {
+            let refresh_sql = params
+                .refresh
+                .map_or_else(String::new, |d| format!("AND REFRESH {}", d.as_secs()));
+
+            let create_sql = format!(
+                "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT {} AS {}",
+                params.view, refresh_sql, sql
+            );
+
+            client.query(&create_sql).execute().await?;
+        }
+
+        let events = if params.only_events { " EVENTS" } else { "" };
+        let mut watch_sql = format!("WATCH {}{}", params.view, events);
+
+        if let Some(limit) = params.limit {
+            let _ = write!(&mut watch_sql, " LIMIT {}", limit);
+        }
+
+        watch_sql.push_str(" FORMAT JSONEachRowWithProgress");
+
+        let response = client.query(&watch_sql).do_execute(true)?;
+        *self = Self::Fetching(JsonCursor::new(response));
+
+        Ok(())
     }
 }
 

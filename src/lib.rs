@@ -24,6 +24,7 @@ pub mod watch;
 
 mod buflist;
 mod compression;
+mod cursor;
 mod response;
 mod row;
 mod rowbinary;
