@@ -29,6 +29,12 @@ pub enum Error {
     Custom(String),
     #[error("bad response: {0}")]
     BadResponse(String),
+
+    // Internally handled errors, not part of public API.
+    // XXX: move to another error?
+    #[error("internal error: too small buffer, need another {0} bytes")]
+    #[doc(hidden)]
+    TooSmallBuffer(usize),
 }
 
 assert_impl_all!(Error: StdError, Send, Sync);

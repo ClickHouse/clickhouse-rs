@@ -11,7 +11,7 @@ use crate::{
     rowbinary,
 };
 
-const BUFFER_SIZE: usize = 8 * 1024;
+const INITIAL_BUFFER_SIZE: usize = 1024;
 
 // === RawCursor ===
 
@@ -45,6 +45,10 @@ impl RawCursor {
                     self.pending.commit();
                     continue;
                 }
+                ControlFlow::Retry => {
+                    self.pending.rollback();
+                    continue;
+                }
                 ControlFlow::Err(Error::NotEnoughData) => {
                     self.pending.rollback();
                 }
@@ -63,6 +67,7 @@ impl RawCursor {
 enum ControlFlow<T> {
     Yield(T),
     Skip,
+    Retry,
     Err(Error),
 }
 
@@ -84,7 +89,7 @@ impl<T> RowBinaryCursor<T> {
     pub(crate) fn new(response: Response) -> Self {
         Self {
             raw: RawCursor::new(response),
-            buffer: vec![0; BUFFER_SIZE],
+            buffer: vec![0; INITIAL_BUFFER_SIZE],
             _marker: PhantomData,
         }
     }
@@ -99,6 +104,13 @@ impl<T> RowBinaryCursor<T> {
             .next(|pending| {
                 match rowbinary::deserialize_from(pending, &mut workaround_51132(buffer)[..]) {
                     Ok(value) => ControlFlow::Yield(value),
+                    Err(Error::TooSmallBuffer(need)) => {
+                        let new_len = (buffer.len() + need)
+                            .checked_next_power_of_two()
+                            .expect("oom");
+                        buffer.resize(new_len, 0);
+                        ControlFlow::Retry
+                    }
                     Err(err) => ControlFlow::Err(err),
                 }
             })
@@ -127,7 +139,7 @@ impl<T> JsonCursor<T> {
     pub(crate) fn new(response: Response) -> Self {
         Self {
             raw: RawCursor::new(response),
-            line: String::with_capacity(BUFFER_SIZE),
+            line: String::with_capacity(INITIAL_BUFFER_SIZE),
             _marker: PhantomData,
         }
     }

@@ -74,3 +74,41 @@ async fn it_requests_long_query() {
 
     assert_eq!(got_string, long_string);
 }
+
+// See #22.
+#[tokio::test]
+async fn it_works_with_big_borrowed_str() {
+    let client = common::prepare_database("it_works_with_big_borrowed_str").await;
+
+    #[derive(Debug, Row, Serialize, Deserialize)]
+    struct MyRow<'a> {
+        no: u32,
+        body: &'a str,
+    }
+
+    client
+        .query("CREATE TABLE test(no UInt32, body String) ENGINE = MergeTree ORDER BY no")
+        .execute()
+        .await
+        .unwrap();
+
+    let long_string = "A".repeat(10000);
+
+    let mut insert = client.insert("test").unwrap();
+    insert
+        .write(&MyRow {
+            no: 0,
+            body: &long_string,
+        })
+        .await
+        .unwrap();
+    insert.end().await.unwrap();
+
+    let mut cursor = client
+        .query("SELECT ?fields FROM test")
+        .fetch::<MyRow<'_>>()
+        .unwrap();
+
+    let row = cursor.next().await.unwrap().unwrap();
+    assert_eq!(row.body, long_string);
+}

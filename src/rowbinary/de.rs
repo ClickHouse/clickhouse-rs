@@ -1,4 +1,4 @@
-use std::{borrow::Cow, convert::TryFrom, mem, str};
+use std::{convert::TryFrom, mem, str};
 
 use bytes::Buf;
 use serde::{
@@ -33,11 +33,11 @@ impl<'de, B: Buf> RowBinaryDeserializer<'de, B> {
         Ok(vec)
     }
 
-    fn read_slice(&mut self, size: usize) -> Result<Cow<'de, [u8]>> {
+    fn read_slice(&mut self, size: usize) -> Result<&'de [u8]> {
         ensure_size(&mut self.input, size)?;
 
         if self.temp_buf.len() < size {
-            return self.read_vec(size).map(Cow::Owned);
+            return Err(Error::TooSmallBuffer(size - self.temp_buf.len()));
         }
 
         let temp_buf = mem::replace(&mut self.temp_buf, &mut []);
@@ -45,7 +45,7 @@ impl<'de, B: Buf> RowBinaryDeserializer<'de, B> {
         self.temp_buf = rest;
         self.input.copy_to_slice(slice);
 
-        Ok(Cow::Borrowed(slice))
+        Ok(slice)
     }
 
     fn read_size(&mut self) -> Result<usize> {
@@ -120,16 +120,9 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     #[inline]
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
-        match self.read_slice(size)? {
-            Cow::Borrowed(slice) => {
-                let str = str::from_utf8(slice).map_err(Error::from)?;
-                visitor.visit_borrowed_str(str)
-            }
-            Cow::Owned(vec) => {
-                let string = String::from_utf8(vec).map_err(|err| Error::from(err.utf8_error()))?;
-                visitor.visit_str(&string)
-            }
-        }
+        let slice = self.read_slice(size)?;
+        let str = str::from_utf8(slice).map_err(Error::from)?;
+        visitor.visit_borrowed_str(str)
     }
 
     #[inline]
@@ -143,10 +136,8 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     #[inline]
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
-        match self.read_slice(size)? {
-            Cow::Borrowed(slice) => visitor.visit_borrowed_bytes(slice),
-            Cow::Owned(vec) => visitor.visit_bytes(&vec),
-        }
+        let slice = self.read_slice(size)?;
+        visitor.visit_borrowed_bytes(slice)
     }
 
     #[inline]
