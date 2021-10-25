@@ -1,7 +1,3 @@
-use std::marker::PhantomData;
-
-use bytes::Bytes;
-use futures::TryStreamExt;
 use hyper::{
     header::{ACCEPT_ENCODING, CONTENT_LENGTH},
     Body, Method, Request,
@@ -10,16 +6,14 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::{
-    buflist::BufList,
+    cursor::RowBinaryCursor,
     error::{Error, Result},
     response::Response,
     row::Row,
-    rowbinary,
     sql::{Bind, SqlBuilder},
     Client,
 };
 
-const BUFFER_SIZE: usize = 8 * 1024;
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
 #[must_use]
@@ -44,19 +38,17 @@ impl Query {
 
     pub async fn execute(self) -> Result<()> {
         // TODO: should we read the body?
-        let _ = self.do_execute::<()>(false)?.resolve().await?;
+        let _ = self.do_execute(false)?.resolve().await?;
         Ok(())
     }
 
+    /// TODO: docs, panics
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
+        self.sql.bind_fields::<T>();
         self.sql.append(" FORMAT RowBinary");
 
-        Ok(RowCursor {
-            response: self.do_execute::<T>(true)?,
-            buffer: vec![0; BUFFER_SIZE],
-            pending: BufList::default(),
-            _marker: PhantomData,
-        })
+        let response = self.do_execute(true)?;
+        Ok(RowCursor(RowBinaryCursor::new(response)))
     }
 
     pub async fn fetch_one<T>(self) -> Result<T>
@@ -91,7 +83,9 @@ impl Query {
         self.fetch()
     }
 
-    fn do_execute<T: Row>(mut self, read_only: bool) -> Result<Response> {
+    pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {
+        let query = self.sql.finish()?;
+
         let mut url = Url::parse(&self.client.url).expect("TODO");
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -99,9 +93,6 @@ impl Query {
         if let Some(database) = &self.client.database {
             pairs.append_pair("database", database);
         }
-
-        self.sql.bind_fields::<T>();
-        let query = self.sql.finish()?;
 
         let use_post = !read_only || query.len() > MAX_QUERY_LEN_TO_USE_GET;
         let method = if use_post { Method::POST } else { Method::GET };
@@ -162,45 +153,15 @@ impl Query {
     }
 }
 
-pub struct RowCursor<T> {
-    response: Response,
-    buffer: Vec<u8>,
-    pending: BufList<Bytes>,
-    _marker: PhantomData<T>,
-}
+/// A cursor that emits rows.
+pub struct RowCursor<T>(RowBinaryCursor<T>);
 
 impl<T> RowCursor<T> {
-    #[allow(clippy::should_implement_trait)]
+    /// Emits the next row.
     pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
     where
         T: Deserialize<'b>,
     {
-        // XXX: a workaround for https://github.com/rust-lang/rust/issues/51132.
-        fn fuck_mut<'a, T>(ptr: &mut T) -> &'a mut T {
-            unsafe { &mut *(ptr as *mut T) }
-        }
-
-        let chunks = self.response.resolve().await?;
-
-        loop {
-            let buffer = fuck_mut(&mut self.buffer);
-
-            match rowbinary::deserialize_from(&mut self.pending, buffer) {
-                Ok(value) => {
-                    self.pending.commit();
-                    return Ok(Some(value));
-                }
-                Err(Error::NotEnoughData) => {
-                    self.pending.rollback();
-                }
-                Err(err) => return Err(err),
-            }
-
-            match chunks.try_next().await? {
-                Some(chunk) => self.pending.push(chunk),
-                None if self.pending.bufs_cnt() > 0 => return Err(Error::NotEnoughData),
-                None => return Ok(None),
-            }
-        }
+        self.0.next().await
     }
 }

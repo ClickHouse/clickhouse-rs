@@ -107,7 +107,7 @@ if stats.entries > 0 {
 * `Inserter` ends an active insert in `commit()` if thresholds (`max_entries`, `max_duration`) are reached.
 * The interval between ending active inserts is biased (±10% of `max_duration`) to avoid load spikes by parallel inserters.
 * All rows between `commit()` calls are inserted in the same `INSERT` statement.
-* Do not forget to flush if you want yo terminate inserting:
+* Do not forget to flush if you want to terminate inserting:
 ```rust
 inserter.end().await?;
 ```
@@ -131,8 +131,11 @@ let mut cursor = client.watch("some_live_view").limit(20).only_events().fetch()?
 println!("live view updated: version={:?}", cursor.next().await?);
 ```
 
+* Use [carefully](https://github.com/ClickHouse/ClickHouse/issues/28309#issuecomment-908666042).
 * This code uses or creates if not exists a temporary live view named `lv_{sha1(query)}` to reuse the same live view by parallel watchers.
 * You can specify a name instead of a query.
+* This API uses `JSONEachRowWithProgress` under the hood because of [the issue](https://github.com/ClickHouse/ClickHouse/issues/22996).
+* Only struct rows can be used. Avoid `fetch::<u64>()` and other without specified names.
 
 ### Mocking
 The crate provides utils for mocking CH server, both for SELECTs and INSERTs.
