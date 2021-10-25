@@ -76,11 +76,6 @@ impl Query {
         Ok(result)
     }
 
-    #[deprecated(since = "0.4.0", note = "use `Query::fetch()` instead")]
-    pub fn rows<T: Row>(self) -> Result<RowCursor<T>> {
-        self.fetch()
-    }
-
     pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {
         let query = self.sql.finish()?;
 
@@ -112,7 +107,6 @@ impl Query {
             pairs.append_pair("compress", "1");
         }
 
-        #[allow(deprecated)]
         if self.client.compression.encoding().is_some() {
             pairs.append_pair("enable_http_compression", "1");
         }
@@ -138,7 +132,6 @@ impl Query {
             builder = builder.header("X-ClickHouse-Key", password);
         }
 
-        #[allow(deprecated)]
         if let Some(encoding) = self.client.compression.encoding() {
             builder = builder.header(ACCEPT_ENCODING, encoding);
         }

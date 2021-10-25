@@ -86,16 +86,6 @@ impl Watch<Rows> {
         }
     }
 
-    #[deprecated(since = "0.4.0", note = "use `Watch::fetch()` instead")]
-    pub fn rows<T: Row>(self) -> Result<RowCursor<T>> {
-        self.fetch()
-    }
-
-    #[deprecated(since = "0.4.0", note = "use `Watch::only_events().fetch()` instead")]
-    pub fn events(self) -> Result<EventCursor> {
-        self.only_events().fetch()
-    }
-
     pub fn only_events(self) -> Watch<Events> {
         Watch {
             client: self.client,
