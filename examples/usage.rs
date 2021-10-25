@@ -111,7 +111,7 @@ async fn select_count(client: &Client) -> Result<()> {
 
 async fn watch(client: &Client) -> Result<()> {
     let mut cursor = client
-        .watch("SELECT max(no), argMax(name, no) FROM some")
+        .watch("SELECT max(no) no, argMax(name, some.no) name FROM some")
         .fetch::<MyRow<'_>>()?;
 
     let (version, row) = cursor.next().await?.unwrap();
@@ -131,7 +131,7 @@ async fn watch(client: &Client) -> Result<()> {
     // Or you can request only events without data.
     let mut cursor = client
         // It's possible to specify a view name.
-        .watch("lv_e1d9c5dc4a1e7f5f2fb41398156d41c88ef9ab74")
+        .watch("lv_f2ac5347c013c5b9a6c1aab7192dd97c2748daa0")
         .limit(10)
         .only_events()
         .fetch()?;
