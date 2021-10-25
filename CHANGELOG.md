@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- mock: add `record_ddl` to test DDL queries.
+- mock: add `record_ddl` handler to test DDL queries.
+- mock: add `watch` and `watch_only_events` handlers to test WATCH queries.
 
 ## [0.9.0] - 2021-10-25
 ### Fixed

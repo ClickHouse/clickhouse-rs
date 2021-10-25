@@ -52,7 +52,7 @@ where
     T: Serialize,
 {
     let s = rows.map(|row| -> Result<Bytes> {
-        let mut buffer = BytesMut::with_capacity(128);
+        let mut buffer = BytesMut::with_capacity(256);
         rowbinary::serialize_into(&mut buffer, &row)?;
         Ok(buffer.freeze())
     });
@@ -155,4 +155,52 @@ impl RecordDdlControl {
 
 pub fn record_ddl() -> impl Handler<Control = RecordDdlControl> {
     RecordDdlHandler
+}
+
+// === watch ===
+
+#[cfg(feature = "watch")]
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+enum JsonRow<T> {
+    Row(T),
+}
+
+#[cfg(feature = "watch")]
+pub fn watch<T>(rows: impl Stream<Item = (u64, T)> + Send + 'static) -> impl Handler
+where
+    T: Serialize,
+{
+    #[derive(Serialize)]
+    struct RowPayload<T> {
+        _version: u64,
+        #[serde(flatten)]
+        data: T,
+    }
+
+    let s = rows.map(|(_version, data)| -> Result<Bytes> {
+        let payload = RowPayload { _version, data };
+        let row = JsonRow::Row(payload);
+        let mut json = serde_json::to_string(&row).expect("invalid json");
+        json.push('\n');
+        Ok(json.into())
+    });
+    raw(move |_req| Response::new(Body::wrap_stream(s)))
+}
+
+#[cfg(feature = "watch")]
+pub fn watch_only_events(rows: impl Stream<Item = u64> + Send + 'static) -> impl Handler {
+    #[derive(Serialize)]
+    struct EventPayload {
+        version: u64,
+    }
+
+    let s = rows.map(|version| -> Result<Bytes> {
+        let payload = EventPayload { version };
+        let row = JsonRow::Row(payload);
+        let mut json = serde_json::to_string(&row).expect("invalid json");
+        json.push('\n');
+        Ok(json.into())
+    });
+    raw(move |_req| Response::new(Body::wrap_stream(s)))
 }

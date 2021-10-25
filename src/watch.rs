@@ -224,10 +224,10 @@ impl<T> CursorWithInit<T> {
         if let Some(sql) = params.sql {
             let refresh_sql = params
                 .refresh
-                .map_or_else(String::new, |d| format!("AND REFRESH {}", d.as_secs()));
+                .map_or_else(String::new, |d| format!(" AND REFRESH {}", d.as_secs()));
 
             let create_sql = format!(
-                "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT {} AS {}",
+                "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT{} AS {}",
                 params.view, refresh_sql, sql
             );
 
