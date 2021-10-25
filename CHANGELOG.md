@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- query: queries with invalid URLs fail with `Error::InvalidParams`.
 - watch: use `JSONEachRowWithProgress` because of [the issue](https://github.com/ClickHouse/ClickHouse/issues/22996).
 - watch: only struct rows are allowed because JSON requires names.
 

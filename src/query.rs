@@ -86,7 +86,8 @@ impl Query {
     pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {
         let query = self.sql.finish()?;
 
-        let mut url = Url::parse(&self.client.url).expect("TODO");
+        let mut url =
+            Url::parse(&self.client.url).map_err(|err| Error::InvalidParams(Box::new(err)))?;
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
 
