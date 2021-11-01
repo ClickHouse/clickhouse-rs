@@ -63,7 +63,7 @@ impl<V> Watch<V> {
             only_events,
         };
 
-        Ok(CursorWithInit::Preparing(Some((self.client, params))))
+        Ok(CursorWithInit::Preparing(self.client, params))
     }
 }
 
@@ -191,7 +191,7 @@ impl<T> RowCursor<T> {
 // === CursorWithInit ===
 
 enum CursorWithInit<T> {
-    Preparing(Option<(Client, WatchParams)>),
+    Preparing(Client, WatchParams),
     Fetching(JsonCursor<T>),
 }
 
@@ -208,46 +208,44 @@ impl<T> CursorWithInit<T> {
     where
         T: Deserialize<'b>,
     {
-        if let Self::Preparing(pair) = self {
-            let (client, params) = pair.take().unwrap();
-            self.init(client, params).await?;
+        if let Self::Preparing(client, params) = self {
+            let cursor = init_cursor(client, params).await?;
+            *self = Self::Fetching(cursor);
         }
 
         match self {
             Self::Fetching(cursor) => cursor.next().await,
-            Self::Preparing(_) => unreachable!(),
+            Self::Preparing(..) => unreachable!(),
         }
     }
+}
 
-    #[cold]
-    async fn init(&mut self, client: Client, params: WatchParams) -> Result<()> {
-        if let Some(sql) = params.sql {
-            let refresh_sql = params
-                .refresh
-                .map_or_else(String::new, |d| format!(" AND REFRESH {}", d.as_secs()));
+#[cold]
+async fn init_cursor<T>(client: &Client, params: &WatchParams) -> Result<JsonCursor<T>> {
+    if let Some(sql) = &params.sql {
+        let refresh_sql = params
+            .refresh
+            .map_or_else(String::new, |d| format!(" AND REFRESH {}", d.as_secs()));
 
-            let create_sql = format!(
-                "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT{} AS {}",
-                params.view, refresh_sql, sql
-            );
+        let create_sql = format!(
+            "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT{} AS {}",
+            params.view, refresh_sql, sql
+        );
 
-            client.query(&create_sql).execute().await?;
-        }
-
-        let events = if params.only_events { " EVENTS" } else { "" };
-        let mut watch_sql = format!("WATCH {}{}", params.view, events);
-
-        if let Some(limit) = params.limit {
-            let _ = write!(&mut watch_sql, " LIMIT {}", limit);
-        }
-
-        watch_sql.push_str(" FORMAT JSONEachRowWithProgress");
-
-        let response = client.query(&watch_sql).do_execute(true)?;
-        *self = Self::Fetching(JsonCursor::new(response));
-
-        Ok(())
+        client.query(&create_sql).execute().await?;
     }
+
+    let events = if params.only_events { " EVENTS" } else { "" };
+    let mut watch_sql = format!("WATCH {}{}", params.view, events);
+
+    if let Some(limit) = params.limit {
+        let _ = write!(&mut watch_sql, " LIMIT {}", limit);
+    }
+
+    watch_sql.push_str(" FORMAT JSONEachRowWithProgress");
+
+    let response = client.query(&watch_sql).do_execute(true)?;
+    Ok(JsonCursor::new(response))
 }
 
 fn is_table_name(sql: &str) -> bool {
