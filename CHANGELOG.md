@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- HTTP Keep-alive timeout is restricted to 2s explicitly.
+
+### Fixed
+- watch: make a cursor cancellation safe.
+
 ## [0.9.1] - 2021-10-25
 ### Added
 - mock: add `record_ddl` handler to test DDL queries.
