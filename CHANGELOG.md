@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2021-11-01
 ### Changed
 - HTTP Keep-alive timeout is restricted to 2s explicitly.
 
@@ -141,7 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::insert()` for inserting into tables.
 - `Client::query()` for selecting from tables and DDL statements.
 
-[unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.9.1...HEAD
+[unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/loyd/clickhouse.rs/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/loyd/clickhouse.rs/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/loyd/clickhouse.rs/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/loyd/clickhouse.rs/compare/v0.8.0...v0.8.1
