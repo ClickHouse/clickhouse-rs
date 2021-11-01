@@ -78,7 +78,12 @@ impl<T> Insert<T> {
     where
         T: Serialize,
     {
+        assert!(self.sender.is_some(), "write() after error");
+
         let result = rowbinary::serialize_into(&mut self.buffer, row);
+        if result.is_err() {
+            self.abort();
+        }
 
         async move {
             result?;
@@ -89,6 +94,29 @@ impl<T> Insert<T> {
 
     pub async fn end(mut self) -> Result<()> {
         self.send_chunk_if_exceeds(1).await?;
+        self.wait_handle().await
+    }
+
+    async fn send_chunk_if_exceeds(&mut self, threshold: usize) -> Result<()> {
+        if self.buffer.len() >= threshold {
+            // Hyper uses non-trivial and inefficient (see benches) schema of buffering chunks.
+            // It's difficult to determine when allocations occur.
+            // So, instead we control it manually here and rely on the system allocator.
+            let chunk = mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE));
+
+            if let Some(sender) = &mut self.sender {
+                if sender.send_data(chunk.freeze()).await.is_err() {
+                    self.abort();
+                    self.wait_handle().await?; // real error should be here.
+                    return Err(Error::Network("channel closed".into()));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn wait_handle(&mut self) -> Result<()> {
         drop(self.sender.take());
 
         match (&mut self.handle).await {
@@ -101,26 +129,15 @@ impl<T> Insert<T> {
         }
     }
 
-    async fn send_chunk_if_exceeds(&mut self, threshold: usize) -> Result<()> {
-        if self.buffer.len() >= threshold {
-            // Hyper uses non-trivial and inefficient (see benches) schema of buffering chunks.
-            // It's difficult to determine when allocations occur.
-            // So, instead we control it manually here and rely on the system allocator.
-            let chunk = mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE));
-
-            if let Some(sender) = &mut self.sender {
-                sender.send_data(chunk.freeze()).await?;
-            }
+    fn abort(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            sender.abort();
         }
-
-        Ok(())
     }
 }
 
 impl<T> Drop for Insert<T> {
     fn drop(&mut self) {
-        if let Some(sender) = self.sender.take() {
-            sender.abort();
-        }
+        self.abort();
     }
 }
