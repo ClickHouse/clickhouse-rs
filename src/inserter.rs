@@ -1,5 +1,6 @@
 use std::{future::Future, mem};
 
+use hyper::client::connect::Connect;
 use serde::Serialize;
 use tokio::time::{Duration, Instant};
 
@@ -10,8 +11,8 @@ const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(10);
 const MAX_TIME_BIAS: f64 = 0.10; // a fraction of `max_duration`
 
 #[must_use]
-pub struct Inserter<T> {
-    client: Client,
+pub struct Inserter<C, T> {
+    client: Client<C>,
     table: String,
     max_entries: u64,
     max_duration: Duration,
@@ -34,11 +35,12 @@ impl Quantities {
     };
 }
 
-impl<T> Inserter<T>
+impl<C, T> Inserter<C, T>
 where
+    C: Connect + Clone + Send + Sync + 'static,
     T: Row,
 {
-    pub(crate) fn new(client: &Client, table: &str) -> Result<Self> {
+    pub(crate) fn new(client: &Client<C>, table: &str) -> Result<Self> {
         Ok(Self {
             client: client.clone(),
             table: table.into(),

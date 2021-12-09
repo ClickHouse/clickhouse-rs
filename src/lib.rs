@@ -6,7 +6,7 @@ extern crate static_assertions;
 
 use std::{collections::HashMap, time::Duration};
 
-use hyper::client::connect::HttpConnector;
+use hyper::client::connect::{Connect, HttpConnector};
 
 pub use clickhouse_derive::Row;
 
@@ -43,8 +43,8 @@ const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
-pub struct Client {
-    client: hyper::Client<HttpConnector>,
+pub struct Client<C = HttpConnector> {
+    client: hyper::Client<C>,
 
     url: String,
     database: Option<String>,
@@ -54,7 +54,7 @@ pub struct Client {
     options: HashMap<String, String>,
 }
 
-impl Default for Client {
+impl Default for Client<HttpConnector> {
     fn default() -> Self {
         let mut connector = HttpConnector::new();
 
@@ -65,6 +65,15 @@ impl Default for Client {
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .build(connector);
 
+        Self::with_hyper_client(client)
+    }
+}
+
+impl<C> Client<C>
+where
+    C: Connect + Clone + Send + Sync + 'static,
+{
+    pub fn with_hyper_client(client: hyper::Client<C>) -> Self {
         Self {
             client,
             url: String::new(),
@@ -75,9 +84,7 @@ impl Default for Client {
             options: HashMap::new(),
         }
     }
-}
 
-impl Client {
     // TODO: use `url` crate?
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = url.into();
@@ -122,11 +129,11 @@ impl Client {
         insert::Insert::new(self, table)
     }
 
-    pub fn inserter<T: Row>(&self, table: &str) -> Result<inserter::Inserter<T>> {
+    pub fn inserter<T: Row>(&self, table: &str) -> Result<inserter::Inserter<C, T>> {
         inserter::Inserter::new(self, table)
     }
 
-    pub fn query(&self, query: &str) -> query::Query {
+    pub fn query(&self, query: &str) -> query::Query<C> {
         query::Query::new(self, query)
     }
 

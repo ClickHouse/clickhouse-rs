@@ -1,7 +1,7 @@
 use std::{future::Future, marker::PhantomData, mem, panic};
 
 use bytes::BytesMut;
-use hyper::{self, body, Body, Request};
+use hyper::{self, body, client::connect::Connect, Body, Request};
 use serde::Serialize;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -25,8 +25,9 @@ pub struct Insert<T> {
 }
 
 impl<T> Insert<T> {
-    pub(crate) fn new(client: &Client, table: &str) -> Result<Self>
+    pub(crate) fn new<C>(client: &Client<C>, table: &str) -> Result<Self>
     where
+        C: Connect + Clone + Send + Sync + 'static,
         T: Row,
     {
         let mut url = Url::parse(&client.url).expect("TODO");
