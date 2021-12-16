@@ -190,6 +190,7 @@ impl<T> RowCursor<T> {
 
 // === CursorWithInit ===
 
+#[allow(clippy::large_enum_variant)]
 enum CursorWithInit<T> {
     Preparing(Client, WatchParams),
     Fetching(JsonCursor<T>),

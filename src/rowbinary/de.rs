@@ -40,7 +40,7 @@ impl<'de, B: Buf> RowBinaryDeserializer<'de, B> {
             return Err(Error::TooSmallBuffer(size - self.temp_buf.len()));
         }
 
-        let temp_buf = mem::replace(&mut self.temp_buf, &mut []);
+        let temp_buf = mem::take(&mut self.temp_buf);
         let (slice, rest) = temp_buf.split_at_mut(size);
         self.temp_buf = rest;
         self.input.copy_to_slice(slice);
