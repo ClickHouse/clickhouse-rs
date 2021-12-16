@@ -24,6 +24,13 @@ A typed client for ClickHouse.
 * Provides API for watching live views.
 * Decompression (lz4, gzip, zlib and brotli). lz4 by default.
 
+### Plans
+* Compression for `INSERT`s.
+* One-line configuration (`schema://user:password@host[:port]/database?p=v`).
+* The builder pattern.
+* Move to `RowBinaryWithNamesAndTypes` to support type conversions and better errors.
+* Alternatives for hyper.
+
 ## Usage
 To use the crate, add this to your `Cargo.toml`:
 ```toml
