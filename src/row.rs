@@ -18,7 +18,9 @@ macro_rules! impl_primitive_for {
 }
 
 // TODO: char? &str? SocketAddr? Path? Duration? NonZero*?
-impl_primitive_for![bool, String, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize];
+impl_primitive_for![
+    bool, String, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64
+];
 
 macro_rules! impl_row_for_tuple {
     ($i:ident $($other:ident)+) => {
