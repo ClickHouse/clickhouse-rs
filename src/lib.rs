@@ -6,12 +6,12 @@ extern crate static_assertions;
 
 use std::{collections::HashMap, time::Duration};
 
-use hyper::client::connect::{Connect, HttpConnector};
+use hyper::client::connect::HttpConnector;
 
 pub use clickhouse_derive::Row;
 
 use self::error::Result;
-pub use self::{compression::Compression, row::Row};
+pub use self::{compression::Compression, http_client::BoxHttpClient, row::Row};
 
 pub mod error;
 pub mod insert;
@@ -28,6 +28,7 @@ pub mod watch;
 mod buflist;
 mod compression;
 mod cursor;
+mod http_client;
 mod response;
 mod row;
 mod rowbinary;
@@ -43,8 +44,8 @@ const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
-pub struct Client<C = HttpConnector> {
-    client: hyper::Client<C>,
+pub struct Client {
+    client: BoxHttpClient,
 
     url: String,
     database: Option<String>,
@@ -54,7 +55,7 @@ pub struct Client<C = HttpConnector> {
     options: HashMap<String, String>,
 }
 
-impl Default for Client<HttpConnector> {
+impl Default for Client {
     fn default() -> Self {
         let mut connector = HttpConnector::new();
 
@@ -65,15 +66,12 @@ impl Default for Client<HttpConnector> {
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .build(connector);
 
-        Self::with_hyper_client(client)
+        Self::with_http_client(Box::new(client))
     }
 }
 
-impl<C> Client<C>
-where
-    C: Connect + Clone + Send + Sync + 'static,
-{
-    pub fn with_hyper_client(client: hyper::Client<C>) -> Self {
+impl Client {
+    pub fn with_http_client(client: BoxHttpClient) -> Self {
         Self {
             client,
             url: String::new(),
@@ -129,11 +127,11 @@ where
         insert::Insert::new(self, table)
     }
 
-    pub fn inserter<T: Row>(&self, table: &str) -> Result<inserter::Inserter<C, T>> {
+    pub fn inserter<T: Row>(&self, table: &str) -> Result<inserter::Inserter<T>> {
         inserter::Inserter::new(self, table)
     }
 
-    pub fn query(&self, query: &str) -> query::Query<C> {
+    pub fn query(&self, query: &str) -> query::Query {
         query::Query::new(self, query)
     }
 

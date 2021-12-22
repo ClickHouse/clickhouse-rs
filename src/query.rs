@@ -1,5 +1,4 @@
 use hyper::{
-    client::connect::Connect,
     header::{ACCEPT_ENCODING, CONTENT_LENGTH},
     Body, Method, Request,
 };
@@ -19,13 +18,13 @@ const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
 #[must_use]
 #[derive(Clone)]
-pub struct Query<C> {
-    client: Client<C>,
+pub struct Query {
+    client: Client,
     sql: SqlBuilder,
 }
 
-impl<C> Query<C> where C: Connect + Clone + Send + Sync + 'static {
-    pub(crate) fn new(client: &Client<C>, template: &str) -> Self {
+impl Query {
+    pub(crate) fn new(client: &Client, template: &str) -> Self {
         Self {
             client: client.clone(),
             sql: SqlBuilder::new(template),
@@ -141,7 +140,7 @@ impl<C> Query<C> where C: Connect + Clone + Send + Sync + 'static {
             .body(body)
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        let future = self.client.client.request(request);
+        let future = self.client.client._request(request);
         Ok(Response::new(future, self.client.compression))
     }
 }
