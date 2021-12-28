@@ -97,8 +97,9 @@ where
             self.next_insert_at = shifted_next_time(now, self.next_insert_at, self.max_duration);
             let new_insert = self.client.insert(&self.table)?; // Actually it mustn't fail.
             let insert = mem::replace(&mut self.insert, new_insert);
+            let quantities = mem::replace(&mut self.committed, Quantities::ZERO);
             insert.end().await?;
-            mem::replace(&mut self.committed, Quantities::ZERO)
+            quantities
         } else {
             Quantities::ZERO
         })
