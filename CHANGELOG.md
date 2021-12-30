@@ -5,10 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- client: `Client::with_http_client` to use custom `hyper::Client`, e.g. for https ([@iwinux](https://github.com/iwinux)).
 
 ## [0.9.3] - 2021-12-21
 ### Added
-- Implement `Primitive` for `f64` and `f32`.
+- Implement `Primitive` for `f64` and `f32`, [#29](https://github.com/loyd/clickhouse.rs/issues/29).
+
+### Fixed
+- Reset quantities on errors to support reusing `Inserter` after errors ([@00nktk](https://github.com/00nktk)).
 
 ## [0.9.2] - 2021-11-01
 ### Changed
@@ -87,14 +92,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.3] - 2021-05-11
 ### Added
-- Support for `bool` values storage ([@quasiyoke](https://quasiyoke.me)).
-- `array`s' binding to SQL queries — useful at [`IN` operators](https://clickhouse.tech/docs/en/sql-reference/operators/in/), [etc](https://clickhouse.tech/docs/en/sql-reference/functions/array-functions/) ([@quasiyoke](https://quasiyoke.me)).
-- `String` values binding to SQL queries ([@quasiyoke](https://quasiyoke.me)).
+- Support for `bool` values storage ([@quasiyoke](https://github.com/quasiyoke)).
+- `array`s' binding to SQL queries — useful at [`IN` operators](https://clickhouse.tech/docs/en/sql-reference/operators/in/), [etc](https://clickhouse.tech/docs/en/sql-reference/functions/array-functions/) ([@quasiyoke](https://github.com/quasiyoke)).
+- `String` values binding to SQL queries ([@quasiyoke](https://github.com/quasiyoke)).
 - `Query::fetch_all()`
 - `sql::Identifier`
 
 ### Changed
-- Expose `query::Bind` ([@ods](https://github.com/ods/)).
+- Expose `query::Bind` ([@ods](https://github.com/ods)).
 - Deprecate `Compression::encoding()`.
 
 ## [0.6.2] - 2021-04-12
@@ -103,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.1] - 2021-04-09
 ### Fixed
-- compression: decompress error messages ([@ods](https://github.com/ods/)).
+- compression: decompress error messages ([@ods](https://github.com/ods)).
 
 ## [0.6.0] - 2021-03-24
 ### Changed
