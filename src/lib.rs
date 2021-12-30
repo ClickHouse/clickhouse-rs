@@ -4,14 +4,14 @@
 #[macro_use]
 extern crate static_assertions;
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use hyper::client::connect::HttpConnector;
 
 pub use clickhouse_derive::Row;
 
 use self::error::Result;
-pub use self::{compression::Compression, http_client::BoxHttpClient, row::Row};
+pub use self::{compression::Compression, http_client::HttpClient, row::Row};
 
 pub mod error;
 pub mod insert;
@@ -45,7 +45,7 @@ const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 pub struct Client {
-    client: BoxHttpClient,
+    client: Arc<dyn HttpClient>,
 
     url: String,
     database: Option<String>,
@@ -66,14 +66,14 @@ impl Default for Client {
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .build(connector);
 
-        Self::with_http_client(Box::new(client))
+        Self::with_http_client(client)
     }
 }
 
 impl Client {
-    pub fn with_http_client(client: BoxHttpClient) -> Self {
+    pub fn with_http_client(client: impl HttpClient) -> Self {
         Self {
-            client,
+            client: Arc::new(client),
             url: String::new(),
             database: None,
             user: None,

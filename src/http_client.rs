@@ -5,9 +5,7 @@ use hyper::{
 
 use crate::sealed::Sealed;
 
-pub type BoxHttpClient = Box<dyn HttpClient + Send + Sync + 'static>;
-
-pub trait HttpClient: Sealed + CloneBoxHttpClient {
+pub trait HttpClient: Sealed + Send + Sync + 'static {
     fn _request(&self, req: Request<Body>) -> ResponseFuture;
 }
 
@@ -19,24 +17,5 @@ where
 {
     fn _request(&self, req: Request<Body>) -> ResponseFuture {
         self.request(req)
-    }
-}
-
-pub trait CloneBoxHttpClient {
-    fn clone_box_http_client(&self) -> BoxHttpClient;
-}
-
-impl<T> CloneBoxHttpClient for T
-where
-    T: 'static + HttpClient + Clone + Send + Sync + 'static,
-{
-    fn clone_box_http_client(&self) -> BoxHttpClient {
-        Box::new(self.clone())
-    }
-}
-
-impl Clone for BoxHttpClient {
-    fn clone(&self) -> Self {
-        self.clone_box_http_client()
     }
 }
