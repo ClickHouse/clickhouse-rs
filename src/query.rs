@@ -140,7 +140,7 @@ impl Query {
             .body(body)
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        let future = self.client.client.request(request);
+        let future = self.client.client._request(request);
         Ok(Response::new(future, self.client.compression))
     }
 }

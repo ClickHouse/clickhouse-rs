@@ -4,14 +4,14 @@
 #[macro_use]
 extern crate static_assertions;
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use hyper::client::connect::HttpConnector;
 
 pub use clickhouse_derive::Row;
 
 use self::error::Result;
-pub use self::{compression::Compression, row::Row};
+pub use self::{compression::Compression, http_client::HttpClient, row::Row};
 
 pub mod error;
 pub mod insert;
@@ -28,6 +28,7 @@ pub mod watch;
 mod buflist;
 mod compression;
 mod cursor;
+mod http_client;
 mod response;
 mod row;
 mod rowbinary;
@@ -44,7 +45,7 @@ const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 pub struct Client {
-    client: hyper::Client<HttpConnector>,
+    client: Arc<dyn HttpClient>,
 
     url: String,
     database: Option<String>,
@@ -65,8 +66,14 @@ impl Default for Client {
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .build(connector);
 
+        Self::with_http_client(client)
+    }
+}
+
+impl Client {
+    pub fn with_http_client(client: impl HttpClient) -> Self {
         Self {
-            client,
+            client: Arc::new(client),
             url: String::new(),
             database: None,
             user: None,
@@ -75,9 +82,7 @@ impl Default for Client {
             options: HashMap::new(),
         }
     }
-}
 
-impl Client {
     // TODO: use `url` crate?
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = url.into();

@@ -62,7 +62,7 @@ impl<T> Insert<T> {
             .body(body)
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        let future = client.client.request(request);
+        let future = client.client._request(request);
         let handle =
             tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
 
