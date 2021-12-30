@@ -10,8 +10,8 @@ use hyper::client::connect::HttpConnector;
 
 pub use clickhouse_derive::Row;
 
-use self::error::Result;
-pub use self::{compression::Compression, http_client::HttpClient, row::Row};
+pub use self::{compression::Compression, row::Row};
+use self::{error::Result, http_client::HttpClient};
 
 pub mod error;
 pub mod insert;
