@@ -5,6 +5,7 @@ use std::{
 };
 
 use bytes::{Buf, BufMut, Bytes};
+use cityhash_rs::cityhash_102_128;
 use futures::{ready, stream::Stream};
 use lz4_sys::LZ4_decompress_safe;
 
@@ -94,7 +95,9 @@ impl<S> Lz4Decoder<S> {
     fn read_meta(&mut self) -> Result<Lz4Meta> {
         assert!(self.chunks.remaining() >= LZ4_META_SIZE);
 
-        let checksum = self.chunks.get_u128_le();
+        let checksum_high = self.chunks.get_u64_le() as u128;
+        let checksum_low = self.chunks.get_u64_le() as u128;
+        let checksum = (checksum_high << 64) | checksum_low;
         let magic = self.chunks.get_u8();
         let compressed_size = self.chunks.get_u32_le();
         let uncompressed_size = self.chunks.get_u32_le();
@@ -139,8 +142,7 @@ impl<S> Lz4Decoder<S> {
 }
 
 fn calc_checksum(buffer: &[u8]) -> u128 {
-    let hash = clickhouse_rs_cityhash_sys::city_hash_128(buffer);
-    u128::from(hash.hi) << 64 | u128::from(hash.lo)
+    cityhash_102_128(buffer)
 }
 
 fn decompress(compressed: &[u8], uncompressed: &mut [u8]) -> Result<()> {
