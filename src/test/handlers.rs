@@ -6,16 +6,18 @@ use futures::{
     stream, Stream, StreamExt,
 };
 use hyper::{body, Body, Request, Response, StatusCode};
+use sealed::sealed;
 use serde::{Deserialize, Serialize};
 
 use super::{Handler, HandlerFn};
-use crate::{error::Result, rowbinary, sealed::Sealed};
+use crate::{error::Result, rowbinary};
 
 // === raw ===
 
 struct RawHandler<F>(Option<F>);
 
-impl<F> Handler for RawHandler<F>
+#[sealed]
+impl<F> super::Handler for RawHandler<F>
 where
     F: FnOnce(Request<Body>) -> Response<Body> + Send + 'static,
 {
@@ -26,8 +28,6 @@ where
         (h, ())
     }
 }
-
-impl<F> Sealed for RawHandler<F> {}
 
 fn raw(f: impl FnOnce(Request<Body>) -> Response<Body> + Send + 'static) -> impl Handler {
     RawHandler(Some(f))
@@ -63,7 +63,8 @@ where
 
 struct RecordHandler<T>(PhantomData<T>);
 
-impl<T> Handler for RecordHandler<T>
+#[sealed]
+impl<T> super::Handler for RecordHandler<T>
 where
     T: for<'a> Deserialize<'a> + Send + 'static,
 {
@@ -95,8 +96,6 @@ where
     }
 }
 
-impl<T> Sealed for RecordHandler<T> {}
-
 pub struct RecordControl<T>(mpsc::UnboundedReceiver<T>);
 
 impl<T> RecordControl<T> {
@@ -119,7 +118,8 @@ where
 
 struct RecordDdlHandler;
 
-impl Handler for RecordDdlHandler {
+#[sealed]
+impl super::Handler for RecordDdlHandler {
     type Control = RecordDdlControl;
 
     #[doc(hidden)]
@@ -141,8 +141,6 @@ impl Handler for RecordDdlHandler {
         (h, control)
     }
 }
-
-impl Sealed for RecordDdlHandler {}
 
 pub struct RecordDdlControl(oneshot::Receiver<Bytes>);
 

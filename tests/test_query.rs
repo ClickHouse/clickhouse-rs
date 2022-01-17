@@ -37,9 +37,10 @@ async fn it_writes_then_reads() {
 
     // Read from the table.
     let mut cursor = client
-        .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
+        .query("SELECT ?fields FROM some WHERE name = ? AND no BETWEEN ? AND ?.2")
+        .bind("foo")
         .bind(500)
-        .bind(504)
+        .bind((42, 504))
         .fetch::<MyRow<'_>>()
         .unwrap();
 

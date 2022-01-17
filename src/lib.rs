@@ -33,10 +33,6 @@ mod response;
 mod row;
 mod rowbinary;
 
-mod sealed {
-    pub trait Sealed {}
-}
-
 const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 
 // ClickHouse uses 3s by default.

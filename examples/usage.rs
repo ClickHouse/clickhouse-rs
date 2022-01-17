@@ -60,7 +60,8 @@ async fn inserter(client: &Client) -> Result<()> {
 
 async fn fetch(client: &Client) -> Result<()> {
     let mut cursor = client
-        .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
+        .query("SELECT ?fields FROM some WHERE name = ? AND no BETWEEN ? AND ?")
+        .bind("foo")
         .bind(500)
         .bind(504)
         .fetch::<MyRow<'_>>()?;

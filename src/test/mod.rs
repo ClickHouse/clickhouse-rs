@@ -1,12 +1,13 @@
 use hyper::{Body, Request, Response, StatusCode};
+use sealed::sealed;
 
 pub use self::mock::Mock;
-use crate::sealed::Sealed;
 
 pub mod handlers;
 mod mock;
 
-pub trait Handler: Sealed {
+#[sealed]
+pub trait Handler {
     type Control;
 
     #[doc(hidden)]

@@ -1,5 +1,3 @@
-use std::fmt;
-
 use crate::{
     error::{Error, Result},
     row::{self, Row},
@@ -9,11 +7,12 @@ pub use bind::{Bind, Identifier};
 
 mod bind;
 pub(crate) mod escape;
+mod ser;
 
 #[derive(Clone)]
 pub(crate) enum SqlBuilder {
     InProgress { parts: Vec<Part>, size: usize },
-    Failed(fmt::Error),
+    Failed(String),
 }
 
 #[derive(Clone)]
@@ -49,7 +48,7 @@ impl SqlBuilder {
     pub(crate) fn bind_arg(&mut self, value: impl Bind) {
         if let Self::InProgress { parts, size } = self {
             if let Some(part) = parts.iter_mut().find(|p| matches!(p, Part::Arg)) {
-                let mut s = String::with_capacity(value.reserve());
+                let mut s = String::new();
 
                 if let Err(err) = value.write(&mut s) {
                     *self = SqlBuilder::Failed(err);
@@ -101,13 +100,13 @@ impl SqlBuilder {
                         }
                     }))
             }
-            Self::Failed(err) => Err(Error::InvalidParams(Box::new(err))),
+            Self::Failed(err) => Err(Error::InvalidParams(err.into())),
         }
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     // XXX: need for `derive(Row)`. Provide `row(crate = ..)` instead.

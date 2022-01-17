@@ -13,6 +13,7 @@ pub(crate) fn identifier(src: &str, dst: impl fmt::Write) -> fmt::Result {
 fn escape(src: &str, mut dst: impl fmt::Write, ch: char) -> fmt::Result {
     dst.write_char(ch)?;
 
+    // TODO: escape newlines?
     for (idx, part) in src.split(ch).enumerate() {
         if idx > 0 {
             dst.write_char('\\')?;

@@ -5,11 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Changed
-- watch: run `WATCH` queries with `max_execution_time=0`.
-
 ### Added
 - client: `Client::with_http_client` to use custom `hyper::Client`, e.g. for https ([@iwinux](https://github.com/iwinux)).
+
+### Changed
+- watch: run `WATCH` queries with `max_execution_time=0`.
+- bind: implement `Bind` for all `Serialize` instances, ([#33](https://github.com/loyd/clickhouse.rs/issues/33)).
 
 ## [0.9.3] - 2021-12-21
 ### Added
