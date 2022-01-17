@@ -113,3 +113,34 @@ async fn it_works_with_big_borrowed_str() {
     let row = cursor.next().await.unwrap().unwrap();
     assert_eq!(row.body, long_string);
 }
+
+// See #31.
+#[tokio::test]
+async fn it_fetches_all_floats() {
+    let client = common::prepare_database("it_fetches_all_floats").await;
+
+    client
+        .query("CREATE TABLE test(no UInt32, f Float64) ENGINE = MergeTree ORDER BY no")
+        .execute()
+        .await
+        .unwrap();
+
+    #[derive(Row, Serialize)]
+    struct Row {
+        no: u32,
+        f: f64,
+    }
+
+    let mut insert = client.insert("test").unwrap();
+    insert.write(&Row { no: 0, f: 42.5 }).await.unwrap();
+    insert.write(&Row { no: 1, f: 43.5 }).await.unwrap();
+    insert.end().await.unwrap();
+
+    let vec = client
+        .query("SELECT f FROM test")
+        .fetch_all::<f64>()
+        .await
+        .unwrap();
+
+    assert_eq!(vec, &[42.5, 43.5]);
+}

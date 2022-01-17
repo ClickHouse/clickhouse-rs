@@ -10,16 +10,16 @@ pub trait Row {
 pub trait Primitive {}
 
 macro_rules! impl_primitive_for {
-    ($t:ty, $($other:ty),+) => {
+    ($t:ty, $($other:tt)*) => {
         impl Primitive for $t {}
-        impl_primitive_for!($($other),+);
+        impl_primitive_for!($($other)*);
     };
-    ($t:ty) => {};
+    () => {};
 }
 
 // TODO: char? &str? SocketAddr? Path? Duration? NonZero*?
 impl_primitive_for![
-    bool, String, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64
+    bool, String, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64,
 ];
 
 macro_rules! impl_row_for_tuple {
@@ -29,7 +29,7 @@ macro_rules! impl_row_for_tuple {
         /// * (SomeRow, P1, P2, ...)
         ///
         /// The second one is useful for queries like
-        /// `SELECT ?fields, count() FROM GROUP BY ?fields`.
+        /// `SELECT ?fields, count() FROM .. GROUP BY ?fields`.
         impl<$i: Row, $($other: Primitive),+> Row for ($i, $($other),+) {
             const COLUMN_NAMES: &'static [&'static str] = $i::COLUMN_NAMES;
         }
