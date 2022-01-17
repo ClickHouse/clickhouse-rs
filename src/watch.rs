@@ -74,6 +74,7 @@ impl Watch<Rows> {
             // TODO: check again.
             // It seems `WATCH` and compression are incompatible.
             .with_compression(Compression::None)
+            .with_option("max_execution_time", "0")
             .with_option("allow_experimental_live_view", "1")
             .with_option("output_format_json_quote_64bit_integers", "0");
 
