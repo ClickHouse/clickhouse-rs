@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - watch: run `WATCH` queries with `max_execution_time=0`.
-- bind: implement `Bind` for all `Serialize` instances, ([#33](https://github.com/loyd/clickhouse.rs/issues/33)).
+- bind: implement `Bind` for all `Serialize` instances, [#33](https://github.com/loyd/clickhouse.rs/issues/33).
 
 ### Fixed
-- Implement `Primitive` for `f64`, ([#31](https://github.com/loyd/clickhouse.rs/issues/31)).
+- Implement `Primitive` for `f64`, [#31](https://github.com/loyd/clickhouse.rs/issues/31).
 
 ## [0.9.3] - 2021-12-21
 ### Added
