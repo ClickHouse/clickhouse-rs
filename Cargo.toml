@@ -1,8 +1,8 @@
 [package]
 name = "clickhouse"
-version = "0.9.3"
-description = "a typed client for ClickHouse"
-keywords = ["clickhouse", "database", "driver", "tokio"]
+version = "0.10.0"
+description = "A typed client for ClickHouse with killer features"
+keywords = ["clickhouse", "database", "driver", "tokio", "hyper"]
 authors = ["Paul Loyd <pavelko95@gmail.com>"]
 repository = "https://github.com/loyd/clickhouse.rs"
 license = "MIT OR Apache-2.0"
