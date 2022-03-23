@@ -35,10 +35,10 @@ A typed client for ClickHouse.
 To use the crate, add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-clickhouse = "0.9"
+clickhouse = "0.10"
 
 [dev-dependencies]
-clickhouse = { version = "0.9", features = ["test-util"] }
+clickhouse = { version = "0.10", features = ["test-util"] }
 ```
 
 ## Examples
