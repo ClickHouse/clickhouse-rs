@@ -7,6 +7,7 @@ extern crate static_assertions;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use hyper::client::connect::HttpConnector;
+use hyper_tls::HttpsConnector;
 
 pub use clickhouse_derive::Row;
 
@@ -67,6 +68,16 @@ impl Default for Client {
 }
 
 impl Client {
+    pub fn new_secure() -> Self {
+        let connector = HttpsConnector::new();
+
+        let client = hyper::Client::builder()
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .build::<_, hyper::Body>(connector);
+
+        Self::with_http_client(client)
+    }
+
     pub fn with_http_client(client: impl HttpClient) -> Self {
         Self {
             client: Arc::new(client),
