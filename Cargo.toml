@@ -39,7 +39,7 @@ test-util = ["hyper/server"]
 watch = ["sha-1", "serde_json"]
 
 # Compression
-lz4 = ["lz4-sys", "clickhouse-rs-cityhash-sys"]
+lz4 = ["dep:lz4", "clickhouse-rs-cityhash-sys"]
 gzip = ["async-compression", "async-compression/gzip", "tokio-util"]
 zlib = ["async-compression", "async-compression/zlib", "tokio-util"]
 brotli = ["async-compression", "async-compression/brotli", "tokio-util"]
@@ -60,7 +60,7 @@ serde_json = { version = "1.0.68", optional = true }
 static_assertions = "1.1.0"
 async-compression = { version = "0.3.6", features = ["tokio"], optional = true }
 tokio-util = { version = "0.6.0", default-features = false, features = ["codec", "io"], optional = true }
-lz4-sys = { version = "1.9.2", optional = true }
+lz4 = { version = "1.23.3", optional = true }
 clickhouse-rs-cityhash-sys = { version = "0.1.2", optional = true }
 sealed = "0.3.0"
 
