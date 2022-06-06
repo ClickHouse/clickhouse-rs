@@ -1,7 +1,4 @@
-use hyper::{
-    header::{ACCEPT_ENCODING, CONTENT_LENGTH},
-    Body, Method, Request,
-};
+use hyper::{header::CONTENT_LENGTH, Body, Method, Request};
 use serde::Deserialize;
 use url::Url;
 
@@ -102,13 +99,8 @@ impl Query {
             (Body::empty(), 0)
         };
 
-        #[cfg(feature = "lz4")]
-        if self.client.compression == crate::Compression::Lz4 {
+        if self.client.compression.is_lz4() {
             pairs.append_pair("compress", "1");
-        }
-
-        if self.client.compression.encoding().is_some() {
-            pairs.append_pair("enable_http_compression", "1");
         }
 
         for (name, value) in &self.client.options {
@@ -130,10 +122,6 @@ impl Query {
 
         if let Some(password) = &self.client.password {
             builder = builder.header("X-ClickHouse-Key", password);
-        }
-
-        if let Some(encoding) = self.client.compression.encoding() {
-            builder = builder.header(ACCEPT_ENCODING, encoding);
         }
 
         let request = builder
