@@ -7,7 +7,6 @@ use tokio::task::JoinHandle;
 use url::Url;
 
 use crate::{
-    compression,
     error::{Error, Result},
     response::Response,
     row::{self, Row},
@@ -48,8 +47,7 @@ impl<T> Insert<T> {
         let query = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields);
         pairs.append_pair("query", &query);
 
-        #[cfg(feature = "lz4")]
-        if client.compression == Compression::Lz4 {
+        if client.compression.is_lz4() {
             pairs.append_pair("decompress", "1");
         }
 
@@ -75,18 +73,11 @@ impl<T> Insert<T> {
         let handle =
             tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
 
-        #[cfg(feature = "lz4")]
-        let compression = if client.compression == Compression::Lz4 {
-            Compression::Lz4
-        } else {
-            Compression::None
-        };
-
         Ok(Self {
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
             sender: Some(sender),
             #[cfg(feature = "lz4")]
-            compression,
+            compression: client.compression,
             handle,
             _marker: PhantomData,
         })
@@ -149,8 +140,8 @@ impl<T> Insert<T> {
 
     #[cfg(feature = "lz4")]
     fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
-        Ok(if self.compression == Compression::Lz4 {
-            let compressed = compression::lz4::compress(&self.buffer)?;
+        Ok(if self.compression.is_lz4() {
+            let compressed = crate::compression::lz4::compress(&self.buffer, self.compression)?;
             self.buffer.clear();
             compressed
         } else {
@@ -160,7 +151,7 @@ impl<T> Insert<T> {
 
     #[cfg(not(feature = "lz4"))]
     fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
-        mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze()
+        Ok(mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze())
     }
 
     fn abort(&mut self) {

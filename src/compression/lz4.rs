@@ -11,6 +11,7 @@ use lz4::liblz4::LZ4_decompress_safe;
 use crate::{
     buflist::BufList,
     error::{Error, Result},
+    Compression,
 };
 
 const MAX_COMPRESSED_SIZE: u32 = 1024 * 1024 * 1024;
@@ -172,19 +173,22 @@ fn decompress(compressed: &[u8], uncompressed: &mut [u8]) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn compress(uncompressed: &[u8]) -> Result<Bytes> {
-    do_compress(uncompressed).map_err(|err| Error::Decompression(err.into()))
+pub(crate) fn compress(uncompressed: &[u8], mode: Compression) -> Result<Bytes> {
+    do_compress(uncompressed, mode).map_err(|err| Error::Decompression(err.into()))
 }
 
-fn do_compress(uncompressed: &[u8]) -> std::io::Result<Bytes> {
+fn do_compress(uncompressed: &[u8], mode: Compression) -> std::io::Result<Bytes> {
     let max_compressed_size = lz4::block::compress_bound(uncompressed.len())?;
 
     let mut buffer = BytesMut::new();
     buffer.resize(LZ4_META_SIZE + max_compressed_size, 0);
 
-    // TODO: pass settings.
-    let compressed_data_size =
-        lz4::block::compress_to_buffer(uncompressed, None, false, &mut buffer[LZ4_META_SIZE..])?;
+    let compressed_data_size = lz4::block::compress_to_buffer(
+        uncompressed,
+        Some(compression_mode(mode)),
+        false,
+        &mut buffer[LZ4_META_SIZE..],
+    )?;
 
     buffer.truncate(LZ4_META_SIZE + compressed_data_size);
 
@@ -199,6 +203,17 @@ fn do_compress(uncompressed: &[u8]) -> std::io::Result<Bytes> {
     meta.write_checksum(&mut buffer[..]);
 
     Ok(buffer.freeze())
+}
+
+fn compression_mode(mode: Compression) -> lz4::block::CompressionMode {
+    use lz4::block::CompressionMode;
+
+    match mode {
+        Compression::None => unreachable!(),
+        Compression::Lz4 => CompressionMode::DEFAULT,
+        Compression::Lz4Hc(level) => CompressionMode::HIGHCOMPRESSION(level),
+        Compression::Lz4Fast(accel) => CompressionMode::FAST(accel),
+    }
 }
 
 #[tokio::test]
@@ -258,6 +273,6 @@ fn it_compresses() {
         110, 103, 3, 97, 98, 99,
     ];
 
-    let actual = compress(&source).unwrap();
+    let actual = compress(&source, Compression::Lz4).unwrap();
     assert_eq!(actual, expected);
 }

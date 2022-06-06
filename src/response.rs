@@ -3,20 +3,12 @@ use std::{
     task::{Context, Poll},
 };
 
-#[cfg(feature = "brotli")]
-use async_compression::tokio::bufread::BrotliDecoder;
-#[cfg(feature = "gzip")]
-use async_compression::tokio::bufread::GzipDecoder;
-#[cfg(feature = "zlib")]
-use async_compression::tokio::bufread::ZlibDecoder;
 use bytes::Bytes;
 use futures::{
     future,
     stream::{self, Stream, TryStreamExt},
 };
 use hyper::{body, client::ResponseFuture, Body, StatusCode};
-#[cfg(any(feature = "brotli", feature = "gzip", feature = "zlib"))]
-use tokio_util::io::{ReaderStream, StreamReader};
 
 #[cfg(feature = "lz4")]
 use crate::compression::lz4::Lz4Decoder;
@@ -84,23 +76,15 @@ where
     S: Stream<Item = Result<Bytes, E>> + Unpin,
     Error: From<E>,
 {
-    Chunks(Box::new(match compression {
+    let inner = match compression {
         Compression::None => Inner::Plain(stream),
         #[cfg(feature = "lz4")]
-        Compression::Lz4 => Inner::Lz4(Lz4Decoder::new(stream)),
-        #[cfg(feature = "gzip")]
-        Compression::Gzip => Inner::Gzip(ReaderStream::new(GzipDecoder::new(StreamReader::new(
-            BodyAdapter(stream),
-        )))),
-        #[cfg(feature = "zlib")]
-        Compression::Zlib => Inner::Zlib(ReaderStream::new(ZlibDecoder::new(StreamReader::new(
-            BodyAdapter(stream),
-        )))),
-        #[cfg(feature = "brotli")]
-        Compression::Brotli => Inner::Brotli(ReaderStream::new(BrotliDecoder::new(
-            StreamReader::new(BodyAdapter(stream)),
-        ))),
-    }))
+        Compression::Lz4 | Compression::Lz4Hc(_) | Compression::Lz4Fast(_) => {
+            Inner::Lz4(Lz4Decoder::new(stream))
+        }
+    };
+
+    Chunks(Box::new(inner))
 }
 
 // We use `Box<_>` here to reduce the size of cursors.
@@ -110,12 +94,6 @@ enum Inner<S> {
     Plain(S),
     #[cfg(feature = "lz4")]
     Lz4(Lz4Decoder<S>),
-    #[cfg(feature = "gzip")]
-    Gzip(ReaderStream<GzipDecoder<StreamReader<BodyAdapter<S>, Bytes>>>),
-    #[cfg(feature = "zlib")]
-    Zlib(ReaderStream<ZlibDecoder<StreamReader<BodyAdapter<S>, Bytes>>>),
-    #[cfg(feature = "brotli")]
-    Brotli(ReaderStream<BrotliDecoder<StreamReader<BodyAdapter<S>, Bytes>>>),
     Empty,
 }
 
@@ -132,12 +110,6 @@ where
             Plain(inner) => Pin::new(inner).poll_next(cx).map_err(Into::into),
             #[cfg(feature = "lz4")]
             Lz4(inner) => Pin::new(inner).poll_next(cx),
-            #[cfg(feature = "gzip")]
-            Gzip(inner) => Pin::new(inner).poll_next(cx).map_err(Error::decode_io),
-            #[cfg(feature = "zlib")]
-            Zlib(inner) => Pin::new(inner).poll_next(cx).map_err(Error::decode_io),
-            #[cfg(feature = "brotli")]
-            Brotli(inner) => Pin::new(inner).poll_next(cx).map_err(Error::decode_io),
             Empty => Poll::Ready(None),
         };
 
@@ -154,36 +126,7 @@ where
             Plain(inner) => inner.size_hint(),
             #[cfg(feature = "lz4")]
             Lz4(inner) => inner.size_hint(),
-            #[cfg(feature = "gzip")]
-            Gzip(inner) => inner.size_hint(),
-            #[cfg(feature = "zlib")]
-            Zlib(inner) => inner.size_hint(),
-            #[cfg(feature = "brotli")]
-            Brotli(inner) => inner.size_hint(),
             Empty => (0, Some(0)),
         }
-    }
-}
-
-/// A stream wrapper that encodes the original error as `io::Error`.
-#[cfg(any(feature = "gzip", feature = "zlib", feature = "brotli"))]
-struct BodyAdapter<S>(S);
-
-#[cfg(any(feature = "gzip", feature = "zlib", feature = "brotli"))]
-impl<S, E> Stream for BodyAdapter<S>
-where
-    S: Stream<Item = Result<Bytes, E>> + Unpin,
-    Error: From<E>,
-{
-    type Item = std::io::Result<Bytes>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.0)
-            .poll_next(cx)
-            .map_err(|err| Error::from(err).into_io())
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
     }
 }

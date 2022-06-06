@@ -7,12 +7,10 @@ pub enum Compression {
     None,
     #[cfg(feature = "lz4")]
     Lz4,
-    #[cfg(feature = "gzip")]
-    Gzip,
-    #[cfg(feature = "zlib")]
-    Zlib,
-    #[cfg(feature = "brotli")]
-    Brotli,
+    #[cfg(feature = "lz4")]
+    Lz4Hc(i32),
+    #[cfg(feature = "lz4")]
+    Lz4Fast(i32),
 }
 
 impl Default for Compression {
@@ -30,17 +28,13 @@ impl Default for Compression {
 }
 
 impl Compression {
-    pub(crate) fn encoding(&self) -> Option<&'static str> {
-        match self {
-            Compression::None => Option::None,
-            #[cfg(feature = "lz4")]
-            Compression::Lz4 => Option::None,
-            #[cfg(feature = "gzip")]
-            Compression::Gzip => Some("gzip"),
-            #[cfg(feature = "zlib")]
-            Compression::Zlib => Some("deflate"),
-            #[cfg(feature = "brotli")]
-            Compression::Brotli => Some("br"),
-        }
+    #[cfg(feature = "lz4")]
+    pub(crate) fn is_lz4(&self) -> bool {
+        *self != Compression::None
+    }
+
+    #[cfg(not(feature = "lz4"))]
+    pub(crate) fn is_lz4(&self) -> bool {
+        false
     }
 }

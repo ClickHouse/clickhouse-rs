@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [Unreleased]
+### Added
+- compression: implement Lz4 compression for `INSERT`s ([#39]).
+
+### Changed
+- decompression: HTTP compression (gzip, zlib and brotli) isn't available anymore, only Lz4.
+
+[#39]: https://github.com/loyd/clickhouse.rs/issues/39
+
 ## [0.10.0] - 2022-01-18
 ### Added
 - client: `Client::with_http_client` to use custom `hyper::Client`, e.g. for https ([@iwinux](https://github.com/iwinux)).
@@ -123,11 +133,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.1] - 2020-11-22
 ### Added
-- Decompression: lz4.
+- decompression: lz4.
 
 ## [0.5.0] - 2020-11-19
 ### Added
-- Decompression: gzip, zlib and brotli.
+- decompression: gzip, zlib and brotli.
 
 ## [0.4.0] - 2020-11-17
 ### Added
