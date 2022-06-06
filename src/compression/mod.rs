@@ -6,16 +6,12 @@ pub(crate) mod lz4;
 pub enum Compression {
     None,
     #[cfg(feature = "lz4")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "lz4")))]
     Lz4,
     #[cfg(feature = "gzip")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "gzip")))]
     Gzip,
     #[cfg(feature = "zlib")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "zlib")))]
     Zlib,
     #[cfg(feature = "brotli")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "brotli")))]
     Brotli,
 }
 

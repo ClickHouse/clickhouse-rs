@@ -1,5 +1,6 @@
 #![warn(rust_2018_idioms, unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 #[macro_use]
 extern crate static_assertions;
@@ -19,10 +20,8 @@ pub mod inserter;
 pub mod query;
 pub mod sql;
 #[cfg(feature = "test-util")]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub mod test;
 #[cfg(feature = "watch")]
-#[cfg_attr(docsrs, doc(cfg(feature = "watch")))]
 pub mod watch;
 
 mod buflist;
