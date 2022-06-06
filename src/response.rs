@@ -79,9 +79,7 @@ where
     let inner = match compression {
         Compression::None => Inner::Plain(stream),
         #[cfg(feature = "lz4")]
-        Compression::Lz4 | Compression::Lz4Hc(_) | Compression::Lz4Fast(_) => {
-            Inner::Lz4(Lz4Decoder::new(stream))
-        }
+        Compression::Lz4 | Compression::Lz4Hc(_) => Inner::Lz4(Lz4Decoder::new(stream)),
     };
 
     Chunks(Box::new(inner))

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- compression: implement Lz4 compression for `INSERT`s ([#39]).
+- compression: implement Lz4/Lz4Hc compression modes for `INSERT`s ([#39]).
 
 ### Changed
 - decompression: HTTP compression (gzip, zlib and brotli) isn't available anymore, only Lz4.

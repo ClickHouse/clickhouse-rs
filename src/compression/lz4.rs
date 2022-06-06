@@ -212,7 +212,6 @@ fn compression_mode(mode: Compression) -> lz4::block::CompressionMode {
         Compression::None => unreachable!(),
         Compression::Lz4 => CompressionMode::DEFAULT,
         Compression::Lz4Hc(level) => CompressionMode::HIGHCOMPRESSION(level),
-        Compression::Lz4Fast(accel) => CompressionMode::FAST(accel),
     }
 }
 
