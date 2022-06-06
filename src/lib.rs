@@ -101,12 +101,7 @@ impl Client {
     }
 
     pub fn with_compression(mut self, compression: Compression) -> Self {
-        // TODO: remove when compression will be implemented.
-        self.compression = if cfg!(feature = "test-util") {
-            Compression::None
-        } else {
-            compression
-        };
+        self.compression = compression;
         self
     }
 

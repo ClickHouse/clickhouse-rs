@@ -11,6 +11,8 @@ pub enum Error {
     InvalidParams(#[source] Box<dyn StdError + Send + Sync>),
     #[error("network error: {0}")]
     Network(#[source] Box<dyn StdError + Send + Sync>),
+    #[error("compression error: {0}")]
+    Compression(#[source] Box<dyn StdError + Send + Sync>),
     #[error("decompression error: {0}")]
     Decompression(#[source] Box<dyn StdError + Send + Sync>),
     #[error("no rows returned by a query that expected to return at least one row")]

@@ -1,12 +1,13 @@
 use std::{future::Future, marker::PhantomData, mem, panic};
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use hyper::{self, body, Body, Request};
 use serde::Serialize;
 use tokio::task::JoinHandle;
 use url::Url;
 
 use crate::{
+    compression,
     error::{Error, Result},
     response::Response,
     row::{self, Row},
@@ -20,6 +21,8 @@ const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
 pub struct Insert<T> {
     buffer: BytesMut,
     sender: Option<body::Sender>,
+    #[cfg(feature = "lz4")]
+    compression: Compression,
     handle: JoinHandle<Result<()>>,
     _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
 }
@@ -44,6 +47,12 @@ impl<T> Insert<T> {
         // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers
         let query = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields);
         pairs.append_pair("query", &query);
+
+        #[cfg(feature = "lz4")]
+        if client.compression == Compression::Lz4 {
+            pairs.append_pair("decompress", "1");
+        }
+
         drop(pairs);
 
         let mut builder = Request::post(url.as_str());
@@ -66,9 +75,18 @@ impl<T> Insert<T> {
         let handle =
             tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
 
-        Ok(Insert {
+        #[cfg(feature = "lz4")]
+        let compression = if client.compression == Compression::Lz4 {
+            Compression::Lz4
+        } else {
+            Compression::None
+        };
+
+        Ok(Self {
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
             sender: Some(sender),
+            #[cfg(feature = "lz4")]
+            compression,
             handle,
             _marker: PhantomData,
         })
@@ -102,10 +120,10 @@ impl<T> Insert<T> {
             // Hyper uses non-trivial and inefficient (see benches) schema of buffering chunks.
             // It's difficult to determine when allocations occur.
             // So, instead we control it manually here and rely on the system allocator.
-            let chunk = mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE));
+            let chunk = self.take_and_prepare_chunk()?;
 
             if let Some(sender) = &mut self.sender {
-                if sender.send_data(chunk.freeze()).await.is_err() {
+                if sender.send_data(chunk).await.is_err() {
                     self.abort();
                     self.wait_handle().await?; // real error should be here.
                     return Err(Error::Network("channel closed".into()));
@@ -127,6 +145,22 @@ impl<T> Insert<T> {
                 Err(Error::Custom(format!("unexpected error: {}", err)))
             }
         }
+    }
+
+    #[cfg(feature = "lz4")]
+    fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
+        Ok(if self.compression == Compression::Lz4 {
+            let compressed = compression::lz4::compress(&self.buffer)?;
+            self.buffer.clear();
+            compressed
+        } else {
+            mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze()
+        })
+    }
+
+    #[cfg(not(feature = "lz4"))]
+    fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
+        mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze()
     }
 
     fn abort(&mut self) {
