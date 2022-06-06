@@ -13,21 +13,21 @@ A typed client for ClickHouse.
 [docs-url]: https://docs.rs/clickhouse
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: https://github.com/loyd/clickhouse.rs/blob/master/LICENSE
-[actions-badge]: https://github.com/loyd/clickhouse.rs/workflows/CI/badge.svg
-[actions-url]: https://github.com/loyd/clickhouse.rs/actions?query=workflow%3ACI+branch%3Amaster
+[actions-badge]: https://github.com/loyd/clickhouse.rs/actions/workflows/ci.yml/badge.svg
+[actions-url]: https://github.com/loyd/clickhouse.rs/actions/workflows/ci.yml
 
 ## Features
 * Uses `serde` for encoding/decoding rows.
 * Uses `RowBinary` encoding.
 * Provides API for selecting.
+* Provides API for inserting.
 * Provides API for infinite transactional (see below) inserting.
 * Provides API for watching live views.
-* Decompression (lz4, gzip, zlib and brotli). lz4 by default.
+* Compression and decompression (LZ4).
+* Provides mocks for unit testing.
 
 ### Plans
-* Compression for `INSERT`s.
 * One-line configuration (`schema://user:password@host[:port]/database?p=v`).
-* The builder pattern.
 * Move to `RowBinaryWithNamesAndTypes` to support type conversions and better errors.
 * Alternatives for hyper.
 
