@@ -33,11 +33,11 @@ required-features = ["test-util"]
 debug = true
 
 [features]
-default = ["lz4"]
+default = ["lz4c"]
 
 test-util = ["hyper/server"]
 watch = ["sha-1", "serde_json"]
-lz4 = ["dep:lz4", "clickhouse-rs-cityhash-sys"]
+lz4c = ["lz4", "clickhouse-rs-cityhash-sys"]
 
 [dependencies]
 clickhouse-derive = { version = "0.1.1", path = "derive" }
