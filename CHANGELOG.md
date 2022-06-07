@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **BREAKING** decompression: HTTP compression (gzip, zlib and brotli) isn't available anymore, only Lz4.
+- inserter: skip timer ticks if `INSERT` is too long ([#20]).
 
 [#39]: https://github.com/loyd/clickhouse.rs/issues/39
+[#20]: https://github.com/loyd/clickhouse.rs/issues/20
 
 ## [0.10.0] - 2022-01-18
 ### Added
