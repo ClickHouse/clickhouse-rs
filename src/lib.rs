@@ -1,5 +1,6 @@
 #![warn(rust_2018_idioms, unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 #[macro_use]
 extern crate static_assertions;
@@ -19,10 +20,8 @@ pub mod inserter;
 pub mod query;
 pub mod sql;
 #[cfg(feature = "test-util")]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub mod test;
 #[cfg(feature = "watch")]
-#[cfg_attr(docsrs, doc(cfg(feature = "watch")))]
 pub mod watch;
 
 mod buflist;
@@ -32,6 +31,7 @@ mod http_client;
 mod response;
 mod row;
 mod rowbinary;
+mod ticks;
 
 const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 
@@ -101,12 +101,7 @@ impl Client {
     }
 
     pub fn with_compression(mut self, compression: Compression) -> Self {
-        // TODO: remove when compression will be implemented.
-        self.compression = if cfg!(feature = "test-util") {
-            Compression::None
-        } else {
-            compression
-        };
+        self.compression = compression;
         self
     }
 
