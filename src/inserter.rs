@@ -3,7 +3,7 @@ use std::{future::Future, mem};
 use serde::Serialize;
 use tokio::time::{Duration, Instant};
 
-use crate::{error::Result, insert::Insert, row::Row, Client};
+use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client};
 
 const DEFAULT_MAX_ENTRIES: u64 = 250_000;
 const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(10);
@@ -14,9 +14,8 @@ pub struct Inserter<T> {
     client: Client,
     table: String,
     max_entries: u64,
-    max_duration: Duration,
     insert: Insert<T>,
-    next_insert_at: Instant,
+    ticks: Ticks,
     committed: Quantities,
     uncommitted_entries: u64,
 }
@@ -43,9 +42,8 @@ where
             client: client.clone(),
             table: table.into(),
             max_entries: DEFAULT_MAX_ENTRIES,
-            max_duration: DEFAULT_MAX_DURATION,
             insert: client.insert(table)?,
-            next_insert_at: Instant::now() + DEFAULT_MAX_DURATION,
+            ticks: Ticks::new(DEFAULT_MAX_DURATION, MAX_TIME_BIAS),
             committed: Quantities::ZERO,
             uncommitted_entries: 0,
         })
@@ -66,12 +64,7 @@ where
     }
 
     pub fn set_max_duration(&mut self, threshold: Duration) {
-        let prev_insert_at = self
-            .next_insert_at
-            .checked_sub(self.max_duration)
-            .unwrap_or_else(Instant::now);
-        self.next_insert_at = prev_insert_at + threshold;
-        self.max_duration = threshold;
+        self.ticks.configure(Some(threshold), Some(MAX_TIME_BIAS));
     }
 
     #[inline]
@@ -94,11 +87,10 @@ where
         let now = Instant::now();
 
         Ok(if self.is_threshold_reached(now) {
-            self.next_insert_at = shifted_next_time(now, self.next_insert_at, self.max_duration);
-            let new_insert = self.client.insert(&self.table)?; // Actually it mustn't fail.
-            let insert = mem::replace(&mut self.insert, new_insert);
             let quantities = mem::replace(&mut self.committed, Quantities::ZERO);
-            insert.end().await?;
+            let result = self.insert().await;
+            self.ticks.reschedule();
+            result?;
             quantities
         } else {
             Quantities::ZERO
@@ -111,16 +103,12 @@ where
     }
 
     fn is_threshold_reached(&self, now: Instant) -> bool {
-        self.committed.entries >= self.max_entries || now >= self.next_insert_at
+        self.committed.entries >= self.max_entries || now >= self.ticks.next_at()
     }
-}
 
-fn shifted_next_time(now: Instant, prev: Instant, max_duration: Duration) -> Instant {
-    const MAX_TIME_BIAS_255: u32 = (MAX_TIME_BIAS * 255. + 0.5) as u32;
-
-    let coef = (now.max(prev) - now.min(prev)).subsec_nanos() & 0xff;
-    let max_bias = max_duration * MAX_TIME_BIAS_255 / 255;
-    let bias = max_bias * coef / 255;
-
-    prev + max_duration + 2 * bias - max_bias
+    async fn insert(&mut self) -> Result<()> {
+        let new_insert = self.client.insert(&self.table)?; // Actually it mustn't fail.
+        let insert = mem::replace(&mut self.insert, new_insert);
+        insert.end().await
+    }
 }

@@ -4,23 +4,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [Unreleased]
+### Added
+- compression: implement Lz4/Lz4Hc compression modes for `INSERT`s ([#39]).
+
+### Changed
+- **BREAKING** decompression: HTTP compression (gzip, zlib and brotli) isn't available anymore, only Lz4.
+- inserter: skip timer ticks if `INSERT` is too long ([#20]).
+
+[#39]: https://github.com/loyd/clickhouse.rs/issues/39
+[#20]: https://github.com/loyd/clickhouse.rs/issues/20
+
 ## [0.10.0] - 2022-01-18
 ### Added
-- client: `Client::with_http_client` to use custom `hyper::Client`, e.g. for https ([@iwinux](https://github.com/iwinux)).
+- client: `Client::with_http_client` to use custom `hyper::Client`, e.g. for https ([#27]).
 
 ### Changed
 - watch: run `WATCH` queries with `max_execution_time=0`.
-- bind: implement `Bind` for all `Serialize` instances, [#33](https://github.com/loyd/clickhouse.rs/issues/33).
+- bind: implement `Bind` for all `Serialize` instances ([#33]).
 
 ### Fixed
-- Implement `Primitive` for `f64`, [#31](https://github.com/loyd/clickhouse.rs/issues/31).
+- Implement `Primitive` for `f64` ([#31]).
+
+[#33]: https://github.com/loyd/clickhouse.rs/issues/33
+[#31]: https://github.com/loyd/clickhouse.rs/issues/31
+[#27]: https://github.com/loyd/clickhouse.rs/pull/27
 
 ## [0.9.3] - 2021-12-21
 ### Added
-- Implement `Primitive` for `f64` and `f32`, [#29](https://github.com/loyd/clickhouse.rs/issues/29).
+- Implement `Primitive` for `f64` and `f32` ([#29]).
 
 ### Fixed
-- Reset quantities on errors to support reusing `Inserter` after errors ([@00nktk](https://github.com/00nktk)).
+- Reset quantities on errors to support reusing `Inserter` after errors ([#30]).
+
+[#30]: https://github.com/loyd/clickhouse.rs/pull/30
+[#29]: https://github.com/loyd/clickhouse.rs/issues/29
 
 ## [0.9.2] - 2021-11-01
 ### Changed
@@ -36,19 +55,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.0] - 2021-10-25
 ### Fixed
-- query: support borrowed long strings, [#22](https://github.com/loyd/clickhouse.rs/issues/22).
+- query: support borrowed long strings ([#22]).
 - query: read the whole response of DDL queries.
 
 ### Changed
 - **BREAKING**: watch: require the `watch` feature.
 - **BREAKING**: watch: only struct rows are allowed because JSON requires names.
 - query: queries with invalid URLs fail with `Error::InvalidParams`.
-- watch: use `JSONEachRowWithProgress` because of [the issue](https://github.com/ClickHouse/ClickHouse/issues/22996), [#23](https://github.com/loyd/clickhouse.rs/issues/23).
+- watch: use `JSONEachRowWithProgress` because of [ClickHouse#22996] ([#23]).
+
+[#23]: https://github.com/loyd/clickhouse.rs/issues/23
+[#22]: https://github.com/loyd/clickhouse.rs/issues/22
+[ClickHouse#22996]: https://github.com/ClickHouse/ClickHouse/issues/22996
 
 ## [0.8.1] - 2021-08-26
 ### Fixed
-- Support `?` inside bound arguments, [#18](https://github.com/loyd/clickhouse.rs/issues/18).
-- Use the `POST` method if a query is bigger than 8KiB, [#19](https://github.com/loyd/clickhouse.rs/issues/19).
+- Support `?` inside bound arguments ([#18]).
+- Use the `POST` method if a query is bigger than 8KiB ([#19]).
+
+[#19]: https://github.com/loyd/clickhouse.rs/issues/19
+[#18]: https://github.com/loyd/clickhouse.rs/issues/18
 
 ## [0.8.0] - 2021-07-28
 ### Fixed
@@ -63,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.1] - 2021-06-29
 ### Fixed
-- Get rid of "socket is not connected" errors (found by [@let4be](https://github.com/let4be)).
+- Get rid of "socket is not connected" errors.
 
 ### Changed
 - Set TCP keepalive to 60 seconds.
@@ -99,15 +125,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.3] - 2021-05-11
 ### Added
-- Support for `bool` values storage ([@quasiyoke](https://github.com/quasiyoke)).
-- `array`s' binding to SQL queries — useful at [`IN` operators](https://clickhouse.tech/docs/en/sql-reference/operators/in/), [etc](https://clickhouse.tech/docs/en/sql-reference/functions/array-functions/) ([@quasiyoke](https://github.com/quasiyoke)).
-- `String` values binding to SQL queries ([@quasiyoke](https://github.com/quasiyoke)).
+- Support for `bool` values storage ([#9]).
+- `array`s' binding to SQL queries — useful at `IN` operators, etc ([#9]).
+- `String` values binding to SQL queries ([#9]).
 - `Query::fetch_all()`
 - `sql::Identifier`
 
 ### Changed
-- Expose `query::Bind` ([@ods](https://github.com/ods)).
+- Expose `query::Bind` ([#11]).
 - Deprecate `Compression::encoding()`.
+
+[#11]: https://github.com/loyd/clickhouse.rs/pull/9
+[#9]: https://github.com/loyd/clickhouse.rs/pull/9
 
 ## [0.6.2] - 2021-04-12
 ### Fixed
@@ -115,7 +144,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.1] - 2021-04-09
 ### Fixed
-- compression: decompress error messages ([@ods](https://github.com/ods)).
+- compression: decompress error messages ([#7]).
+
+[#7]: https://github.com/loyd/clickhouse.rs/pull/7
 
 ## [0.6.0] - 2021-03-24
 ### Changed
@@ -123,11 +154,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.1] - 2020-11-22
 ### Added
-- Decompression: lz4.
+- decompression: lz4.
 
 ## [0.5.0] - 2020-11-19
 ### Added
-- Decompression: gzip, zlib and brotli.
+- decompression: gzip, zlib and brotli.
 
 ## [0.4.0] - 2020-11-17
 ### Added

@@ -1,10 +1,10 @@
-use std::mem;
+use std::{mem, time::Duration};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use serde::Serialize;
 use tokio::{runtime::Runtime, time::Instant};
 
-use clickhouse::{error::Result, Client, Row};
+use clickhouse::{error::Result, Client, Compression, Row};
 
 mod server {
     use std::{convert::Infallible, net::SocketAddr, thread};
@@ -51,7 +51,8 @@ fn insert(c: &mut Criterion) {
         d: u32,
     }
 
-    async fn run(client: Client, iters: u64) -> Result<()> {
+    async fn run(client: Client, iters: u64) -> Result<Duration> {
+        let start = Instant::now();
         let mut insert = client.insert("table")?;
 
         for _ in 0..iters {
@@ -65,18 +66,37 @@ fn insert(c: &mut Criterion) {
                 .await?;
         }
 
-        insert.end().await
+        insert.end().await?;
+        Ok(start.elapsed())
     }
 
     let mut group = c.benchmark_group("insert");
     group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
-    group.bench_function("insert", |b| {
+    group.bench_function("no compression", |b| {
         b.iter_custom(|iters| {
             let rt = Runtime::new().unwrap();
-            let client = Client::default().with_url(format!("http://{}", addr));
-            let start = Instant::now();
-            rt.block_on(run(client, iters)).unwrap();
-            start.elapsed()
+            let client = Client::default()
+                .with_url(format!("http://{}", addr))
+                .with_compression(Compression::None);
+            rt.block_on(run(client, iters)).unwrap()
+        })
+    });
+    group.bench_function("lz4", |b| {
+        b.iter_custom(|iters| {
+            let rt = Runtime::new().unwrap();
+            let client = Client::default()
+                .with_url(format!("http://{}", addr))
+                .with_compression(Compression::Lz4);
+            rt.block_on(run(client, iters)).unwrap()
+        })
+    });
+    group.bench_function("lz4hc(4)", |b| {
+        b.iter_custom(|iters| {
+            let rt = Runtime::new().unwrap();
+            let client = Client::default()
+                .with_url(format!("http://{}", addr))
+                .with_compression(Compression::Lz4Hc(4));
+            rt.block_on(run(client, iters)).unwrap()
         })
     });
     group.finish();
