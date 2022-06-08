@@ -18,7 +18,11 @@ impl Default for Compression {
     #[cfg(feature = "lz4")]
     #[inline]
     fn default() -> Self {
-        Compression::Lz4
+        if cfg!(feature = "test-util") {
+            Compression::None
+        } else {
+            Compression::Lz4
+        }
     }
 
     #[cfg(not(feature = "lz4"))]
