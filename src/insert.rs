@@ -19,6 +19,8 @@ const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
 #[must_use]
 pub struct Insert<T> {
     buffer: BytesMut,
+    #[cfg(feature = "wa-37420")]
+    chunk_count: usize,
     sender: Option<body::Sender>,
     #[cfg(feature = "lz4")]
     compression: Compression,
@@ -75,6 +77,8 @@ impl<T> Insert<T> {
 
         Ok(Self {
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
+            #[cfg(feature = "wa-37420")]
+            chunk_count: 0,
             sender: Some(sender),
             #[cfg(feature = "lz4")]
             compression: client.compression,
@@ -108,6 +112,10 @@ impl<T> Insert<T> {
 
     async fn send_chunk_if_exceeds(&mut self, threshold: usize) -> Result<()> {
         if self.buffer.len() >= threshold {
+            // Temporary workaround for https://github.com/ClickHouse/ClickHouse/issues/37420.
+            #[cfg(feature = "wa-37420")]
+            self.prepend_bom();
+
             // Hyper uses non-trivial and inefficient (see benches) schema of buffering chunks.
             // It's difficult to determine when allocations occur.
             // So, instead we control it manually here and rely on the system allocator.
@@ -152,6 +160,19 @@ impl<T> Insert<T> {
     #[cfg(not(feature = "lz4"))]
     fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
         Ok(mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze())
+    }
+
+    // Temporary workaround for https://github.com/ClickHouse/ClickHouse/issues/37420.
+    #[cfg(feature = "wa-37420")]
+    fn prepend_bom(&mut self) {
+        if self.chunk_count == 0 && self.buffer.starts_with(&[0xef, 0xbb, 0xbf]) {
+            let mut new_chunk = BytesMut::with_capacity(self.buffer.len() + 3);
+            new_chunk.extend_from_slice(&[0xef, 0xbb, 0xbf]);
+            new_chunk.extend_from_slice(&self.buffer);
+            self.buffer = new_chunk;
+        }
+
+        self.chunk_count += 1;
     }
 
     fn abort(&mut self) {

@@ -21,10 +21,6 @@ harness = false
 name = "select"
 harness = false
 
-[[test]]
-name = "test_watch"
-required-features = ["watch"]
-
 [[example]]
 name = "mock"
 required-features = ["test-util"]
@@ -38,6 +34,9 @@ default = ["lz4"]
 test-util = ["hyper/server"]
 watch = ["sha-1", "serde_json"]
 lz4 = ["dep:lz4", "clickhouse-rs-cityhash-sys"]
+
+# Temporary workaround for https://github.com/ClickHouse/ClickHouse/issues/37420
+wa-37420 = []
 
 [dependencies]
 clickhouse-derive = { version = "0.1.1", path = "derive" }

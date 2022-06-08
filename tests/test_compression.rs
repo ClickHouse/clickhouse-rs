@@ -53,11 +53,13 @@ async fn it_inserts_compression_none() {
     it_inserts("it_inserts_compression_none", Compression::None).await;
 }
 
+#[cfg(feature = "lz4")]
 #[tokio::test]
 async fn it_inserts_compression_lz4() {
     it_inserts("it_inserts_compression_lz4", Compression::Lz4).await;
 }
 
+#[cfg(feature = "lz4")]
 #[tokio::test]
 async fn it_inserts_compression_lz4_hc() {
     it_inserts("it_inserts_compression_lz4hc", Compression::Lz4Hc(4)).await;

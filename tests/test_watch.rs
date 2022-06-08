@@ -1,3 +1,5 @@
+#![cfg(feature = "watch")]
+
 use serde::{Deserialize, Serialize};
 
 use clickhouse::{Client, Row};

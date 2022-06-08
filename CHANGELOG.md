@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 - compression: implement Lz4/Lz4Hc compression modes for `INSERT`s ([#39]).
+- insert: feature `wa-37420` to avoid [ClickHouse#37420].
 
 ### Changed
 - **BREAKING** decompression: HTTP compression (gzip, zlib and brotli) isn't available anymore, only Lz4.
@@ -15,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [#39]: https://github.com/loyd/clickhouse.rs/issues/39
 [#20]: https://github.com/loyd/clickhouse.rs/issues/20
+[ClickHouse#37420]: https://github.com/ClickHouse/ClickHouse/issues/37420
 
 ## [0.10.0] - 2022-01-18
 ### Added

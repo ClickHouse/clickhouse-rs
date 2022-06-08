@@ -81,6 +81,7 @@ fn insert(c: &mut Criterion) {
             rt.block_on(run(client, iters)).unwrap()
         })
     });
+    #[cfg(feature = "lz4")]
     group.bench_function("lz4", |b| {
         b.iter_custom(|iters| {
             let rt = Runtime::new().unwrap();
@@ -90,6 +91,7 @@ fn insert(c: &mut Criterion) {
             rt.block_on(run(client, iters)).unwrap()
         })
     });
+    #[cfg(feature = "lz4")]
     group.bench_function("lz4hc(4)", |b| {
         b.iter_custom(|iters| {
             let rt = Runtime::new().unwrap();
