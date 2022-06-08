@@ -37,7 +37,7 @@ impl Query {
         self.do_execute(false)?.finish().await
     }
 
-    /// TODO: docs, panics
+    // TODO: docs, panics
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
         self.sql.append(" FORMAT RowBinary");

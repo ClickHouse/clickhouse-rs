@@ -6,8 +6,6 @@ use tokio::time::{Duration, Instant};
 use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client};
 
 const DEFAULT_MAX_ENTRIES: u64 = 250_000;
-const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(10);
-const MAX_TIME_BIAS: f64 = 0.10; // a fraction of `max_duration`
 
 #[must_use]
 pub struct Inserter<T> {
@@ -20,13 +18,17 @@ pub struct Inserter<T> {
     uncommitted_entries: u64,
 }
 
+/// Statistics about inserted rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Quantities {
+    /// How many rows ([`Inserter::write`]) have been inserted.
     pub entries: u64,
+    /// How many nonempty transactions ([`Inserter::commit`]) have been inserted.
     pub transactions: u64,
 }
 
 impl Quantities {
+    /// Just zero quantities, nothing special.
     pub const ZERO: Quantities = Quantities {
         entries: 0,
         transactions: 0,
@@ -43,7 +45,7 @@ where
             table: table.into(),
             max_entries: DEFAULT_MAX_ENTRIES,
             insert: client.insert(table)?,
-            ticks: Ticks::new(DEFAULT_MAX_DURATION, MAX_TIME_BIAS),
+            ticks: Ticks::default(),
             committed: Quantities::ZERO,
             uncommitted_entries: 0,
         })
@@ -54,8 +56,19 @@ where
         self
     }
 
+    pub fn with_period(mut self, period: Option<Duration>) -> Self {
+        self.set_period(period);
+        self
+    }
+
+    pub fn with_period_bias(mut self, bias: f64) -> Self {
+        self.set_period_bias(bias);
+        self
+    }
+
+    #[deprecated(note = "use `with_period()` instead")]
     pub fn with_max_duration(mut self, threshold: Duration) -> Self {
-        self.set_max_duration(threshold);
+        self.set_period(Some(threshold));
         self
     }
 
@@ -63,8 +76,17 @@ where
         self.max_entries = threshold;
     }
 
+    pub fn set_period(&mut self, period: Option<Duration>) {
+        self.ticks.set_period(period)
+    }
+
+    pub fn set_period_bias(&mut self, bias: f64) {
+        self.ticks.set_period_bias(bias)
+    }
+
+    #[deprecated(note = "use `set_period()` instead")]
     pub fn set_max_duration(&mut self, threshold: Duration) {
-        self.ticks.configure(Some(threshold), Some(MAX_TIME_BIAS));
+        self.ticks.set_period(Some(threshold));
     }
 
     #[inline]
@@ -103,7 +125,8 @@ where
     }
 
     fn is_threshold_reached(&self, now: Instant) -> bool {
-        self.committed.entries >= self.max_entries || now >= self.ticks.next_at()
+        self.committed.entries >= self.max_entries
+            || self.ticks.next_at().map_or(false, |next_at| now >= next_at)
     }
 
     async fn insert(&mut self) -> Result<()> {
