@@ -43,7 +43,7 @@ async fn inserter(client: &Client) -> Result<()> {
     let mut inserter = client
         .inserter("some")?
         .with_max_entries(100_000)
-        .with_max_duration(Duration::from_secs(15));
+        .with_period(Some(Duration::from_secs(15)));
 
     for i in 0..1000 {
         if i == 500 {
