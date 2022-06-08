@@ -89,6 +89,17 @@ where
         self.ticks.set_period(Some(threshold));
     }
 
+    /// How much time we have until the next tick.
+    ///
+    /// `None` if the period isn't configured.
+    pub fn time_left(&mut self) -> Option<Duration> {
+        Some(
+            self.ticks
+                .next_at()?
+                .saturating_duration_since(Instant::now()),
+        )
+    }
+
     #[inline]
     pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
     where
