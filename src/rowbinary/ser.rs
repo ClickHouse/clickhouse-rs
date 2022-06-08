@@ -63,13 +63,8 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     #[inline]
     fn serialize_char(self, v: char) -> Result<()> {
         //ClickHouse does not have the concept of encodings. Strings can contain an arbitrary set of bytes, which are stored and output as-is.
-        //First save lenght of "string"
-        put_unsigned_leb128(&mut self.buffer, v.len_utf8() as u64);
         let mut buff = Vec::with_capacity(v.len_utf8()); 
-        //Encode the character assuming that the encoding is utf-8
-        let _ = v.encode_utf8(&mut buff);
-        self.buffer.put_slice(&buff);
-        Ok(())
+        self.serialize_str(v.encode_utf8(&mut buff))
     }
 
     #[inline]
@@ -100,22 +95,22 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
 
     #[inline]
     fn serialize_unit(self) -> Result<()> {
-        todo!();
+        self.serialize_none()
     }
 
     #[inline]
     fn serialize_unit_struct(self, _name: &'static str) -> Result<()> {
-        todo!();
+        self.serialize_none()
     }
 
     #[inline]
     fn serialize_unit_variant(
         self,
-        _name: &'static str,
+        name: &'static str,
         _variant_index: u32,
         _variant: &'static str,
     ) -> Result<()> {
-        todo!();
+        self.serialize_str(name)
     }
 
     #[inline]
@@ -133,9 +128,10 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
         _name: &'static str,
         _variant_index: u32,
         _variant: &'static str,
-        _value: &T,
+        value: &T,
     ) -> Result<()> {
-        todo!();
+        value.serialize(self)?;
+        Ok(())
     }
 
     #[inline]
@@ -156,7 +152,7 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
         _name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleStruct> {
-        todo!();
+        todo!()
     }
 
     #[inline]
