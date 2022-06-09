@@ -1,11 +1,16 @@
+//! Contains [`Error`] and corresponding [`Result`].
+
 use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
 
 use serde::{de, ser};
 
+/// A result with a specified [`Error`] type.
 pub type Result<T, E = Error> = result::Result<T, E>;
 
+/// Represents all possible errors.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
+#[allow(missing_docs)]
 pub enum Error {
     #[error("invalid params: {0}")]
     InvalidParams(#[source] Box<dyn StdError + Send + Sync>),

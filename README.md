@@ -42,10 +42,10 @@ clickhouse = { version = "0.10", features = ["test-util"] }
 ```
 
 ## Examples
-See [more examples](examples/).
+See [more examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
 
 ### Create `Client`
-```rust
+```rust,ignore
 use clickhouse::Client;
 
 let client = Client::default()
@@ -58,7 +58,7 @@ let client = Client::default()
 * Reuse created clients or clone them in order to reuse a connection pool.
 
 ### Select rows
-```rust
+```rust,ignore
 use serde::Deserialize;
 use clickhouse::Row;
 
@@ -84,7 +84,7 @@ while let Some(row) = cursor.next().await? { .. }
 * [soa-derive](https://github.com/lumol-org/soa-derive) is useful for `Nested` types.
 
 ### Insert a batch
-```rust
+```rust,ignore
 let mut insert = client.insert("some")?;
 insert.write(&Row { no: 0, name: "foo" }).await?;
 insert.write(&Row { no: 1, name: "bar" }).await?;
@@ -97,7 +97,7 @@ insert.end().await?;
 * [ch2rs](https://github.com/loyd/ch2rs) is useful to generate a row type from ClickHouse.
 
 ### Infinite inserting
-```rust
+```rust,ignore
 let mut inserter = client.inserter("some")?
     .with_max_entries(150_000) // `250_000` by default
     .with_max_duration(Duration::from_secs(15)); // `10s` by default
@@ -115,19 +115,19 @@ if stats.entries > 0 {
 * The interval between ending active inserts is biased (±10% of `max_duration`) to avoid load spikes by parallel inserters.
 * All rows between `commit()` calls are inserted in the same `INSERT` statement.
 * Do not forget to flush if you want to terminate inserting:
-```rust
+```rust,ignore
 inserter.end().await?;
 ```
 
 ### Perform DDL
-```rust
+```rust,ignore
 client.query("DROP TABLE IF EXISTS some").execute().await?;
 ```
 
 ### Live views
 Requires the `watch` feature.
 
-```rust
+```rust,ignore
 let mut cursor = client
     .watch("SELECT max(no), argMax(name, no) FROM some")
     .fetch::<Row<'_>>()?;
@@ -149,6 +149,6 @@ println!("live view updated: version={:?}", cursor.next().await?);
 ### Mocking
 The crate provides utils for mocking CH server and testing DDL, SELECT, INSERT and WATCH queries.
 
-The functionality can be enabled with the `test-util` feature. Use it only in dev-dependencies.
+The functionality can be enabled with the `test-util` feature. Use it **only** in dev-dependencies.
 
-See [the example](examples/mock.rs).
+See [the example](https://github.com/loyd/clickhouse.rs/tree/master/examples/mock.rs).
