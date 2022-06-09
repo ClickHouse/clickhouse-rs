@@ -77,11 +77,13 @@ where
     }
 
     pub fn set_period(&mut self, period: Option<Duration>) {
-        self.ticks.set_period(period)
+        self.ticks.set_period(period);
+        self.ticks.reschedule();
     }
 
     pub fn set_period_bias(&mut self, bias: f64) {
-        self.ticks.set_period_bias(bias)
+        self.ticks.set_period_bias(bias);
+        self.ticks.reschedule();
     }
 
     #[deprecated(note = "use `set_period()` instead")]
