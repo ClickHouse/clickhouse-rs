@@ -8,6 +8,7 @@ repository = "https://github.com/loyd/clickhouse.rs"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 edition = "2018"
+rust-version = "1.60"
 
 [package.metadata.docs.rs]
 all-features = true
