@@ -2,7 +2,7 @@ use std::{
     convert::Infallible,
     net::SocketAddr,
     sync::{
-        atomic::{AtomicU16, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
     thread,
@@ -29,14 +29,10 @@ pub struct Mock {
     non_exhaustive: bool,
 }
 
-static NEXT_PORT: AtomicU16 = AtomicU16::new(15420);
-
 impl Mock {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        // TODO: need to reassign if the port has already been taken.
-        let port = NEXT_PORT.fetch_add(1, Ordering::Relaxed);
-        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        let addr = SocketAddr::from(([127, 0, 0, 1], 0));
 
         let (tx, rx) = channel::mpsc::unbounded::<HandlerFn>();
         let rx = Arc::new(Mutex::new(rx));
@@ -73,7 +69,7 @@ impl Mock {
         });
 
         let server = Server::bind(&addr).serve(make_service);
-
+        let addr = server.local_addr();
         // TODO: handle error
         tokio::spawn(server);
 
