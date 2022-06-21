@@ -138,6 +138,7 @@ impl Client {
     /// # Examples
     /// ```
     /// # use clickhouse::{Client, Compression};
+    /// # #[cfg(feature = "lz4")]
     /// let client = Client::default().with_compression(Compression::Lz4Hc(4));
     /// ```
     pub fn with_compression(mut self, compression: Compression) -> Self {
