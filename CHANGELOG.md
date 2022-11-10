@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+## [0.11.0] - 2022-11-10
 ### Added
 - compression: implement Lz4/Lz4Hc compression modes for `INSERT`s ([#39]).
 - insert: the `wa-37420` feature to avoid [ClickHouse#37420].
@@ -197,7 +199,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/loyd/clickhouse.rs/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/loyd/clickhouse.rs/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/loyd/clickhouse.rs/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/loyd/clickhouse.rs/compare/v0.9.1...v0.9.2
