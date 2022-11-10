@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, unused_macros)]
+
 use clickhouse::{sql, Client};
 
 const HOST: &str = "localhost:8123";

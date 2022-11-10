@@ -1,7 +1,7 @@
 #[cfg(feature = "lz4")]
 pub(crate) mod lz4;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Compression {
     None,
