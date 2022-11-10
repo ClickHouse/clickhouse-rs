@@ -22,6 +22,8 @@ pub mod query;
 pub mod sql;
 #[cfg(feature = "test-util")]
 pub mod test;
+#[cfg(feature = "uuid")]
+pub mod uuid;
 #[cfg(feature = "watch")]
 pub mod watch;
 

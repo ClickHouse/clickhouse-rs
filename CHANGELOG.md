@@ -9,16 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - ReleaseDate
 ### Added
 - compression: implement Lz4/Lz4Hc compression modes for `INSERT`s ([#39]).
-- insert: feature `wa-37420` to avoid [ClickHouse#37420].
+- insert: the `wa-37420` feature to avoid [ClickHouse#37420].
 - inserter: new method `Inserter::time_left()`.
+- uuid: the `uuid` feature and a corresponding module to ser/de [`uuid::Uuid`] ([#26]).
 
 ### Changed
 - **BREAKING** decompression: HTTP compression (gzip, zlib and brotli) isn't available anymore, only Lz4.
 - inserter: skip timer ticks if `INSERT` is too long ([#20]).
 
 [#39]: https://github.com/loyd/clickhouse.rs/issues/39
+[#26]: https://github.com/loyd/clickhouse.rs/issues/26
 [#20]: https://github.com/loyd/clickhouse.rs/issues/20
 [ClickHouse#37420]: https://github.com/ClickHouse/ClickHouse/issues/37420
+[`uuid::Uuid`]: https://docs.rs/uuid/latest/uuid/struct.Uuid.html
 
 ## [0.10.0] - 2022-01-18
 ### Added

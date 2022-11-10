@@ -146,6 +146,17 @@ println!("live view updated: version={:?}", cursor.next().await?);
 * This API uses `JSONEachRowWithProgress` under the hood because of [the issue](https://github.com/ClickHouse/ClickHouse/issues/22996).
 * Only struct rows can be used. Avoid `fetch::<u64>()` and other without specified names.
 
+### UUID
+Requires the `uuid` feature.
+
+```rust,ignore
+#[derive(Row, Deserialize)]
+struct MyRow {
+    #[serde(with = "clickhouse::uuid")]
+    uuid: uuid::Uuid,
+}
+```
+
 ### Mocking
 The crate provides utils for mocking CH server and testing DDL, SELECT, INSERT and WATCH queries.
 
