@@ -26,11 +26,6 @@ A typed client for ClickHouse.
 * Compression and decompression (LZ4).
 * Provides mocks for unit testing.
 
-### Plans
-* One-line configuration (`schema://user:password@host[:port]/database?p=v`).
-* Move to `RowBinaryWithNamesAndTypes` to support type conversions and better errors.
-* Alternatives for hyper.
-
 ## Usage
 To use the crate, add this to your `Cargo.toml`:
 ```toml
@@ -41,8 +36,10 @@ clickhouse = "0.10"
 clickhouse = { version = "0.10", features = ["test-util"] }
 ```
 
-## Examples
-See [more examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
+See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
+
+### Note about old versions of ClickHouse
+CH server older than v22.6 (2022-06-16) handles `RowBinary` [incorrectly](https://github.com/ClickHouse/ClickHouse/issues/37420) in some rare cases. Enable `wa-37420` feature to solve this problem. Don't use it for newer versions.
 
 ### Create `Client`
 ```rust,ignore
@@ -91,7 +88,7 @@ insert.write(&Row { no: 1, name: "bar" }).await?;
 insert.end().await?;
 ```
 
-* If `end()` isn't called the insertion will be aborted.
+* If `end()` isn't called, the `INSERT` is aborted.
 * Rows are being sent progressively to spread network load.
 * ClickHouse inserts batches atomically only if all rows fit in the same partition and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
 * [ch2rs](https://github.com/loyd/ch2rs) is useful to generate a row type from ClickHouse.
@@ -99,20 +96,22 @@ insert.end().await?;
 ### Infinite inserting
 ```rust,ignore
 let mut inserter = client.inserter("some")?
-    .with_max_entries(150_000) // `250_000` by default
-    .with_max_duration(Duration::from_secs(15)); // `10s` by default
+    .with_max_entries(500_000) // `250_000` by default
+    .with_period(Some(Duration::from_secs(15))); // `None` by default
 
 inserter.write(&Row { no: 0, name: "foo" }).await?;
 inserter.write(&Row { no: 1, name: "bar" }).await?;
 let stats = inserter.commit().await?;
 if stats.entries > 0 {
-    println!("{} entries ({} transactions) have been inserted",
-        stats.entries, stats.transactions);
+    println!(
+        "{} entries ({} transactions) have been inserted",
+        stats.entries, stats.transactions,
+    );
 }
 ```
 
-* `Inserter` ends an active insert in `commit()` if thresholds (`max_entries`, `max_duration`) are reached.
-* The interval between ending active inserts is biased (±10% of `max_duration`) to avoid load spikes by parallel inserters.
+* `Inserter` ends an active insert in `commit()` if thresholds (`max_entries`, `period`) are reached.
+* The interval between ending active `INSERT`s can be biased by using `with_period_bias` to avoid load spikes by parallel inserters.
 * All rows between `commit()` calls are inserted in the same `INSERT` statement.
 * Do not forget to flush if you want to terminate inserting:
 ```rust,ignore

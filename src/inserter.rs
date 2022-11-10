@@ -7,6 +7,9 @@ use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client};
 
 const DEFAULT_MAX_ENTRIES: u64 = 250_000;
 
+/// Performs multiple consecutive `INSERT`s.
+///
+/// Rows are being sent progressively to spread network load.
 #[must_use]
 pub struct Inserter<T> {
     client: Client,
@@ -51,16 +54,36 @@ where
         })
     }
 
+    /// The maximum number of rows in one `INSERT` statement.
+    ///
+    /// Note: ClickHouse inserts batches atomically only if all rows fit in the same partition
+    /// and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
+    ///
+    /// `250_000` by default.
     pub fn with_max_entries(mut self, threshold: u64) -> Self {
         self.set_max_entries(threshold);
         self
     }
 
+    /// The time between `INSERT`s.
+    ///
+    /// Note that [`Inserter`] doesn't spawn tasks or threads to check the elapsed time,
+    /// all checks are performend only on [`Inserter::commit()`] calls.
+    /// However, it's possible to use [`Inserter::time_left()`] and set a timer up
+    /// to call [`Inserter::commit()`] to check passed time again.
+    ///
+    /// `None` by default.
     pub fn with_period(mut self, period: Option<Duration>) -> Self {
         self.set_period(period);
         self
     }
 
+    /// Adds a bias to the period. The actual period will be in the following range:
+    /// ```ignore
+    ///   [period * (1 - bias), period * (1 + bias)]
+    /// ```
+    ///
+    /// It helps to avoid producing a lot of `INSERT`s at the same time by multiple inserters.
     pub fn with_period_bias(mut self, bias: f64) -> Self {
         self.set_period_bias(bias);
         self
@@ -72,15 +95,18 @@ where
         self
     }
 
+    /// See [`Inserter::with_max_entries()`].
     pub fn set_max_entries(&mut self, threshold: u64) {
         self.max_entries = threshold;
     }
 
+    /// See [`Inserter::with_period()`].
     pub fn set_period(&mut self, period: Option<Duration>) {
         self.ticks.set_period(period);
         self.ticks.reschedule();
     }
 
+    /// See [`Inserter::with_period_bias()`].
     pub fn set_period_bias(&mut self, bias: f64) {
         self.ticks.set_period_bias(bias);
         self.ticks.reschedule();
@@ -102,6 +128,10 @@ where
         )
     }
 
+    /// Serializes and writes to the socket a provided row.
+    ///
+    /// # Panics
+    /// If called after previous call returned an error.
     #[inline]
     pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
     where
@@ -112,6 +142,7 @@ where
         async move { fut.await }
     }
 
+    /// Checks limits and ends a current `INSERT` if they are reached.
     pub async fn commit(&mut self) -> Result<Quantities> {
         if self.uncommitted_entries > 0 {
             self.committed.entries += self.uncommitted_entries;
@@ -132,6 +163,9 @@ where
         })
     }
 
+    /// Ends a current `INSERT` and whole `Inserter` unconditionally.
+    ///
+    /// If it isn't called, the current `INSERT` is aborted.
     pub async fn end(self) -> Result<Quantities> {
         self.insert.end().await?;
         Ok(self.committed)

@@ -16,6 +16,9 @@ use crate::{
 const BUFFER_SIZE: usize = 128 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
 
+/// Performs only one `INSERT`.
+///
+/// Rows are being sent progressively to spread network load.
 #[must_use]
 pub struct Insert<T> {
     buffer: BytesMut,
@@ -87,6 +90,10 @@ impl<T> Insert<T> {
         })
     }
 
+    /// Serializes and writes to the socket a provided row.
+    ///
+    /// # Panics
+    /// If called after previous call returned an error.
     pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
     where
         T: Serialize,
@@ -105,6 +112,9 @@ impl<T> Insert<T> {
         }
     }
 
+    /// Ends `INSERT`.
+    ///
+    /// If it isn't called, the last `INSERT` is aborted.
     pub async fn end(mut self) -> Result<()> {
         self.send_chunk_if_exceeds(1).await?;
         self.wait_handle().await
