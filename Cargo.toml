@@ -33,7 +33,7 @@ debug = true
 default = ["lz4"]
 
 test-util = ["hyper/server"]
-watch = ["dep:sha-1", "serde_json"]
+watch = ["dep:sha-1", "dep:serde_json"]
 lz4 = ["dep:lz4", "dep:clickhouse-rs-cityhash-sys"]
 uuid = ["dep:uuid"]
 
