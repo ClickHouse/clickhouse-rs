@@ -4,9 +4,10 @@ use clickhouse::Row;
 
 mod common;
 
+#[common::named]
 #[tokio::test]
-async fn it_writes_then_reads() {
-    let client = common::prepare_database("it_writes_then_reads").await;
+async fn smoke() {
+    let client = common::prepare_database!();
 
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow<'a> {
@@ -18,7 +19,7 @@ async fn it_writes_then_reads() {
     client
         .query(
             "
-            CREATE TABLE some(no UInt32, name LowCardinality(String))
+            CREATE TABLE test(no UInt32, name LowCardinality(String))
             ENGINE = MergeTree
             ORDER BY no
         ",
@@ -28,7 +29,7 @@ async fn it_writes_then_reads() {
         .unwrap();
 
     // Write to the table.
-    let mut insert = client.insert("some").unwrap();
+    let mut insert = client.insert("test").unwrap();
     for i in 0..1000 {
         insert.write(&MyRow { no: i, name: "foo" }).await.unwrap();
     }
@@ -37,7 +38,7 @@ async fn it_writes_then_reads() {
 
     // Read from the table.
     let mut cursor = client
-        .query("SELECT ?fields FROM some WHERE name = ? AND no BETWEEN ? AND ?.2")
+        .query("SELECT ?fields FROM test WHERE name = ? AND no BETWEEN ? AND ?.2")
         .bind("foo")
         .bind(500)
         .bind((42, 504))
@@ -54,9 +55,10 @@ async fn it_writes_then_reads() {
 }
 
 // See #19.
+#[common::named]
 #[tokio::test]
-async fn it_requests_long_query() {
-    let client = common::prepare_database("it_requests_long_query").await;
+async fn long_query() {
+    let client = common::prepare_database!();
 
     client
         .query("CREATE TABLE test(n String) ENGINE = MergeTree ORDER BY n")
@@ -77,9 +79,10 @@ async fn it_requests_long_query() {
 }
 
 // See #22.
+#[common::named]
 #[tokio::test]
-async fn it_works_with_big_borrowed_str() {
-    let client = common::prepare_database("it_works_with_big_borrowed_str").await;
+async fn big_borrowed_str() {
+    let client = common::prepare_database!();
 
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow<'a> {
@@ -115,9 +118,10 @@ async fn it_works_with_big_borrowed_str() {
 }
 
 // See #31.
+#[common::named]
 #[tokio::test]
-async fn it_fetches_all_floats() {
-    let client = common::prepare_database("it_fetches_all_floats").await;
+async fn all_floats() {
+    let client = common::prepare_database!();
 
     client
         .query("CREATE TABLE test(no UInt32, f Float64) ENGINE = MergeTree ORDER BY no")

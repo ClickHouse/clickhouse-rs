@@ -6,9 +6,10 @@ use clickhouse::Row;
 
 mod common;
 
+#[common::named]
 #[tokio::test]
-async fn wa_37420() {
-    let client = common::prepare_database("wa_37420").await;
+async fn smoke() {
+    let client = common::prepare_database!();
 
     #[derive(Debug, Row, Serialize, Deserialize)]
     pub struct Row {
@@ -24,7 +25,7 @@ async fn wa_37420() {
 
     // Create a table.
     client
-        .query("CREATE TABLE some(name String, time UInt64) ENGINE = MergeTree ORDER BY time")
+        .query("CREATE TABLE test(name String, time UInt64) ENGINE = MergeTree ORDER BY time")
         .execute()
         .await
         .unwrap();
@@ -35,13 +36,13 @@ async fn wa_37420() {
     };
 
     // Write to the table.
-    let mut insert = client.insert("some").unwrap();
+    let mut insert = client.insert("test").unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 
     // Read from the table.
     let inserted = client
-        .query("SELECT ?fields FROM some WHERE name = 'first'")
+        .query("SELECT ?fields FROM test WHERE name = 'first'")
         .fetch_one::<Row>()
         .await
         .unwrap();
@@ -56,13 +57,13 @@ async fn wa_37420() {
     };
 
     // Write to the table.
-    let mut insert = client.insert("some").unwrap();
+    let mut insert = client.insert("test").unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 
     // Read from the table.
     let inserted = client
-        .query("SELECT ?fields FROM some WHERE name = 'second'")
+        .query("SELECT ?fields FROM test WHERE name = 'second'")
         .fetch_one::<Row>()
         .await
         .unwrap();

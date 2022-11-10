@@ -15,7 +15,7 @@ async fn create_table(client: &Client) {
     client
         .query(
             "
-            CREATE TABLE some(num UInt32)
+            CREATE TABLE test(num UInt32)
             ENGINE = MergeTree
             ORDER BY num
         ",
@@ -26,27 +26,28 @@ async fn create_table(client: &Client) {
 }
 
 async fn insert_into_table(client: &Client, rows: &[MyRow]) {
-    let mut insert = client.insert("some").unwrap();
+    let mut insert = client.insert("test").unwrap();
     for row in rows {
         insert.write(row).await.unwrap();
     }
     insert.end().await.unwrap();
 }
 
+#[common::named]
 #[tokio::test]
-async fn it_watches_changes() {
-    let client = common::prepare_database("it_watches_changes").await;
+async fn changes() {
+    let client = common::prepare_database!();
 
     create_table(&client).await;
 
     let mut cursor1 = client
-        .watch("SELECT ?fields FROM some ORDER BY num")
+        .watch("SELECT ?fields FROM test ORDER BY num")
         .limit(1)
         .fetch::<MyRow>()
         .unwrap();
 
     let mut cursor2 = client
-        .watch("SELECT sum(num) as num FROM some")
+        .watch("SELECT sum(num) as num FROM test")
         .fetch::<MyRow>()
         .unwrap();
 
@@ -70,21 +71,22 @@ async fn it_watches_changes() {
     assert_eq!(cursor2.next().await.unwrap(), Some((3, MyRow { num: 21 })));
 }
 
+#[common::named]
 #[tokio::test]
-async fn it_watches_events() {
-    let client = common::prepare_database("it_watches_events").await;
+async fn events() {
+    let client = common::prepare_database!();
 
     create_table(&client).await;
 
     let mut cursor1 = client
-        .watch("SELECT num FROM some ORDER BY num")
+        .watch("SELECT num FROM test ORDER BY num")
         .limit(1)
         .only_events()
         .fetch()
         .unwrap();
 
     let mut cursor2 = client
-        .watch("SELECT sum(num) as num FROM some")
+        .watch("SELECT sum(num) as num FROM test")
         .only_events()
         .fetch()
         .unwrap();
