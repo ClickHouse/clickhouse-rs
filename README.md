@@ -156,6 +156,17 @@ struct MyRow {
 }
 ```
 
+### IPv4, IPv6
+```rust,ignore
+#[derive(Row, Deserialize)]
+struct MyRow {
+    #[serde(with = "clickhouse::serde::ipv4")]
+    ipv4: Ipv4Addr,
+    // IPv6 requires no annotations.
+    ipv6: Ipv6Addr,
+}
+```
+
 ### Mocking
 The crate provides utils for mocking CH server and testing DDL, SELECT, INSERT and WATCH queries.
 

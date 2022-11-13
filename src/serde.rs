@@ -1,16 +1,37 @@
 //! Contains ser/de modules for different external types.
 
-#![allow(unused_imports)] // TODO
-
-use std::mem;
-
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
 };
 
+/// Handles [`std::net::Ipv4Addr`].
+pub mod ipv4 {
+    use std::net::Ipv4Addr;
+
+    use super::*;
+
+    pub fn serialize<S>(ipv4: &Ipv4Addr, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        u32::from(*ipv4).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Ipv4Addr, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let ip: u32 = Deserialize::deserialize(deserializer)?;
+        Ok(Ipv4Addr::from(ip))
+    }
+}
+
+/// Handles [`::uuid::Uuid`].
 #[cfg(feature = "uuid")]
 pub mod uuid {
+    use std::mem;
+
     use ::uuid::Uuid;
 
     use super::*;
