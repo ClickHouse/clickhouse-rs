@@ -1,20 +1,22 @@
-#![cfg(feature = "uuid")]
+#![allow(unused_imports)] // TODO
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use clickhouse::Row;
 
 mod common;
 
+#[cfg(feature = "uuid")]
 #[common::named]
 #[tokio::test]
-async fn smoke() {
+async fn uuid() {
+    use uuid::Uuid;
+
     let client = common::prepare_database!();
 
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow {
-        #[serde(with = "clickhouse::uuid")]
+        #[serde(with = "clickhouse::serde::uuid")]
         uuid: Uuid,
     }
 

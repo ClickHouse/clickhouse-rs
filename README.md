@@ -151,7 +151,7 @@ Requires the `uuid` feature.
 ```rust,ignore
 #[derive(Row, Deserialize)]
 struct MyRow {
-    #[serde(with = "clickhouse::uuid")]
+    #[serde(with = "clickhouse::serde::uuid")]
     uuid: uuid::Uuid,
 }
 ```

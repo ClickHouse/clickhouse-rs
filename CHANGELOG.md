@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Changed
+- uuid: move to the `serde` submodule.
 
 ## [0.11.0] - 2022-11-10
 ### Added

@@ -19,13 +19,18 @@ pub mod error;
 pub mod insert;
 pub mod inserter;
 pub mod query;
+pub mod serde;
 pub mod sql;
 #[cfg(feature = "test-util")]
 pub mod test;
-#[cfg(feature = "uuid")]
-pub mod uuid;
 #[cfg(feature = "watch")]
 pub mod watch;
+
+#[cfg(feature = "uuid")]
+#[deprecated(since = "0.11.1", note = "use `clickhouse::serde::uuid` instead")]
+pub mod uuid {
+    pub use crate::serde::uuid::*;
+}
 
 mod buflist;
 mod compression;
