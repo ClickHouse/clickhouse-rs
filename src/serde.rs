@@ -63,3 +63,38 @@ pub mod uuid {
         words[1] = words[1].swap_bytes();
     }
 }
+
+/// Handles [`::time::OffsetDateTime`].
+#[cfg(feature = "time")]
+pub mod time {
+    use ::time::OffsetDateTime;
+    use serde::{de::Error as _, ser::Error as _};
+
+    use super::*;
+
+    pub mod datetime {
+        use super::*;
+
+        pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let ts = dt.unix_timestamp();
+
+            if ts < 0 || ts > i64::from(u32::MAX) {
+                let msg = format!("{dt} cannot be represented as DateTime");
+                return Err(S::Error::custom(msg));
+            }
+
+            (ts as u32).serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let ts: u32 = Deserialize::deserialize(deserializer)?;
+            OffsetDateTime::from_unix_timestamp(i64::from(ts)).map_err(D::Error::custom)
+        }
+    }
+}

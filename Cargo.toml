@@ -36,6 +36,7 @@ test-util = ["hyper/server"]
 watch = ["dep:sha-1", "dep:serde_json"]
 lz4 = ["dep:lz4", "dep:clickhouse-rs-cityhash-sys"]
 uuid = ["dep:uuid"]
+time = ["dep:time"]
 
 # Temporary workaround for https://github.com/ClickHouse/ClickHouse/issues/37420
 wa-37420 = []
@@ -57,6 +58,7 @@ serde_json = { version = "1.0.68", optional = true }
 lz4 = { version = "1.23.3", optional = true }
 clickhouse-rs-cityhash-sys = { version = "0.1.2", optional = true }
 uuid = { version = "1", optional = true }
+time = { version = "0.3", optional = true }
 
 [dev-dependencies]
 criterion = "0.3.2"
@@ -67,3 +69,4 @@ serde_bytes = "0.11.4"
 serde_repr = "0.1.7"
 uuid = { version = "1", features = ["v4"] }
 function_name = "0.3"
+time = { version = "0.3.17", features = ["macros"] }

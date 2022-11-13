@@ -79,3 +79,39 @@ async fn uuid() {
     assert_eq!(row.uuid, uuid);
     assert_eq!(row_uuid_str, uuid.to_string());
 }
+
+#[cfg(feature = "time")]
+#[common::named]
+#[tokio::test]
+async fn time() {
+    use time::{macros::datetime, OffsetDateTime};
+
+    let client = common::prepare_database!();
+
+    #[derive(Debug, Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::time::datetime")]
+        dt: OffsetDateTime,
+    }
+
+    client
+        .query("CREATE TABLE test(dt DateTime) ENGINE = MergeTree ORDER BY dt")
+        .execute()
+        .await
+        .unwrap();
+
+    let dt = datetime!(2022-11-13 15:27:42 UTC);
+
+    let mut insert = client.insert("test").unwrap();
+    insert.write(&MyRow { dt }).await.unwrap();
+    insert.end().await.unwrap();
+
+    let (row, row_dt_str) = client
+        .query("SELECT ?fields, toString(dt) FROM test")
+        .fetch_one::<(MyRow, String)>()
+        .await
+        .unwrap();
+
+    assert_eq!(row.dt, dt);
+    assert_eq!(row_dt_str, &dt.to_string()[..19]);
+}
