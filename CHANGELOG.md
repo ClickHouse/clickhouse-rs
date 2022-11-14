@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - ReleaseDate
 ### Added
 - ipv4: `serde::ipv4` for ser/de the `IPv4` type to/from `Ipv4Addr`. Note that `IPv6` requires no annotations.
+- time: `serde::time` for ser/de the [`time::OffsetDateTime`] type to/from `DateTime` and `DateTime64`.
 
 ### Changed
 - uuid: move to the `serde` submodule.
+
+[`time::OffsetDateTime`]: https://docs.rs/time/latest/time/struct.OffsetDateTime.html
 
 ## [0.11.0] - 2022-11-10
 ### Added

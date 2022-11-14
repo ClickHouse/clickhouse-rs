@@ -97,4 +97,107 @@ pub mod time {
             OffsetDateTime::from_unix_timestamp(i64::from(ts)).map_err(D::Error::custom)
         }
     }
+
+    pub mod datetime64 {
+        use super::*;
+
+        /// `DateTime64(0)`
+        pub mod secs {
+            use super::*;
+
+            pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                do_serialize(dt, 1_000_000_000, serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                do_deserialize(deserializer, 1_000_000_000)
+            }
+        }
+
+        /// `DateTime64(3)`
+        pub mod millis {
+            use super::*;
+
+            pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                do_serialize(dt, 1_000_000, serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                do_deserialize(deserializer, 1_000_000)
+            }
+        }
+
+        /// `DateTime64(6)`
+        pub mod micros {
+            use super::*;
+
+            pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                do_serialize(dt, 1_000, serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                do_deserialize(deserializer, 1_000)
+            }
+        }
+
+        /// `DateTime64(9)`
+        pub mod nanos {
+            use super::*;
+
+            pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                do_serialize(dt, 1, serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                do_deserialize(deserializer, 1)
+            }
+        }
+
+        fn do_serialize<S>(dt: &OffsetDateTime, div: i128, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let ts = dt.unix_timestamp_nanos() / div;
+
+            if ts != i128::from(ts as i64) {
+                let msg = format!("{dt} cannot be represented as DateTime64");
+                return Err(S::Error::custom(msg));
+            }
+
+            (ts as i64).serialize(serializer)
+        }
+
+        fn do_deserialize<'de, D>(deserializer: D, mul: i128) -> Result<OffsetDateTime, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let ts: i64 = Deserialize::deserialize(deserializer)?;
+            let ts = i128::from(ts) * mul;
+            OffsetDateTime::from_unix_timestamp_nanos(ts).map_err(D::Error::custom)
+        }
+    }
 }
