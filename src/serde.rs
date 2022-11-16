@@ -1,7 +1,5 @@
 //! Contains ser/de modules for different external types.
 
-use std::convert::TryFrom;
-
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
@@ -69,6 +67,8 @@ pub mod uuid {
 /// Handles [`::time::OffsetDateTime`].
 #[cfg(feature = "time")]
 pub mod time {
+    use std::convert::TryFrom;
+
     use ::time::{error::ComponentRange, Date, Duration, OffsetDateTime};
     use serde::{de::Error as _, ser::Error as _};
 

@@ -1,3 +1,5 @@
+use std::net::{Ipv4Addr, Ipv6Addr};
+
 use serde::{Deserialize, Serialize};
 
 use clickhouse::Row;
@@ -6,9 +8,7 @@ mod common;
 
 #[common::named]
 #[tokio::test]
-async fn ip() {
-    use std::net::{Ipv4Addr, Ipv6Addr};
-
+async fn smoke() {
     let client = common::prepare_database!();
 
     #[derive(Debug, Row, Serialize, Deserialize)]
@@ -41,42 +41,4 @@ async fn ip() {
     assert_eq!(row_ipv4_str, ipv4.to_string());
     assert_eq!(row.ipv6, ipv6);
     assert_eq!(row_ipv6_str, ipv6.to_string());
-}
-
-// TODO: move to another module.
-#[cfg(feature = "uuid")]
-#[common::named]
-#[tokio::test]
-async fn uuid() {
-    use uuid::Uuid;
-
-    let client = common::prepare_database!();
-
-    #[derive(Debug, Row, Serialize, Deserialize)]
-    struct MyRow {
-        #[serde(with = "clickhouse::serde::uuid")]
-        uuid: Uuid,
-    }
-
-    client
-        .query("CREATE TABLE test(uuid UUID) ENGINE = MergeTree ORDER BY uuid")
-        .execute()
-        .await
-        .unwrap();
-
-    let uuid = Uuid::new_v4();
-    println!("uuid: {}", uuid);
-
-    let mut insert = client.insert("test").unwrap();
-    insert.write(&MyRow { uuid }).await.unwrap();
-    insert.end().await.unwrap();
-
-    let (row, row_uuid_str) = client
-        .query("SELECT ?fields, toString(uuid) FROM test")
-        .fetch_one::<(MyRow, String)>()
-        .await
-        .unwrap();
-
-    assert_eq!(row.uuid, uuid);
-    assert_eq!(row_uuid_str, uuid.to_string());
 }
