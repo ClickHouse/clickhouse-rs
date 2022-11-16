@@ -1,5 +1,7 @@
 //! Contains ser/de modules for different external types.
 
+use std::convert::TryFrom;
+
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
@@ -67,7 +69,7 @@ pub mod uuid {
 /// Handles [`::time::OffsetDateTime`].
 #[cfg(feature = "time")]
 pub mod time {
-    use ::time::OffsetDateTime;
+    use ::time::{error::ComponentRange, Date, Duration, OffsetDateTime};
     use serde::{de::Error as _, ser::Error as _};
 
     use super::*;
@@ -81,12 +83,9 @@ pub mod time {
         {
             let ts = dt.unix_timestamp();
 
-            if ts < 0 || ts > i64::from(u32::MAX) {
-                let msg = format!("{dt} cannot be represented as DateTime");
-                return Err(S::Error::custom(msg));
-            }
-
-            (ts as u32).serialize(serializer)
+            u32::try_from(ts)
+                .map_err(|_| S::Error::custom(format!("{dt} cannot be represented as DateTime")))?
+                .serialize(serializer)
         }
 
         pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
@@ -183,12 +182,9 @@ pub mod time {
         {
             let ts = dt.unix_timestamp_nanos() / div;
 
-            if ts != i128::from(ts as i64) {
-                let msg = format!("{dt} cannot be represented as DateTime64");
-                return Err(S::Error::custom(msg));
-            }
-
-            (ts as i64).serialize(serializer)
+            i64::try_from(ts)
+                .map_err(|_| S::Error::custom(format!("{dt} cannot be represented as DateTime64")))?
+                .serialize(serializer)
         }
 
         fn do_deserialize<'de, D>(deserializer: D, mul: i128) -> Result<OffsetDateTime, D::Error>
@@ -196,8 +192,40 @@ pub mod time {
             D: Deserializer<'de>,
         {
             let ts: i64 = Deserialize::deserialize(deserializer)?;
-            let ts = i128::from(ts) * mul;
+            let ts = i128::from(ts) * mul; // cannot overflow: `mul` fits in `i64`
             OffsetDateTime::from_unix_timestamp_nanos(ts).map_err(D::Error::custom)
+        }
+    }
+
+    pub mod date {
+        use super::*;
+
+        const ORIGIN: Result<Date, ComponentRange> = Date::from_ordinal_date(1970, 1);
+
+        pub fn serialize<S>(date: &Date, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let origin = ORIGIN.unwrap();
+            if *date < origin {
+                let msg = format!("{date} cannot be represented as Date");
+                return Err(S::Error::custom(msg));
+            }
+
+            let elapsed = *date - origin;
+            let days = elapsed.whole_days();
+
+            u16::try_from(days)
+                .map_err(|_| S::Error::custom(format!("{date} cannot be represented as Date")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Date, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let days: u16 = Deserialize::deserialize(deserializer)?;
+            Ok(ORIGIN.unwrap() + Duration::days(i64::from(days))) // cannot overflow: always < `Date::MAX`
         }
     }
 }

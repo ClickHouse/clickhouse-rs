@@ -69,4 +69,5 @@ serde_bytes = "0.11.4"
 serde_repr = "0.1.7"
 uuid = { version = "1", features = ["v4"] }
 function_name = "0.3"
-time = { version = "0.3.17", features = ["macros"] }
+time = { version = "0.3.17", features = ["macros", "rand"] }
+rand = "0.8.5"
