@@ -212,7 +212,7 @@ pub mod time {
                 return Err(S::Error::custom(msg));
             }
 
-            let elapsed = *date - origin;
+            let elapsed = *date - origin; // cannot underflow: checked above
             let days = elapsed.whole_days();
 
             u16::try_from(days)
@@ -226,6 +226,44 @@ pub mod time {
         {
             let days: u16 = Deserialize::deserialize(deserializer)?;
             Ok(ORIGIN.unwrap() + Duration::days(i64::from(days))) // cannot overflow: always < `Date::MAX`
+        }
+    }
+
+    pub mod date32 {
+        use super::*;
+
+        const ORIGIN: Result<Date, ComponentRange> = Date::from_ordinal_date(1970, 1);
+
+        // NOTE: actually, it's 1925 and 2283 with a tail for versions before 22.8-lts.
+        const MIN: Result<Date, ComponentRange> = Date::from_ordinal_date(1900, 1);
+        const MAX: Result<Date, ComponentRange> = Date::from_ordinal_date(2299, 365);
+
+        pub fn serialize<S>(date: &Date, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            if *date < MIN.unwrap() || *date > MAX.unwrap() {
+                let msg = format!("{date} cannot be represented as Date");
+                return Err(S::Error::custom(msg));
+            }
+
+            let elapsed = *date - ORIGIN.unwrap(); // cannot underflow: checked above
+            let days = elapsed.whole_days();
+
+            i32::try_from(days)
+                .map_err(|_| S::Error::custom(format!("{date} cannot be represented as Date32")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Date, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let days: i32 = Deserialize::deserialize(deserializer)?;
+
+            // It shouldn't overflow, because clamped by CH and < `Date::MAX`.
+            // TODO: check that CH clamps when an invalid value is inserted in binary format.
+            Ok(ORIGIN.unwrap() + Duration::days(i64::from(days)))
         }
     }
 }

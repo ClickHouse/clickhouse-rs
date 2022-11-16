@@ -127,6 +127,45 @@ async fn date() {
     }
 }
 
+#[common::named]
+#[tokio::test]
+async fn date32() {
+    let client = common::prepare_database!();
+
+    #[derive(Debug, Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::time::date32")]
+        date: Date,
+    }
+
+    client
+        .query("CREATE TABLE test(date Date32) ENGINE = MergeTree ORDER BY date")
+        .execute()
+        .await
+        .unwrap();
+
+    let mut insert = client.insert("test").unwrap();
+
+    let dates = generate_dates(1925..2283, 100); // TODO: 1900..=2299 for newer versions.
+    for &date in &dates {
+        insert.write(&MyRow { date }).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let actual = client
+        .query("SELECT ?fields, toString(date) FROM test ORDER BY date")
+        .fetch_all::<(MyRow, String)>()
+        .await
+        .unwrap();
+
+    assert_eq!(actual.len(), dates.len());
+
+    for ((row, date_str), expected) in actual.iter().zip(dates) {
+        assert_eq!(row.date, expected);
+        assert_eq!(date_str, &expected.to_string());
+    }
+}
+
 fn generate_dates(years: impl RangeBounds<i32>, count: usize) -> Vec<Date> {
     let mut rng = rand::thread_rng();
     let mut dates: Vec<_> = (&mut rng)
