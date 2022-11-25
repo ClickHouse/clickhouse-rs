@@ -49,7 +49,8 @@ async fn datetime() {
     }
 
     client
-        .query("
+        .query(
+            "
             CREATE TABLE test(
                 dt          DateTime,
                 dt_opt      Nullable(DateTime),
@@ -63,7 +64,8 @@ async fn datetime() {
                 dt64ns_opt  Nullable(DateTime64(9))
             )
             ENGINE = MergeTree ORDER BY dt
-        ")
+        ",
+        )
         .execute()
         .await
         .unwrap();
@@ -92,14 +94,16 @@ async fn datetime() {
         .unwrap();
 
     let row_str = client
-        .query("
+        .query(
+            "
             SELECT toString(dt),
                    toString(dt64s),
                    toString(dt64ms),
                    toString(dt64us),
                    toString(dt64ns)
               FROM test
-        ")
+        ",
+        )
         .fetch_one::<MyRowStr>()
         .await
         .unwrap();
@@ -126,12 +130,14 @@ async fn date() {
     }
 
     client
-        .query("
+        .query(
+            "
             CREATE TABLE test(
                 date        Date,
                 date_opt    Nullable(Date)
             ) ENGINE = MergeTree ORDER BY date
-        ")
+        ",
+        )
         .execute()
         .await
         .unwrap();
@@ -178,12 +184,14 @@ async fn date32() {
     }
 
     client
-        .query("
+        .query(
+            "
             CREATE TABLE test(
                 date        Date32,
                 date_opt    Nullable(Date32)
             ) ENGINE = MergeTree ORDER BY date
-        ")
+        ",
+        )
         .execute()
         .await
         .unwrap();

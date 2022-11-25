@@ -22,14 +22,16 @@ async fn smoke() {
     }
 
     client
-        .query("
+        .query(
+            "
             CREATE TABLE test(
                 ipv4 IPv4,
                 ipv6 IPv6,
                 ipv4_opt Nullable(IPv4),
                 ipv6_opt Nullable(IPv6),
             ) ENGINE = MergeTree ORDER BY ipv4
-        ")
+        ",
+        )
         .execute()
         .await
         .unwrap();

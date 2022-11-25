@@ -18,7 +18,9 @@ async fn smoke() {
         items_count: Vec<u32>,
     }
 
-    client.query("
+    client
+        .query(
+            "
         CREATE TABLE test(
             no      Int32,
             items   Nested(
@@ -27,7 +29,8 @@ async fn smoke() {
             )
         )
         ENGINE = MergeTree ORDER BY no
-    ")
+    ",
+        )
         .execute()
         .await
         .unwrap();

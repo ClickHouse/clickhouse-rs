@@ -21,12 +21,14 @@ async fn smoke() {
     }
 
     client
-        .query("
+        .query(
+            "
             CREATE TABLE test(
                 uuid UUID,
                 uuid_opt Nullable(UUID)
             ) ENGINE = MergeTree ORDER BY uuid
-        ")
+        ",
+        )
         .execute()
         .await
         .unwrap();
