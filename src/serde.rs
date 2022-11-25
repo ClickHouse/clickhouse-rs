@@ -11,9 +11,19 @@ macro_rules! option {
         pub mod option {
             use super::*;
 
-            #[derive(serde::Serialize, serde::Deserialize)] // TODO: get rid of it
-            #[serde(transparent)]
-            struct $name(#[serde(with = "super")] super::$name);
+            struct $name(super::$name);
+
+            impl Serialize for $name {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    super::serialize(&self.0, serializer)
+                }
+            }
+
+            impl<'de> Deserialize<'de> for $name {
+                fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                    super::deserialize(deserializer).map($name)
+                }
+            }
 
             pub fn serialize<S>(v: &Option<super::$name>, serializer: S) -> Result<S::Ok, S::Error>
             where
