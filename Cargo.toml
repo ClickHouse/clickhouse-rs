@@ -52,8 +52,8 @@ hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream"] }
 url = "2.1.1"
 futures = "0.3.5"
 static_assertions = "1.1"
-sealed = "0.3"
-sha-1 = { version = "0.9.1", optional = true }
+sealed = "0.4"
+sha-1 = { version = "0.10", optional = true }
 serde_json = { version = "1.0.68", optional = true }
 lz4 = { version = "1.23.3", optional = true }
 clickhouse-rs-cityhash-sys = { version = "0.1.2", optional = true }
@@ -61,7 +61,7 @@ uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
 
 [dev-dependencies]
-criterion = "0.3.2"
+criterion = "0.4.0"
 serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "1.0.1", features = ["full", "test-util"] }
 hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream", "server"] }
