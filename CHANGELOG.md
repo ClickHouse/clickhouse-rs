@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+## [0.11.1] - 2022-11-25
 ### Added
 - ipv4: `serde::ipv4` for ser/de the `IPv4` type to/from `Ipv4Addr`. Note that `IPv6` requires no annotations.
 - time: `serde::time::datetime(64)` for ser/de the [`time::OffsetDateTime`] type to/from `DateTime` and `DateTime64`.
@@ -210,7 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/loyd/clickhouse.rs/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/loyd/clickhouse.rs/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/loyd/clickhouse.rs/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/loyd/clickhouse.rs/compare/v0.9.2...v0.9.3
