@@ -42,10 +42,10 @@ jobs:
     - uses: actions/checkout@v2
     - run: cargo test
     - run: cargo test --no-default-features
-    - run: cargo test --all-features
+    - run: cargo test --features uuid,time
 
     services:
       clickhouse:
-        image: yandex/clickhouse-server
+        image: clickhouse/clickhouse-server
         ports:
           - 8123:8123
