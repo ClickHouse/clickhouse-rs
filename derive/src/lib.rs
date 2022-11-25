@@ -14,7 +14,7 @@ fn serde_skipped(cx: &Ctxt, attrs: &[syn::Attribute]) -> bool {
                 NestedMeta::Meta(Meta::Path(path))
                     if path
                         .get_ident()
-                        .map_or(false, |i| i.to_string() == "skip_serializing") =>
+                        .map_or(false, |i| *i == "skip_serializing") =>
                 {
                     return true
                 }
@@ -38,7 +38,7 @@ fn serde_rename(cx: &Ctxt, field: &syn::Field) -> Option<String> {
                     if nv
                         .path
                         .get_ident()
-                        .map_or(false, |i| i.to_string() == "rename") =>
+                        .map_or(false, |i| *i == "rename") =>
                 {
                     if let Lit::Str(lit) = nv.lit {
                         return Some(lit.value());
