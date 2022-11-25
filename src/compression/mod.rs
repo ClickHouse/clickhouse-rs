@@ -4,12 +4,17 @@ pub(crate) mod lz4;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Compression {
+    /// Disables any compression.
+    /// Used by default if the `lz4` feature is disabled.
     None,
+    /// Uses `LZ4` codec to (de)compress.
+    /// Used by default if the `lz4` feature is enabled.
     #[cfg(feature = "lz4")]
     Lz4,
+    /// Uses `LZ4HC` codec to compress and `LZ4` to decompress.
     /// High compression levels are useful in networks with low bandwidth.
-    /// Affects only INSERTs, because others are compressed by the server.
-    /// Possible levels: [1, 12]. Recommended level range: [4, 9].
+    /// Affects only `INSERT`s, because others are compressed by the server.
+    /// Possible levels: `[1, 12]`. Recommended level range: `[4, 9]`.
     #[cfg(feature = "lz4")]
     Lz4Hc(i32),
 }

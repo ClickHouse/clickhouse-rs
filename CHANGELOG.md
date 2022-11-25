@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ipv4: `serde::ipv4` for ser/de the `IPv4` type to/from `Ipv4Addr`. Note that `IPv6` requires no annotations.
 - time: `serde::time::datetime(64)` for ser/de the [`time::OffsetDateTime`] type to/from `DateTime` and `DateTime64`.
 - time: `serde::time::date(32)` for ser/de the [`time::Date`] type to/from `Date` and `Date32`.
+- serde: add `::option` variants to support `Option<_>`.
 
 ### Changed
 - uuid: move to the `serde` submodule.

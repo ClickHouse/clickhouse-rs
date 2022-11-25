@@ -16,7 +16,6 @@ A typed client for ClickHouse.
 [actions-badge]: https://github.com/loyd/clickhouse.rs/actions/workflows/ci.yml/badge.svg
 [actions-url]: https://github.com/loyd/clickhouse.rs/actions/workflows/ci.yml
 
-## Features
 * Uses `serde` for encoding/decoding rows.
 * Uses `RowBinary` encoding.
 * Provides API for selecting.
@@ -36,12 +35,23 @@ clickhouse = "0.11.0"
 clickhouse = { version = "0.11.0", features = ["test-util"] }
 ```
 
-See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
+<details>
+<summary>
 
-### Note about old versions of ClickHouse
+### Note about ClickHouse prior to v22.6
+
+</summary>
+
 CH server older than v22.6 (2022-06-16) handles `RowBinary` [incorrectly](https://github.com/ClickHouse/ClickHouse/issues/37420) in some rare cases. Enable `wa-37420` feature to solve this problem. Don't use it for newer versions.
 
-### Create `Client`
+</details>
+<details>
+<summary>
+
+### Create a client
+
+</summary>
+
 ```rust,ignore
 use clickhouse::Client;
 
@@ -54,7 +64,14 @@ let client = Client::default()
 
 * Reuse created clients or clone them in order to reuse a connection pool.
 
+</details>
+<details>
+<summary>
+
 ### Select rows
+
+</summary>
+
 ```rust,ignore
 use serde::Deserialize;
 use clickhouse::Row;
@@ -78,13 +95,28 @@ while let Some(row) = cursor.next().await? { .. }
 * Placeholder `?` is replaced with values in following `bind()` calls.
 * Convenient `fetch_one::<Row>()` and `fetch_all::<Row>()` can be used to get a first row or all rows correspondingly.
 * `sql::Identifier` can be used to bind table names.
-* [soa-derive](https://github.com/lumol-org/soa-derive) is useful for `Nested` types.
+
+</details>
+<details>
+<summary>
 
 ### Insert a batch
+
+</summary>
+
 ```rust,ignore
+use serde::Serialize;
+use clickhouse::Row;
+
+#[derive(Row, Serialize)]
+struct MyRow {
+    no: u32,
+    name: String,
+}
+
 let mut insert = client.insert("some")?;
-insert.write(&Row { no: 0, name: "foo" }).await?;
-insert.write(&Row { no: 1, name: "bar" }).await?;
+insert.write(&MyRow { no: 0, name: "foo".into() }).await?;
+insert.write(&MyRow { no: 1, name: "bar".into() }).await?;
 insert.end().await?;
 ```
 
@@ -93,14 +125,21 @@ insert.end().await?;
 * ClickHouse inserts batches atomically only if all rows fit in the same partition and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
 * [ch2rs](https://github.com/loyd/ch2rs) is useful to generate a row type from ClickHouse.
 
+</details>
+<details>
+<summary>
+
 ### Infinite inserting
+
+</summary>
+
 ```rust,ignore
 let mut inserter = client.inserter("some")?
     .with_max_entries(500_000) // `250_000` by default
     .with_period(Some(Duration::from_secs(15))); // `None` by default
 
-inserter.write(&Row { no: 0, name: "foo" }).await?;
-inserter.write(&Row { no: 1, name: "bar" }).await?;
+inserter.write(&MyRow { no: 0, name: "foo".into() }).await?;
+inserter.write(&MyRow { no: 1, name: "bar".into() }).await?;
 let stats = inserter.commit().await?;
 if stats.entries > 0 {
     println!(
@@ -118,12 +157,26 @@ if stats.entries > 0 {
 inserter.end().await?;
 ```
 
+</details>
+<details>
+<summary>
+
 ### Perform DDL
+
+</summary>
+
 ```rust,ignore
 client.query("DROP TABLE IF EXISTS some").execute().await?;
 ```
 
+</details>
+<details>
+<summary>
+
 ### Live views
+
+</summary>
+
 Requires the `watch` feature.
 
 ```rust,ignore
@@ -145,29 +198,180 @@ println!("live view updated: version={:?}", cursor.next().await?);
 * This API uses `JSONEachRowWithProgress` under the hood because of [the issue](https://github.com/ClickHouse/ClickHouse/issues/22996).
 * Only struct rows can be used. Avoid `fetch::<u64>()` and other without specified names.
 
-### UUID
-Requires the `uuid` feature.
+</details>
 
-```rust,ignore
-#[derive(Row, Deserialize)]
-struct MyRow {
-    #[serde(with = "clickhouse::serde::uuid")]
-    uuid: uuid::Uuid,
-}
-```
+See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
 
-### IPv4, IPv6
-```rust,ignore
-#[derive(Row, Deserialize)]
-struct MyRow {
-    #[serde(with = "clickhouse::serde::ipv4")]
-    ipv4: Ipv4Addr,
-    // IPv6 requires no annotations.
-    ipv6: Ipv6Addr,
-}
-```
+## Feature Flags
+* `lz4` (enabled by default) — enables `Compression::Lz4` and `Compression::Lz4Hc(_)` variants. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
+* `test-util` — adds mocks. See [the example](https://github.com/loyd/clickhouse.rs/tree/master/examples/mock.rs). Use it only in `dev-dependencies`.
+* `watch` — enables `client.watch` functionality. See the corresponding section for details.
+* `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid/latest/uuid/) crate.
+* `time` — adds `serde::time` to work with [time](https://docs.rs/time/latest/time/) crate.
+* `wa-37420` — implements a workaround for CH versions prior to v22.6. See the corresponding section for details.
 
-### Mocking
+## Data Types
+* `(U)Int(8|16|32|64|128)` maps to/from corresponding `(u|i)(8|16|32|64|128)` types or newtypes around them.
+* `(U)Int256` aren't supported directly, but there is [a workaround for it](https://github.com/loyd/clickhouse.rs/issues/48).
+* `Float(32|64)` maps to/from corresponding `f(32|64)` or newtypes around them.
+* `Decimal(32|64|128)` maps to/from corresponding `i(32|64|128)` or newtypes around them. It's more convenient to use [fixnum](https://github.com/loyd/fixnum) or another implementation of signed fixed-point numbers.
+* `Boolean` maps to/from `bool` or newtypes around it.
+* `String` maps to/from any string or bytes types, e.g. `&str`, `&[u8]`, `String`, `Vec<u8>` or [`SmartString`](https://docs.rs/smartstring/latest/smartstring/struct.SmartString.html). Newtypes are also supported. To store bytes, consider using [serde_bytes](https://docs.rs/serde_bytes/latest/serde_bytes/), because it's more efficient.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Debug, Serialize, Deserialize)]
+    struct MyRow<'a> {
+        str: &'a str,
+        string: String,
+        #[serde(with = "serde_bytes")]
+        bytes: Vec<u8>,
+        #[serde(with = "serde_bytes")]
+        byte_slice: &'a [u8],
+    }
+    ```
+    </details>
+* `FixedString(_)` isn't [supported yet](https://github.com/loyd/clickhouse.rs/issues/49).
+* `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/).
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    use serde_repr::{Deserialize_repr, Serialize_repr};
+
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        level: Level,
+    }
+
+    #[derive(Debug, Serialize_repr, Deserialize_repr)]
+    #[repr(u8)]
+    enum Level {
+        Debug = 1,
+        Info = 2,
+        Warn = 3,
+        Error = 4,
+    }
+    ```
+    </details>
+* `UUID` maps to/from [`uuid::Uuid`](https://docs.rs/uuid/latest/uuid/struct.Uuid.html) by using `serde::uuid`. Requires the `uuid` feature.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::uuid")]
+        uuid: uuid::Uuid,
+    }
+    ```
+    </details>
+* `IPv6` maps to/from [`std::net::Ipv6Addr`](https://doc.rust-lang.org/stable/std/net/struct.Ipv6Addr.html).
+* `IPv4` maps to/from [`std::net::Ipv4Addr`](https://doc.rust-lang.org/stable/std/net/struct.Ipv4Addr.html) by using `serde::ipv4`.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::ipv4")]
+        ipv4: std::net::Ipv4Addr,
+    }
+    ```
+    </details>
+* `Date` maps to/from `u16` or a newtype around it and represents a number of days elapsed since `1970-01-01`. Also, [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date`, that requires the `time` feature.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        days: u16,
+        #[serde(with = "clickhouse::serde::time::date")]
+        date: Date,
+    }
+    ```
+    </details>
+* `Date32` maps to/from `i32` or a newtype around it and represents a number of days elapsed since `1970-01-01`. Also, [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date32`, that requires the `time` feature.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        days: i32,
+        #[serde(with = "clickhouse::serde::time::date32")]
+        date: Date,
+    }
+    ```
+    </details>
+* `DateTime` maps to/from `u32` or a newtype around it and represents a number of seconds elapsed since UNIX epoch. Also, [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime`, that requires the `time` feature.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        ts: u32,
+        #[serde(with = "clickhouse::serde::time::datetime")]
+        dt: OffsetDateTime,
+    }
+    ```
+    </details>
+* `DateTime64(_)` maps to/from `i32` or a newtype around it and represents a time elapsed since UNIX epoch. Also, [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime64::*`, that requires the `time` feature.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        ts: i64, // elapsed s/us/ms/ns depending on `DateTime64(X)`
+        #[serde(with = "clickhouse::serde::time::datetime64::secs")]
+        dt64s: OffsetDateTime,  // `DateTime64(0)`
+        #[serde(with = "clickhouse::serde::time::datetime64::millis")]
+        dt64ms: OffsetDateTime, // `DateTime64(3)`
+        #[serde(with = "clickhouse::serde::time::datetime64::micros")]
+        dt64us: OffsetDateTime, // `DateTime64(6)`
+        #[serde(with = "clickhouse::serde::time::datetime64::nanos")]
+        dt64ns: OffsetDateTime, // `DateTime64(9)`
+    }
+    ```
+    </details>
+* `Typle(A, B, ...)` maps to/from `(A, B, ...)` or a newtype around it.
+* `Array(_)` maps to/from any slice, e.g. `Vec<_>`, `&[_]`. Newtypes are also supported.
+* `Map(K, V)` behaves like `Array((K, V))`.
+* `LowCardinality(_)` is supported seamlessly.
+* `Nullable(_)` maps to/from `Option<_>`. For `clickhouse::serde::*` helpers add `::option`.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::ipv4::option")]
+        ipv4_opt: Option<Ipv4Addr>,
+    }
+    ```
+    </details>
+* `Nested` is supported by providing multiple arrays with renaming.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    // CREATE TABLE test(items Nested(name String, count UInt32))
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(rename = "items.name")]
+        items_name: Vec<String>,
+        #[serde(rename = "items.count")]
+        items_count: Vec<u32>,
+    }
+    ```
+    </details>
+* `JSON` and `Geo` aren't supported for now.
+
+## Mocking
 The crate provides utils for mocking CH server and testing DDL, SELECT, INSERT and WATCH queries.
 
 The functionality can be enabled with the `test-util` feature. Use it **only** in dev-dependencies.
