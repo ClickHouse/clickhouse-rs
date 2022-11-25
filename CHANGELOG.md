@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - uuid: move to the `serde` submodule.
 
 [`time::OffsetDateTime`]: https://docs.rs/time/latest/time/struct.OffsetDateTime.html
+[`time::Date`]: https://docs.rs/time/latest/time/struct.Date.html
 
 ## [0.11.0] - 2022-11-10
 ### Added

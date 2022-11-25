@@ -372,7 +372,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
 * `JSON` and `Geo` aren't supported for now.
 
 ## Mocking
-The crate provides utils for mocking CH server and testing DDL, SELECT, INSERT and WATCH queries.
+The crate provides utils for mocking CH server and testing DDL, `SELECT`, `INSERT` and `WATCH` queries.
 
 The functionality can be enabled with the `test-util` feature. Use it **only** in dev-dependencies.
 
