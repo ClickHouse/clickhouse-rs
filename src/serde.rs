@@ -5,11 +5,44 @@ use serde::{
     ser::{Serialize, Serializer},
 };
 
-/// Handles [`std::net::Ipv4Addr`].
+macro_rules! option {
+    ($name:ident, $doc:literal) => {
+        #[doc = $doc]
+        pub mod option {
+            use super::*;
+
+            #[derive(serde::Serialize, serde::Deserialize)] // TODO: get rid of it
+            #[serde(transparent)]
+            struct $name(#[serde(with = "super")] super::$name);
+
+            pub fn serialize<S>(v: &Option<super::$name>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                v.clone().map($name).serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<super::$name>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let opt: Option<$name> = Deserialize::deserialize(deserializer)?;
+                Ok(opt.map(|v| v.0))
+            }
+        }
+    };
+}
+
+/// Ser/de [`std::net::Ipv4Addr`] to/from `IPv4`.
 pub mod ipv4 {
     use std::net::Ipv4Addr;
 
     use super::*;
+
+    option!(
+        Ipv4Addr,
+        "Ser/de `Option<Ipv4Addr>` to/from `Nullable(IPv4)`."
+    );
 
     pub fn serialize<S>(ipv4: &Ipv4Addr, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -27,7 +60,7 @@ pub mod ipv4 {
     }
 }
 
-/// Handles [`::uuid::Uuid`].
+/// Ser/de [`::uuid::Uuid`] to/from `UUID`.
 #[cfg(feature = "uuid")]
 pub mod uuid {
     use std::mem;
@@ -35,6 +68,8 @@ pub mod uuid {
     use ::uuid::Uuid;
 
     use super::*;
+
+    option!(Uuid, "Ser/de `Option<Uuid>` to/from `Nullable(UUID)`.");
 
     pub fn serialize<S>(uuid: &Uuid, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -64,7 +99,7 @@ pub mod uuid {
     }
 }
 
-/// Handles [`::time::OffsetDateTime`].
+/// Ser/de [`::time::OffsetDateTime`] and [`::time::Date`].
 #[cfg(feature = "time")]
 pub mod time {
     use std::convert::TryFrom;
@@ -74,8 +109,14 @@ pub mod time {
 
     use super::*;
 
+    /// Ser/de `OffsetDateTime` to/from `DateTime`.
     pub mod datetime {
         use super::*;
+
+        option!(
+            OffsetDateTime,
+            "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime)`."
+        );
 
         pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -97,12 +138,18 @@ pub mod time {
         }
     }
 
+    /// Contains modules to ser/de `OffsetDateTime` to/from `DateTime64(_)`.
     pub mod datetime64 {
         use super::*;
 
-        /// `DateTime64(0)`
+        /// Ser/de `OffsetDateTime` to/from `DateTime64(0)`.
         pub mod secs {
             use super::*;
+
+            option!(
+                OffsetDateTime,
+                "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(0))`."
+            );
 
             pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -119,9 +166,14 @@ pub mod time {
             }
         }
 
-        /// `DateTime64(3)`
+        /// Ser/de `OffsetDateTime` to/from `DateTime64(3)`.
         pub mod millis {
             use super::*;
+
+            option!(
+                OffsetDateTime,
+                "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(3))`."
+            );
 
             pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -138,9 +190,14 @@ pub mod time {
             }
         }
 
-        /// `DateTime64(6)`
+        /// Ser/de `OffsetDateTime` to/from `DateTime64(6)`.
         pub mod micros {
             use super::*;
+
+            option!(
+                OffsetDateTime,
+                "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(6))`."
+            );
 
             pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -157,9 +214,14 @@ pub mod time {
             }
         }
 
-        /// `DateTime64(9)`
+        /// Ser/de `OffsetDateTime` to/from `DateTime64(9)`.
         pub mod nanos {
             use super::*;
+
+            option!(
+                OffsetDateTime,
+                "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(9))`."
+            );
 
             pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -197,8 +259,14 @@ pub mod time {
         }
     }
 
+    /// Ser/de `time::Date` to/from `Date`.
     pub mod date {
         use super::*;
+
+        option!(
+            Date,
+            "Ser/de `Option<time::Date>` to/from `Nullable(Date)`."
+        );
 
         const ORIGIN: Result<Date, ComponentRange> = Date::from_ordinal_date(1970, 1);
 
@@ -229,8 +297,14 @@ pub mod time {
         }
     }
 
+    /// Ser/de `time::Date` to/from `Date32`.
     pub mod date32 {
         use super::*;
+
+        option!(
+            Date,
+            "Ser/de `Option<time::Date>` to/from `Nullable(Date32)`."
+        );
 
         const ORIGIN: Result<Date, ComponentRange> = Date::from_ordinal_date(1970, 1);
 

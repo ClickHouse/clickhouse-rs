@@ -12,14 +12,21 @@ mod common;
 async fn smoke() {
     let client = common::prepare_database!();
 
-    #[derive(Debug, Row, Serialize, Deserialize)]
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::uuid")]
         uuid: Uuid,
+        #[serde(with = "clickhouse::serde::uuid::option")]
+        uuid_opt: Option<Uuid>,
     }
 
     client
-        .query("CREATE TABLE test(uuid UUID) ENGINE = MergeTree ORDER BY uuid")
+        .query("
+            CREATE TABLE test(
+                uuid UUID,
+                uuid_opt Nullable(UUID)
+            ) ENGINE = MergeTree ORDER BY uuid
+        ")
         .execute()
         .await
         .unwrap();
@@ -27,8 +34,13 @@ async fn smoke() {
     let uuid = Uuid::new_v4();
     println!("uuid: {}", uuid);
 
+    let original_row = MyRow {
+        uuid,
+        uuid_opt: Some(uuid),
+    };
+
     let mut insert = client.insert("test").unwrap();
-    insert.write(&MyRow { uuid }).await.unwrap();
+    insert.write(&original_row).await.unwrap();
     insert.end().await.unwrap();
 
     let (row, row_uuid_str) = client
@@ -37,6 +49,6 @@ async fn smoke() {
         .await
         .unwrap();
 
-    assert_eq!(row.uuid, uuid);
-    assert_eq!(row_uuid_str, uuid.to_string());
+    assert_eq!(row, original_row);
+    assert_eq!(row_uuid_str, original_row.uuid.to_string());
 }
