@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - insert: improve throughput (~30%).
+- inserter: set a default value of `max_entries` to 500_000.
 
 ## [0.11.1] - 2022-11-25
 ### Added

@@ -5,7 +5,7 @@ use tokio::time::{Duration, Instant};
 
 use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client};
 
-const DEFAULT_MAX_ENTRIES: u64 = 250_000;
+const DEFAULT_MAX_ENTRIES: u64 = 500_000;
 
 /// Performs multiple consecutive `INSERT`s.
 ///
@@ -73,7 +73,7 @@ where
     /// Note: ClickHouse inserts batches atomically only if all rows fit in the same partition
     /// and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
     ///
-    /// `250_000` by default.
+    /// `500_000` by default.
     pub fn with_max_entries(mut self, threshold: u64) -> Self {
         self.set_max_entries(threshold);
         self
