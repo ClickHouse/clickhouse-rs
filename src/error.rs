@@ -36,6 +36,8 @@ pub enum Error {
     Custom(String),
     #[error("bad response: {0}")]
     BadResponse(String),
+    #[error("timeout expired")]
+    TimedOut,
 
     // Internally handled errors, not part of public API.
     // XXX: move to another error?

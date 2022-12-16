@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Added
+- insert: `with_timeouts` to manage timeouts.
+- inserter: `with_timeouts` and `set_timeouts` to manage timeouts.
+
+### Changed
+- insert: improve throughput (~30%).
 
 ## [0.11.1] - 2022-11-25
 ### Added

@@ -15,6 +15,8 @@ pub struct Inserter<T> {
     client: Client,
     table: String,
     max_entries: u64,
+    send_timeout: Option<Duration>,
+    end_timeout: Option<Duration>,
     insert: Insert<T>,
     ticks: Ticks,
     committed: Quantities,
@@ -47,11 +49,23 @@ where
             client: client.clone(),
             table: table.into(),
             max_entries: DEFAULT_MAX_ENTRIES,
+            send_timeout: None,
+            end_timeout: None,
             insert: client.insert(table)?,
             ticks: Ticks::default(),
             committed: Quantities::ZERO,
             uncommitted_entries: 0,
         })
+    }
+
+    /// See [`Insert::with_max_entries()`].
+    pub fn with_timeouts(
+        mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) -> Self {
+        self.set_timeouts(send_timeout, end_timeout);
+        self
     }
 
     /// The maximum number of rows in one `INSERT` statement.
@@ -93,6 +107,13 @@ where
     pub fn with_max_duration(mut self, threshold: Duration) -> Self {
         self.set_period(Some(threshold));
         self
+    }
+
+    /// See [`Inserter::with_timeouts()`].
+    pub fn set_timeouts(&mut self, send_timeout: Option<Duration>, end_timeout: Option<Duration>) {
+        self.send_timeout = send_timeout;
+        self.end_timeout = end_timeout;
+        self.insert.set_timeouts(send_timeout, end_timeout);
     }
 
     /// See [`Inserter::with_max_entries()`].
@@ -177,7 +198,8 @@ where
     }
 
     async fn insert(&mut self) -> Result<()> {
-        let new_insert = self.client.insert(&self.table)?; // Actually it mustn't fail.
+        let mut new_insert = self.client.insert(&self.table)?; // Actually it mustn't fail.
+        new_insert.set_timeouts(self.send_timeout, self.end_timeout);
         let insert = mem::replace(&mut self.insert, new_insert);
         insert.end().await
     }

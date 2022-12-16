@@ -135,6 +135,7 @@ insert.end().await?;
 
 ```rust,ignore
 let mut inserter = client.inserter("some")?
+    .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
     .with_max_entries(500_000) // `250_000` by default
     .with_period(Some(Duration::from_secs(15))); // `None` by default
 

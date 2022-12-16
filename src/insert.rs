@@ -1,9 +1,12 @@
-use std::{future::Future, marker::PhantomData, mem, panic};
+use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Duration};
 
 use bytes::{Bytes, BytesMut};
 use hyper::{self, body, Body, Request};
 use serde::Serialize;
-use tokio::task::JoinHandle;
+use tokio::{
+    task::JoinHandle,
+    time::{Instant, Sleep},
+};
 use url::Url;
 
 use crate::{
@@ -14,7 +17,7 @@ use crate::{
 };
 
 const BUFFER_SIZE: usize = 128 * 1024;
-const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
+const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extra reallocations
 
 /// Performs only one `INSERT`.
 ///
@@ -27,8 +30,27 @@ pub struct Insert<T> {
     sender: Option<body::Sender>,
     #[cfg(feature = "lz4")]
     compression: Compression,
+    send_timeout: Option<Duration>,
+    end_timeout: Option<Duration>,
+    // Use boxed `Sleep` to reuse a timer entry, it improves performance.
+    // Also, `tokio::time::timeout()` significantly increases a future's size.
+    sleep: Pin<Box<Sleep>>,
     handle: JoinHandle<Result<()>>,
     _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
+}
+
+// It should be a regular function, but it decreases performance.
+macro_rules! timeout {
+    ($self:expr, $timeout:ident, $fut:expr) => {{
+        if let Some(timeout) = $self.$timeout {
+            $self.sleep.as_mut().reset(Instant::now() + timeout);
+        }
+
+        tokio::select! {
+            res = $fut => Some(res),
+            _ = &mut $self.sleep, if $self.$timeout.is_some() => None,
+        }
+    }};
 }
 
 impl<T> Insert<T> {
@@ -36,7 +58,7 @@ impl<T> Insert<T> {
     where
         T: Row,
     {
-        let mut url = Url::parse(&client.url).expect("TODO");
+        let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
 
@@ -85,9 +107,44 @@ impl<T> Insert<T> {
             sender: Some(sender),
             #[cfg(feature = "lz4")]
             compression: client.compression,
+            send_timeout: None,
+            end_timeout: None,
+            sleep: Box::pin(tokio::time::sleep(Duration::new(0, 0))),
             handle,
             _marker: PhantomData,
         })
+    }
+
+    /// Sets timeouts for different operations.
+    ///
+    /// `send_timeout` restricts time on sending a data chunk to a socket.
+    /// `None` disables the timeout, it's a default.
+    /// It's roughly equivalent to `tokio::time::timeout(insert.write(..))`.
+    ///
+    /// `end_timeout` restricts time on waiting for a response from the CH server.
+    /// Thus, it includes all work needed to handle `INSERT` by the CH server,
+    /// e.g. handling all materialized views and so on.
+    /// `None` disables the timeout, it's a default.
+    /// It's roughly equivalent to `tokio::time::timeout(insert.end(..))`.
+    ///
+    /// These timeouts are much more performant (~x10) than wrapping `write()` and `end()` calls
+    /// into `tokio::time::timeout()`.
+    pub fn with_timeouts(
+        mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) -> Self {
+        self.set_timeouts(send_timeout, end_timeout);
+        self
+    }
+
+    pub(crate) fn set_timeouts(
+        &mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) {
+        self.send_timeout = send_timeout;
+        self.end_timeout = end_timeout;
     }
 
     /// Serializes and writes to the socket a provided row.
@@ -107,51 +164,72 @@ impl<T> Insert<T> {
 
         async move {
             result?;
-            self.send_chunk_if_exceeds(MIN_CHUNK_SIZE).await?;
+            if self.buffer.len() >= MIN_CHUNK_SIZE {
+                self.send_chunk().await?;
+            }
             Ok(())
         }
     }
 
     /// Ends `INSERT`.
+    /// Succeeds if the server returns 200.
     ///
-    /// If it isn't called, the last `INSERT` is aborted.
+    /// If it isn't called, the whole `INSERT` is aborted.
     pub async fn end(mut self) -> Result<()> {
-        self.send_chunk_if_exceeds(1).await?;
+        if !self.buffer.is_empty() {
+            self.send_chunk().await?;
+        }
+
+        self.sender = None; // terminate the sender successfully
         self.wait_handle().await
     }
 
-    async fn send_chunk_if_exceeds(&mut self, threshold: usize) -> Result<()> {
-        if self.buffer.len() >= threshold {
-            // Temporary workaround for https://github.com/ClickHouse/ClickHouse/issues/37420.
-            #[cfg(feature = "wa-37420")]
-            self.prepend_bom();
-
-            // Hyper uses non-trivial and inefficient (see benches) schema of buffering chunks.
-            // It's difficult to determine when allocations occur.
-            // So, instead we control it manually here and rely on the system allocator.
-            let chunk = self.take_and_prepare_chunk()?;
-
-            if let Some(sender) = &mut self.sender {
-                if sender.send_data(chunk).await.is_err() {
-                    self.abort();
-                    self.wait_handle().await?; // real error should be here.
-                    return Err(Error::Network("channel closed".into()));
-                }
-            }
+    async fn send_chunk(&mut self) -> Result<()> {
+        if self.sender.is_none() {
+            return Ok(());
         }
 
-        Ok(())
+        // A temporary workaround for https://github.com/ClickHouse/ClickHouse/issues/37420.
+        #[cfg(feature = "wa-37420")]
+        self.prepend_bom();
+
+        // Hyper uses non-trivial and inefficient schema of buffering chunks.
+        // It's difficult to determine when allocations occur.
+        // So, instead we control it manually here and rely on the system allocator.
+        let chunk = self.take_and_prepare_chunk()?;
+
+        let sender = self.sender.as_mut().unwrap(); // checked above
+
+        let is_timed_out = match timeout!(self, send_timeout, sender.send_data(chunk)) {
+            Some(Ok(())) => return Ok(()),
+            Some(Err(_)) => false, // an actual error will be returned from `wait_handle`
+            None => true,
+        };
+
+        // Error handling.
+
+        self.abort();
+
+        // TODO: is it required to wait the handle in the case of timeout?
+        let res = self.wait_handle().await;
+
+        if is_timed_out {
+            Err(Error::TimedOut)
+        } else {
+            res?; // a real error should be here.
+            Err(Error::Network("channel closed".into()))
+        }
     }
 
     async fn wait_handle(&mut self) -> Result<()> {
-        drop(self.sender.take());
-
-        match (&mut self.handle).await {
-            Ok(res) => res,
-            Err(err) if err.is_panic() => panic::resume_unwind(err.into_panic()),
-            Err(err) => {
-                // TODO
-                Err(Error::Custom(format!("unexpected error: {}", err)))
+        match timeout!(self, end_timeout, &mut self.handle) {
+            Some(Ok(res)) => res,
+            Some(Err(err)) if err.is_panic() => panic::resume_unwind(err.into_panic()),
+            Some(Err(err)) => Err(Error::Custom(format!("unexpected error: {}", err))),
+            None => {
+                // We can do nothing useful here, so just shut down the background task.
+                self.handle.abort();
+                Err(Error::TimedOut)
             }
         }
     }
@@ -172,7 +250,6 @@ impl<T> Insert<T> {
         Ok(mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze())
     }
 
-    // Temporary workaround for https://github.com/ClickHouse/ClickHouse/issues/37420.
     #[cfg(feature = "wa-37420")]
     fn prepend_bom(&mut self) {
         if self.chunk_count == 0 && self.buffer.starts_with(&[0xef, 0xbb, 0xbf]) {
