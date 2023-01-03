@@ -59,6 +59,9 @@ where
     }
 
     /// See [`Insert::with_max_entries()`].
+    ///
+    /// Note that [`Inserter::commit()`] can call [`Insert::end()`] inside,
+    /// so `end_timeout` is also applied to `commit()` method.
     pub fn with_timeouts(
         mut self,
         send_timeout: Option<Duration>,
