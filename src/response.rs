@@ -213,6 +213,8 @@ where
                 if let Poll::Ready(Some(Ok(chunk))) = &mut res {
                     if let Some(err) = extract_exception(chunk) {
                         *self = Self::Exception(Some(err));
+
+                        // NOTE: now `chunk` can be empty, but it's ok for callers.
                     }
                 }
 
