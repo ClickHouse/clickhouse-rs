@@ -1,5 +1,3 @@
-use serde::Serialize;
-
 use clickhouse::{Client, Compression};
 
 mod common;
@@ -59,7 +57,7 @@ async fn deferred_lz4() {
         .await
         .unwrap();
 
-    #[derive(Serialize, clickhouse::Row)]
+    #[derive(serde::Serialize, clickhouse::Row)]
     struct Row {
         no: u32,
     }
