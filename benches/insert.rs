@@ -76,7 +76,7 @@ fn insert(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let rt = Runtime::new().unwrap();
             let client = Client::default()
-                .with_url(format!("http://{}", addr))
+                .with_url(format!("http://{addr}"))
                 .with_compression(Compression::None);
             rt.block_on(run(client, iters)).unwrap()
         })
@@ -86,7 +86,7 @@ fn insert(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let rt = Runtime::new().unwrap();
             let client = Client::default()
-                .with_url(format!("http://{}", addr))
+                .with_url(format!("http://{addr}"))
                 .with_compression(Compression::Lz4);
             rt.block_on(run(client, iters)).unwrap()
         })
@@ -96,7 +96,7 @@ fn insert(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let rt = Runtime::new().unwrap();
             let client = Client::default()
-                .with_url(format!("http://{}", addr))
+                .with_url(format!("http://{addr}"))
                 .with_compression(Compression::Lz4Hc(4));
             rt.block_on(run(client, iters)).unwrap()
         })

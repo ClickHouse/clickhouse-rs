@@ -63,7 +63,7 @@ async fn main() {
     // How to test failures.
     mock.add(test::handlers::failure(test::status::FORBIDDEN));
     let reason = make_select(&client).await;
-    assert_eq!(format!("{:?}", reason), r#"Err(BadResponse("Forbidden"))"#);
+    assert_eq!(format!("{reason:?}"), r#"Err(BadResponse("Forbidden"))"#);
 
     // How to test INSERT.
     let recording = mock.add(test::handlers::record());

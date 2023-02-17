@@ -74,7 +74,7 @@ impl Mock {
         tokio::spawn(server);
 
         Self {
-            url: format!("http://{}", addr),
+            url: format!("http://{addr}"),
             tx,
             responses_left: responses_left_0,
             non_exhaustive: false,

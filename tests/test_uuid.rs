@@ -34,7 +34,7 @@ async fn smoke() {
         .unwrap();
 
     let uuid = Uuid::new_v4();
-    println!("uuid: {}", uuid);
+    println!("uuid: {uuid}");
 
     let original_row = MyRow {
         uuid,
