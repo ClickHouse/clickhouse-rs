@@ -1,18 +1,31 @@
 use serde::Serialize;
 
-use clickhouse::{Compression, Row};
+use clickhouse::{Client, Compression};
 
 mod common;
 
 #[common::named]
 #[tokio::test]
-async fn max_execution_time() {
-    // TODO: check different `timeout_overflow_mode`
-    let client = common::prepare_database!().with_compression(Compression::None);
+async fn deferred() {
+    max_execution_time(common::prepare_database!(), false).await;
+}
 
+#[common::named]
+#[tokio::test]
+async fn wait_end_of_query() {
+    max_execution_time(common::prepare_database!(), true).await;
+}
+
+async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
+    if wait_end_of_query {
+        client = client.with_option("wait_end_of_query", "1")
+    }
+
+    // TODO: check different `timeout_overflow_mode`
     let mut cursor = client
+        .with_compression(Compression::None)
         .with_option("max_execution_time", "0.1")
-        .query("SELECT toUInt8(65 + number % 5) FROM system.numbers LIMIT 10000000")
+        .query("SELECT toUInt8(65 + number % 5) FROM system.numbers LIMIT 100000000")
         .fetch::<u8>()
         .unwrap();
 
@@ -30,14 +43,14 @@ async fn max_execution_time() {
         }
     };
 
-    assert_ne!(i, 0); // we're interested only in errors during processing
+    assert!(wait_end_of_query ^ (i != 0));
     assert!(err.to_string().contains("TIMEOUT_EXCEEDED"));
 }
 
 #[cfg(feature = "lz4")]
 #[common::named]
 #[tokio::test]
-async fn max_execution_time_lz4() {
+async fn deferred_lz4() {
     let client = common::prepare_database!().with_compression(Compression::Lz4);
 
     client
@@ -46,7 +59,7 @@ async fn max_execution_time_lz4() {
         .await
         .unwrap();
 
-    #[derive(Serialize, Row)]
+    #[derive(Serialize, clickhouse::Row)]
     struct Row {
         no: u32,
     }
