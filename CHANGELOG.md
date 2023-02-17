@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Changed
+- query: improve throughput (~8%).
+
 ### Fixed
 - cursor: handle errors sent at the end of a response ([#56]).
 

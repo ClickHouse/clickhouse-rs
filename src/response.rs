@@ -1,4 +1,5 @@
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -19,32 +20,32 @@ use crate::{
 };
 
 pub(crate) enum Response {
-    Waiting(ResponseFuture, Compression),
+    Waiting(Pin<Box<dyn Future<Output = Result<Chunks<Body>>> + Send>>),
     Loading(Chunks<Body>),
 }
 
 impl Response {
-    pub(crate) fn new(future: ResponseFuture, compression: Compression) -> Self {
-        Self::Waiting(future, compression)
-    }
-
-    pub(crate) async fn chunks(&mut self) -> Result<&mut Chunks<Body>> {
-        if let Self::Waiting(response, compression) = self {
+    pub(crate) fn new(response: ResponseFuture, compression: Compression) -> Self {
+        // Boxing here significantly improves performance by reducing the size of `chunks()`.
+        Self::Waiting(Box::pin(async move {
             let response = response.await?;
             let status = response.status();
             let body = response.into_body();
 
-            if status != StatusCode::OK {
-                return Err(collect_bad_response(status, body, *compression).await);
+            if status == StatusCode::OK {
+                Ok(Chunks::new(body, compression))
+            } else {
+                Err(collect_bad_response(status, body, compression).await)
             }
+        }))
+    }
 
-            let chunks = Chunks::new(body, *compression);
-            *self = Self::Loading(chunks);
-        }
-
-        match self {
-            Self::Waiting(..) => unreachable!(),
-            Self::Loading(chunks) => Ok(chunks),
+    pub(crate) async fn chunks(&mut self) -> Result<&mut Chunks<Body>> {
+        loop {
+            match self {
+                Self::Waiting(future) => *self = Self::Loading(future.await?),
+                Self::Loading(chunks) => break Ok(chunks),
+            }
         }
     }
 
