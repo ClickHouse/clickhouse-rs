@@ -17,16 +17,15 @@ use crate::{
 const MAX_COMPRESSED_SIZE: u32 = 1024 * 1024 * 1024;
 
 pub(crate) struct Lz4Decoder<S> {
-    inner: S,
+    stream: S,
     chunks: BufList<Bytes>,
     meta: Option<Lz4Meta>,
     buffer: Vec<u8>,
 }
 
-impl<S, E> Stream for Lz4Decoder<S>
+impl<S> Stream for Lz4Decoder<S>
 where
-    S: Stream<Item = Result<Bytes, E>> + Unpin,
-    E: Into<Error>,
+    S: Stream<Item = Result<Bytes>> + Unpin,
 {
     type Item = Result<Bytes>;
 
@@ -38,13 +37,13 @@ where
             });
 
             if size < required_size {
-                let inner = Pin::new(&mut self.inner);
-                match ready!(inner.poll_next(cx)) {
+                let stream = Pin::new(&mut self.stream);
+                match ready!(stream.poll_next(cx)) {
                     Some(Ok(chunk)) => {
                         self.chunks.push(chunk);
                         continue;
                     }
-                    Some(Err(err)) => return Some(Err(err.into())).into(),
+                    Some(Err(err)) => return Some(Err(err)).into(),
                     None if size > 0 => {
                         let err = Error::Decompression("malformed data".into());
                         return Poll::Ready(Some(Err(err)));
@@ -119,7 +118,7 @@ impl Lz4Meta {
 impl<S> Lz4Decoder<S> {
     pub(crate) fn new(stream: S) -> Self {
         Self {
-            inner: stream,
+            stream,
             chunks: BufList::default(),
             meta: None,
             buffer: Vec::new(),
@@ -137,6 +136,7 @@ impl<S> Lz4Decoder<S> {
         self.buffer.resize(meta.compressed_size as usize, 0);
         meta.write_header(&mut self.buffer[..]);
 
+        // TODO: if we have a whole frame in one chunk, extra copying can be avoided.
         self.chunks
             .copy_to_slice(&mut self.buffer[LZ4_HEADER_SIZE..]);
 

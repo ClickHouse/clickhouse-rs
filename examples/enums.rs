@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         .query("SELECT ?fields FROM event_log")
         .fetch_all::<Event>()
         .await?;
-    println!("{:?}", events);
+    println!("{events:?}");
 
     Ok(())
 }

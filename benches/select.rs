@@ -16,7 +16,7 @@ mod server {
     use tokio::runtime;
 
     async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-        let _ = body::aggregate(req.into_body());
+        let _ = body::aggregate(req.into_body()).await;
         let chunk = Bytes::from_static(&[15; 128 * 1024]);
         let stream = stream::repeat(Ok::<Bytes, &'static str>(chunk));
         let body = Body::wrap_stream(stream);
@@ -70,7 +70,7 @@ fn select(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let rt = Runtime::new().unwrap();
             let client = Client::default()
-                .with_url(format!("http://{}", addr))
+                .with_url(format!("http://{addr}"))
                 .with_compression(Compression::None);
             let start = Instant::now();
             rt.block_on(run(client, iters)).unwrap();

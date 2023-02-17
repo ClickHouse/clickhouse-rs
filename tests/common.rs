@@ -16,7 +16,7 @@ pub(crate) mod _priv {
 
     pub async fn prepare_database(file_path: &str, fn_name: &str) -> Client {
         let name = make_db_name(file_path, fn_name);
-        let client = Client::default().with_url(format!("http://{}", HOST));
+        let client = Client::default().with_url(format!("http://{HOST}"));
 
         client
             .query("DROP DATABASE IF EXISTS ?")

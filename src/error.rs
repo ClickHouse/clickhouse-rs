@@ -22,11 +22,11 @@ pub enum Error {
     Decompression(#[source] Box<dyn StdError + Send + Sync>),
     #[error("no rows returned by a query that expected to return at least one row")]
     RowNotFound,
-    #[error("sequences must have a knowable size ahead of time")]
+    #[error("sequences must have a known size ahead of time")]
     SequenceMustHaveLength,
     #[error("`deserialize_any` is not supported")]
     DeserializeAnyNotSupported,
-    #[error("not enough data. Probably a row type mismatches a database schema")]
+    #[error("not enough data, probably a row type mismatches a database schema")]
     NotEnoughData,
     #[error("string is not valid utf8")]
     InvalidUtf8Encoding(#[from] Utf8Error),

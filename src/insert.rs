@@ -71,7 +71,7 @@ impl<T> Insert<T> {
 
         // TODO: what about escaping a table name?
         // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers
-        let query = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields);
+        let query = format!("INSERT INTO {table}({fields}) FORMAT RowBinary");
         pairs.append_pair("query", &query);
 
         if client.compression.is_lz4() {
@@ -225,7 +225,7 @@ impl<T> Insert<T> {
         match timeout!(self, end_timeout, &mut self.handle) {
             Some(Ok(res)) => res,
             Some(Err(err)) if err.is_panic() => panic::resume_unwind(err.into_panic()),
-            Some(Err(err)) => Err(Error::Custom(format!("unexpected error: {}", err))),
+            Some(Err(err)) => Err(Error::Custom(format!("unexpected error: {err}"))),
             None => {
                 // We can do nothing useful here, so just shut down the background task.
                 self.handle.abort();

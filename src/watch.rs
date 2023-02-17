@@ -241,7 +241,7 @@ async fn init_cursor<T>(client: &Client, params: &WatchParams) -> Result<JsonCur
     let mut watch_sql = format!("WATCH {}{}", params.view, events);
 
     if let Some(limit) = params.limit {
-        let _ = write!(&mut watch_sql, " LIMIT {}", limit);
+        let _ = write!(&mut watch_sql, " LIMIT {limit}");
     }
 
     watch_sql.push_str(" FORMAT JSONEachRowWithProgress");
@@ -262,10 +262,10 @@ fn make_live_view_name(sql: &str) -> String {
 
     let mut name = String::with_capacity(40);
     for word in &result[..] {
-        let _ = write!(&mut name, "{:02x}", word);
+        let _ = write!(&mut name, "{word:02x}");
     }
 
-    format!("lv_{}", name)
+    format!("lv_{name}")
 }
 
 #[test]

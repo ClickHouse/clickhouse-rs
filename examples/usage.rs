@@ -67,7 +67,7 @@ async fn fetch(client: &Client) -> Result<()> {
         .fetch::<MyRow<'_>>()?;
 
     while let Some(row) = cursor.next().await? {
-        println!("{:?}", row);
+        println!("{row:?}");
     }
 
     Ok(())
@@ -82,7 +82,7 @@ async fn fetch_all(client: &Client) -> Result<()> {
         .fetch_all::<MyRowOwned>()
         .await?;
 
-    println!("{:?}", vec);
+    println!("{vec:?}");
 
     Ok(())
 }
@@ -105,7 +105,7 @@ async fn select_count(client: &Client) -> Result<()> {
         .fetch_one::<u64>()
         .await?;
 
-    println!("count() = {}", count);
+    println!("count() = {count}");
 
     Ok(())
 }
@@ -117,7 +117,7 @@ async fn watch(client: &Client) -> Result<()> {
         .fetch::<MyRow<'_>>()?;
 
     let (version, row) = cursor.next().await?.unwrap();
-    println!("version={}, row={:?}", version, row);
+    println!("version={version}, row={row:?}");
 
     let mut insert = client.insert("some")?;
     let row = MyRow {
@@ -128,7 +128,7 @@ async fn watch(client: &Client) -> Result<()> {
     insert.end().await?;
 
     let (version, row) = cursor.next().await?.unwrap();
-    println!("version={}, row={:?}", version, row);
+    println!("version={version}, row={row:?}");
 
     // Or you can request only events without data.
     let mut cursor = client
