@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+## [0.11.3] - 2023-02-19
 ### Added
 - client: support HTTPS ([#54]).
 
@@ -232,7 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.3...HEAD
+[0.11.3]: https://github.com/loyd/clickhouse.rs/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/loyd/clickhouse.rs/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/loyd/clickhouse.rs/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/loyd/clickhouse.rs/compare/v0.10.0...v0.11.0
