@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Added
+- client: support HTTPS ([#54]).
+
 ### Changed
 - query: improve throughput (~8%).
 
@@ -14,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - cursor: handle errors sent at the end of a response ([#56]).
 
 [#56]: https://github.com/loyd/clickhouse.rs/issues/56
+[#54]: https://github.com/loyd/clickhouse.rs/pull/54
 
 ## [0.11.2] - 2023-01-03
 ### Added

@@ -18,6 +18,7 @@ A typed client for ClickHouse.
 
 * Uses `serde` for encoding/decoding rows.
 * Uses `RowBinary` encoding.
+* Supports HTTP and HTTPS.
 * Provides API for selecting.
 * Provides API for inserting.
 * Provides API for infinite transactional (see below) inserting.
@@ -207,6 +208,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
 
 ## Feature Flags
 * `lz4` (enabled by default) — enables `Compression::Lz4` and `Compression::Lz4Hc(_)` variants. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
+* `tls` (enabled by default) — supports urls with the `HTTPS` schema.
 * `test-util` — adds mocks. See [the example](https://github.com/loyd/clickhouse.rs/tree/master/examples/mock.rs). Use it only in `dev-dependencies`.
 * `watch` — enables `client.watch` functionality. See the corresponding section for details.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid/latest/uuid/) crate.

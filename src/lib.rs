@@ -9,7 +9,6 @@ extern crate static_assertions;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use hyper::client::connect::HttpConnector;
-
 #[cfg(feature = "tls")]
 use hyper_tls::HttpsConnector;
 
@@ -67,10 +66,14 @@ pub struct Client {
 
 impl Default for Client {
     fn default() -> Self {
+        #[allow(unused_mut)]
         let mut connector = HttpConnector::new();
 
         // TODO: make configurable in `Client::builder()`.
         connector.set_keepalive(Some(TCP_KEEPALIVE));
+
+        #[cfg(feature = "tls")]
+        let connector = HttpsConnector::new_with_connector(connector);
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
@@ -104,16 +107,6 @@ impl Client {
     /// ```
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = url.into();
-
-        #[cfg(feature = "tls")]
-        if self.url.starts_with("https:") {
-            let mut connector = HttpsConnector::new();
-            let client = hyper::Client::builder()
-                .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-                .build::<_, hyper::Body>(connector);
-            self.client = Arc::new(client);
-        }
-
         self
     }
 
