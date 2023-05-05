@@ -28,16 +28,41 @@ impl Query {
         }
     }
 
+    /// Bind `value` to the first `?` in the query.
+    ///
+    /// The `value`, which must either implement [`Serialize`](serde::Serialize)
+    /// or be an [`Identifier`], will be appropriately escaped.
+    ///
+    /// WARNING: This means that the query must not have any extra `?`, even if
+    /// they are in a string literal!
     pub fn bind(mut self, value: impl Bind) -> Self {
         self.sql.bind_arg(value);
         self
     }
 
+    /// Execute the query.
     pub async fn execute(self) -> Result<()> {
         self.do_execute(false)?.finish().await
     }
 
-    // TODO: docs, panics
+    /// Execute the query, returning a [`RowCursor`] to obtain results.
+    ///
+    /// # Example
+    /// ```norun
+    /// #[derive(clickhouse::Row, serde::Deserialize)]
+    /// struct MyRow<'a> {
+    ///     no: u32,
+    ///     name: &'a str,
+    /// }
+    ///
+    /// let mut cursor = clickhouse::Client::default()
+    ///     .query("SELECT ?fields FROM some WHERE no BETWEEN 0 AND 1")
+    ///     .fetch::<MyRow<'_>>()?;
+    ///
+    /// while let Some(MyRow { name, no }) = cursor.next().await? {
+    ///     println!("{name}: {no}");
+    /// }
+    /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
         self.sql.append(" FORMAT RowBinary");
@@ -46,6 +71,9 @@ impl Query {
         Ok(RowCursor(RowBinaryCursor::new(response)))
     }
 
+    /// Executes the query and returns just a single row.
+    ///
+    /// Note that `T` must be owned.
     pub async fn fetch_one<T>(self) -> Result<T>
     where
         T: Row + for<'b> Deserialize<'b>,
@@ -58,6 +86,7 @@ impl Query {
     }
 
     /// Executes the query and returns all the generated results, collected into a Vec.
+    ///
     /// Note that `T` must be owned.
     pub async fn fetch_all<T>(self) -> Result<Vec<T>>
     where
