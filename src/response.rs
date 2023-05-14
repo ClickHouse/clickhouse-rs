@@ -40,7 +40,17 @@ impl Response {
         }))
     }
 
-    pub(crate) async fn chunks(&mut self) -> Result<&mut Chunks<Body>> {
+    #[inline]
+    pub(crate) fn chunks(&mut self) -> Option<&mut Chunks<Body>> {
+        match self {
+            Self::Waiting(_) => None,
+            Self::Loading(chunks) => Some(chunks),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub(crate) async fn chunks_slow(&mut self) -> Result<&mut Chunks<Body>> {
         loop {
             match self {
                 Self::Waiting(future) => *self = Self::Loading(future.await?),
@@ -50,7 +60,7 @@ impl Response {
     }
 
     pub(crate) async fn finish(&mut self) -> Result<()> {
-        let chunks = self.chunks().await?;
+        let chunks = self.chunks_slow().await?;
         while chunks.try_next().await?.is_some() {}
         Ok(())
     }

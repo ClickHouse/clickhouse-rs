@@ -2,8 +2,9 @@ use std::collections::VecDeque;
 
 use bytes::Buf;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct BufList<T> {
+    next_buf: Option<T>,
     bufs: VecDeque<T>,
     rem: usize,
     cursor: usize,
@@ -13,21 +14,28 @@ impl<T: Buf> BufList<T> {
     #[inline]
     pub(crate) fn push(&mut self, buf: T) {
         let rem = buf.remaining();
-
-        if rem > 0 {
-            self.bufs.push_back(buf);
-            self.rem += rem;
+        if rem == 0 {
+            return;
         }
+
+        if self.next_buf.is_none() {
+            self.next_buf = Some(buf);
+        } else {
+            self.bufs.push_back(buf);
+        }
+
+        self.rem += rem;
     }
 
     #[inline]
     pub(crate) fn bufs_cnt(&self) -> usize {
-        self.bufs.len()
+        self.next_buf.is_some() as usize + self.bufs.len()
     }
 
+    #[inline]
     pub(crate) fn commit(&mut self) {
         while self.cursor > 0 {
-            let front = &mut self.bufs[0];
+            let front = self.next_buf.as_mut().unwrap();
             let rem = front.remaining();
 
             if rem > self.cursor {
@@ -36,7 +44,7 @@ impl<T: Buf> BufList<T> {
             } else {
                 front.advance(rem);
                 self.cursor -= rem;
-                self.bufs.pop_front();
+                self.next_buf = self.bufs.pop_front();
             }
         }
     }
@@ -44,6 +52,21 @@ impl<T: Buf> BufList<T> {
     pub(crate) fn rollback(&mut self) {
         self.rem += self.cursor;
         self.cursor = 0;
+    }
+
+    #[cold]
+    fn chunk_slow(&self) -> &[u8] {
+        let mut cnt = self.cursor - self.next_buf.as_ref().map_or(0, |b| b.chunk().len());
+
+        for buf in &self.bufs {
+            let bytes = buf.chunk();
+            if bytes.len() > cnt {
+                return &bytes[cnt..];
+            }
+            cnt -= bytes.len();
+        }
+
+        b""
     }
 }
 
@@ -55,17 +78,14 @@ impl<T: Buf> Buf for BufList<T> {
 
     #[inline]
     fn chunk(&self) -> &[u8] {
-        let mut cnt = self.cursor;
-
-        for buf in &self.bufs {
+        if let Some(buf) = &self.next_buf {
             let bytes = buf.chunk();
-            if bytes.len() > cnt {
-                return &bytes[cnt..];
+            if bytes.len() > self.cursor {
+                return &bytes[self.cursor..];
             }
-            cnt -= bytes.len();
         }
 
-        b""
+        self.chunk_slow()
     }
 
     #[inline]

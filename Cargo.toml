@@ -15,6 +15,10 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [[bench]]
+name = "select_numbers"
+harness = false
+
+[[bench]]
 name = "insert"
 harness = false
 

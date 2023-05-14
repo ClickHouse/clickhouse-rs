@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Added
+- query: `Query::fetch_optional()`.
+
+### Changed
+- query: increase performance up to 40%.
 
 ## [0.11.3] - 2023-02-19
 ### Added
