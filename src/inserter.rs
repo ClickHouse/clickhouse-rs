@@ -162,8 +162,7 @@ where
         T: Serialize,
     {
         self.uncommitted_entries += 1;
-        let fut = self.insert.write(row);
-        async move { fut.await }
+        self.insert.write(row)
     }
 
     /// Checks limits and ends a current `INSERT` if they are reached.
