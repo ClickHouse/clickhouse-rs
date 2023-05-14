@@ -5,13 +5,15 @@ mod common;
 #[common::named]
 #[tokio::test]
 async fn deferred() {
-    max_execution_time(common::prepare_database!(), false).await;
+    let client = common::prepare_database!();
+    max_execution_time(client, false).await;
 }
 
 #[common::named]
 #[tokio::test]
 async fn wait_end_of_query() {
-    max_execution_time(common::prepare_database!(), true).await;
+    let client = common::prepare_database!();
+    max_execution_time(client, true).await;
 }
 
 async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {

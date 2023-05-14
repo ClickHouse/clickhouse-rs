@@ -47,19 +47,22 @@ async fn check(client: Client) {
 #[common::named]
 #[tokio::test]
 async fn none() {
-    check(common::prepare_database!().with_compression(Compression::None)).await;
+    let client = common::prepare_database!().with_compression(Compression::None);
+    check(client).await;
 }
 
 #[cfg(feature = "lz4")]
 #[common::named]
 #[tokio::test]
 async fn lz4() {
-    check(common::prepare_database!().with_compression(Compression::Lz4)).await;
+    let client = common::prepare_database!().with_compression(Compression::Lz4);
+    check(client).await;
 }
 
 #[cfg(feature = "lz4")]
 #[common::named]
 #[tokio::test]
 async fn lz4_hc() {
-    check(common::prepare_database!().with_compression(Compression::Lz4Hc(4))).await;
+    let client = common::prepare_database!().with_compression(Compression::Lz4Hc(4));
+    check(client).await;
 }
