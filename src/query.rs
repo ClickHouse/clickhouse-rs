@@ -28,7 +28,7 @@ impl Query {
         }
     }
 
-    /// Bind `value` to the first `?` in the query.
+    /// Binds `value` to the next `?` in the query.
     ///
     /// The `value`, which must either implement [`Serialize`](serde::Serialize)
     /// or be an [`Identifier`], will be appropriately escaped.
@@ -40,15 +40,17 @@ impl Query {
         self
     }
 
-    /// Execute the query.
+    /// Executes the query.
     pub async fn execute(self) -> Result<()> {
         self.do_execute(false)?.finish().await
     }
 
-    /// Execute the query, returning a [`RowCursor`] to obtain results.
+    /// Executes the query, returning a [`RowCursor`] to obtain results.
     ///
     /// # Example
-    /// ```norun
+    ///
+    /// ```
+    /// # async fn example() -> clickhouse::error::Result<()> {
     /// #[derive(clickhouse::Row, serde::Deserialize)]
     /// struct MyRow<'a> {
     ///     no: u32,
@@ -62,6 +64,7 @@ impl Query {
     /// while let Some(MyRow { name, no }) = cursor.next().await? {
     ///     println!("{name}: {no}");
     /// }
+    /// # Ok(()) }
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
@@ -83,6 +86,16 @@ impl Query {
             Ok(None) => Err(Error::RowNotFound),
             Err(err) => Err(err),
         }
+    }
+
+    /// Executes the query and returns at most one row.
+    ///
+    /// Note that `T` must be owned.
+    pub async fn fetch_optional<T>(self) -> Result<Option<T>>
+    where
+        T: Row + for<'b> Deserialize<'b>,
+    {
+        self.fetch()?.next().await
     }
 
     /// Executes the query and returns all the generated results, collected into a Vec.

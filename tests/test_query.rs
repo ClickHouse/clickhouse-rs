@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use clickhouse::Row;
+use clickhouse::{error::Error, Row};
 
 mod common;
 
@@ -52,6 +52,41 @@ async fn smoke() {
         assert_eq!(row.name, "foo");
         i += 1;
     }
+}
+
+#[common::named]
+#[tokio::test]
+async fn fetch_one_and_optional() {
+    let client = common::prepare_database!();
+
+    client
+        .query("CREATE TABLE test(n String) ENGINE = MergeTree ORDER BY n")
+        .execute()
+        .await
+        .unwrap();
+
+    let q = "SELECT * FROM test";
+    let got_string = client.query(q).fetch_optional::<String>().await.unwrap();
+    assert_eq!(got_string, None);
+
+    let got_string = client.query(q).fetch_one::<String>().await;
+    assert!(matches!(got_string, Err(Error::RowNotFound)));
+
+    #[derive(Serialize, Row)]
+    struct Row {
+        n: String,
+    }
+
+    let mut insert = client.insert("test").unwrap();
+    insert.write(&Row { n: "foo".into() }).await.unwrap();
+    insert.write(&Row { n: "bar".into() }).await.unwrap();
+    insert.end().await.unwrap();
+
+    let got_string = client.query(q).fetch_optional::<String>().await.unwrap();
+    assert_eq!(got_string, Some("bar".into()));
+
+    let got_string = client.query(q).fetch_one::<String>().await.unwrap();
+    assert_eq!(got_string, "bar");
 }
 
 // See #19.
