@@ -15,22 +15,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - run: cargo build --all-targets --all-features
 
   rustfmt:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - run: rustup component add rustfmt
+    - uses: actions/checkout@v3
     - run: cargo fmt --version
     - run: cargo fmt -- --check
 
   clippy:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - run: rustup component add clippy
+    - uses: actions/checkout@v3
     - run: cargo clippy --version
     - run: cargo clippy
     - run: cargo clippy --all-targets --no-default-features
@@ -39,7 +37,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - run: cargo test
     - run: cargo test --no-default-features
     - run: cargo test --features uuid,time
