@@ -132,6 +132,37 @@ insert.end().await?;
 <details>
 <summary>
 
+### Async insert
+
+</summary>
+
+```rust,ignore
+use serde::Serialize;
+use clickhouse::{Row, AsyncInsertOptions};
+
+#[derive(Row, Serialize)]
+struct MyRow {
+    no: u32,
+    name: String,
+}
+
+let opts = AsyncInsertOptions::builder()
+    .async_insert(true)
+    .async_insert_threads(8)
+    .build();
+let mut insert = client.async_insert("some", opts)?;
+insert.write(&MyRow { no: 0, name: "foo".into() }).await?;
+insert.write(&MyRow { no: 1, name: "bar".into() }).await?;
+insert.end().await?;
+```
+
+- To enable [async insert](https://clickhouse.com/docs/en/cloud/bestpractices/asynchronous-inserts), you can use [`Client::async_insert`] method with [`AsyncInsertOptions`] passed to it.
+- You can configure async insert via methods on [`AsyncInsertOptionsBuilder`].
+
+</details>
+<details>
+<summary>
+
 ### Infinite inserting
 
 </summary>
