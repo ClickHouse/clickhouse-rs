@@ -13,9 +13,12 @@ use hyper::client::connect::HttpConnector;
 use hyper_tls::HttpsConnector;
 
 pub use clickhouse_derive::Row;
-use insert::AsyncInsertOptions;
 
-pub use self::{compression::Compression, row::Row};
+pub use self::{
+    compression::Compression,
+    insert::{AsyncInsertOptions, AsyncInsertOptionsBuilder},
+    row::Row,
+};
 use self::{error::Result, http_client::HttpClient};
 
 pub mod error;

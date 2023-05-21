@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use clickhouse::{error::Error, insert::AsyncInsertOptions, Row};
+use clickhouse::{error::Error, AsyncInsertOptions, Row};
 
 mod common;
 
