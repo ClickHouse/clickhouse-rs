@@ -281,6 +281,7 @@ impl<T> Drop for Insert<T> {
     }
 }
 
+/// The option values to be used when configuring [async insert](https://clickhouse.com/docs/en/cloud/bestpractices/asynchronous-inserts).
 #[derive(Debug, Default)]
 pub struct AsyncInsertOptions {
     async_insert: OptionValue<bool>,
@@ -376,6 +377,7 @@ impl<T> Default for OptionValue<T> {
     }
 }
 
+/// A builder for [`AsyncInsertOptions`].
 #[derive(Debug, Default)]
 pub struct AsyncInsertOptionsBuilder {
     async_insert: OptionValue<bool>,
@@ -390,6 +392,12 @@ pub struct AsyncInsertOptionsBuilder {
 }
 
 impl AsyncInsertOptionsBuilder {
+    /// Starts a new builder.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Builds [`AsyncInsertOptions`] with the specified options.
     pub fn build(self) -> AsyncInsertOptions {
         AsyncInsertOptions {
             async_insert: self.async_insert,
@@ -404,46 +412,55 @@ impl AsyncInsertOptionsBuilder {
         }
     }
 
+    /// Specifies whether to enable async insert. See <https://clickhouse.com/docs/en/operations/settings/settings#async-insert> for more info.
     pub fn async_insert(mut self, async_insert: bool) -> Self {
         self.async_insert = OptionValue::Specified(async_insert);
         self
     }
 
+    /// Specifies the number of threads for async insert. See <https://clickhouse.com/docs/en/operations/settings/settings#async-insert-threads> for more info.
     pub fn async_insert_threads(mut self, async_insert_threads: usize) -> Self {
         self.async_insert_threads = OptionValue::Specified(async_insert_threads);
         self
     }
 
+    /// Specifies whether to enable waiting for processing of asynchronous insertion. See <https://clickhouse.com/docs/en/operations/settings/settings#wait-for-async-insert> for more info.
     pub fn wait_for_async_insert(mut self, wait_for_async_insert: bool) -> Self {
         self.wait_for_async_insert = OptionValue::Specified(wait_for_async_insert);
         self
     }
 
+    /// Specifies the timeout in seconds for waiting for processing of asynchronous insertion. See <https://clickhouse.com/docs/en/operations/settings/settings#wait-for-async-insert-timeout> for more info.
     pub fn wait_for_async_insert_timeout(mut self, wait_for_async_insert_timeout: usize) -> Self {
         self.wait_for_async_insert_timeout = OptionValue::Specified(wait_for_async_insert_timeout);
         self
     }
 
+    /// Specifies the maximum size of unparsed data in bytes collected per query before being inserted. See <https://clickhouse.com/docs/en/operations/settings/settings#async-insert-max-data-size> for more info.
     pub fn async_insert_max_data_size(mut self, async_insert_max_data_size: usize) -> Self {
         self.async_insert_max_data_size = OptionValue::Specified(async_insert_max_data_size);
         self
     }
 
+    /// Specifies the maximum number of queries per block before being inserted. See <https://clickhouse.com/docs/en/operations/settings/settings#async-insert-max-query-number> for more info.
     pub fn async_insert_max_query_number(mut self, async_insert_max_query_number: usize) -> Self {
         self.async_insert_max_query_number = OptionValue::Specified(async_insert_max_query_number);
         self
     }
 
+    /// Specifies the maximum timeout in milliseconds since the first `INSERT` query before inserting. See <https://clickhouse.com/docs/en/operations/settings/settings#async-insert-busy-timeout-ms> for more info.
     pub fn async_insert_busy_timeout_ms(mut self, async_insert_busy_timeout_ms: usize) -> Self {
         self.async_insert_busy_timeout_ms = OptionValue::Specified(async_insert_busy_timeout_ms);
         self
     }
 
+    /// Specifies the maximum timeout in milliseconds since the last `INSERT` query before inserting. See <https://clickhouse.com/docs/en/operations/settings/settings#async-insert-stale-timeout-ms> for more info.
     pub fn async_insert_stale_timeout_ms(mut self, async_insert_stale_timeout_ms: usize) -> Self {
         self.async_insert_stale_timeout_ms = OptionValue::Specified(async_insert_stale_timeout_ms);
         self
     }
 
+    /// Specifies whether to enable deduplication of data in async insert. See <https://clickhouse.com/docs/en/operations/settings/settings#async-insert-deduplicate> for more info.
     pub fn async_insert_deduplicate(mut self, async_insert_deduplicate: bool) -> Self {
         self.async_insert_deduplicate = OptionValue::Specified(async_insert_deduplicate);
         self
@@ -451,6 +468,7 @@ impl AsyncInsertOptionsBuilder {
 }
 
 impl AsyncInsertOptions {
+    /// Starts a new builder.
     pub fn builder() -> AsyncInsertOptionsBuilder {
         AsyncInsertOptionsBuilder::default()
     }

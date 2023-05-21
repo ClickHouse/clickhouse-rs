@@ -181,6 +181,7 @@ impl Client {
         insert::Insert::new(self, table, AsyncInsertOptions::default())
     }
 
+    /// Starts a new INSERT statement with async insert options of your choice.
     pub fn async_insert<T: Row>(
         &self,
         table: &str,
