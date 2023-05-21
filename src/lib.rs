@@ -13,6 +13,7 @@ use hyper::client::connect::HttpConnector;
 use hyper_tls::HttpsConnector;
 
 pub use clickhouse_derive::Row;
+use insert::AsyncInsertOptions;
 
 pub use self::{compression::Compression, row::Row};
 use self::{error::Result, http_client::HttpClient};
@@ -177,7 +178,15 @@ impl Client {
     /// # Panics
     /// If `T` has unnamed fields, e.g. tuples.
     pub fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
-        insert::Insert::new(self, table)
+        insert::Insert::new(self, table, AsyncInsertOptions::default())
+    }
+
+    pub fn async_insert<T: Row>(
+        &self,
+        table: &str,
+        async_insert_options: AsyncInsertOptions,
+    ) -> Result<insert::Insert<T>> {
+        insert::Insert::new(self, table, async_insert_options)
     }
 
     /// Creates an inserter to perform multiple INSERTs.
