@@ -63,13 +63,18 @@ async fn async_insert() {
     struct MyRow<'a> {
         no: u32,
         name: &'a str,
+        ts: u32,
     }
 
     // Create a table.
     client
         .query(
             "
-        CREATE TABLE test(no UInt32, name LowCardinality(String))
+        CREATE TABLE test(
+            no UInt32,
+            name LowCardinality(String),
+            ts Datetime
+        )
         ENGINE = MergeTree
         ORDER BY no
     ",
@@ -92,7 +97,14 @@ async fn async_insert() {
         .build();
     let mut insert = client.async_insert("test", opts).unwrap();
     for i in 0..1000 {
-        insert.write(&MyRow { no: i, name: "foo" }).await.unwrap();
+        insert
+            .write(&MyRow {
+                no: i,
+                name: "foo",
+                ts: 42,
+            })
+            .await
+            .unwrap();
     }
 
     insert.end().await.unwrap();

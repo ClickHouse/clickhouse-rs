@@ -77,7 +77,7 @@ impl<T> Insert<T> {
 
         // TODO: what about escaping a table name?
         // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers
-        let query = format!("INSERT INTO {table} ({fields}) FORMAT RowBinary {settings_clause}");
+        let query = format!("INSERT INTO {table} ({fields}) {settings_clause} FORMAT RowBinary");
         pairs.append_pair("query", &query);
 
         if client.compression.is_lz4() {
