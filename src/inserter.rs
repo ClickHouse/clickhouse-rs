@@ -154,6 +154,14 @@ where
         )
     }
 
+    #[cold]
+    #[inline(never)]
+    fn init_insert(&mut self) -> Result<&mut Insert<T>> {
+        let mut new_insert = self.client.insert(&self.table)?;
+        new_insert.set_timeouts(self.send_timeout, self.end_timeout);
+        Ok(self.insert.insert(new_insert))
+    }
+
     /// Serializes and writes to the socket a provided row.
     ///
     /// # Panics
@@ -167,9 +175,7 @@ where
         let insert = if let Some(insert) = &mut self.insert {
             insert
         } else {
-            let mut new_insert = self.client.insert(&self.table)?;
-            new_insert.set_timeouts(self.send_timeout, self.end_timeout);
-            self.insert.insert(new_insert)
+            self.init_insert()?
         };
         insert.write(row).await
     }
