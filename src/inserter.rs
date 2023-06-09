@@ -1,5 +1,6 @@
 use std::mem;
 
+use futures::{future::Either, Future};
 use serde::Serialize;
 use tokio::time::{Duration, Instant};
 
@@ -167,17 +168,18 @@ where
     /// # Panics
     /// If called after previous call returned an error.
     #[inline]
-    pub async fn write(&mut self, row: &T) -> Result<()>
+    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
     where
         T: Serialize,
     {
         self.uncommitted_entries += 1;
-        let insert = if let Some(insert) = &mut self.insert {
-            insert
-        } else {
-            self.init_insert()?
-        };
-        insert.write(row).await
+        if self.insert.is_none() {
+            return match self.init_insert() {
+                Ok(insert) => Either::Left(insert.write(row)),
+                Err(e) => Either::Right(futures::future::ready(Result::<()>::Err(e))),
+            };
+        }
+        Either::Left(self.insert.as_mut().unwrap().write(row))
     }
 
     /// Checks limits and ends a current `INSERT` if they are reached.
