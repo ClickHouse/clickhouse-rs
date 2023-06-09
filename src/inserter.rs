@@ -1,6 +1,9 @@
 use std::mem;
 
-use futures::{future::Either, Future};
+use futures::{
+    future::{self, Either},
+    Future,
+};
 use serde::Serialize;
 use tokio::time::{Duration, Instant};
 
@@ -155,14 +158,6 @@ where
         )
     }
 
-    #[cold]
-    #[inline(never)]
-    fn init_insert(&mut self) -> Result<&mut Insert<T>> {
-        let mut new_insert = self.client.insert(&self.table)?;
-        new_insert.set_timeouts(self.send_timeout, self.end_timeout);
-        Ok(self.insert.insert(new_insert))
-    }
-
     /// Serializes and writes to the socket a provided row.
     ///
     /// # Panics
@@ -174,10 +169,9 @@ where
     {
         self.uncommitted_entries += 1;
         if self.insert.is_none() {
-            return match self.init_insert() {
-                Ok(insert) => Either::Left(insert.write(row)),
-                Err(e) => Either::Right(futures::future::ready(Result::<()>::Err(e))),
-            };
+            if let Err(e) = self.init_insert() {
+                return Either::Right(future::ready(Result::<()>::Err(e)));
+            }
         }
         Either::Left(self.insert.as_mut().unwrap().write(row))
     }
@@ -222,6 +216,15 @@ where
         if let Some(insert) = self.insert.take() {
             insert.end().await?;
         }
+        Ok(())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn init_insert(&mut self) -> Result<()> {
+        debug_assert!(self.insert.is_none());
+        let mut new_insert: Insert<T> = self.client.insert(&self.table)?;
+        new_insert.set_timeouts(self.send_timeout, self.end_timeout);
         Ok(())
     }
 }
