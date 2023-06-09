@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Changed
+- inserter: start new insert only when the first row is provided ([#68]).
+
+[#68]: https://github.com/loyd/clickhouse.rs/pull/68
 
 ## [0.11.4] - 2023-05-14
 ### Added

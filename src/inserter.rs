@@ -1,5 +1,9 @@
-use std::{future::Future, mem};
+use std::mem;
 
+use futures::{
+    future::{self, Either},
+    Future,
+};
 use serde::Serialize;
 use tokio::time::{Duration, Instant};
 
@@ -17,7 +21,7 @@ pub struct Inserter<T> {
     max_entries: u64,
     send_timeout: Option<Duration>,
     end_timeout: Option<Duration>,
-    insert: Insert<T>,
+    insert: Option<Insert<T>>,
     ticks: Ticks,
     committed: Quantities,
     uncommitted_entries: u64,
@@ -51,7 +55,7 @@ where
             max_entries: DEFAULT_MAX_ENTRIES,
             send_timeout: None,
             end_timeout: None,
-            insert: client.insert(table)?,
+            insert: None,
             ticks: Ticks::default(),
             committed: Quantities::ZERO,
             uncommitted_entries: 0,
@@ -116,7 +120,9 @@ where
     pub fn set_timeouts(&mut self, send_timeout: Option<Duration>, end_timeout: Option<Duration>) {
         self.send_timeout = send_timeout;
         self.end_timeout = end_timeout;
-        self.insert.set_timeouts(send_timeout, end_timeout);
+        if let Some(insert) = &mut self.insert {
+            insert.set_timeouts(self.send_timeout, self.end_timeout);
+        }
     }
 
     /// See [`Inserter::with_max_entries()`].
@@ -162,7 +168,12 @@ where
         T: Serialize,
     {
         self.uncommitted_entries += 1;
-        self.insert.write(row)
+        if self.insert.is_none() {
+            if let Err(e) = self.init_insert() {
+                return Either::Right(future::ready(Result::<()>::Err(e)));
+            }
+        }
+        Either::Left(self.insert.as_mut().unwrap().write(row))
     }
 
     /// Checks limits and ends a current `INSERT` if they are reached.
@@ -189,8 +200,10 @@ where
     /// Ends a current `INSERT` and whole `Inserter` unconditionally.
     ///
     /// If it isn't called, the current `INSERT` is aborted.
-    pub async fn end(self) -> Result<Quantities> {
-        self.insert.end().await?;
+    pub async fn end(mut self) -> Result<Quantities> {
+        if let Some(insert) = self.insert.take() {
+            insert.end().await?;
+        }
         Ok(self.committed)
     }
 
@@ -200,9 +213,18 @@ where
     }
 
     async fn insert(&mut self) -> Result<()> {
-        let mut new_insert = self.client.insert(&self.table)?; // Actually it mustn't fail.
+        if let Some(insert) = self.insert.take() {
+            insert.end().await?;
+        }
+        Ok(())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn init_insert(&mut self) -> Result<()> {
+        debug_assert!(self.insert.is_none());
+        let mut new_insert: Insert<T> = self.client.insert(&self.table)?;
         new_insert.set_timeouts(self.send_timeout, self.end_timeout);
-        let insert = mem::replace(&mut self.insert, new_insert);
-        insert.end().await
+        Ok(())
     }
 }
