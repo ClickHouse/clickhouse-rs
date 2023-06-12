@@ -225,6 +225,7 @@ where
         debug_assert!(self.insert.is_none());
         let mut new_insert: Insert<T> = self.client.insert(&self.table)?;
         new_insert.set_timeouts(self.send_timeout, self.end_timeout);
+        self.insert = Some(new_insert);
         Ok(())
     }
 }
