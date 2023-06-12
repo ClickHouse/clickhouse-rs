@@ -8,8 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 ### Changed
-- inserter: start new insert only when the first row is provided ([#68]).
+- inserter: start new insert only when the first row is provided ([#68], [#70]).
 
+[#70]: https://github.com/loyd/clickhouse.rs/pull/70
 [#68]: https://github.com/loyd/clickhouse.rs/pull/68
 
 ## [0.11.4] - 2023-05-14
