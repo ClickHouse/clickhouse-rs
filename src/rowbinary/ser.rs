@@ -201,7 +201,7 @@ impl<'a, B: BufMut> SerializeStruct for &'a mut RowBinarySerializer<B> {
     /// In Clickhouse, when inserting in the RowBinary format:
     /// -- String is represented as a varint length (unsigned LEB128), followed by the bytes of the string. 
     /// -- FixedString is represented simply as a sequence of bytes.
-    /// When serializing a FixedString, we can simply serialize the &str in the wrapper struct FixedString
+    /// When serializing a FixedString, we can simply serialize the String in the wrapper struct FixedString
     /// Since T is generic and the &str type already has an implementation which encodes it as LEB128,
     /// we can coerce T to a &str and put the bytes in the buffer without LEB128.
     /// * This will fail if the length of the underlying string != n for Clickhouse type FixedString(n)

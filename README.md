@@ -239,7 +239,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
     }
     ```
     </details>
-* `FixedString(_)` is now supported via a wrapper struct, `FixedString`, to allow for Rust - Clickhouse, &str type differention.
+* `FixedString(_)` is now supported via a wrapper struct, `FixedString`, to allow for Rust - Clickhouse, String type differention.
 * `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/).
     <details>
     <summary>Example</summary>
