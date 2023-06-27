@@ -19,7 +19,6 @@ use self::{error::Result, http_client::HttpClient};
 
 pub mod error;
 pub mod insert;
-pub mod custom_types;
 pub mod inserter;
 pub mod query;
 pub mod serde;
