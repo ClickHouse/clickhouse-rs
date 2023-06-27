@@ -17,7 +17,7 @@ use serde::ser::SerializeStruct;
 /// query("SELECT t1, toString(t2) FROM test;").fetch...
 #[derive(Deserialize, Debug)]
 pub struct FixedString {
-    pub string: &'static str
+    pub string: String
 }
 
 impl Serialize for FixedString {
@@ -26,13 +26,13 @@ impl Serialize for FixedString {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("FixedString", 1)?;
-        state.serialize_field("FixedString", self.string)?;
+        state.serialize_field("FixedString", &self.string)?;
         state.end()
     }
 }
 
 impl FixedString {
-    pub fn new(string: &'static str) -> Self {
+    pub fn new(string: String) -> Self {
         FixedString { string }
     }
 }
