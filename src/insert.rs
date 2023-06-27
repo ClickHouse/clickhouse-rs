@@ -156,8 +156,9 @@ impl<T> Insert<T> {
         T: Serialize,
     {
         assert!(self.sender.is_some(), "write() after error");
-
+        println!("before: {:?}\n", self.buffer.clone());
         let result = rowbinary::serialize_into(&mut self.buffer, row);
+        println!("after: {:?}\n", self.buffer.clone());
         if result.is_err() {
             self.abort();
         }
@@ -241,7 +242,8 @@ impl<T> Insert<T> {
             self.buffer.clear();
             compressed
         } else {
-            mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze()
+            let b = mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze();
+            b
         })
     }
 
