@@ -17,6 +17,7 @@ pub use clickhouse_derive::Row;
 pub use self::{compression::Compression, row::Row};
 use self::{error::Result, http_client::HttpClient};
 
+pub mod fixed_string;
 pub mod error;
 pub mod insert;
 pub mod inserter;
