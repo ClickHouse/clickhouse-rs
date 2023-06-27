@@ -96,6 +96,7 @@ while let Some(row) = cursor.next().await? { .. }
 * Placeholder `?` is replaced with values in following `bind()` calls.
 * Convenient `fetch_one::<Row>()` and `fetch_all::<Row>()` can be used to get a first row or all rows correspondingly.
 * `sql::Identifier` can be used to bind table names.
+* Note: `FixedString(_)` types should be called with `SELECT toString(col)` instead of `SELECT col`. See `FixedString` for more details.
 
 Note that cursors can return an error even after producing some rows. To avoid this, use `client.with_option("wait_end_of_query", "1")` in order to enable buffering on the server-side. [More details](https://clickhouse.com/docs/en/interfaces/http/#response-buffering). The `buffer_size` option can be useful too.
 
@@ -127,6 +128,7 @@ insert.end().await?;
 * Rows are being sent progressively to spread network load.
 * ClickHouse inserts batches atomically only if all rows fit in the same partition and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
 * [ch2rs](https://github.com/loyd/ch2rs) is useful to generate a row type from ClickHouse.
+* Note: `FixedString(_)` types should be wrapped in a `FixedString` Struct to be properly imported. See `FixedString` for more details.
 
 </details>
 <details>
@@ -237,7 +239,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
     }
     ```
     </details>
-* `FixedString(_)` isn't [supported yet](https://github.com/loyd/clickhouse.rs/issues/49).
+* `FixedString(_)` is now supported via a wrapper struct, `FixedString`, to allow for Rust - Clickhouse, &str type differention.
 * `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/).
     <details>
     <summary>Example</summary>
