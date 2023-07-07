@@ -54,7 +54,11 @@ macro_rules! timeout {
 }
 
 impl<T> Insert<T> {
-    pub(crate) fn new(client: &Client, table: &str) -> Result<Self>
+    pub(crate) fn new(
+        client: &Client,
+        table: &str,
+        flied_names: Option<Vec<String>>,
+    ) -> Result<Self>
     where
         T: Row,
     {
@@ -65,9 +69,12 @@ impl<T> Insert<T> {
         if let Some(database) = &client.database {
             pairs.append_pair("database", database);
         }
-
-        let fields = row::join_column_names::<T>()
-            .expect("the row type must be a struct or a wrapper around it");
+        let fields = match flied_names {
+            None => row::join_column_names::<T>()
+                .expect("the row type must be a struct or a wrapper around it"),
+            Some(flied_name_vec) => row::join_column_names_from_flied(flied_name_vec)
+                .expect("the row type must be a struct or a wrapper around it"),
+        };
 
         // TODO: what about escaping a table name?
         // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers

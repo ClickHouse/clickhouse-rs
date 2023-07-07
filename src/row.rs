@@ -72,6 +72,24 @@ pub(crate) fn join_column_names<R: Row>() -> Option<String> {
     Some(out)
 }
 
+pub(crate) fn join_column_names_from_flied(flied_name_vec: Vec<String>) -> Option<String> {
+    if flied_name_vec.is_empty() {
+        return None;
+    }
+    let out = flied_name_vec
+        .into_iter()
+        .enumerate()
+        .fold(String::new(), |mut res, (idx, name)| {
+            if idx > 0 {
+                res.push(',');
+            }
+            sql::escape::identifier(&name, &mut res).expect("impossible");
+            res
+        });
+
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     // XXX: need for `derive(Row)`. Provide `row(crate = ..)` instead.
