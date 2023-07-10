@@ -15,7 +15,7 @@ use serde::ser::SerializeStruct;
 /// ) ...
 /// 
 /// query("SELECT t1, toString(t2) FROM test;").fetch...
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct FixedString {
     pub string: String
 }
