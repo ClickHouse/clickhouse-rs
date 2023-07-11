@@ -76,6 +76,7 @@ pub mod uuid {
     use std::mem;
 
     use ::uuid::Uuid;
+    use serde::de::Error;
 
     use super::*;
 
@@ -85,18 +86,27 @@ pub mod uuid {
     where
         S: Serializer,
     {
-        let mut bytes = uuid.into_bytes();
-        transform(&mut bytes);
-        bytes.serialize(serializer)
+        if serializer.is_human_readable() {
+            uuid.to_string().serialize(serializer)
+        } else {
+            let mut bytes = uuid.into_bytes();
+            transform(&mut bytes);
+            bytes.serialize(serializer)
+        }
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Uuid, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let mut bytes: [u8; 16] = Deserialize::deserialize(deserializer)?;
-        transform(&mut bytes);
-        Ok(Uuid::from_bytes(bytes))
+        if deserializer.is_human_readable() {
+            let uuid_str: String = Deserialize::deserialize(deserializer)?;
+            Uuid::parse_str(&uuid_str).map_err(D::Error::custom)
+        } else {
+            let mut bytes: [u8; 16] = Deserialize::deserialize(deserializer)?;
+            transform(&mut bytes);
+            Ok(Uuid::from_bytes(bytes))
+        }
     }
 
     /// Swaps bytes inside both 8-byte words of UUID.
