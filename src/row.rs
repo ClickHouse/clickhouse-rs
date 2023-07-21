@@ -4,6 +4,12 @@ pub trait Row {
     const COLUMN_NAMES: &'static [&'static str];
 
     // TODO: count
+    fn get_column_names() -> Vec<String> {
+        Self::COLUMN_NAMES
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
 }
 
 // Actually, it's not public now.
@@ -54,20 +60,21 @@ impl<T> Row for Vec<T> {
 
 /// Collects all field names in depth and joins them with comma.
 pub(crate) fn join_column_names<R: Row>() -> Option<String> {
-    if R::COLUMN_NAMES.is_empty() {
+    if R::get_column_names().is_empty() {
         return None;
     }
 
-    let out = R::COLUMN_NAMES
-        .iter()
-        .enumerate()
-        .fold(String::new(), |mut res, (idx, name)| {
-            if idx > 0 {
-                res.push(',');
-            }
-            sql::escape::identifier(name, &mut res).expect("impossible");
-            res
-        });
+    let out =
+        R::get_column_names()
+            .iter()
+            .enumerate()
+            .fold(String::new(), |mut res, (idx, name)| {
+                if idx > 0 {
+                    res.push(',');
+                }
+                sql::escape::identifier(name, &mut res).expect("impossible");
+                res
+            });
 
     Some(out)
 }
