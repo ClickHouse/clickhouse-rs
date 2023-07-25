@@ -83,7 +83,7 @@ async fn datetime() {
         dt64ns_opt: Some(datetime!(2022-11-13 15:27:42.123456789 UTC)),
     };
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert("test",None).unwrap();
     insert.write(&original_row).await.unwrap();
     insert.end().await.unwrap();
 
@@ -142,7 +142,7 @@ async fn date() {
         .await
         .unwrap();
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert("test",None).unwrap();
 
     let dates = generate_dates(1970..2149, 100);
     for &date in &dates {
@@ -196,7 +196,7 @@ async fn date32() {
         .await
         .unwrap();
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert("test",None).unwrap();
 
     let dates = generate_dates(1925..2283, 100); // TODO: 1900..=2299 for newer versions.
     for &date in &dates {

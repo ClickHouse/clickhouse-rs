@@ -31,7 +31,7 @@ async fn ddl(client: &Client) -> Result<()> {
 }
 
 async fn insert(client: &Client) -> Result<()> {
-    let mut insert = client.insert("some")?;
+    let mut insert = client.insert("some",None)?;
     for i in 0..1000 {
         insert.write(&MyRow { no: i, name: "foo" }).await?;
     }
@@ -119,7 +119,7 @@ async fn watch(client: &Client) -> Result<()> {
     let (version, row) = cursor.next().await?.unwrap();
     println!("version={version}, row={row:?}");
 
-    let mut insert = client.insert("some")?;
+    let mut insert = client.insert("some",None)?;
     let row = MyRow {
         no: row.no + 1,
         name: "bar",

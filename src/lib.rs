@@ -176,8 +176,8 @@ impl Client {
     ///
     /// # Panics
     /// If `T` has unnamed fields, e.g. tuples.
-    pub fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
-        insert::Insert::new(self, table)
+    pub fn insert<T: Row>(&self, table: &str,fields_names: Option<Vec<String>>) -> Result<insert::Insert<T>> {
+        insert::Insert::new(self, table,fields_names)
     }
 
     /// Creates an inserter to perform multiple INSERTs.

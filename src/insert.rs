@@ -54,7 +54,7 @@ macro_rules! timeout {
 }
 
 impl<T> Insert<T> {
-    pub(crate) fn new(client: &Client, table: &str) -> Result<Self>
+    pub(crate) fn new(client: &Client, table: &str, fields_names: Option<Vec<String>>) -> Result<Self>
     where
         T: Row,
     {
@@ -66,9 +66,11 @@ impl<T> Insert<T> {
             pairs.append_pair("database", database);
         }
 
-        let fields = row::join_column_names::<T>()
-            .expect("the row type must be a struct or a wrapper around it");
-
+        let fields = match fields_names{
+            Some(fields) => {fields.join(",")},
+            None => { row::join_column_names::<T>()
+                .expect("the row type must be a struct or a wrapper around it")},
+        };
         // TODO: what about escaping a table name?
         // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers
         let query = format!("INSERT INTO {table}({fields}) FORMAT RowBinary");
@@ -151,9 +153,9 @@ impl<T> Insert<T> {
     ///
     /// # Panics
     /// If called after previous call returned an error.
-    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
+    pub fn write<'a,'b>(&'a mut self, row: &'b T) -> impl Future<Output = Result<()>> + 'a + Send
     where
-        T: Serialize,
+        T: Serialize + 'b,
     {
         assert!(self.sender.is_some(), "write() after error");
 

@@ -41,7 +41,7 @@ async fn smoke() {
         uuid_opt: Some(uuid),
     };
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert("test",None).unwrap();
     insert.write(&original_row).await.unwrap();
     insert.end().await.unwrap();
 
