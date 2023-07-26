@@ -36,12 +36,10 @@ async fn smoke() {
 
     insert.end().await.unwrap();
 
-    let mut a = Some(1);
-    a = None;
     // Read from the table.
     let mut cursor = client
         .query("SELECT ?fields FROM test WHERE name = ? AND no BETWEEN ? AND ?.2")
-        .bind(a)
+        .bind("foo")
         .bind(500)
         .bind((42, 504))
         .fetch::<MyRow<'_>>()

@@ -68,7 +68,7 @@ pub(crate) fn join_column_names<R: Row>() -> Option<String> {
             sql::escape::identifier(name, &mut res).expect("impossible");
             res
         });
-        
+
     Some(out)
 }
 
