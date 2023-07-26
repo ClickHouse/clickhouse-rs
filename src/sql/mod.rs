@@ -63,18 +63,6 @@ impl SqlBuilder {
         }
     }
 
-    pub(crate) fn bind_none(&mut self) {
-        if let Self::InProgress { parts, size } = self {
-            if let Some(part) = parts.iter_mut().find(|p| matches!(p, Part::Arg)) {
-                let s = "null".to_string();
-                *size += s.len();
-                *part = Part::Text(s);
-            } else {
-                panic!("all query arguments are already bound");
-            }
-        }
-    }
-
     pub(crate) fn bind_fields<T: Row>(&mut self) {
         if let Self::InProgress { parts, size } = self {
             if let Some(fields) = row::join_column_names::<T>() {

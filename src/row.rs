@@ -58,18 +58,17 @@ pub(crate) fn join_column_names<R: Row>() -> Option<String> {
         return None;
     }
 
-    let out =
-        R::COLUMN_NAMES
-            .iter()
-            .enumerate()
-            .fold(String::new(), |mut res, (idx, name)| {
-                if idx > 0 {
-                    res.push(',');
-                }
-                sql::escape::identifier(name, &mut res).expect("impossible");
-                res
-            });
-
+    let out = R::COLUMN_NAMES
+        .iter()
+        .enumerate()
+        .fold(String::new(), |mut res, (idx, name)| {
+            if idx > 0 {
+                res.push(',');
+            }
+            sql::escape::identifier(name, &mut res).expect("impossible");
+            res
+        });
+        
     Some(out)
 }
 

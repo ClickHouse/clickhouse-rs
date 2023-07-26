@@ -53,7 +53,7 @@ fn insert(c: &mut Criterion) {
 
     async fn run(client: Client, iters: u64) -> Result<Duration> {
         let start = Instant::now();
-        let mut insert = client.insert("table",None)?;
+        let mut insert = client.insert("table")?;
 
         for _ in 0..iters {
             insert

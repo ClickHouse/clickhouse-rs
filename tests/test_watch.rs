@@ -26,7 +26,7 @@ async fn create_table(client: &Client) {
 }
 
 async fn insert_into_table(client: &Client, rows: &[MyRow]) {
-    let mut insert = client.insert("test",None).unwrap();
+    let mut insert = client.insert("test").unwrap();
     for row in rows {
         insert.write(row).await.unwrap();
     }

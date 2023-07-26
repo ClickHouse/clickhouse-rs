@@ -36,7 +36,7 @@ async fn smoke() {
     };
 
     // Write to the table.
-    let mut insert = client.insert("test",None).unwrap();
+    let mut insert = client.insert("test").unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 
@@ -57,7 +57,7 @@ async fn smoke() {
     };
 
     // Write to the table.
-    let mut insert = client.insert("test",None).unwrap();
+    let mut insert = client.insert("test").unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 

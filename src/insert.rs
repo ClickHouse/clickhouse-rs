@@ -153,9 +153,9 @@ impl<T> Insert<T> {
     ///
     /// # Panics
     /// If called after previous call returned an error.
-    pub fn write<'a,'b>(&'a mut self, row: &'b T) -> impl Future<Output = Result<()>> + 'a + Send
+    pub fn write<'a>(&'a mut self, row: & T) -> impl Future<Output = Result<()>> + 'a + Send
     where
-        T: Serialize + 'b,
+        T: Serialize,
     {
         assert!(self.sender.is_some(), "write() after error");
 

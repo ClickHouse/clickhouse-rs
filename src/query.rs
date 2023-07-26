@@ -40,10 +40,6 @@ impl Query {
         self
     }
 
-    pub fn bind_none(&mut self) {
-        self.sql.bind_none();
-    }
-
     pub fn bind_ref(&mut self, value: impl Bind) {
         self.sql.bind_arg(value);
     }
