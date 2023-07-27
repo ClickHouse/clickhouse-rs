@@ -8,7 +8,7 @@ pub struct Delete {
 
 impl Delete {
     pub(crate) fn new(client: &Client, table_name: &str, pk_name: &str, pk_len: usize) -> Self {
-        let mut out = format!("ALTER TABLE {table_name} DELETE WHERE {pk_name} in (");
+        let mut out = format!("ALTER TABLE `{table_name}` DELETE WHERE `{pk_name}` in (");
         for idx in 0..pk_len {
             if idx > 0 {
                 out.push(',');
