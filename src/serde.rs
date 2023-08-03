@@ -2,7 +2,7 @@
 
 use serde::{
     de::{Deserialize, Deserializer},
-    ser::{Serialize, Serializer},
+    ser::{Serialize, Serializer, SerializeTuple},
 };
 
 macro_rules! option {
@@ -42,6 +42,20 @@ macro_rules! option {
         }
     };
 }
+
+pub fn fixed_string<S: Serializer, const N: usize>(
+    u: &String,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let bytes = u.as_bytes();
+    let mut serializer = serializer.serialize_tuple(N)?;
+    for i in 0..N {
+        let v = if i < bytes.len() { bytes[i] } else { 0 };
+        serializer.serialize_element(&v)?;
+    }
+    serializer.end()
+}
+
 
 /// Ser/de [`std::net::Ipv4Addr`] to/from `IPv4`.
 pub mod ipv4 {
