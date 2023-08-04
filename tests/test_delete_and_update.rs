@@ -1,5 +1,5 @@
 use core::time::Duration;
-use std::{collections::HashSet, thread::sleep};
+use std::thread::sleep;
 
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +15,7 @@ async fn test_update_delete() {
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow<'a> {
         no: u32,
+        no2: u32,
         name: &'a str,
         list: Vec<i32>,
     }
@@ -23,9 +24,9 @@ async fn test_update_delete() {
     client
         .query(
             "
-            CREATE TABLE test(no UInt32, name LowCardinality(String) , list Array(UInt32))
+            CREATE TABLE test(no UInt32, no2 UInt32, name LowCardinality(String) , list Array(UInt32))
             ENGINE = MergeTree
-            ORDER BY no
+            PRIMARY KEY (no,no2)
         ",
         )
         .execute()
@@ -34,10 +35,22 @@ async fn test_update_delete() {
 
     // Write to the table.
     let mut insert = client.insert("test").unwrap();
-    for i in 0..1000 {
+    for i in 0..5 {
         insert
             .write(&MyRow {
                 no: i,
+                no2: 1,
+                name: "foo",
+                list: vec![1, 2, 3],
+            })
+            .await
+            .unwrap();
+    }
+    for i in 0..5 {
+        insert
+            .write(&MyRow {
+                no: i,
+                no2: 2,
                 name: "foo",
                 list: vec![1, 2, 3],
             })
@@ -47,38 +60,18 @@ async fn test_update_delete() {
 
     insert.end().await.unwrap();
 
-    let mut pk_vec = vec![];
-    let mut set = HashSet::new();
-    for i in 0..100 {
-        set.insert(i);
-        pk_vec.push(i as u64)
-    }
-    pk_vec.push(567 as u64);
-    set.insert(567 as u64);
-    pk_vec.push(545 as u64);
-    set.insert(545 as u64);
-    pk_vec.push(674 as u64);
-    set.insert(674 as u64);
-    pk_vec.push(873 as u64);
-    set.insert(873 as u64);
-
-    let delete = client.delete("test", "no", pk_vec.len());
-    delete.delete(pk_vec).await.unwrap();
+    let delete = client.delete("test", vec!["no".to_string(), "no2".to_string()]);
+    delete.delete(vec![1, 1]).await.unwrap();
     sleep(Duration::from_secs(1));
-    let mut cursor = client
-        .query("SELECT ?fields FROM test")
-        .fetch::<MyRow<'_>>()
-        .unwrap();
 
-    while let Some(row) = cursor.next().await.unwrap() {
-        assert!(!set.contains(&(row.no as u64)));
-    }
+    let update = client.update(
+        "test",
+        vec!["no".to_string(), "no2".to_string()],
+        vec![format!("name"), format!("list")],
+    );
+    let vec = vec!["name1", "[2,5,8]"];
+    update.update_fields(vec, vec![2, 2]).await.unwrap();
 
-    for i in 700..750 {
-        let update = client.update("test", "no", vec![format!("name"), format!("list")]);
-        let vec = vec!["name1", "[2,5,8]"];
-        update.update_fields(vec, i as u64).await.unwrap();
-    }
     sleep(Duration::from_secs(2));
 
     let mut cursor = client
@@ -87,7 +80,9 @@ async fn test_update_delete() {
         .unwrap();
 
     while let Some(row) = cursor.next().await.unwrap() {
-        if row.no >= 700 && row.no < 750 {
+        if row.no == 1 {
+            assert_ne!(row.no2, 1);
+        } else if row.no == 2 && row.no2 == 2 {
             assert_eq!(row.name, "name1");
             assert_eq!(row.list, vec![2, 5, 8]);
         } else {

@@ -10,7 +10,7 @@ impl Update {
     pub(crate) fn new(
         client: &Client,
         table_name: &str,
-        pk_name: &str,
+        pk_names: Vec<String>,
         flieds_names: Vec<String>,
     ) -> Self {
         let mut out: String = flieds_names.iter().enumerate().fold(
@@ -23,15 +23,23 @@ impl Update {
                 res
             },
         );
-        out.push_str(&format!(" where `{pk_name}` = ?"));
+        out.push_str(&format!(" where "));
+        for (idx, pk_name) in pk_names.iter().enumerate() {
+            if idx > 0 {
+                out.push_str(" AND ");
+            }
+            out.push_str(&format!(" `{pk_name}` = ? "));
+        }
         let query = Query::new(client, &out);
         Self { query }
     }
-    pub async fn update_fields(mut self, fields: Vec<impl Bind>, pk: impl Bind) -> Result<()> {
+    pub async fn update_fields(mut self, fields: Vec<impl Bind>, pk: Vec<impl Bind>) -> Result<()> {
         fields.into_iter().for_each(|a| {
             self.query.bind_ref(a);
         });
-        self.query.bind_ref(pk);
+        for i in pk {
+            self.query.bind_ref(i);
+        }
         self.query.execute().await
     }
 }

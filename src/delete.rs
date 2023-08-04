@@ -7,20 +7,34 @@ pub struct Delete {
 }
 
 impl Delete {
-    pub(crate) fn new(client: &Client, table_name: &str, pk_name: &str, pk_len: usize) -> Self {
-        let mut out = format!("ALTER TABLE `{table_name}` DELETE WHERE `{pk_name}` in (");
-        for idx in 0..pk_len {
+    pub(crate) fn new(client: &Client, table_name: &str, pk_names: Vec<String>) -> Self {
+        let mut out = format!("ALTER TABLE `{table_name}` DELETE WHERE");
+        for (idx, pk_name) in pk_names.iter().enumerate() {
             if idx > 0 {
-                out.push(',');
+                out.push_str(" AND ");
             }
-            out.push_str("?");
+            out.push_str(&format!(" `{pk_name}` = ? "));
         }
-        out.push_str(")");
         let query = Query::new(client, &out);
         Self { query }
     }
     pub async fn delete(mut self, delete_pk: Vec<impl Bind>) -> Result<()> {
-        delete_pk.into_iter().for_each(|a| self.query.bind_ref(a));
+        for i in delete_pk {
+            self.query.bind_ref(i);
+        }
         self.query.execute().await
     }
+}
+
+#[macro_export]
+macro_rules! delete {
+    ( $( $x:expr ),* ) => {
+        {
+            let mut temp_vec = Vec::new();
+            $(
+                temp_vec.push($x);
+            )*
+            temp_vec
+        }
+    };
 }
