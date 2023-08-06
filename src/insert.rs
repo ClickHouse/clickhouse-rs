@@ -54,10 +54,24 @@ macro_rules! timeout {
 }
 
 impl<T> Insert<T> {
+    pub(crate) fn new_with_field_names(
+        client: &Client,
+        table: &str,
+        fields_names: Vec<String>,
+    ) -> Result<Self> {
+        Insert::new_inner(client, table, fields_names.join(","))
+    }
+
     pub(crate) fn new(client: &Client, table: &str) -> Result<Self>
     where
         T: Row,
     {
+        let fields_names = row::join_column_names::<T>()
+            .expect("the row type must be a struct or a wrapper around it");
+        Insert::new_inner(client, table, fields_names)
+    }
+
+    pub(crate) fn new_inner(client: &Client, table: &str, fields_names: String) -> Result<Self> {
         let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -66,12 +80,9 @@ impl<T> Insert<T> {
             pairs.append_pair("database", database);
         }
 
-        let fields = row::join_column_names::<T>()
-            .expect("the row type must be a struct or a wrapper around it");
-
         // TODO: what about escaping a table name?
         // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers
-        let query = format!("INSERT INTO {table}({fields}) FORMAT RowBinary");
+        let query = format!("INSERT INTO {table}({fields_names}) FORMAT RowBinary");
         pairs.append_pair("query", &query);
 
         if client.compression.is_lz4() {

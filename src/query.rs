@@ -40,6 +40,10 @@ impl Query {
         self
     }
 
+    pub fn bind_ref(&mut self, value: impl Bind) {
+        self.sql.bind_arg(value);
+    }
+
     /// Executes the query.
     pub async fn execute(self) -> Result<()> {
         self.do_execute(false)?.finish().await
