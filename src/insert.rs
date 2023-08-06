@@ -58,10 +58,7 @@ impl<T> Insert<T> {
         client: &Client,
         table: &str,
         fields_names: Vec<String>,
-    ) -> Result<Self>
-    where
-        T: Row,
-    {
+    ) -> Result<Self> {
         Insert::new_inner(client, table, fields_names.join(","))
     }
 
@@ -74,10 +71,7 @@ impl<T> Insert<T> {
         Insert::new_inner(client, table, fields_names)
     }
 
-    pub(crate) fn new_inner(client: &Client, table: &str, fields_names: String) -> Result<Self>
-    where
-        T: Row,
-    {
+    pub(crate) fn new_inner(client: &Client, table: &str, fields_names: String) -> Result<Self> {
         let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
