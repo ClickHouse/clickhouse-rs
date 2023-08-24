@@ -3,7 +3,7 @@ use quote::quote;
 use serde_derive_internals::{attr::get_serde_meta_items, Ctxt};
 use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields, Ident, Lit, Meta, NestedMeta};
 
-/// Parses `#[serde(skip_serializing)]`
+/// Parses `#[serde(skip_*)]`; does not work properly with `#[serde(skip_serializing_if)]`
 fn serde_skipped(cx: &Ctxt, attrs: &[syn::Attribute]) -> bool {
     for meta_items in attrs
         .iter()
@@ -12,12 +12,13 @@ fn serde_skipped(cx: &Ctxt, attrs: &[syn::Attribute]) -> bool {
         for meta_item in meta_items {
             match meta_item {
                 NestedMeta::Meta(Meta::Path(path))
-                    if path
-                        .get_ident()
-                        .map_or(false, |i| *i == "skip_serializing") =>
-                {
-                    return true
-                }
+                if path
+                    .get_ident()
+                    // will not work with skip_serializing_if
+                    .map_or(false, |i| i.to_string().starts_with("skip")) =>
+                    {
+                        return true
+                    }
                 _ => continue,
             }
         }
