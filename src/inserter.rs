@@ -21,7 +21,7 @@ pub struct Inserter<T> {
     ticks: Ticks,
     committed: Quantities,
     uncommitted_entries: u64,
-    uncommited_bytes: u64,
+    uncommitted_bytes: u64,
 }
 
 /// Statistics about inserted rows.
@@ -59,7 +59,7 @@ where
             ticks: Ticks::default(),
             committed: Quantities::ZERO,
             uncommitted_entries: 0,
-            uncommited_bytes: 0,
+            uncommitted_bytes: 0,
         })
     }
 
@@ -173,7 +173,7 @@ where
             self.init_insert()?;
         }
         let bytes = self.insert.as_mut().unwrap().write(row).await?;
-        self.uncommited_bytes += bytes as u64;
+        self.uncommitted_bytes += bytes as u64;
         Ok(())
     }
 
@@ -181,10 +181,10 @@ where
     pub async fn commit(&mut self) -> Result<Quantities> {
         if self.uncommitted_entries > 0 {
             self.committed.entries += self.uncommitted_entries;
-            self.committed.bytes += self.uncommited_bytes;
+            self.committed.bytes += self.uncommitted_bytes;
             self.committed.transactions += 1;
             self.uncommitted_entries = 0;
-            self.uncommited_bytes = 0;
+            self.uncommitted_bytes = 0;
         }
 
         let now = Instant::now();
@@ -208,6 +208,11 @@ where
             insert.end().await?;
         }
         Ok(self.committed)
+    }
+
+    // Returns statistics about inserted rows.
+    pub fn committed(&self) -> Quantities {
+        self.committed.clone()
     }
 
     fn is_threshold_reached(&self, now: Instant) -> bool {
