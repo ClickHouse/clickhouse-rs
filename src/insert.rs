@@ -151,12 +151,13 @@ impl<T> Insert<T> {
     ///
     /// # Panics
     /// If called after previous call returned an error.
-    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
+    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<usize>> + 'a + Send
     where
         T: Serialize,
     {
         assert!(self.sender.is_some(), "write() after error");
 
+        let size_before = self.buffer.len();
         let result = rowbinary::serialize_into(&mut self.buffer, row);
         if result.is_err() {
             self.abort();
@@ -164,10 +165,11 @@ impl<T> Insert<T> {
 
         async move {
             result?;
-            if self.buffer.len() >= MIN_CHUNK_SIZE {
+            let size_after = self.buffer.len();
+            if size_after >= MIN_CHUNK_SIZE {
                 self.send_chunk().await?;
             }
-            Ok(())
+            Ok(size_after - size_before)
         }
     }
 

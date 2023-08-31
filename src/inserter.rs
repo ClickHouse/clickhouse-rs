@@ -1,9 +1,5 @@
 use std::mem;
 
-use futures::{
-    future::{self, Either},
-    Future,
-};
 use serde::Serialize;
 use tokio::time::{Duration, Instant};
 
@@ -25,6 +21,7 @@ pub struct Inserter<T> {
     ticks: Ticks,
     committed: Quantities,
     uncommitted_entries: u64,
+    uncommited_bytes: u64,
 }
 
 /// Statistics about inserted rows.
@@ -34,6 +31,8 @@ pub struct Quantities {
     pub entries: u64,
     /// How many nonempty transactions ([`Inserter::commit`]) have been inserted.
     pub transactions: u64,
+    /// How many bytes ([`Inserter::write`]) have been wrote.
+    pub bytes: u64,
 }
 
 impl Quantities {
@@ -41,6 +40,7 @@ impl Quantities {
     pub const ZERO: Quantities = Quantities {
         entries: 0,
         transactions: 0,
+        bytes: 0,
     };
 }
 
@@ -59,6 +59,7 @@ where
             ticks: Ticks::default(),
             committed: Quantities::ZERO,
             uncommitted_entries: 0,
+            uncommited_bytes: 0,
         })
     }
 
@@ -163,25 +164,27 @@ where
     /// # Panics
     /// If called after previous call returned an error.
     #[inline]
-    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
+    pub async fn write<'a>(&'a mut self, row: &T) -> Result<()>
     where
         T: Serialize,
     {
         self.uncommitted_entries += 1;
         if self.insert.is_none() {
-            if let Err(e) = self.init_insert() {
-                return Either::Right(future::ready(Result::<()>::Err(e)));
-            }
+            self.init_insert()?;
         }
-        Either::Left(self.insert.as_mut().unwrap().write(row))
+        let bytes = self.insert.as_mut().unwrap().write(row).await?;
+        self.uncommited_bytes += bytes as u64;
+        Ok(())
     }
 
     /// Checks limits and ends a current `INSERT` if they are reached.
     pub async fn commit(&mut self) -> Result<Quantities> {
         if self.uncommitted_entries > 0 {
             self.committed.entries += self.uncommitted_entries;
+            self.committed.bytes += self.uncommited_bytes;
             self.committed.transactions += 1;
             self.uncommitted_entries = 0;
+            self.uncommited_bytes = 0;
         }
 
         let now = Instant::now();
