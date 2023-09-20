@@ -1,9 +1,9 @@
-use std::mem;
 use bytes::BufMut;
 use serde::{
     ser::{Impossible, SerializeSeq, SerializeStruct, SerializeTuple, Serializer},
     Serialize,
 };
+use std::mem;
 
 use crate::error::{Error, Result};
 
@@ -21,7 +21,6 @@ struct RowBinarySerializer<B> {
     buffer: B,
 }
 
-
 macro_rules! impl_num {
     ($ty:ty, $ser_method:ident, $writer_method:ident) => {
         #[inline]
@@ -31,7 +30,6 @@ macro_rules! impl_num {
         }
     };
 }
-
 
 impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     type Ok = ();
@@ -72,7 +70,7 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     fn serialize_str(self, v: &str) -> Result<()> where {
         put_unsigned_leb128(&mut self.buffer, v.len() as u64);
         self.buffer.put_slice(v.as_bytes());
-        
+
         Ok(())
     }
 
@@ -199,14 +197,18 @@ impl<'a, B: BufMut> SerializeStruct for &'a mut RowBinarySerializer<B> {
     type Error = Error;
 
     /// In Clickhouse, when inserting in the RowBinary format:
-    /// -- String is represented as a varint length (unsigned LEB128), followed by the bytes of the string. 
+    /// -- String is represented as a varint length (unsigned LEB128), followed by the bytes of the string.
     /// -- FixedString is represented simply as a sequence of bytes.
     /// When serializing a FixedString, we can simply serialize the String in the wrapper struct FixedString
     /// Since T is generic and the &str type already has an implementation which encodes it as LEB128,
     /// we can coerce T to a &str and put the bytes in the buffer without LEB128.
     /// * This will fail if the length of the underlying string != n for Clickhouse type FixedString(n)
     #[inline]
-    fn serialize_field<T: Serialize + ?Sized>(&mut self, name: &'static str, value: &T) -> Result<()> {
+    fn serialize_field<T: Serialize + ?Sized>(
+        &mut self,
+        name: &'static str,
+        value: &T,
+    ) -> Result<()> {
         if name == "FixedString" {
             let value_str: &&String = unsafe { mem::transmute(&value) };
             self.buffer.put_slice(value_str.as_bytes());

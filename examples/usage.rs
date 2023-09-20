@@ -31,7 +31,7 @@ async fn ddl(client: &Client) -> Result<()> {
 }
 
 async fn insert(client: &Client) -> Result<()> {
-    let mut insert = client.insert("some")?;
+    let mut insert = client.insert()?;
     for i in 0..1000 {
         insert.write(&MyRow { no: i, name: "foo" }).await?;
     }
@@ -41,7 +41,7 @@ async fn insert(client: &Client) -> Result<()> {
 
 async fn inserter(client: &Client) -> Result<()> {
     let mut inserter = client
-        .inserter("some")?
+        .inserter()?
         .with_max_entries(100_000)
         .with_period(Some(Duration::from_secs(15)));
 
