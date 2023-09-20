@@ -178,17 +178,13 @@ impl Client {
     ///
     /// # Panics
     /// If `T` has unnamed fields, e.g. tuples.
-    pub fn insert<T: InsertRow + Serialize>(
-        &self,
-        table: &str,
-        row: T,
-    ) -> Result<insert::Insert<T>> {
-        insert::Insert::new(self, table, row)
+    pub fn insert<T: InsertRow + Serialize>(&self) -> Result<insert::Insert<T>> {
+        insert::Insert::new(self)
     }
 
     /// Creates an inserter to perform multiple INSERTs.
-    pub fn inserter<T: Row + Serialize>(&self, table: &str) -> Result<inserter::Inserter<T>> {
-        inserter::Inserter::new(self, table)
+    pub fn inserter<T: InsertRow + Serialize>(&self) -> Result<inserter::Inserter<T>> {
+        inserter::Inserter::new(self)
     }
 
     /// Starts a new SELECT/DDL query.

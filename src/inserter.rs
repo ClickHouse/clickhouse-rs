@@ -7,7 +7,7 @@ use futures::{
 use serde::Serialize;
 use tokio::time::{Duration, Instant};
 
-use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client, InsertRow};
+use crate::{error::Result, insert::Insert, ticks::Ticks, Client, InsertRow};
 
 const DEFAULT_MAX_ENTRIES: u64 = 500_000;
 
@@ -17,7 +17,6 @@ const DEFAULT_MAX_ENTRIES: u64 = 500_000;
 #[must_use]
 pub struct Inserter<T: InsertRow + Serialize> {
     client: Client,
-    table: String,
     max_entries: u64,
     send_timeout: Option<Duration>,
     end_timeout: Option<Duration>,
@@ -48,10 +47,9 @@ impl<T> Inserter<T>
 where
     T: InsertRow + Serialize,
 {
-    pub(crate) fn new(client: &Client, table: &str) -> Result<Self> {
+    pub(crate) fn new(client: &Client) -> Result<Self> {
         Ok(Self {
             client: client.clone(),
-            table: table.into(),
             max_entries: DEFAULT_MAX_ENTRIES,
             send_timeout: None,
             end_timeout: None,
@@ -223,7 +221,7 @@ where
     #[inline(never)]
     fn init_insert(&mut self) -> Result<()> {
         debug_assert!(self.insert.is_none());
-        let mut new_insert: Insert<T> = self.client.insert(&self.table)?;
+        let mut new_insert: Insert<T> = self.client.insert()?;
         new_insert.set_timeouts(self.send_timeout, self.end_timeout);
         self.insert = Some(new_insert);
         Ok(())

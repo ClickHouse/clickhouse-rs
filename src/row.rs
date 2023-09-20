@@ -62,26 +62,6 @@ impl<T> Row for Vec<T> {
     const COLUMN_NAMES: &'static [&'static str] = &[];
 }
 
-pub(crate) fn join_insert_column_names<R: InsertRow>(row: R) -> Option<String> {
-    let columns = row.get_column_names();
-    if columns.is_empty() {
-        return None;
-    }
-
-    let out = columns
-        .iter()
-        .enumerate()
-        .fold(String::new(), |mut res, (idx, name)| {
-            if idx > 0 {
-                res.push(',');
-            }
-            sql::escape::identifier(name, &mut res).expect("impossible");
-            res
-        });
-
-    Some(out)
-}
-
 /// Collects all field names in depth and joins them with comma.
 pub(crate) fn join_column_names<R: Row>() -> Option<String> {
     if R::COLUMN_NAMES.is_empty() {

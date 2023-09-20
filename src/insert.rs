@@ -1,3 +1,4 @@
+use core::marker::PhantomData;
 use std::{future::Future, mem, panic, pin::Pin, time::Duration};
 
 use bytes::{Bytes, BytesMut};
@@ -12,7 +13,6 @@ use url::Url;
 use crate::{
     error::{Error, Result},
     response::Response,
-    row::{self, Row},
     rowbinary, Client, Compression, InsertRow,
 };
 
@@ -32,11 +32,11 @@ pub struct Insert<T: InsertRow + Serialize> {
     compression: Compression,
     send_timeout: Option<Duration>,
     end_timeout: Option<Duration>,
-    row: T,
     // Use boxed `Sleep` to reuse a timer entry, it improves performance.
     // Also, `tokio::time::timeout()` significantly increases a future's size.
     sleep: Pin<Box<Sleep>>,
     handle: JoinHandle<Result<()>>,
+    _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
 }
 
 // It should be a regular function, but it decreases performance.
@@ -57,29 +57,8 @@ impl<T> Insert<T>
 where
     T: InsertRow + Serialize,
 {
-    pub(crate) fn new(client: &Client, table: &str, row: T) -> Result<Self> {
-        let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
-        let mut pairs = url.query_pairs_mut();
-        pairs.clear();
-
-        if let Some(database) = &client.database {
-            pairs.append_pair("database", database);
-        }
-
-        let fields = row::join_insert_column_names(row)
-            .expect("the row type must be a struct or a wrapper around it");
-
-        // TODO: what about escaping a table name?
-        // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers
-        let query = format!("INSERT INTO {table}({fields}) FORMAT RowBinary");
-        pairs.append_pair("query", &query);
-
-        if client.compression.is_lz4() {
-            pairs.append_pair("decompress", "1");
-        }
-
-        drop(pairs);
-
+    pub(crate) fn new(client: &Client) -> Result<Self> {
+        let url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
         let mut builder = Request::post(url.as_str());
 
         if let Some(user) = &client.user {
@@ -111,7 +90,7 @@ where
             end_timeout: None,
             sleep: Box::pin(tokio::time::sleep(Duration::new(0, 0))),
             handle,
-            row,
+            _marker: Default::default(),
         })
     }
 
@@ -151,9 +130,9 @@ where
     ///
     /// # Panics
     /// If called after previous call returned an error.
-    pub fn write<'a>(&'a mut self) -> impl Future<Output = Result<()>> + 'a + Send {
+    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send {
         assert!(self.sender.is_some(), "write() after error");
-        let result = rowbinary::serialize_into(&mut self.buffer, &self.row);
+        let result = rowbinary::serialize_into(&mut self.buffer, row);
         if result.is_err() {
             self.abort();
         }
