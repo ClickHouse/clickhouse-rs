@@ -6,6 +6,7 @@
 #[macro_use]
 extern crate static_assertions;
 
+use serde::Serialize;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use hyper::client::connect::HttpConnector;
@@ -14,11 +15,11 @@ use hyper_tls::HttpsConnector;
 
 pub use clickhouse_derive::Row;
 
-pub use self::{compression::Compression, row::Row};
+pub use self::{compression::Compression, row::*};
 use self::{error::Result, http_client::HttpClient};
 
-pub mod fixed_string;
 pub mod error;
+pub mod fixed_string;
 pub mod insert;
 pub mod inserter;
 pub mod query;
@@ -177,12 +178,16 @@ impl Client {
     ///
     /// # Panics
     /// If `T` has unnamed fields, e.g. tuples.
-    pub fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
-        insert::Insert::new(self, table)
+    pub fn insert<T: InsertRow + Serialize>(
+        &self,
+        table: &str,
+        row: T,
+    ) -> Result<insert::Insert<T>> {
+        insert::Insert::new(self, table, row)
     }
 
     /// Creates an inserter to perform multiple INSERTs.
-    pub fn inserter<T: Row>(&self, table: &str) -> Result<inserter::Inserter<T>> {
+    pub fn inserter<T: Row + Serialize>(&self, table: &str) -> Result<inserter::Inserter<T>> {
         inserter::Inserter::new(self, table)
     }
 

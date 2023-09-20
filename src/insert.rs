@@ -1,4 +1,4 @@
-use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Duration};
+use std::{future::Future, mem, panic, pin::Pin, time::Duration};
 
 use bytes::{Bytes, BytesMut};
 use hyper::{self, body, Body, Request};
@@ -13,7 +13,7 @@ use crate::{
     error::{Error, Result},
     response::Response,
     row::{self, Row},
-    rowbinary, Client, Compression,
+    rowbinary, Client, Compression, InsertRow,
 };
 
 const BUFFER_SIZE: usize = 128 * 1024;
@@ -23,7 +23,7 @@ const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extr
 ///
 /// Rows are being sent progressively to spread network load.
 #[must_use]
-pub struct Insert<T> {
+pub struct Insert<T: InsertRow + Serialize> {
     buffer: BytesMut,
     #[cfg(feature = "wa-37420")]
     chunk_count: usize,
@@ -32,11 +32,11 @@ pub struct Insert<T> {
     compression: Compression,
     send_timeout: Option<Duration>,
     end_timeout: Option<Duration>,
+    row: T,
     // Use boxed `Sleep` to reuse a timer entry, it improves performance.
     // Also, `tokio::time::timeout()` significantly increases a future's size.
     sleep: Pin<Box<Sleep>>,
     handle: JoinHandle<Result<()>>,
-    _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
 }
 
 // It should be a regular function, but it decreases performance.
@@ -53,11 +53,11 @@ macro_rules! timeout {
     }};
 }
 
-impl<T> Insert<T> {
-    pub(crate) fn new(client: &Client, table: &str) -> Result<Self>
-    where
-        T: Row,
-    {
+impl<T> Insert<T>
+where
+    T: InsertRow + Serialize,
+{
+    pub(crate) fn new(client: &Client, table: &str, row: T) -> Result<Self> {
         let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -66,7 +66,7 @@ impl<T> Insert<T> {
             pairs.append_pair("database", database);
         }
 
-        let fields = row::join_column_names::<T>()
+        let fields = row::join_insert_column_names(row)
             .expect("the row type must be a struct or a wrapper around it");
 
         // TODO: what about escaping a table name?
@@ -111,7 +111,7 @@ impl<T> Insert<T> {
             end_timeout: None,
             sleep: Box::pin(tokio::time::sleep(Duration::new(0, 0))),
             handle,
-            _marker: PhantomData,
+            row,
         })
     }
 
@@ -151,12 +151,9 @@ impl<T> Insert<T> {
     ///
     /// # Panics
     /// If called after previous call returned an error.
-    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
-    where
-        T: Serialize,
-    {
+    pub fn write<'a>(&'a mut self) -> impl Future<Output = Result<()>> + 'a + Send {
         assert!(self.sender.is_some(), "write() after error");
-        let result = rowbinary::serialize_into(&mut self.buffer, row);
+        let result = rowbinary::serialize_into(&mut self.buffer, &self.row);
         if result.is_err() {
             self.abort();
         }
@@ -269,7 +266,7 @@ impl<T> Insert<T> {
     }
 }
 
-impl<T> Drop for Insert<T> {
+impl<T: InsertRow + Serialize> Drop for Insert<T> {
     fn drop(&mut self) {
         self.abort();
     }

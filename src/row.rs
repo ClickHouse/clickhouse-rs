@@ -2,8 +2,18 @@ use crate::sql;
 
 pub trait Row {
     const COLUMN_NAMES: &'static [&'static str];
+}
 
-    // TODO: count
+/// The InsertRow Trait is a ObjectSafe version of row that allows us to
+/// insert trait objects directly into the database
+pub trait InsertRow: Send + Sync {
+    fn get_column_names(&self) -> &'static [&'static str];
+}
+
+impl<R: Row + Send + Sync> InsertRow for R {
+    fn get_column_names(&self) -> &'static [&'static str] {
+        R::COLUMN_NAMES
+    }
 }
 
 // Actually, it's not public now.
@@ -50,6 +60,26 @@ impl_row_for_tuple!(T0 T1 T2 T3 T4 T5 T6 T7 T8);
 
 impl<T> Row for Vec<T> {
     const COLUMN_NAMES: &'static [&'static str] = &[];
+}
+
+pub(crate) fn join_insert_column_names<R: InsertRow>(row: R) -> Option<String> {
+    let columns = row.get_column_names();
+    if columns.is_empty() {
+        return None;
+    }
+
+    let out = columns
+        .iter()
+        .enumerate()
+        .fold(String::new(), |mut res, (idx, name)| {
+            if idx > 0 {
+                res.push(',');
+            }
+            sql::escape::identifier(name, &mut res).expect("impossible");
+            res
+        });
+
+    Some(out)
 }
 
 /// Collects all field names in depth and joins them with comma.

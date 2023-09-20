@@ -1,6 +1,6 @@
 //! Contains ser/de modules for different external types.
 
-use serde::{
+pub use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
 };

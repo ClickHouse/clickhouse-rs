@@ -7,7 +7,7 @@ use futures::{
 use serde::Serialize;
 use tokio::time::{Duration, Instant};
 
-use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client};
+use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client, InsertRow};
 
 const DEFAULT_MAX_ENTRIES: u64 = 500_000;
 
@@ -15,7 +15,7 @@ const DEFAULT_MAX_ENTRIES: u64 = 500_000;
 ///
 /// Rows are being sent progressively to spread network load.
 #[must_use]
-pub struct Inserter<T> {
+pub struct Inserter<T: InsertRow + Serialize> {
     client: Client,
     table: String,
     max_entries: u64,
@@ -46,7 +46,7 @@ impl Quantities {
 
 impl<T> Inserter<T>
 where
-    T: Row,
+    T: InsertRow + Serialize,
 {
     pub(crate) fn new(client: &Client, table: &str) -> Result<Self> {
         Ok(Self {
@@ -165,7 +165,7 @@ where
     #[inline]
     pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
     where
-        T: Serialize,
+        T: InsertRow + Serialize,
     {
         self.uncommitted_entries += 1;
         if self.insert.is_none() {
