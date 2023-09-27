@@ -75,7 +75,10 @@ impl Default for Client {
         connector.set_keepalive(Some(TCP_KEEPALIVE));
 
         #[cfg(feature = "tls")]
-        let connector = HttpsConnector::new_with_connector(connector);
+        let connector = HttpsConnector::new_with_connector({
+            connector.enforce_http(false);
+            connector
+        });
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
