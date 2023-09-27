@@ -1,18 +1,16 @@
 use clickhouse::{Client, Compression};
 
-mod common;
-
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn deferred() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
     max_execution_time(client, false).await;
 }
 
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn wait_end_of_query() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
     max_execution_time(client, true).await;
 }
 
@@ -48,10 +46,10 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
 }
 
 #[cfg(feature = "lz4")]
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn deferred_lz4() {
-    let client = common::prepare_database!().with_compression(Compression::Lz4);
+    let client = prepare_database!().with_compression(Compression::Lz4);
 
     client
         .query("CREATE TABLE test(no UInt32) ENGINE = MergeTree ORDER BY no")

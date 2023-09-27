@@ -2,12 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use clickhouse::{error::Error, Row};
 
-mod common;
-
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn smoke() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow<'a> {
@@ -54,10 +52,10 @@ async fn smoke() {
     }
 }
 
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn fetch_one_and_optional() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     client
         .query("CREATE TABLE test(n String) ENGINE = MergeTree ORDER BY n")
@@ -90,10 +88,10 @@ async fn fetch_one_and_optional() {
 }
 
 // See #19.
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn long_query() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     client
         .query("CREATE TABLE test(n String) ENGINE = MergeTree ORDER BY n")
@@ -114,10 +112,10 @@ async fn long_query() {
 }
 
 // See #22.
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn big_borrowed_str() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow<'a> {
@@ -153,10 +151,10 @@ async fn big_borrowed_str() {
 }
 
 // See #31.
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn all_floats() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     client
         .query("CREATE TABLE test(no UInt32, f Float64) ENGINE = MergeTree ORDER BY no")

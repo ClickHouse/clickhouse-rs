@@ -2,8 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use clickhouse::{Client, Compression, Row};
 
-mod common;
-
 async fn check(client: Client) {
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow<'a> {
@@ -44,25 +42,25 @@ async fn check(client: Client) {
     assert_eq!(sum_len, 600_000);
 }
 
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn none() {
-    let client = common::prepare_database!().with_compression(Compression::None);
+    let client = prepare_database!().with_compression(Compression::None);
     check(client).await;
 }
 
 #[cfg(feature = "lz4")]
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn lz4() {
-    let client = common::prepare_database!().with_compression(Compression::Lz4);
+    let client = prepare_database!().with_compression(Compression::Lz4);
     check(client).await;
 }
 
 #[cfg(feature = "lz4")]
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn lz4_hc() {
-    let client = common::prepare_database!().with_compression(Compression::Lz4Hc(4));
+    let client = prepare_database!().with_compression(Compression::Lz4Hc(4));
     check(client).await;
 }

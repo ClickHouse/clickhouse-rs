@@ -1,20 +1,28 @@
-#![allow(dead_code, unused_imports, unused_macros)]
-
 use clickhouse::{sql, Client};
-
-const HOST: &str = "localhost:8123";
+use function_name::named;
 
 macro_rules! prepare_database {
     () => {
-        common::_priv::prepare_database(file!(), function_name!()).await
+        crate::_priv::prepare_database(file!(), function_name!()).await
     };
 }
 
-pub(crate) use {function_name::named, prepare_database};
-pub(crate) mod _priv {
+mod compression;
+mod cursor_error;
+mod ip;
+mod nested;
+mod query;
+mod time;
+mod uuid;
+mod wa_37420;
+mod watch;
+
+const HOST: &str = "localhost:8123";
+
+mod _priv {
     use super::*;
 
-    pub async fn prepare_database(file_path: &str, fn_name: &str) -> Client {
+    pub(crate) async fn prepare_database(file_path: &str, fn_name: &str) -> Client {
         let name = make_db_name(file_path, fn_name);
         let client = Client::default().with_url(format!("http://{HOST}"));
 

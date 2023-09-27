@@ -5,12 +5,10 @@ use uuid::Uuid;
 
 use clickhouse::Row;
 
-mod common;
-
-#[common::named]
+#[crate::named]
 #[tokio::test]
 async fn smoke() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct MyRow {
