@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Fixed
+- client: accept HTTPs urls if `tls` feature is enabled ([#58]).
+
+[#58]: https://github.com/loyd/clickhouse.rs/issues/56
 
 ## [0.11.5] - 2023-06-12
 ### Changed
