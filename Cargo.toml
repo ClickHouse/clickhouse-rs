@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse"
-version = "0.11.5"
+version = "0.11.6"
 description = "A typed client for ClickHouse with killer features"
 keywords = ["clickhouse", "database", "driver", "tokio", "hyper"]
 authors = ["Paul Loyd <pavelko95@gmail.com>"]

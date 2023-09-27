@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+## [0.11.6] - 2023-09-27
 ### Fixed
 - client: accept HTTPs urls if `tls` feature is enabled ([#58]).
 
@@ -252,7 +254,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.5...HEAD
+[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.6...HEAD
+[0.11.6]: https://github.com/loyd/clickhouse.rs/compare/v0.11.5...v0.11.6
 [0.11.5]: https://github.com/loyd/clickhouse.rs/compare/v0.11.4...v0.11.5
 [0.11.4]: https://github.com/loyd/clickhouse.rs/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/loyd/clickhouse.rs/compare/v0.11.2...v0.11.3
