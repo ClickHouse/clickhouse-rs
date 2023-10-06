@@ -100,8 +100,8 @@ pub mod uuid {
         D: Deserializer<'de>,
     {
         if deserializer.is_human_readable() {
-            let uuid_str: String = Deserialize::deserialize(deserializer)?;
-            Uuid::parse_str(&uuid_str).map_err(D::Error::custom)
+            let uuid_str: &str = Deserialize::deserialize(deserializer)?;
+            Uuid::parse_str(uuid_str).map_err(D::Error::custom)
         } else {
             let mut bytes: [u8; 16] = Deserialize::deserialize(deserializer)?;
             transform(&mut bytes);
