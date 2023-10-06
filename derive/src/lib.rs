@@ -15,7 +15,7 @@ fn serde_skipped(cx: &Ctxt, attrs: &[syn::Attribute]) -> bool {
                 if path
                     .get_ident()
                     // will not work with skip_serializing_if
-                    .map_or(false, |i| i.to_string().starts_with("skip")) =>
+                    .map_or(false, |i| *i == "skip_serializing" || *i == "skip_deserializing") =>
                     {
                         return true
                     }
