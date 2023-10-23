@@ -78,6 +78,10 @@ impl<T> Insert<T> {
             pairs.append_pair("decompress", "1");
         }
 
+        for (name, value) in &client.options {
+            pairs.append_pair(name, value);
+        }
+
         drop(pairs);
 
         let mut builder = Request::post(url.as_str());
