@@ -59,7 +59,7 @@ impl Mock {
                                     responses_left.fetch_sub(1, Ordering::Relaxed);
                                     res
                                 }
-                                _ => panic!("unexpected request, no predefined responses left"),
+                                _ => panic!("unexpected request, no predefined responses left for request: {:?}", req),
                             }
                         };
                         Ok::<_, Infallible>(handler_fn(req))
