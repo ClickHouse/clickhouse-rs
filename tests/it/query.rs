@@ -181,3 +181,35 @@ async fn all_floats() {
 
     assert_eq!(vec, &[42.5, 43.5]);
 }
+
+// Fetch summary
+#[crate::named]
+#[tokio::test]
+async fn summary() {
+    let client = prepare_database!();
+
+    client
+        .query("CREATE TABLE test(n String) ENGINE = MergeTree ORDER BY n")
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query("INSERT INTO test SELECT number as n FROM numbers(10)")
+        .execute()
+        .await
+        .unwrap();
+
+    let q = "SELECT COUNT() FROM test";
+    let got_string = client.query(q).summary().await.unwrap();
+
+    println!("{:?}", got_string);
+
+    assert!(got_string.read_rows > 0);
+    assert!(got_string.read_bytes > 0);
+    assert!(got_string.written_rows == 0);
+    assert!(got_string.written_bytes == 0);
+    assert!(got_string.result_rows == 1);
+    assert!(got_string.result_bytes > 0);
+    assert!(got_string.elapsed_ns > 0);
+}

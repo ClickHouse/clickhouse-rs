@@ -1,4 +1,4 @@
-use hyper::{header::CONTENT_LENGTH, Body, Method, Request};
+use hyper::{client::ResponseFuture, header::CONTENT_LENGTH, Body, Method, Request};
 use serde::Deserialize;
 use url::Url;
 
@@ -8,6 +8,7 @@ use crate::{
     response::Response,
     row::Row,
     sql::{Bind, SqlBuilder},
+    summary::Summary,
     Client,
 };
 
@@ -115,7 +116,29 @@ impl Query {
         Ok(result)
     }
 
+    /// Executes the query and returns the X-ClickHouse-Summary response header.
+    pub async fn summary(self) -> Result<Summary> {
+        let mut _s = self;
+        _s.client
+            .options
+            .insert("send_progress_in_http_headers".into(), "1".into());
+        _s.client
+            .options
+            .insert("wait_end_of_query".into(), "1".into());
+
+        let future = _s.do_request(true)?;
+
+        Summary::new(future).await
+    }
+
     pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {
+        let compression = self.client.compression;
+        let future = self.do_request(read_only)?;
+
+        Ok(Response::new(future, compression))
+    }
+
+    pub(crate) fn do_request(self, read_only: bool) -> Result<ResponseFuture> {
         let query = self.sql.finish()?;
 
         let mut url =
@@ -171,7 +194,8 @@ impl Query {
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
         let future = self.client.client._request(request);
-        Ok(Response::new(future, self.client.compression))
+
+        Ok(future)
     }
 }
 

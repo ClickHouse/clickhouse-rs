@@ -38,6 +38,10 @@ pub enum Error {
     BadResponse(String),
     #[error("timeout expired")]
     TimedOut,
+    #[error("summary header not found in response")]
+    SummaryHeaderNotFound,
+    #[error("summary not found")]
+    SummaryNotFound,
 
     // Internally handled errors, not part of public API.
     // XXX: move to another error?
