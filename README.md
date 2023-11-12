@@ -17,16 +17,21 @@ A typed client for ClickHouse.
 [actions-url]: https://github.com/loyd/clickhouse.rs/actions/workflows/ci.yml
 
 * Uses `serde` for encoding/decoding rows.
-* Uses `RowBinary` encoding.
-* Supports HTTP and HTTPS.
+* Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
+* Uses `RowBinary` encoding over HTTP transport.
+    * There are plans to switch to `Native` over TCP.
+* Supports TLS.
+* Supports compression and decompression (LZ4 and LZ4HC).
 * Provides API for selecting.
 * Provides API for inserting.
 * Provides API for infinite transactional (see below) inserting.
 * Provides API for watching live views.
-* Compression and decompression (LZ4).
 * Provides mocks for unit testing.
 
+Note: [ch2rs](https://github.com/loyd/ch2rs) is useful to generate a row type from ClickHouse.
+
 ## Usage
+
 To use the crate, add this to your `Cargo.toml`:
 ```toml
 [dependencies]
@@ -126,7 +131,6 @@ insert.end().await?;
 * If `end()` isn't called, the `INSERT` is aborted.
 * Rows are being sent progressively to spread network load.
 * ClickHouse inserts batches atomically only if all rows fit in the same partition and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
-* [ch2rs](https://github.com/loyd/ch2rs) is useful to generate a row type from ClickHouse.
 
 </details>
 <details>
@@ -226,7 +230,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
     <summary>Example</summary>
 
     ```rust,ignore
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Row, Debug, Serialize, Deserialize)]
     struct MyRow<'a> {
         str: &'a str,
         string: String,
