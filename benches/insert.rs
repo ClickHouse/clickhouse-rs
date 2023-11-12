@@ -86,11 +86,11 @@ async fn run_inserter(client: Client, iters: u64) -> Result<Duration> {
     Ok(start.elapsed())
 }
 
-fn run<F>(c: &mut Criterion, name: &str, f: impl Fn(Client, u64) -> F)
+fn run<F>(c: &mut Criterion, name: &str, port: u16, f: impl Fn(Client, u64) -> F)
 where
     F: Future<Output = Result<Duration>>,
 {
-    let addr = "127.0.0.1:6543".parse().unwrap();
+    let addr = format!("127.0.0.1:{port}").parse().unwrap();
     server::start(addr);
 
     let mut group = c.benchmark_group(name);
@@ -128,11 +128,11 @@ where
 }
 
 fn insert(c: &mut Criterion) {
-    run(c, "insert", run_insert);
+    run(c, "insert", 6543, run_insert);
 }
 
 fn inserter(c: &mut Criterion) {
-    run(c, "inserter", run_inserter);
+    run(c, "inserter", 6544, run_inserter);
 }
 
 criterion_group!(benches, insert, inserter);
