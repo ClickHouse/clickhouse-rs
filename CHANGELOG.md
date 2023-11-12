@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - derive: move to syn v2.
 
+### Fixed
+- watch: support a new syntax.
+
 [#83]: https://github.com/loyd/clickhouse.rs/pull/83
 
 ## [0.11.6] - 2023-09-27

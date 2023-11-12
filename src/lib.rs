@@ -194,6 +194,9 @@ impl Client {
     }
 
     /// Starts a new WATCH query.
+    ///
+    /// The `query` can be either the table name or a SELECT query.
+    /// In the second case, a new LV table is created.
     #[cfg(feature = "watch")]
     pub fn watch(&self, query: &str) -> watch::Watch {
         watch::Watch::new(self, query)
