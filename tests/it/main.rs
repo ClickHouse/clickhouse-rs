@@ -14,7 +14,6 @@ mod nested;
 mod query;
 mod time;
 mod uuid;
-mod wa_37420;
 mod watch;
 
 const HOST: &str = "localhost:8123";

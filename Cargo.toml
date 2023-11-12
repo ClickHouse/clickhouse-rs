@@ -43,9 +43,6 @@ uuid = ["dep:uuid"]
 time = ["dep:time"]
 tls = ["dep:hyper-tls"]
 
-# Temporary workaround for https://github.com/ClickHouse/ClickHouse/issues/37420
-wa-37420 = []
-
 [dependencies]
 clickhouse-derive = { version = "0.1.1", path = "derive" }
 

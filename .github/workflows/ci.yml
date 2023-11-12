@@ -41,6 +41,7 @@ jobs:
     - run: cargo test
     - run: cargo test --no-default-features
     - run: cargo test --features uuid,time
+    - run: cargo test --all-features
 
     services:
       clickhouse:
