@@ -31,7 +31,6 @@ async fn insert_into_table(client: &Client, rows: &[MyRow]) {
     insert.end().await.unwrap();
 }
 
-#[crate::named]
 #[tokio::test]
 async fn changes() {
     let client = prepare_database!();
@@ -69,7 +68,6 @@ async fn changes() {
     assert_eq!(cursor2.next().await.unwrap(), Some((3, MyRow { num: 21 })));
 }
 
-#[crate::named]
 #[tokio::test]
 async fn events() {
     let client = prepare_database!();

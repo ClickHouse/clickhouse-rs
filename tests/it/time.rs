@@ -8,7 +8,6 @@ use time::{macros::datetime, Date, OffsetDateTime};
 
 use clickhouse::Row;
 
-#[crate::named]
 #[tokio::test]
 async fn datetime() {
     let client = prepare_database!();
@@ -114,7 +113,6 @@ async fn datetime() {
     assert_eq!(row_str.dt64ns, &original_row.dt64ns.to_string()[..29]);
 }
 
-#[crate::named]
 #[tokio::test]
 async fn date() {
     let client = prepare_database!();
@@ -168,7 +166,6 @@ async fn date() {
     }
 }
 
-#[crate::named]
 #[tokio::test]
 async fn date32() {
     let client = prepare_database!();

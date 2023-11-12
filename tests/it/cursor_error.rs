@@ -1,13 +1,11 @@
 use clickhouse::{Client, Compression};
 
-#[crate::named]
 #[tokio::test]
 async fn deferred() {
     let client = prepare_database!();
     max_execution_time(client, false).await;
 }
 
-#[crate::named]
 #[tokio::test]
 async fn wait_end_of_query() {
     let client = prepare_database!();
@@ -46,7 +44,6 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
 }
 
 #[cfg(feature = "lz4")]
-#[crate::named]
 #[tokio::test]
 async fn deferred_lz4() {
     let client = prepare_database!().with_compression(Compression::Lz4);

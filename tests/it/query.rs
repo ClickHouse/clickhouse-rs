@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use clickhouse::{error::Error, Row};
 
-#[crate::named]
 #[tokio::test]
 async fn smoke() {
     let client = prepare_database!();
@@ -52,7 +51,6 @@ async fn smoke() {
     }
 }
 
-#[crate::named]
 #[tokio::test]
 async fn fetch_one_and_optional() {
     let client = prepare_database!();
@@ -88,7 +86,6 @@ async fn fetch_one_and_optional() {
 }
 
 // See #19.
-#[crate::named]
 #[tokio::test]
 async fn long_query() {
     let client = prepare_database!();
@@ -112,7 +109,6 @@ async fn long_query() {
 }
 
 // See #22.
-#[crate::named]
 #[tokio::test]
 async fn big_borrowed_str() {
     let client = prepare_database!();
@@ -151,7 +147,6 @@ async fn big_borrowed_str() {
 }
 
 // See #31.
-#[crate::named]
 #[tokio::test]
 async fn all_floats() {
     let client = prepare_database!();

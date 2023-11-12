@@ -42,7 +42,6 @@ async fn check(client: Client) {
     assert_eq!(sum_len, 600_000);
 }
 
-#[crate::named]
 #[tokio::test]
 async fn none() {
     let client = prepare_database!().with_compression(Compression::None);
@@ -50,7 +49,6 @@ async fn none() {
 }
 
 #[cfg(feature = "lz4")]
-#[crate::named]
 #[tokio::test]
 async fn lz4() {
     let client = prepare_database!().with_compression(Compression::Lz4);
@@ -58,7 +56,6 @@ async fn lz4() {
 }
 
 #[cfg(feature = "lz4")]
-#[crate::named]
 #[tokio::test]
 async fn lz4_hc() {
     let client = prepare_database!().with_compression(Compression::Lz4Hc(4));
