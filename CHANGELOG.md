@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - ReleaseDate
 ### Added
 - derive: support `serde::skip_deserializing` ([#83]).
+- the `quanta` feature, enabled by default.
 
 ### Changed
 - **BREAKING** drop the `wa-37420` feature.
+- inserter: increase performance if the `quanta` feature is enabled.
 - derive: move to syn v2.
 
 ### Fixed

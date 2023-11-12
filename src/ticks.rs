@@ -1,6 +1,17 @@
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 
 const PERIOD_THRESHOLD: Duration = Duration::from_secs(365 * 24 * 3600);
+
+// === Instant ===
+
+// More efficient `Instant` based on TSC.
+#[cfg(all(feature = "quanta", not(feature = "test-util")))]
+pub(crate) type Instant = quanta::Instant;
+
+#[cfg(any(not(feature = "quanta"), feature = "test-util"))]
+pub(crate) type Instant = tokio::time::Instant;
+
+// === Ticks ===
 
 pub(crate) struct Ticks {
     period: Duration,
@@ -62,9 +73,9 @@ impl Ticks {
     }
 }
 
-#[tokio::test]
+#[cfg(feature = "test-util")] // only with `tokio::time::Instant`
+#[tokio::test(start_paused = true)]
 async fn it_works() {
-    tokio::time::pause();
     let origin = Instant::now();
 
     // No bias.
@@ -101,9 +112,9 @@ async fn it_works() {
     assert_eq!(ticks.next_at().unwrap() - origin, Duration::from_secs(31));
 }
 
-#[tokio::test]
+#[cfg(feature = "test-util")] // only with `tokio::time::Instant`
+#[tokio::test(start_paused = true)]
 async fn it_skips_extra_ticks() {
-    tokio::time::pause();
     let origin = Instant::now();
 
     let mut ticks = Ticks::default();

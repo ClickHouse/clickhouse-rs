@@ -5,9 +5,15 @@ use futures::{
     Future,
 };
 use serde::Serialize;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 
-use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client};
+use crate::{
+    error::Result,
+    insert::Insert,
+    row::Row,
+    ticks::{self, Ticks},
+    Client,
+};
 
 const DEFAULT_MAX_ENTRIES: u64 = 500_000;
 
@@ -154,7 +160,7 @@ where
         Some(
             self.ticks
                 .next_at()?
-                .saturating_duration_since(Instant::now()),
+                .saturating_duration_since(ticks::Instant::now()),
         )
     }
 
@@ -184,7 +190,7 @@ where
             self.uncommitted_entries = 0;
         }
 
-        let now = Instant::now();
+        let now = ticks::Instant::now();
 
         Ok(if self.is_threshold_reached(now) {
             let quantities = mem::replace(&mut self.committed, Quantities::ZERO);
@@ -207,7 +213,7 @@ where
         Ok(self.committed)
     }
 
-    fn is_threshold_reached(&self, now: Instant) -> bool {
+    fn is_threshold_reached(&self, now: ticks::Instant) -> bool {
         self.committed.entries >= self.max_entries
             || self.ticks.next_at().map_or(false, |next_at| now >= next_at)
     }
