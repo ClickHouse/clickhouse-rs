@@ -9,7 +9,7 @@ A typed client for ClickHouse.
 
 [crates-badge]: https://img.shields.io/crates/v/clickhouse.svg
 [crates-url]: https://crates.io/crates/clickhouse
-[docs-badge]: https://docs.rs/clickhouse/badge.svg
+[docs-badge]: https://img.shields.io/docsrs/clickhouse
 [docs-url]: https://docs.rs/clickhouse
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: https://github.com/loyd/clickhouse.rs/blob/master/LICENSE
