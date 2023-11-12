@@ -213,7 +213,6 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
 * `watch` — enables `client.watch` functionality. See the corresponding section for details.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid/latest/uuid/) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time/latest/time/) crate.
-* `wa-37420` — implements a workaround for CH versions prior to v22.6. See the corresponding section for details.
 
 ## Data Types
 * `(U)Int(8|16|32|64|128)` maps to/from corresponding `(u|i)(8|16|32|64|128)` types or newtypes around them.
