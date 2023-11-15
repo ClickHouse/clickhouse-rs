@@ -10,10 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - derive: support `serde::skip_deserializing` ([#83]).
 - the `quanta` feature, enabled by default.
+- inserter: can be limited by size, see `Inserter::with_max_bytes()`.
 
 ### Changed
+- **BREAKING** inserter: `Inserter::write` is synchronous now.
+- **BREAKING** inserter: rename `entries` to `rows`.
 - **BREAKING** drop the `wa-37420` feature.
+- **BREAKING** remove deprecated items.
 - inserter: increase performance if the `quanta` feature is enabled.
+- inserter: increase performance if the time limit isn't used.
 - derive: move to syn v2.
 
 ### Fixed

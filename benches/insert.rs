@@ -68,17 +68,15 @@ async fn run_insert(client: Client, iters: u64) -> Result<Duration> {
 
 async fn run_inserter(client: Client, iters: u64) -> Result<Duration> {
     let start = Instant::now();
-    let mut inserter = client.inserter("table")?.with_max_entries(iters);
+    let mut inserter = client.inserter("table")?.with_max_rows(iters);
 
     for _ in 0..iters {
-        inserter
-            .write(&black_box(SomeRow {
-                a: 42,
-                b: 42,
-                c: 42,
-                d: 42,
-            }))
-            .await?;
+        inserter.write(&black_box(SomeRow {
+            a: 42,
+            b: 42,
+            c: 42,
+            d: 42,
+        }))?;
         inserter.commit().await?;
     }
 

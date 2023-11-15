@@ -143,22 +143,24 @@ insert.end().await?;
 ```rust,ignore
 let mut inserter = client.inserter("some")?
     .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
-    .with_max_entries(750_000)
+    .with_max_bytes(50_000_000)
+    .with_max_rows(750_000)
     .with_period(Some(Duration::from_secs(15)));
 
-inserter.write(&MyRow { no: 0, name: "foo".into() }).await?;
-inserter.write(&MyRow { no: 1, name: "bar".into() }).await?;
+inserter.write(&MyRow { no: 0, name: "foo".into() })?;
+inserter.write(&MyRow { no: 1, name: "bar".into() })?;
 let stats = inserter.commit().await?;
-if stats.entries > 0 {
+if stats.rows > 0 {
     println!(
-        "{} entries ({} transactions) have been inserted",
-        stats.entries, stats.transactions,
+        "{} bytes, {} rows, {} transactions have been inserted",
+        stats.bytes, stats.rows, stats.transactions,
     );
 }
 ```
 
-* `Inserter` ends an active insert in `commit()` if thresholds (`max_entries`, `period`) are reached.
+* `Inserter` ends an active insert in `commit()` if thresholds (`max_bytes`, `max_rows`, `period`) are reached.
 * The interval between ending active `INSERT`s can be biased by using `with_period_bias` to avoid load spikes by parallel inserters.
+* `Inserter::time_left()` can be used to detect when the current period ends. Call `Inserter::commit()` again to check limits.
 * All rows between `commit()` calls are inserted in the same `INSERT` statement.
 * Do not forget to flush if you want to terminate inserting:
 ```rust,ignore

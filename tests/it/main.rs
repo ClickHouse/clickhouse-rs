@@ -15,6 +15,7 @@ macro_rules! prepare_database {
 
 mod compression;
 mod cursor_error;
+mod inserter;
 mod ip;
 mod nested;
 mod query;

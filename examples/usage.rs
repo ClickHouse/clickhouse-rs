@@ -42,15 +42,15 @@ async fn insert(client: &Client) -> Result<()> {
 async fn inserter(client: &Client) -> Result<()> {
     let mut inserter = client
         .inserter("some")?
-        .with_max_entries(100_000)
+        .with_max_rows(100_000)
         .with_period(Some(Duration::from_secs(15)));
 
     for i in 0..1000 {
         if i == 500 {
-            inserter.set_max_entries(300);
+            inserter.set_max_rows(300);
         }
 
-        inserter.write(&MyRow { no: i, name: "foo" }).await?;
+        inserter.write(&MyRow { no: i, name: "foo" })?;
         inserter.commit().await?;
     }
 

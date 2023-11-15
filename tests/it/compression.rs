@@ -21,14 +21,11 @@ async fn check(client: Client) {
         .await
         .unwrap();
 
-    let mut inserter = client.inserter("test").unwrap();
-
+    let mut insert = client.insert("test").unwrap();
     for i in 0..200_000 {
-        inserter.write(&MyRow { no: i, name: "foo" }).await.unwrap();
-        inserter.commit().await.unwrap();
+        insert.write(&MyRow { no: i, name: "foo" }).await.unwrap();
     }
-
-    inserter.end().await.unwrap();
+    insert.end().await.unwrap();
 
     // Check data.
 

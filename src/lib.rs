@@ -28,13 +28,6 @@ pub mod test;
 #[cfg(feature = "watch")]
 pub mod watch;
 
-#[cfg(feature = "uuid")]
-#[doc(hidden)]
-#[deprecated(since = "0.11.1", note = "use `clickhouse::serde::uuid` instead")]
-pub mod uuid {
-    pub use crate::serde::uuid::*;
-}
-
 mod buflist;
 mod compression;
 mod cursor;
