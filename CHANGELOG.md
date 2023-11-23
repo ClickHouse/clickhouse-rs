@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Added
+- derive: support `serde::skip_deserializing` ([#83]).
+- the `quanta` feature, enabled by default.
+- inserter: can be limited by size, see `Inserter::with_max_bytes()`.
+
+### Changed
+- **BREAKING** inserter: `Inserter::write` is synchronous now.
+- **BREAKING** inserter: rename `entries` to `rows`.
+- **BREAKING** drop the `wa-37420` feature.
+- **BREAKING** remove deprecated items.
+- inserter: increase performance if the `quanta` feature is enabled.
+- inserter: increase performance if the time limit isn't used.
+- derive: move to syn v2.
+
+### Fixed
+- watch: support a new syntax.
+
+[#83]: https://github.com/loyd/clickhouse.rs/pull/83
+
+## [0.11.6] - 2023-09-27
+### Fixed
+- client: accept HTTPs urls if `tls` feature is enabled ([#58]).
+
+[#58]: https://github.com/loyd/clickhouse.rs/issues/56
+
+## [0.11.5] - 2023-06-12
+### Changed
+- inserter: start new insert only when the first row is provided ([#68], [#70]).
+
+[#70]: https://github.com/loyd/clickhouse.rs/pull/70
+[#68]: https://github.com/loyd/clickhouse.rs/pull/68
 
 ## [0.11.4] - 2023-05-14
 ### Added
@@ -241,7 +272,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.4...HEAD
+[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.6...HEAD
+[0.11.6]: https://github.com/loyd/clickhouse.rs/compare/v0.11.5...v0.11.6
+[0.11.5]: https://github.com/loyd/clickhouse.rs/compare/v0.11.4...v0.11.5
 [0.11.4]: https://github.com/loyd/clickhouse.rs/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/loyd/clickhouse.rs/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/loyd/clickhouse.rs/compare/v0.11.1...v0.11.2

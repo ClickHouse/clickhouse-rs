@@ -35,13 +35,13 @@ fn escape(src: &str, mut dst: impl fmt::Write, ch: char) -> fmt::Result {
 #[test]
 fn it_escapes_string() {
     let mut actual = String::new();
-    string(r#"f\o'o '' b\'ar'"#, &mut actual).unwrap();
-    assert_eq!(actual, r#"'f\\o\'o \'\' b\\\'ar\''"#);
+    string(r"f\o'o '' b\'ar'", &mut actual).unwrap();
+    assert_eq!(actual, r"'f\\o\'o \'\' b\\\'ar\''");
 }
 
 #[test]
 fn it_escapes_identifier() {
     let mut actual = String::new();
-    identifier(r#"f\o`o `` b\`ar`"#, &mut actual).unwrap();
-    assert_eq!(actual, r#"`f\\o\`o \`\` b\\\`ar\``"#);
+    identifier(r"f\o`o `` b\`ar`", &mut actual).unwrap();
+    assert_eq!(actual, r"`f\\o\`o \`\` b\\\`ar\``");
 }

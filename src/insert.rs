@@ -19,14 +19,15 @@ use crate::{
 const BUFFER_SIZE: usize = 128 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extra reallocations
 
-/// Performs only one `INSERT`.
+/// Performs one `INSERT`.
+///
+/// The [`Insert::end`] must be called to finalize the `INSERT`.
+/// Otherwise, the whole `INSERT` will be aborted.
 ///
 /// Rows are being sent progressively to spread network load.
 #[must_use]
 pub struct Insert<T> {
     buffer: BytesMut,
-    #[cfg(feature = "wa-37420")]
-    chunk_count: usize,
     sender: Option<body::Sender>,
     #[cfg(feature = "lz4")]
     compression: Compression,
@@ -108,8 +109,6 @@ impl<T> Insert<T> {
 
         Ok(Self {
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
-            #[cfg(feature = "wa-37420")]
-            chunk_count: 0,
             sender: Some(sender),
             #[cfg(feature = "lz4")]
             compression: client.compression,
@@ -153,7 +152,18 @@ impl<T> Insert<T> {
         self.end_timeout = end_timeout;
     }
 
-    /// Serializes and writes to the socket a provided row.
+    /// Serializes the provided row into an internal buffer.
+    /// Once the buffer is full, it's sent to a background task writing to the socket.
+    ///
+    /// Close to:
+    /// ```ignore
+    /// async fn write<T>(&self, row: &T) -> Result<usize>;
+    /// ```
+    ///
+    /// A returned future doesn't depend on the row's lifetime.
+    ///
+    /// Returns an error if the row cannot be serialized or the background task failed.
+    /// Once failed, the whole `INSERT` is aborted and cannot be used anymore.
     ///
     /// # Panics
     /// If called after previous call returned an error.
@@ -161,12 +171,7 @@ impl<T> Insert<T> {
     where
         T: Serialize,
     {
-        assert!(self.sender.is_some(), "write() after error");
-
-        let result = rowbinary::serialize_into(&mut self.buffer, row);
-        if result.is_err() {
-            self.abort();
-        }
+        let result = self.do_write(row);
 
         async move {
             result?;
@@ -177,10 +182,30 @@ impl<T> Insert<T> {
         }
     }
 
-    /// Ends `INSERT`.
-    /// Succeeds if the server returns 200.
+    #[inline(always)]
+    pub(crate) fn do_write(&mut self, row: &T) -> Result<usize>
+    where
+        T: Serialize,
+    {
+        assert!(self.sender.is_some(), "write() after error");
+
+        let old_buf_size = self.buffer.len();
+        let result = rowbinary::serialize_into(&mut self.buffer, row);
+        let written = self.buffer.len() - old_buf_size;
+
+        if result.is_err() {
+            self.abort();
+        }
+
+        result.and(Ok(written))
+    }
+
+    /// Ends `INSERT`, the server starts processing the data.
     ///
-    /// If it isn't called, the whole `INSERT` is aborted.
+    /// Succeeds if the server returns 200, that means the `INSERT` was handled successfully,
+    /// including all materialized views and quorum writes.
+    ///
+    /// NOTE: If it isn't called, the whole `INSERT` is aborted.
     pub async fn end(mut self) -> Result<()> {
         if !self.buffer.is_empty() {
             self.send_chunk().await?;
@@ -194,10 +219,6 @@ impl<T> Insert<T> {
         if self.sender.is_none() {
             return Ok(());
         }
-
-        // A temporary workaround for https://github.com/ClickHouse/ClickHouse/issues/37420.
-        #[cfg(feature = "wa-37420")]
-        self.prepend_bom();
 
         // Hyper uses non-trivial and inefficient schema of buffering chunks.
         // It's difficult to determine when allocations occur.
@@ -254,18 +275,6 @@ impl<T> Insert<T> {
     #[cfg(not(feature = "lz4"))]
     fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
         Ok(mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze())
-    }
-
-    #[cfg(feature = "wa-37420")]
-    fn prepend_bom(&mut self) {
-        if self.chunk_count == 0 && self.buffer.starts_with(&[0xef, 0xbb, 0xbf]) {
-            let mut new_chunk = BytesMut::with_capacity(self.buffer.len() + 3);
-            new_chunk.extend_from_slice(&[0xef, 0xbb, 0xbf]);
-            new_chunk.extend_from_slice(&self.buffer);
-            self.buffer = new_chunk;
-        }
-
-        self.chunk_count += 1;
     }
 
     fn abort(&mut self) {

@@ -8,12 +8,9 @@ use time::{macros::datetime, Date, OffsetDateTime};
 
 use clickhouse::Row;
 
-mod common;
-
-#[common::named]
 #[tokio::test]
 async fn datetime() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct MyRow {
@@ -116,10 +113,9 @@ async fn datetime() {
     assert_eq!(row_str.dt64ns, &original_row.dt64ns.to_string()[..29]);
 }
 
-#[common::named]
 #[tokio::test]
 async fn date() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct MyRow {
@@ -170,10 +166,9 @@ async fn date() {
     }
 }
 
-#[common::named]
 #[tokio::test]
 async fn date32() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct MyRow {

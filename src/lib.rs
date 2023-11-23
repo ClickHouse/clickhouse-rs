@@ -32,13 +32,6 @@ pub mod test;
 #[cfg(feature = "watch")]
 pub mod watch;
 
-#[cfg(feature = "uuid")]
-#[doc(hidden)]
-#[deprecated(since = "0.11.1", note = "use `clickhouse::serde::uuid` instead")]
-pub mod uuid {
-    pub use crate::serde::uuid::*;
-}
-
 mod buflist;
 mod compression;
 mod cursor;
@@ -77,7 +70,10 @@ impl Default for Client {
         connector.set_keepalive(Some(TCP_KEEPALIVE));
 
         #[cfg(feature = "tls")]
-        let connector = HttpsConnector::new_with_connector(connector);
+        let connector = HttpsConnector::new_with_connector({
+            connector.enforce_http(false);
+            connector
+        });
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
@@ -204,6 +200,9 @@ impl Client {
     }
 
     /// Starts a new WATCH query.
+    ///
+    /// The `query` can be either the table name or a SELECT query.
+    /// In the second case, a new LV table is created.
     #[cfg(feature = "watch")]
     pub fn watch(&self, query: &str) -> watch::Watch {
         watch::Watch::new(self, query)

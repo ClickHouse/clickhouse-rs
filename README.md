@@ -9,7 +9,7 @@ A typed client for ClickHouse.
 
 [crates-badge]: https://img.shields.io/crates/v/clickhouse.svg
 [crates-url]: https://crates.io/crates/clickhouse
-[docs-badge]: https://docs.rs/clickhouse/badge.svg
+[docs-badge]: https://img.shields.io/docsrs/clickhouse
 [docs-url]: https://docs.rs/clickhouse
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: https://github.com/loyd/clickhouse.rs/blob/master/LICENSE
@@ -17,23 +17,28 @@ A typed client for ClickHouse.
 [actions-url]: https://github.com/loyd/clickhouse.rs/actions/workflows/ci.yml
 
 * Uses `serde` for encoding/decoding rows.
-* Uses `RowBinary` encoding.
-* Supports HTTP and HTTPS.
+* Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
+* Uses `RowBinary` encoding over HTTP transport.
+    * There are plans to switch to `Native` over TCP.
+* Supports TLS.
+* Supports compression and decompression (LZ4 and LZ4HC).
 * Provides API for selecting.
 * Provides API for inserting.
 * Provides API for infinite transactional (see below) inserting.
 * Provides API for watching live views.
-* Compression and decompression (LZ4).
 * Provides mocks for unit testing.
 
+Note: [ch2rs](https://github.com/loyd/ch2rs) is useful to generate a row type from ClickHouse.
+
 ## Usage
+
 To use the crate, add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-clickhouse = "0.11.4"
+clickhouse = "0.11.6"
 
 [dev-dependencies]
-clickhouse = { version = "0.11.4", features = ["test-util"] }
+clickhouse = { version = "0.11.6", features = ["test-util"] }
 ```
 
 <details>
@@ -43,7 +48,7 @@ clickhouse = { version = "0.11.4", features = ["test-util"] }
 
 </summary>
 
-CH server older than v22.6 (2022-06-16) handles `RowBinary` [incorrectly](https://github.com/ClickHouse/ClickHouse/issues/37420) in some rare cases. Enable `wa-37420` feature to solve this problem. Don't use it for newer versions.
+CH server older than v22.6 (2022-06-16) handles `RowBinary` [incorrectly](https://github.com/ClickHouse/ClickHouse/issues/37420) in some rare cases. Use 0.11 and enable `wa-37420` feature to solve this problem. Don't use it for newer versions.
 
 </details>
 <details>
@@ -126,7 +131,6 @@ insert.end().await?;
 * If `end()` isn't called, the `INSERT` is aborted.
 * Rows are being sent progressively to spread network load.
 * ClickHouse inserts batches atomically only if all rows fit in the same partition and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
-* [ch2rs](https://github.com/loyd/ch2rs) is useful to generate a row type from ClickHouse.
 
 </details>
 <details>
@@ -170,22 +174,24 @@ insert.end().await?;
 ```rust,ignore
 let mut inserter = client.inserter("some")?
     .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
-    .with_max_entries(750_000)
+    .with_max_bytes(50_000_000)
+    .with_max_rows(750_000)
     .with_period(Some(Duration::from_secs(15)));
 
-inserter.write(&MyRow { no: 0, name: "foo".into() }).await?;
-inserter.write(&MyRow { no: 1, name: "bar".into() }).await?;
+inserter.write(&MyRow { no: 0, name: "foo".into() })?;
+inserter.write(&MyRow { no: 1, name: "bar".into() })?;
 let stats = inserter.commit().await?;
-if stats.entries > 0 {
+if stats.rows > 0 {
     println!(
-        "{} entries ({} transactions) have been inserted",
-        stats.entries, stats.transactions,
+        "{} bytes, {} rows, {} transactions have been inserted",
+        stats.bytes, stats.rows, stats.transactions,
     );
 }
 ```
 
-* `Inserter` ends an active insert in `commit()` if thresholds (`max_entries`, `period`) are reached.
+* `Inserter` ends an active insert in `commit()` if thresholds (`max_bytes`, `max_rows`, `period`) are reached.
 * The interval between ending active `INSERT`s can be biased by using `with_period_bias` to avoid load spikes by parallel inserters.
+* `Inserter::time_left()` can be used to detect when the current period ends. Call `Inserter::commit()` again to check limits.
 * All rows between `commit()` calls are inserted in the same `INSERT` statement.
 * Do not forget to flush if you want to terminate inserting:
 ```rust,ignore
@@ -240,11 +246,11 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
 ## Feature Flags
 * `lz4` (enabled by default) — enables `Compression::Lz4` and `Compression::Lz4Hc(_)` variants. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
 * `tls` (enabled by default) — supports urls with the `HTTPS` schema.
+* `quanta` (enabled by default) - uses the [quanta](https://docs.rs/quanta) crate to speed the inserter up. Not used if `test-util` is enabled (thus, time can be managed by `tokio::time::advance()` in custom tests).
 * `test-util` — adds mocks. See [the example](https://github.com/loyd/clickhouse.rs/tree/master/examples/mock.rs). Use it only in `dev-dependencies`.
 * `watch` — enables `client.watch` functionality. See the corresponding section for details.
-* `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid/latest/uuid/) crate.
-* `time` — adds `serde::time` to work with [time](https://docs.rs/time/latest/time/) crate.
-* `wa-37420` — implements a workaround for CH versions prior to v22.6. See the corresponding section for details.
+* `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
+* `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
 
 ## Data Types
 * `(U)Int(8|16|32|64|128)` maps to/from corresponding `(u|i)(8|16|32|64|128)` types or newtypes around them.
@@ -257,7 +263,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
     <summary>Example</summary>
 
     ```rust,ignore
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Row, Debug, Serialize, Deserialize)]
     struct MyRow<'a> {
         str: &'a str,
         string: String,
