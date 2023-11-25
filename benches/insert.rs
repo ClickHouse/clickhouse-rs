@@ -66,9 +66,14 @@ async fn run_insert(client: Client, iters: u64) -> Result<Duration> {
     Ok(start.elapsed())
 }
 
-async fn run_inserter(client: Client, iters: u64) -> Result<Duration> {
+async fn run_inserter<const WITH_PERIOD: bool>(client: Client, iters: u64) -> Result<Duration> {
     let start = Instant::now();
     let mut inserter = client.inserter("table")?.with_max_rows(iters);
+
+    if WITH_PERIOD {
+        // Just to measure overhead, not to actually use it.
+        inserter = inserter.with_period(Some(Duration::from_secs(1000)));
+    }
 
     for _ in 0..iters {
         inserter.write(&black_box(SomeRow {
@@ -130,7 +135,8 @@ fn insert(c: &mut Criterion) {
 }
 
 fn inserter(c: &mut Criterion) {
-    run(c, "inserter", 6544, run_inserter);
+    run(c, "inserter", 6544, run_inserter::<false>);
+    run(c, "inserter-period", 6545, run_inserter::<true>);
 }
 
 criterion_group!(benches, insert, inserter);
