@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - derive: support `serde::skip_deserializing` ([#83]).
 - the `quanta` feature, enabled by default.
 - inserter: can be limited by size, see `Inserter::with_max_bytes()`.
+- insert: apply options set on the client ([#90]).
 
 ### Changed
 - **BREAKING** inserter: `Inserter::write` is synchronous now.
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - watch: support a new syntax.
 
 [#83]: https://github.com/loyd/clickhouse.rs/pull/83
+[#90]: https://github.com/loyd/clickhouse.rs/pull/90
 
 ## [0.11.6] - 2023-09-27
 ### Fixed
