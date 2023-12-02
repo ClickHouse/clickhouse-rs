@@ -215,6 +215,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
 ## Feature Flags
 * `lz4` (enabled by default) — enables `Compression::Lz4` and `Compression::Lz4Hc(_)` variants. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
 * `tls` (enabled by default) — supports urls with the `HTTPS` schema.
+* `rustls` - enables `rustls` TLS backend. You can use it to avoid OpenSSL dependency. As `tls` is enabled by default, you should disable the `default-features` to use `rustls`. Like this: `clickhouse = { version = "x.y.z", default-features = false, features = ["lz4", "quanta", "rustls"] }`
 * `quanta` (enabled by default) - uses the [quanta](https://docs.rs/quanta) crate to speed the inserter up. Not used if `test-util` is enabled (thus, time can be managed by `tokio::time::advance()` in custom tests).
 * `test-util` — adds mocks. See [the example](https://github.com/loyd/clickhouse.rs/tree/master/examples/mock.rs). Use it only in `dev-dependencies`.
 * `watch` — enables `client.watch` functionality. See the corresponding section for details.

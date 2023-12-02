@@ -71,6 +71,13 @@ impl Default for Client {
             connector
         });
 
+        #[cfg(feature = "rustls")]
+        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_native_roots()
+            .https_or_http()
+            .enable_http2()
+            .wrap_connector(connector);
+
         let client = hyper::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .build(connector);
