@@ -76,7 +76,7 @@ impl Default for Client {
             .with_native_roots()
             .https_or_http()
             .enable_http2()
-            .wrap_connector(connector);
+            .build();
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
