@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - insert: apply options set on the client ([#90]).
 
 ### Changed
+- **BREAKING** inserter: there is no default limits anymore.
 - **BREAKING** inserter: `Inserter::write` is synchronous now.
 - **BREAKING** inserter: rename `entries` to `rows`.
 - **BREAKING** drop the `wa-37420` feature.
