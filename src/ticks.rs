@@ -5,10 +5,10 @@ const PERIOD_THRESHOLD: Duration = Duration::from_secs(365 * 24 * 3600);
 // === Instant ===
 
 // More efficient `Instant` based on TSC.
-#[cfg(all(feature = "quanta", not(feature = "test-util")))]
+#[cfg(not(feature = "test-util"))]
 type Instant = quanta::Instant;
 
-#[cfg(any(not(feature = "quanta"), feature = "test-util"))]
+#[cfg(feature = "test-util")]
 type Instant = tokio::time::Instant;
 
 // === Ticks ===

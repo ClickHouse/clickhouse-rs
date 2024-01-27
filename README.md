@@ -140,6 +140,8 @@ insert.end().await?;
 
 </summary>
 
+Requires the `inserter` feature.
+
 ```rust,ignore
 let mut inserter = client.inserter("some")?
     .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
@@ -160,7 +162,8 @@ if stats.rows > 0 {
 
 * `Inserter` ends an active insert in `commit()` if thresholds (`max_bytes`, `max_rows`, `period`) are reached.
 * The interval between ending active `INSERT`s can be biased by using `with_period_bias` to avoid load spikes by parallel inserters.
-* `Inserter::time_left()` can be used to detect when the current period ends. Call `Inserter::commit()` again to check limits.
+* `Inserter::time_left()` can be used to detect when the current period ends. Call `Inserter::commit()` again to check limits if your stream emits items rarely.
+* Time thresholds implemented by using [quanta](https://docs.rs/quanta) crate to speed the inserter up. Not used if `test-util` is enabled (thus, time can be managed by `tokio::time::advance()` in custom tests).
 * All rows between `commit()` calls are inserted in the same `INSERT` statement.
 * Do not forget to flush if you want to terminate inserting:
 ```rust,ignore
@@ -215,7 +218,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
 ## Feature Flags
 * `lz4` (enabled by default) — enables `Compression::Lz4` and `Compression::Lz4Hc(_)` variants. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
 * `tls` (enabled by default) — supports urls with the `HTTPS` schema.
-* `quanta` (enabled by default) - uses the [quanta](https://docs.rs/quanta) crate to speed the inserter up. Not used if `test-util` is enabled (thus, time can be managed by `tokio::time::advance()` in custom tests).
+* `inserter` — enables `client.inserter()`.
 * `test-util` — adds mocks. See [the example](https://github.com/loyd/clickhouse.rs/tree/master/examples/mock.rs). Use it only in `dev-dependencies`.
 * `watch` — enables `client.watch` functionality. See the corresponding section for details.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
