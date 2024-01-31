@@ -45,6 +45,25 @@ struct SomeRow {
     b: i64,
     c: i32,
     d: u32,
+    e: u64,
+    f: u32,
+    g: u64,
+    h: i64,
+}
+
+impl SomeRow {
+    fn sample() -> Self {
+        black_box(Self {
+            a: 42,
+            b: 42,
+            c: 42,
+            d: 42,
+            e: 42,
+            f: 42,
+            g: 42,
+            h: 42,
+        })
+    }
 }
 
 async fn run_insert(client: Client, iters: u64) -> Result<Duration> {
@@ -52,20 +71,14 @@ async fn run_insert(client: Client, iters: u64) -> Result<Duration> {
     let mut insert = client.insert("table")?;
 
     for _ in 0..iters {
-        insert
-            .write(&black_box(SomeRow {
-                a: 42,
-                b: 42,
-                c: 42,
-                d: 42,
-            }))
-            .await?;
+        insert.write(&SomeRow::sample()).await?;
     }
 
     insert.end().await?;
     Ok(start.elapsed())
 }
 
+#[cfg(feature = "inserter")]
 async fn run_inserter<const WITH_PERIOD: bool>(client: Client, iters: u64) -> Result<Duration> {
     let start = Instant::now();
     let mut inserter = client.inserter("table")?.with_max_rows(iters);
@@ -76,12 +89,7 @@ async fn run_inserter<const WITH_PERIOD: bool>(client: Client, iters: u64) -> Re
     }
 
     for _ in 0..iters {
-        inserter.write(&black_box(SomeRow {
-            a: 42,
-            b: 42,
-            c: 42,
-            d: 42,
-        }))?;
+        inserter.write(&SomeRow::sample())?;
         inserter.commit().await?;
     }
 
@@ -134,10 +142,14 @@ fn insert(c: &mut Criterion) {
     run(c, "insert", 6543, run_insert);
 }
 
+#[cfg(feature = "inserter")]
 fn inserter(c: &mut Criterion) {
     run(c, "inserter", 6544, run_inserter::<false>);
     run(c, "inserter-period", 6545, run_inserter::<true>);
 }
 
+#[cfg(not(feature = "inserter"))]
+criterion_group!(benches, insert);
+#[cfg(feature = "inserter")]
 criterion_group!(benches, insert, inserter);
 criterion_main!(benches);

@@ -1,3 +1,5 @@
+#![cfg(feature = "inserter")]
+
 use serde::Serialize;
 
 use clickhouse::{inserter::Quantities, Client, Row};

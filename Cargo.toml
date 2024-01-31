@@ -34,23 +34,23 @@ required-features = ["test-util"]
 debug = true
 
 [features]
-default = ["lz4", "tls", "quanta"]
+default = ["lz4", "tls"]
 
 test-util = ["hyper/server"]
+inserter = ["dep:quanta"]
 watch = ["dep:sha-1", "dep:serde_json"]
-lz4 = ["dep:lz4", "dep:clickhouse-rs-cityhash-sys"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
+lz4 = ["dep:lz4", "dep:clickhouse-rs-cityhash-sys"]
 tls = ["dep:hyper-tls"]
 rustls = ["dep:hyper-rustls"]
-quanta = ["dep:quanta"]
 
 [dependencies]
 clickhouse-derive = { version = "0.1.1", path = "derive" }
 
 thiserror = "1.0.16"
 serde = "1.0.106"
-bytes = "1"
+bytes = "1.5.0"
 tokio = { version = "1.0.1", features = ["rt", "macros"] }
 hyper-rustls = { version = "0.24", features = ["http2"], optional = true }
 hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream"] }

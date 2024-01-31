@@ -5,12 +5,10 @@ use tokio::time::Duration;
 
 use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client};
 
-const DEFAULT_MAX_ROWS: u64 = 500_000;
-
 /// Performs multiple consecutive `INSERT`s.
 ///
-/// By default, it ends the current active `INSERT` every 500_000 rows.
-/// Use `with_max_bytes`,`with_max_rows` and `with_period` to modify this behaviour.
+/// By default, it doesn't end the current active `INSERT` automatically.
+/// Use `with_max_bytes`,`with_max_rows` and `with_period` to set limits.
 ///
 /// Rows are being sent progressively to spread network load.
 ///
@@ -59,7 +57,7 @@ where
             client: client.clone(),
             table: table.into(),
             max_bytes: u64::MAX,
-            max_rows: DEFAULT_MAX_ROWS,
+            max_rows: u64::MAX,
             send_timeout: None,
             end_timeout: None,
             insert: None,
@@ -87,7 +85,7 @@ where
     /// Note: ClickHouse inserts batches atomically only if all rows fit in the same partition
     /// and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
     ///
-    /// Unlimited by default.
+    /// Unlimited (`u64::MAX`) by default.
     pub fn with_max_bytes(mut self, threshold: u64) -> Self {
         self.set_max_bytes(threshold);
         self
@@ -98,7 +96,7 @@ where
     /// Note: ClickHouse inserts batches atomically only if all rows fit in the same partition
     /// and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
     ///
-    /// `500_000` by default.
+    /// Unlimited (`u64::MAX`) by default.
     pub fn with_max_rows(mut self, threshold: u64) -> Self {
         self.set_max_rows(threshold);
         self
@@ -117,7 +115,7 @@ where
     /// Actual ticks:   | work -----|          delay          | work ---| work -----| work -----|
     /// ```
     ///
-    /// `None` by default.
+    /// Unlimited (`None`) by default.
     pub fn with_period(mut self, period: Option<Duration>) -> Self {
         self.set_period(period);
         self

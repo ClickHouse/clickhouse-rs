@@ -17,6 +17,7 @@ use self::{error::Result, http_client::HttpClient};
 
 pub mod error;
 pub mod insert;
+#[cfg(feature = "inserter")]
 pub mod inserter;
 pub mod query;
 pub mod serde;
@@ -33,6 +34,7 @@ mod http_client;
 mod response;
 mod row;
 mod rowbinary;
+#[cfg(feature = "inserter")]
 mod ticks;
 
 const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
@@ -187,6 +189,7 @@ impl Client {
     }
 
     /// Creates an inserter to perform multiple INSERTs.
+    #[cfg(feature = "inserter")]
     pub fn inserter<T: Row>(&self, table: &str) -> Result<inserter::Inserter<T>> {
         inserter::Inserter::new(self, table)
     }
