@@ -9,8 +9,6 @@ extern crate static_assertions;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use hyper::client::connect::HttpConnector;
-#[cfg(feature = "tls")]
-use hyper_tls::HttpsConnector;
 
 pub use clickhouse_derive::Row;
 
@@ -65,18 +63,23 @@ impl Default for Client {
         // TODO: make configurable in `Client::builder()`.
         connector.set_keepalive(Some(TCP_KEEPALIVE));
 
-        #[cfg(feature = "tls")]
-        let connector = HttpsConnector::new_with_connector({
+        #[cfg(all(feature = "tls", not(feature = "rustls")))]
+        let connector = hyper_tls::HttpsConnector::new_with_connector({
             connector.enforce_http(false);
             connector
         });
 
-        #[cfg(feature = "rustls")]
+        #[cfg(all(feature = "rustls", not(feature = "tls")))]
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
             .https_or_http()
             .enable_http2()
-            .build();
+            .wrap_connector(connector);
+
+        #[cfg(all(feature = "rustls", feature = "tls"))]
+        compile_error!(
+            "The rustls and tls features are mutually exclusive and cannot be enabled together"
+        );
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
