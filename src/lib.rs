@@ -65,11 +65,11 @@ impl Default for Client {
         // TODO: make configurable in `Client::builder()`.
         connector.set_keepalive(Some(TCP_KEEPALIVE));
 
+        #[cfg(any(feature = "tls", feature = "rustls"))]
+        connector.enforce_http(false);
+
         #[cfg(all(feature = "tls", not(feature = "rustls")))]
-        let connector = hyper_tls::HttpsConnector::new_with_connector({
-            connector.enforce_http(false);
-            connector
-        });
+        let connector = hyper_tls::HttpsConnector::new_with_connector(connector);
 
         #[cfg(all(feature = "rustls", not(feature = "tls")))]
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
