@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - insert: apply options set on the client ([#90]).
 - inserter: can be limited by size, see `Inserter::with_max_bytes()`.
 - inserter: `Inserter::pending()` to get stats about still being inserted data.
+- inserter: `Inserter::force_commit()` to commit and insert immediately.
 
 ### Changed
 - **BREAKING** inserter: move under the `inserter` feature.
