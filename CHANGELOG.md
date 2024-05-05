@@ -9,22 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - ReleaseDate
 ### Added
 - derive: support `serde::skip_deserializing` ([#83]).
-- the `quanta` feature, enabled by default.
+- insert: apply options set on the client ([#90]).
 - inserter: can be limited by size, see `Inserter::with_max_bytes()`.
+- inserter: `Inserter::pending()` to get stats about still being inserted data.
+- inserter: `Inserter::force_commit()` to commit and insert immediately.
 
 ### Changed
+- **BREAKING** inserter: move under the `inserter` feature.
+- **BREAKING** inserter: there is no default limits anymore.
 - **BREAKING** inserter: `Inserter::write` is synchronous now.
 - **BREAKING** inserter: rename `entries` to `rows`.
 - **BREAKING** drop the `wa-37420` feature.
 - **BREAKING** remove deprecated items.
-- inserter: increase performance if the `quanta` feature is enabled.
-- inserter: increase performance if the time limit isn't used.
+- inserter: improve performance of time measurements by using `quanta`.
+- inserter: improve performance if the time limit isn't used.
 - derive: move to syn v2.
 
 ### Fixed
 - watch: support a new syntax.
 
 [#83]: https://github.com/loyd/clickhouse.rs/pull/83
+[#90]: https://github.com/loyd/clickhouse.rs/pull/90
 
 ## [0.11.6] - 2023-09-27
 ### Fixed

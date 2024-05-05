@@ -1,3 +1,7 @@
+#![cfg(feature = "inserter")]
+
+use std::string::ToString;
+
 use serde::Serialize;
 
 use clickhouse::{inserter::Quantities, Client, Row};
@@ -5,6 +9,14 @@ use clickhouse::{inserter::Quantities, Client, Row};
 #[derive(Debug, Row, Serialize)]
 struct MyRow {
     data: String,
+}
+
+impl MyRow {
+    fn new(data: impl ToString) -> Self {
+        Self {
+            data: data.to_string(),
+        }
+    }
 }
 
 async fn create_table(client: &Client) {
@@ -16,6 +28,35 @@ async fn create_table(client: &Client) {
 }
 
 #[tokio::test]
+async fn force_commit() {
+    let client = prepare_database!();
+    create_table(&client).await;
+
+    let mut inserter = client.inserter("test").unwrap();
+    let rows = 100;
+
+    for i in 1..=rows {
+        inserter.write(&MyRow::new(i)).unwrap();
+        assert_eq!(inserter.commit().await.unwrap(), Quantities::ZERO);
+
+        if i % 10 == 0 {
+            assert_eq!(inserter.force_commit().await.unwrap().rows, 10);
+        }
+    }
+
+    assert_eq!(inserter.end().await.unwrap(), Quantities::ZERO);
+
+    let (count, sum) = client
+        .query("SELECT count(), sum(toUInt64(data)) FROM test")
+        .fetch_one::<(u64, u64)>()
+        .await
+        .unwrap();
+
+    assert_eq!(count, rows);
+    assert_eq!(sum, (1..=rows).sum::<u64>());
+}
+
+#[tokio::test]
 async fn limited_by_rows() {
     let client = prepare_database!();
     create_table(&client).await;
@@ -24,13 +65,9 @@ async fn limited_by_rows() {
     let rows = 100;
 
     for i in (2..=rows).step_by(2) {
-        let row = MyRow {
-            data: (i - 1).to_string(),
-        };
+        let row = MyRow::new(i - 1);
         inserter.write(&row).unwrap();
-        let row = MyRow {
-            data: i.to_string(),
-        };
+        let row = MyRow::new(i);
         inserter.write(&row).unwrap();
 
         let inserted = inserter.commit().await.unwrap();
@@ -69,9 +106,7 @@ async fn limited_by_bytes() {
     let mut inserter = client.inserter("test").unwrap().with_max_bytes(100);
     let rows = 100;
 
-    let row = MyRow {
-        data: "x".repeat(9), // +1 for length
-    };
+    let row = MyRow::new("x".repeat(9));
 
     for i in 1..=rows {
         inserter.write(&row).unwrap();
@@ -116,9 +151,7 @@ async fn limited_by_time() {
     let rows = 100;
 
     for i in 1..=rows {
-        let row = MyRow {
-            data: i.to_string(),
-        };
+        let row = MyRow::new(i);
         inserter.write(&row).unwrap();
 
         tokio::time::sleep(period / 10).await;
