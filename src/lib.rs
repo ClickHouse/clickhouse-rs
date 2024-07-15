@@ -9,8 +9,10 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 #[cfg(feature = "tls")]
 use hyper_tls::HttpsConnector;
-use hyper_util::client::legacy::{connect::HttpConnector, Client as HyperClient};
-use hyper_util::rt::TokioExecutor;
+use hyper_util::{
+    client::legacy::{connect::HttpConnector, Client as HyperClient},
+    rt::TokioExecutor,
+};
 
 pub use clickhouse_derive::Row;
 
@@ -84,7 +86,7 @@ impl Default for Client {
 impl Client {
     /// Creates a new client with a specified underlying HTTP client.
     ///
-    /// See [`HttpClient`] for details.
+    /// See `HttpClient` for details.
     pub fn with_http_client(client: impl HttpClient) -> Self {
         Self {
             http: Arc::new(client),

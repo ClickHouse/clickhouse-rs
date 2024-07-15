@@ -31,11 +31,14 @@ impl Query {
 
     /// Binds `value` to the next `?` in the query.
     ///
-    /// The `value`, which must either implement [`Serialize`](serde::Serialize)
-    /// or be an [`Identifier`], will be appropriately escaped.
+    /// The `value`, which must either implement [`Serialize`] or be an
+    /// [`Identifier`], will be appropriately escaped.
     ///
     /// WARNING: This means that the query must not have any extra `?`, even if
     /// they are in a string literal!
+    ///
+    /// [`Serialize`]: serde::Serialize
+    /// [`Identifier`]: crate::sql::Identifier
     pub fn bind(mut self, value: impl Bind) -> Self {
         self.sql.bind_arg(value);
         self
@@ -99,7 +102,8 @@ impl Query {
         self.fetch()?.next().await
     }
 
-    /// Executes the query and returns all the generated results, collected into a Vec.
+    /// Executes the query and returns all the generated results,
+    /// collected into a Vec.
     ///
     /// Note that `T` must be owned.
     pub async fn fetch_all<T>(self) -> Result<Vec<T>>
