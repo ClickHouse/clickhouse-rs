@@ -1,47 +1,35 @@
+use std::convert::Infallible;
 use std::mem;
 
+use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use futures::stream::{self, StreamExt as _};
+use http_body_util::StreamBody;
+use hyper::{
+    body::{Body, Frame, Incoming},
+    Request, Response,
+};
 use serde::Deserialize;
 use tokio::{runtime::Runtime, time::Instant};
 
 use clickhouse::{error::Result, Client, Compression, Row};
 
-mod server {
-    use std::{convert::Infallible, net::SocketAddr, thread};
+mod common;
 
-    use bytes::Bytes;
-    use futures::stream;
-    use hyper::service::{make_service_fn, service_fn};
-    use hyper::{body, Body, Request, Response, Server};
-    use tokio::runtime;
+async fn serve(
+    request: Request<Incoming>,
+) -> Response<impl Body<Data = Bytes, Error = Infallible>> {
+    common::skip_incoming(request).await;
 
-    async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-        let _ = body::aggregate(req.into_body()).await;
-        let chunk = Bytes::from_static(&[15; 128 * 1024]);
-        let stream = stream::repeat(Ok::<Bytes, &'static str>(chunk));
-        let body = Body::wrap_stream(stream);
+    let chunk = Bytes::from_static(&[15; 128 * 1024]);
+    let stream = stream::repeat(chunk).map(|chunk| Ok(Frame::data(chunk)));
 
-        Ok(Response::new(body))
-    }
-
-    pub fn start(addr: SocketAddr) {
-        thread::spawn(move || {
-            runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async {
-                    let make_svc =
-                        make_service_fn(|_| async { Ok::<_, Infallible>(service_fn(handle)) });
-                    Server::bind(&addr).serve(make_svc).await.unwrap();
-                });
-        });
-    }
+    Response::new(StreamBody::new(stream))
 }
 
 fn select(c: &mut Criterion) {
     let addr = "127.0.0.1:6543".parse().unwrap();
-    server::start(addr);
+    let _server = common::start_server(addr, serve);
 
     #[allow(dead_code)]
     #[derive(Debug, Row, Deserialize)]

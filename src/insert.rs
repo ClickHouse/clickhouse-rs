@@ -1,7 +1,7 @@
 use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Duration};
 
 use bytes::{Bytes, BytesMut};
-use hyper::{self, body, Body, Request};
+use hyper::{self, Request};
 use serde::Serialize;
 use tokio::{
     task::JoinHandle,
@@ -11,6 +11,7 @@ use url::Url;
 
 use crate::{
     error::{Error, Result},
+    request_body::{ChunkSender, RequestBody},
     response::Response,
     row::{self, Row},
     rowbinary, Client, Compression,
@@ -28,7 +29,7 @@ const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extr
 #[must_use]
 pub struct Insert<T> {
     buffer: BytesMut,
-    sender: Option<body::Sender>,
+    sender: Option<ChunkSender>,
     #[cfg(feature = "lz4")]
     compression: Compression,
     send_timeout: Option<Duration>,
@@ -95,13 +96,14 @@ impl<T> Insert<T> {
             builder = builder.header("X-ClickHouse-Key", password);
         }
 
-        let (sender, body) = Body::channel();
+        let (sender, body) = RequestBody::chunked();
 
         let request = builder
             .body(body)
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        let future = client.client._request(request);
+        let future = client.http.request(request);
+        // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.
         let handle =
             tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
 
@@ -225,9 +227,9 @@ impl<T> Insert<T> {
 
         let sender = self.sender.as_mut().unwrap(); // checked above
 
-        let is_timed_out = match timeout!(self, send_timeout, sender.send_data(chunk)) {
-            Some(Ok(())) => return Ok(()),
-            Some(Err(_)) => false, // an actual error will be returned from `wait_handle`
+        let is_timed_out = match timeout!(self, send_timeout, sender.send(chunk)) {
+            Some(true) => return Ok(()),
+            Some(false) => false, // an actual error will be returned from `wait_handle`
             None => true,
         };
 
