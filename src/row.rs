@@ -156,6 +156,7 @@ mod tests {
 
     #[test]
     fn it_rejects_other() {
+        #[allow(dead_code)]
         #[derive(Row)]
         struct NamedTuple(u32, u32);
 

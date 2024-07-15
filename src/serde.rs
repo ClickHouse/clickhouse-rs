@@ -73,8 +73,6 @@ pub mod ipv4 {
 /// Ser/de [`::uuid::Uuid`] to/from `UUID`.
 #[cfg(feature = "uuid")]
 pub mod uuid {
-    use std::mem;
-
     use ::uuid::Uuid;
 
     use super::*;
@@ -85,8 +83,7 @@ pub mod uuid {
     where
         S: Serializer,
     {
-        let mut bytes = uuid.into_bytes();
-        transform(&mut bytes);
+        let bytes = uuid.as_u64_pair();
         bytes.serialize(serializer)
     }
 
@@ -94,18 +91,8 @@ pub mod uuid {
     where
         D: Deserializer<'de>,
     {
-        let mut bytes: [u8; 16] = Deserialize::deserialize(deserializer)?;
-        transform(&mut bytes);
-        Ok(Uuid::from_bytes(bytes))
-    }
-
-    /// Swaps bytes inside both 8-byte words of UUID.
-    /// * Input:   0 1 2 3 4 5 6 7   8 9 10 a b c  d e f
-    /// * Output:  7 6 5 4 3 2 1 0   f e  d c b a 10 9 8
-    fn transform(bytes: &mut [u8; 16]) {
-        let words = unsafe { mem::transmute::<&mut [u8; 16], &mut [u64; 2]>(bytes) };
-        words[0] = words[0].swap_bytes();
-        words[1] = words[1].swap_bytes();
+        let bytes: (u64, u64) = Deserialize::deserialize(deserializer)?;
+        Ok(Uuid::from_u64_pair(bytes.0, bytes.1))
     }
 }
 

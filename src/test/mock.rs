@@ -1,111 +1,163 @@
 use std::{
-    convert::Infallible,
+    collections::VecDeque,
+    error::Error,
     net::SocketAddr,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::{Arc, Mutex},
     thread,
-    time::Duration,
 };
 
-use futures::{
-    channel::{self, mpsc::UnboundedSender},
-    lock::Mutex,
-    StreamExt,
-};
-use hyper::service::{make_service_fn, service_fn};
-use hyper::Server;
-use tokio::time::timeout;
+use bytes::Bytes;
+use http_body_util::{BodyExt as _, Full};
+use hyper::{body::Incoming, server::conn, service, Request, Response};
+use hyper_util::rt::{TokioIo, TokioTimer};
+use tokio::{net::TcpListener, task::AbortHandle};
 
 use super::{Handler, HandlerFn};
 
-const MAX_WAIT_TIME: Duration = Duration::from_millis(150);
-
+/// A mock server for testing.
 pub struct Mock {
     url: String,
-    tx: UnboundedSender<HandlerFn>,
-    responses_left: Arc<AtomicUsize>,
+    shared: Arc<Mutex<Shared>>,
     non_exhaustive: bool,
+    server_handle: AbortHandle,
+}
+
+/// Shared between the server and the test.
+#[derive(Default)]
+struct Shared {
+    handlers: VecDeque<HandlerFn>,
+    /// An error from the background server task.
+    /// Propagated as a panic in test cases.
+    error: Option<Box<dyn Error + Send + Sync>>,
 }
 
 impl Mock {
-    #[allow(clippy::new_without_default)]
+    /// Starts a new test server and returns a handle to it.
+    #[track_caller]
     pub fn new() -> Self {
-        let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+        let (addr, listener) = {
+            let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+            let listener = std::net::TcpListener::bind(addr).expect("cannot bind a listener");
+            listener
+                .set_nonblocking(true)
+                .expect("cannot set non-blocking mode");
+            let addr = listener.local_addr().expect("cannot get a local address");
+            let listener = TcpListener::from_std(listener).expect("cannot convert to tokio");
+            (addr, listener)
+        };
 
-        let (tx, rx) = channel::mpsc::unbounded::<HandlerFn>();
-        let rx = Arc::new(Mutex::new(rx));
-        let responses_left = Arc::new(AtomicUsize::new(0));
-        let responses_left_0 = responses_left.clone();
-
-        // Hm, here is one of the ugliest code that I've written ever.
-        let make_service = make_service_fn(move |_conn| {
-            let rx1 = rx.clone();
-            let responses_left_1 = responses_left.clone();
-            async move {
-                let rx2 = rx1.clone();
-                let responses_left_2 = responses_left_1.clone();
-                Ok::<_, Infallible>(service_fn(move |req| {
-                    let rx3 = rx2.clone();
-                    let responses_left = responses_left_2.clone();
-                    async move {
-                        let handler_fn = {
-                            let mut rx = rx3.lock().await;
-
-                            // TODO: should we use `std::time::Instant` instead?
-                            match timeout(MAX_WAIT_TIME, rx.next()).await {
-                                Ok(Some(res)) => {
-                                    responses_left.fetch_sub(1, Ordering::Relaxed);
-                                    res
-                                }
-                                _ => panic!("unexpected request, no predefined responses left"),
-                            }
-                        };
-                        Ok::<_, Infallible>(handler_fn(req))
-                    }
-                }))
-            }
-        });
-
-        let server = Server::bind(&addr).serve(make_service);
-        let addr = server.local_addr();
-        // TODO: handle error
-        tokio::spawn(server);
+        let shared = Arc::new(Mutex::new(Shared::default()));
+        let server_handle = tokio::spawn(server(listener, shared.clone()));
 
         Self {
             url: format!("http://{addr}"),
-            tx,
-            responses_left: responses_left_0,
+            shared,
             non_exhaustive: false,
+            server_handle: server_handle.abort_handle(),
         }
     }
 
+    /// Returns a test server's URL to provide into [`Client`].
+    ///
+    /// [`Client`]: crate::Client::with_url
     pub fn url(&self) -> &str {
         &self.url
     }
 
-    pub fn add<H: Handler>(&self, mut handler: H) -> H::Control {
-        let (h_fn, control) = handler.make();
-        self.responses_left.fetch_add(1, Ordering::Relaxed);
-        self.tx
-            .unbounded_send(h_fn)
-            .expect("the test server is down");
+    /// Adds a handler to the test server for the next request.
+    ///
+    /// Can be called multiple times to enqueue multiple handlers.
+    ///
+    /// If [`Mock::non_exhaustive()`] is not called, the destructor will panic
+    /// if not all handlers are called by the end of the test.
+    #[track_caller]
+    pub fn add<H: Handler>(&self, handler: H) -> H::Control {
+        self.propagate_server_error();
+
+        if self.server_handle.is_finished() {
+            panic!("impossible to add a handler: the test server is terminated");
+        }
+
+        let (handler, control) = handler.make();
+        self.shared.lock().unwrap().handlers.push_back(handler);
         control
     }
 
+    /// Allows unused handlers to be left after the test ends.
     pub fn non_exhaustive(&mut self) {
         self.non_exhaustive = true;
+    }
+
+    #[track_caller]
+    fn propagate_server_error(&self) {
+        if let Some(error) = &self.shared.lock().unwrap().error {
+            panic!("server error: {error}");
+        }
+    }
+}
+
+impl Default for Mock {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl Drop for Mock {
     fn drop(&mut self) {
-        if !self.non_exhaustive
-            && !thread::panicking()
-            && self.responses_left.load(Ordering::Relaxed) > 0
-        {
+        self.server_handle.abort();
+
+        if thread::panicking() {
+            return;
+        }
+
+        self.propagate_server_error();
+
+        if !self.non_exhaustive && !self.shared.lock().unwrap().handlers.is_empty() {
             panic!("test ended, but not all responses have been consumed");
         }
     }
+}
+
+async fn server(listener: TcpListener, shared: Arc<Mutex<Shared>>) {
+    let error = loop {
+        let stream = match listener.accept().await {
+            Ok((stream, _)) => stream,
+            Err(err) => break err.into(),
+        };
+
+        let serving = conn::http1::Builder::new()
+            .timer(TokioTimer::new())
+            .keep_alive(false)
+            .serve_connection(
+                TokioIo::new(stream),
+                service::service_fn(|request| handle(request, &shared)),
+            );
+
+        if let Err(err) = serving.await {
+            break if let Some(source) = err.source() {
+                source.to_string().into()
+            } else {
+                err.into()
+            };
+        }
+    };
+
+    shared.lock().unwrap().error.get_or_insert(error);
+}
+
+async fn handle(
+    request: Request<Incoming>,
+    shared: &Mutex<Shared>,
+) -> Result<Response<Full<Bytes>>, Box<dyn Error + Send + Sync>> {
+    let Some(handler) = shared.lock().unwrap().handlers.pop_front() else {
+        return Err("no installed handler for an incoming request".into());
+    };
+
+    let (parts, body) = request.into_parts();
+    let body = body.collect().await?.to_bytes();
+
+    let request = Request::from_parts(parts, body);
+    let response = handler(request).map(Full::new);
+
+    Ok(response)
 }

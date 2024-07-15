@@ -80,6 +80,7 @@ enum ControlFlow<T> {
 // XXX: it was a workaround for https://github.com/rust-lang/rust/issues/51132,
 //      but introduced #24 and must be fixed.
 fn workaround_51132<'a, T>(ptr: &mut T) -> &'a mut T {
+    // SAFETY: actually, it leads to unsoundness, see #24
     unsafe { &mut *(ptr as *mut T) }
 }
 

@@ -1,5 +1,4 @@
 #![doc = include_str!("../README.md")]
-#![warn(rust_2018_idioms, unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
@@ -8,7 +7,12 @@ extern crate static_assertions;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use hyper::client::connect::HttpConnector;
+#[cfg(feature = "tls")]
+use hyper_tls::HttpsConnector;
+use hyper_util::{
+    client::legacy::{connect::HttpConnector, Client as HyperClient},
+    rt::TokioExecutor,
+};
 
 pub use clickhouse_derive::Row;
 
@@ -31,6 +35,7 @@ mod buflist;
 mod compression;
 mod cursor;
 mod http_client;
+mod request_body;
 mod response;
 mod row;
 mod rowbinary;
@@ -44,10 +49,9 @@ const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// A client containing HTTP pool.
-/// Can be created by using `Client::default()` or [`Client::with_http_client`].
 #[derive(Clone)]
 pub struct Client {
-    client: Arc<dyn HttpClient>,
+    http: Arc<dyn HttpClient>,
 
     url: String,
     database: Option<String>,
@@ -83,7 +87,7 @@ impl Default for Client {
             "The rustls and tls features are mutually exclusive and cannot be enabled together"
         );
 
-        let client = hyper::Client::builder()
+        let client = HyperClient::builder(TokioExecutor::new())
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .build(connector);
 
@@ -93,10 +97,11 @@ impl Default for Client {
 
 impl Client {
     /// Creates a new client with a specified underlying HTTP client.
-    /// Now only [`hyper::Client`] is supported.
+    ///
+    /// See `HttpClient` for details.
     pub fn with_http_client(client: impl HttpClient) -> Self {
         Self {
-            client: Arc::new(client),
+            http: Arc::new(client),
             url: String::new(),
             database: None,
             user: None,

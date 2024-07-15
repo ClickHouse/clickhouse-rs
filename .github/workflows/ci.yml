@@ -9,26 +9,49 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
+  RUSTDOCFLAGS: -Dwarnings
   RUST_BACKTRACE: 1
+  MSRV: 1.67.0
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+    - run: rustup show active-toolchain -v
+    - run: cargo build --all-targets
+    - run: cargo build --all-targets --no-default-features
     - run: cargo build --all-targets --all-features
+
+  msrv:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "" # remove -Dwarnings
+    steps:
+    - uses: actions/checkout@v4
+    - run: rustup toolchain install ${{ env.MSRV }} --profile minimal
+    - run: rustup override set ${{ env.MSRV }}
+    - run: rustup show active-toolchain -v
+    - run: cargo build
+    - run: cargo build --no-default-features
+    - run: cargo build --features uuid,time
+    - run: cargo build --all-features
 
   rustfmt:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+    - run: rustup show active-toolchain -v
+    - run: rustup component add rustfmt
     - run: cargo fmt --version
     - run: cargo fmt -- --check
 
   clippy:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+    - run: rustup show active-toolchain -v
+    - run: rustup component add clippy
     - run: cargo clippy --version
     - run: cargo clippy
     - run: cargo clippy --all-targets --no-default-features
@@ -37,7 +60,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+    - run: rustup show active-toolchain -v
     - run: cargo test
     - run: cargo test --no-default-features
     - run: cargo test --features uuid,time
@@ -48,3 +72,15 @@ jobs:
         image: clickhouse/clickhouse-server
         ports:
           - 8123:8123
+
+  docs:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -Dwarnings --cfg docsrs
+    steps:
+    - uses: actions/checkout@v4
+    - run: rustup toolchain install nightly
+    - run: rustup override set nightly
+    - run: rustup show active-toolchain -v
+    - run: cargo doc --all-features

@@ -1,10 +1,11 @@
-use hyper::{header::CONTENT_LENGTH, Body, Method, Request};
+use hyper::{header::CONTENT_LENGTH, Method, Request};
 use serde::Deserialize;
 use url::Url;
 
 use crate::{
     cursor::RowBinaryCursor,
     error::{Error, Result},
+    request_body::RequestBody,
     response::Response,
     row::Row,
     sql::{Bind, SqlBuilder},
@@ -30,11 +31,14 @@ impl Query {
 
     /// Binds `value` to the next `?` in the query.
     ///
-    /// The `value`, which must either implement [`Serialize`](serde::Serialize)
-    /// or be an [`Identifier`], will be appropriately escaped.
+    /// The `value`, which must either implement [`Serialize`] or be an
+    /// [`Identifier`], will be appropriately escaped.
     ///
     /// WARNING: This means that the query must not have any extra `?`, even if
     /// they are in a string literal!
+    ///
+    /// [`Serialize`]: serde::Serialize
+    /// [`Identifier`]: crate::sql::Identifier
     pub fn bind(mut self, value: impl Bind) -> Self {
         self.sql.bind_arg(value);
         self
@@ -98,7 +102,8 @@ impl Query {
         self.fetch()?.next().await
     }
 
-    /// Executes the query and returns all the generated results, collected into a Vec.
+    /// Executes the query and returns all the generated results,
+    /// collected into a Vec.
     ///
     /// Note that `T` must be owned.
     pub async fn fetch_all<T>(self) -> Result<Vec<T>>
@@ -128,17 +133,16 @@ impl Query {
         }
 
         let use_post = !read_only || query.len() > MAX_QUERY_LEN_TO_USE_GET;
-        let method = if use_post { Method::POST } else { Method::GET };
 
-        let (body, content_length) = if use_post {
+        let (method, body, content_length) = if use_post {
             if read_only {
                 pairs.append_pair("readonly", "1");
             }
             let len = query.len();
-            (Body::from(query), len)
+            (Method::POST, RequestBody::full(query), len)
         } else {
             pairs.append_pair("query", &query);
-            (Body::empty(), 0)
+            (Method::GET, RequestBody::empty(), 0)
         };
 
         if self.client.compression.is_lz4() {
@@ -170,7 +174,7 @@ impl Query {
             .body(body)
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        let future = self.client.client._request(request);
+        let future = self.client.http.request(request);
         Ok(Response::new(future, self.client.compression))
     }
 }

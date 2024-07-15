@@ -157,6 +157,7 @@ fn calc_checksum(buffer: &[u8]) -> u128 {
 }
 
 fn decompress(compressed: &[u8], uncompressed: &mut [u8]) -> Result<()> {
+    // SAFETY: all pointers are valid and sizes are correspondingly correct.
     let status = unsafe {
         LZ4_decompress_safe(
             compressed.as_ptr() as *const c_char,

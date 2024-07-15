@@ -10,7 +10,12 @@ use futures::{
     future,
     stream::{self, Stream, TryStreamExt},
 };
-use hyper::{body, client::ResponseFuture, Body, StatusCode};
+use http_body_util::BodyExt as _;
+use hyper::{
+    body::{Body as _, Incoming},
+    StatusCode,
+};
+use hyper_util::client::legacy::ResponseFuture;
 
 #[cfg(feature = "lz4")]
 use crate::compression::lz4::Lz4Decoder;
@@ -19,29 +24,36 @@ use crate::{
     error::{Error, Result},
 };
 
+// === Response ===
+
 pub(crate) enum Response {
-    Waiting(Pin<Box<dyn Future<Output = Result<Chunks<Body>>> + Send>>),
-    Loading(Chunks<Body>),
+    // Headers haven't been received yet.
+    // `Box<_>` improves performance by reducing the size of the whole future.
+    Waiting(Pin<Box<dyn Future<Output = Result<Chunks>> + Send>>),
+    // Headers have been received, streaming the body.
+    Loading(Chunks),
 }
 
 impl Response {
     pub(crate) fn new(response: ResponseFuture, compression: Compression) -> Self {
-        // Boxing here significantly improves performance by reducing the size of `chunks()`.
         Self::Waiting(Box::pin(async move {
             let response = response.await?;
             let status = response.status();
             let body = response.into_body();
 
             if status == StatusCode::OK {
+                // More likely to be successful, start streaming.
+                // It still can fail, but we'll handle it in `DetectDbException`.
                 Ok(Chunks::new(body, compression))
             } else {
+                // An instantly failed request.
                 Err(collect_bad_response(status, body, compression).await)
             }
         }))
     }
 
     #[inline]
-    pub(crate) fn chunks(&mut self) -> Option<&mut Chunks<Body>> {
+    pub(crate) fn chunks(&mut self) -> Option<&mut Chunks> {
         match self {
             Self::Waiting(_) => None,
             Self::Loading(chunks) => Some(chunks),
@@ -50,7 +62,7 @@ impl Response {
 
     #[cold]
     #[inline(never)]
-    pub(crate) async fn chunks_slow(&mut self) -> Result<&mut Chunks<Body>> {
+    pub(crate) async fn chunks_slow(&mut self) -> Result<&mut Chunks> {
         loop {
             match self {
                 Self::Waiting(future) => *self = Self::Loading(future.await?),
@@ -68,16 +80,21 @@ impl Response {
 
 #[cold]
 #[inline(never)]
-async fn collect_bad_response(status: StatusCode, body: Body, compression: Compression) -> Error {
+async fn collect_bad_response(
+    status: StatusCode,
+    body: Incoming,
+    compression: Compression,
+) -> Error {
     // Collect the whole body into one contiguous buffer to simplify handling.
     // Only network errors can occur here and we return them instead of status code
     // because it means the request can be repeated to get a more detailed error.
     //
     // TODO: we don't implement any length checks and a malicious peer (e.g. MITM)
     //       might make us consume arbitrary amounts of memory.
-    let raw_bytes = match body::to_bytes(body).await {
-        Ok(bytes) => bytes,
-        Err(err) => return err.into(),
+    let raw_bytes = match body.collect().await {
+        Ok(collected) => collected.to_bytes(),
+        // If we can't collect the body, return standardised reason for the status code.
+        Err(_) => return Error::BadResponse(stringify_status(status)),
     };
 
     // Try to decompress the body, because CH compresses any responses, even with errors.
@@ -91,14 +108,8 @@ async fn collect_bad_response(status: StatusCode, body: Body, compression: Compr
 
     let reason = String::from_utf8(bytes.into())
         .map(|reason| reason.trim().into())
-        .unwrap_or_else(|_| {
-            // If we have a unreadable response, return standardised reason for the status code.
-            format!(
-                "{} {}",
-                status.as_str(),
-                status.canonical_reason().unwrap_or("<unknown>"),
-            )
-        });
+        // If we have a unreadable response, return standardised reason for the status code.
+        .unwrap_or_else(|_| stringify_status(status));
 
     Error::BadResponse(reason)
 }
@@ -116,26 +127,30 @@ async fn collect_bytes(stream: impl Stream<Item = Result<Bytes>>) -> Result<Byte
     Ok(bytes.into())
 }
 
+fn stringify_status(status: StatusCode) -> String {
+    format!(
+        "{} {}",
+        status.as_str(),
+        status.canonical_reason().unwrap_or("<unknown>"),
+    )
+}
+
+// === Chunks ===
+
 // * Uses `Option<_>` to make this stream fused.
 // * Uses `Box<_>` in order to reduce the size of cursors.
-pub(crate) struct Chunks<S>(Option<Box<DetectDbException<Decompress<ConvertError<S>>>>>);
+pub(crate) struct Chunks(Option<Box<DetectDbException<Decompress<IncomingStream>>>>);
 
-impl<S, E> Chunks<S>
-where
-    S: Stream<Item = Result<Bytes, E>> + Unpin,
-    Error: From<E>,
-{
-    fn new(stream: S, compression: Compression) -> Self {
-        let stream = DetectDbException::Stream(Decompress::new(ConvertError(stream), compression));
+impl Chunks {
+    fn new(stream: Incoming, compression: Compression) -> Self {
+        let stream = IncomingStream(stream);
+        let stream = Decompress::new(stream, compression);
+        let stream = DetectDbException::new(stream);
         Self(Some(Box::new(stream)))
     }
 }
 
-impl<S, E> Stream for Chunks<S>
-where
-    S: Stream<Item = Result<Bytes, E>> + Unpin,
-    Error: From<E>,
-{
+impl Stream for Chunks {
     type Item = Result<Bytes>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -158,21 +173,34 @@ where
     // `size_hint()` is unimplemented because unused.
 }
 
-struct ConvertError<S>(S);
+// === IncomingStream ===
 
-impl<S, E> Stream for ConvertError<S>
-where
-    S: Stream<Item = Result<Bytes, E>> + Unpin,
-    Error: From<E>,
-{
+// * Produces bytes from incoming data frames.
+// * Skips trailer frames (CH doesn't use them for now).
+// * Converts hyper errors to our own.
+struct IncomingStream(Incoming);
+
+impl Stream for IncomingStream {
     type Item = Result<Bytes>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.0)
-            .poll_next(cx)
-            .map_err(|err| err.into())
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut incoming = Pin::new(&mut self.get_mut().0);
+
+        loop {
+            break match incoming.as_mut().poll_frame(cx) {
+                Poll::Ready(Some(Ok(frame))) => match frame.into_data() {
+                    Ok(bytes) => Poll::Ready(Some(Ok(bytes))),
+                    Err(_frame) => continue,
+                },
+                Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
+            };
+        }
     }
 }
+
+// === Decompress ===
 
 enum Decompress<S> {
     Plain(S),
@@ -205,9 +233,17 @@ where
     }
 }
 
+// === DetectDbException ===
+
 enum DetectDbException<S> {
     Stream(S),
     Exception(Option<Error>),
+}
+
+impl<S> DetectDbException<S> {
+    fn new(stream: S) -> Self {
+        Self::Stream(stream)
+    }
 }
 
 impl<S> Stream for DetectDbException<S>

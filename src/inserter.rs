@@ -8,7 +8,8 @@ use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client};
 /// Performs multiple consecutive `INSERT`s.
 ///
 /// By default, it doesn't end the current active `INSERT` automatically.
-/// Use `with_max_bytes`,`with_max_rows` and `with_period` to set limits.
+/// Use `with_max_bytes`, `with_max_rows` and `with_period` to set limits.
+/// Alternatively, use `force_commit` to end an active `INSERT` whenever you want.
 ///
 /// Rows are being sent progressively to spread network load.
 ///
@@ -213,17 +214,23 @@ where
 
     /// Checks limits and ends the current `INSERT` if they are reached.
     pub async fn commit(&mut self) -> Result<Quantities> {
+        if !self.limits_reached() {
+            self.in_transaction = false;
+            return Ok(Quantities::ZERO);
+        }
+
+        self.force_commit().await
+    }
+
+    /// Ends the current `INSERT` unconditionally.
+    pub async fn force_commit(&mut self) -> Result<Quantities> {
         self.in_transaction = false;
 
-        Ok(if self.limits_reached() {
-            let quantities = mem::replace(&mut self.pending, Quantities::ZERO);
-            let result = self.insert().await;
-            self.ticks.reschedule();
-            result?;
-            quantities
-        } else {
-            Quantities::ZERO
-        })
+        let quantities = mem::replace(&mut self.pending, Quantities::ZERO);
+        let result = self.insert().await;
+        self.ticks.reschedule();
+        result?;
+        Ok(quantities)
     }
 
     /// Ends the current `INSERT` and whole `Inserter` unconditionally.
