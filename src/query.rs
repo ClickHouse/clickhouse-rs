@@ -1,10 +1,11 @@
-use hyper::{header::CONTENT_LENGTH, Body, Method, Request};
+use hyper::{header::CONTENT_LENGTH, Method, Request};
 use serde::Deserialize;
 use url::Url;
 
 use crate::{
     cursor::RowBinaryCursor,
     error::{Error, Result},
+    request_body::RequestBody,
     response::Response,
     row::Row,
     sql::{Bind, SqlBuilder},
@@ -128,17 +129,16 @@ impl Query {
         }
 
         let use_post = !read_only || query.len() > MAX_QUERY_LEN_TO_USE_GET;
-        let method = if use_post { Method::POST } else { Method::GET };
 
-        let (body, content_length) = if use_post {
+        let (method, body, content_length) = if use_post {
             if read_only {
                 pairs.append_pair("readonly", "1");
             }
             let len = query.len();
-            (Body::from(query), len)
+            (Method::POST, RequestBody::full(query), len)
         } else {
             pairs.append_pair("query", &query);
-            (Body::empty(), 0)
+            (Method::GET, RequestBody::empty(), 0)
         };
 
         if self.client.compression.is_lz4() {
@@ -170,7 +170,7 @@ impl Query {
             .body(body)
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        let future = self.client.client._request(request);
+        let future = self.client.http.request(request);
         Ok(Response::new(future, self.client.compression))
     }
 }

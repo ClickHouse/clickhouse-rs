@@ -1,42 +1,19 @@
 use std::{future::Future, mem, time::Duration};
 
+use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use http_body_util::Empty;
+use hyper::{body::Incoming, Request, Response};
 use serde::Serialize;
 use tokio::{runtime::Runtime, time::Instant};
 
 use clickhouse::{error::Result, Client, Compression, Row};
 
-mod server {
-    use std::{convert::Infallible, net::SocketAddr, thread};
+mod common;
 
-    use futures::stream::StreamExt;
-    use hyper::service::{make_service_fn, service_fn};
-    use hyper::{Body, Request, Response, Server};
-    use tokio::runtime;
-
-    async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-        let mut body = req.into_body();
-
-        while let Some(res) = body.next().await {
-            res.unwrap();
-        }
-
-        Ok(Response::new(Body::empty()))
-    }
-
-    pub fn start(addr: SocketAddr) {
-        thread::spawn(move || {
-            runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async {
-                    let make_svc =
-                        make_service_fn(|_| async { Ok::<_, Infallible>(service_fn(handle)) });
-                    Server::bind(&addr).serve(make_svc).await.unwrap();
-                });
-        });
-    }
+async fn serve(request: Request<Incoming>) -> Response<Empty<Bytes>> {
+    common::skip_incoming(request).await;
+    Response::new(Empty::new())
 }
 
 #[derive(Row, Serialize)]
@@ -102,7 +79,7 @@ where
     F: Future<Output = Result<Duration>>,
 {
     let addr = format!("127.0.0.1:{port}").parse().unwrap();
-    server::start(addr);
+    let _server = common::start_server(addr, serve);
 
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));

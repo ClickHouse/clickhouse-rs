@@ -1,5 +1,4 @@
 use clickhouse::{error::Result, test, Client, Row};
-use futures::stream;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,7 +55,7 @@ async fn main() {
     assert!(recording.query().await.contains("CREATE TABLE"));
 
     // How to test SELECT.
-    mock.add(test::handlers::provide(stream::iter(list.clone())));
+    mock.add(test::handlers::provide(list.clone()));
     let rows = make_select(&client).await.unwrap();
     assert_eq!(rows, list);
 
@@ -76,9 +75,7 @@ async fn main() {
     {
         // Check `CREATE LIVE VIEW` (for `watch(query)` case only).
         let recording = mock.add(test::handlers::record_ddl());
-        mock.add(test::handlers::watch(stream::iter(
-            list.into_iter().map(|row| (42, row)),
-        )));
+        mock.add(test::handlers::watch(list.into_iter().map(|row| (42, row))));
         let (version, row) = make_watch(&client).await.unwrap();
         assert!(recording.query().await.contains("CREATE LIVE VIEW"));
         assert_eq!(version, 42);
@@ -86,7 +83,7 @@ async fn main() {
 
         // `EVENTS`.
         let recording = mock.add(test::handlers::record_ddl());
-        mock.add(test::handlers::watch_only_events(stream::iter(3..5)));
+        mock.add(test::handlers::watch_only_events(3..5));
         let version = make_watch_only_events(&client).await.unwrap();
         assert!(recording.query().await.contains("CREATE LIVE VIEW"));
         assert_eq!(version, 3);

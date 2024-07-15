@@ -13,14 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - inserter: can be limited by size, see `Inserter::with_max_bytes()`.
 - inserter: `Inserter::pending()` to get stats about still being inserted data.
 - inserter: `Inserter::force_commit()` to commit and insert immediately.
+- mock: impl `Default` instance for `Mock`.
 
 ### Changed
+- **BREAKING** http: `HttpClient` API is changed due to moving to hyper v1.
 - **BREAKING** inserter: move under the `inserter` feature.
 - **BREAKING** inserter: there is no default limits anymore.
 - **BREAKING** inserter: `Inserter::write` is synchronous now.
 - **BREAKING** inserter: rename `entries` to `rows`.
 - **BREAKING** drop the `wa-37420` feature.
 - **BREAKING** remove deprecated items.
+- **BREAKING** mock: `provide()`, `watch()` and `watch_only_events()` now accept iterators instead of streams.
 - inserter: improve performance of time measurements by using `quanta`.
 - inserter: improve performance if the time limit isn't used.
 - derive: move to syn v2.
