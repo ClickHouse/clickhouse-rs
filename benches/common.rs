@@ -1,3 +1,5 @@
+#![allow(dead_code)] // typical for common test/bench modules :(
+
 use std::{convert::Infallible, future::Future, net::SocketAddr, thread};
 
 use bytes::Bytes;
@@ -11,9 +13,9 @@ use hyper::{
 use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::{net::TcpListener, runtime};
 
-pub struct ServerHandle;
+pub(crate) struct ServerHandle;
 
-pub fn start_server<S, F, B>(addr: SocketAddr, serve: S) -> ServerHandle
+pub(crate) fn start_server<S, F, B>(addr: SocketAddr, serve: S) -> ServerHandle
 where
     S: Fn(Request<Incoming>) -> F + Send + Sync + 'static,
     F: Future<Output = Response<B>> + Send,
@@ -47,7 +49,7 @@ where
     ServerHandle
 }
 
-pub async fn skip_incoming(request: Request<Incoming>) {
+pub(crate) async fn skip_incoming(request: Request<Incoming>) {
     let mut body = request.into_body().into_data_stream();
 
     // Read and skip all frames.

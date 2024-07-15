@@ -10,6 +10,15 @@ readme = "README.md"
 edition = "2021"
 rust-version = "1.60"
 
+[lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+# TODO: missing_docs = "warn"
+unexpected_cfgs = "allow" # for `docsrs`
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

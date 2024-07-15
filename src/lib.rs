@@ -1,5 +1,4 @@
 #![doc = include_str!("../README.md")]
-#![warn(rust_2018_idioms, unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
