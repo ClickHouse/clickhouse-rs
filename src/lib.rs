@@ -75,17 +75,12 @@ impl Default for Client {
         #[cfg(all(feature = "tls", not(feature = "rustls")))]
         let connector = hyper_tls::HttpsConnector::new_with_connector(connector);
 
-        #[cfg(all(feature = "rustls", not(feature = "tls")))]
+        #[cfg(feature = "rustls")]
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_native_roots()
+            .with_webpki_roots()
             .https_or_http()
-            .enable_http2()
+            .enable_http1()
             .wrap_connector(connector);
-
-        #[cfg(all(feature = "rustls", feature = "tls"))]
-        compile_error!(
-            "The rustls and tls features are mutually exclusive and cannot be enabled together"
-        );
 
         let client = HyperClient::builder(TokioExecutor::new())
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
