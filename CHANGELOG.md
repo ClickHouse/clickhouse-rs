@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - mock: impl `Default` instance for `Mock`.
 
 ### Changed
+- **BREAKING** bump MSRV to 1.67.
 - **BREAKING** http: `HttpClient` API is changed due to moving to hyper v1.
 - **BREAKING** inserter: move under the `inserter` feature.
 - **BREAKING** inserter: there is no default limits anymore.

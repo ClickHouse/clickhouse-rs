@@ -8,7 +8,7 @@ repository = "https://github.com/loyd/clickhouse.rs"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 edition = "2021"
-rust-version = "1.60"
+rust-version = "1.67.0" # update `derive/Cargo.toml` and CI if changed
 
 [lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
@@ -47,7 +47,7 @@ default = ["lz4", "tls"]
 
 test-util = ["hyper/server"]
 inserter = ["dep:quanta"]
-watch = ["dep:sha-1", "dep:serde_json"]
+watch = ["dep:sha-1", "dep:serde_json", "serde/derive"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
 lz4 = ["dep:lz4", "dep:clickhouse-rs-cityhash-sys"]
