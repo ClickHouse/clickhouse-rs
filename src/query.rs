@@ -34,11 +34,15 @@ impl Query {
     /// The `value`, which must either implement [`Serialize`] or be an
     /// [`Identifier`], will be appropriately escaped.
     ///
+    /// All possible errors will be returned as [`Error::InvalidParams`]
+    /// during query execution (`execute()`, `fetch()` etc).
+    ///
     /// WARNING: This means that the query must not have any extra `?`, even if
     /// they are in a string literal!
     ///
     /// [`Serialize`]: serde::Serialize
     /// [`Identifier`]: crate::sql::Identifier
+    #[track_caller]
     pub fn bind(mut self, value: impl Bind) -> Self {
         self.sql.bind_arg(value);
         self

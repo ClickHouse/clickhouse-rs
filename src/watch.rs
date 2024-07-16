@@ -24,6 +24,10 @@ pub struct Rows;
 pub struct Events;
 
 impl<V> Watch<V> {
+    /// See [`Query::bind()`] for details.
+    ///
+    /// [`Query::bind()`]: crate::query::Query::bind
+    #[track_caller]
     pub fn bind(mut self, value: impl Bind) -> Self {
         self.sql.bind_arg(value);
         self

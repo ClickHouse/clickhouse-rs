@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - watch: support a new syntax.
 - uuid: possible unsoundness.
+- query: avoid panics during `Query::bind()` calls ([#103]).
 
+[#103]: https://github.com/loyd/clickhouse.rs/issues/103
 [#102]: https://github.com/loyd/clickhouse.rs/pull/102
 [#83]: https://github.com/loyd/clickhouse.rs/pull/83
 [#90]: https://github.com/loyd/clickhouse.rs/pull/90
