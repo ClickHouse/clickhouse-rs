@@ -225,7 +225,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
 
-> [!NOTE]
+> **NOTE**:
 > When connecting to ClickHouse via an `HTTPS` url, you must enable either the `native-tls` or `rustls-tls` features.
 > If both are enabled, the `rustls-tls` feature will take precedence.
 
