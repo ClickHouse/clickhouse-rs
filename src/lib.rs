@@ -69,11 +69,18 @@ impl Default for Client {
         // TODO: make configurable in `Client::builder()`.
         connector.set_keepalive(Some(TCP_KEEPALIVE));
 
-        #[cfg(feature = "tls")]
-        let connector = HttpsConnector::new_with_connector({
-            connector.enforce_http(false);
-            connector
-        });
+        #[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+        connector.enforce_http(false);
+
+        #[cfg(all(feature = "native-tls", not(feature = "rustls-tls")))]
+        let connector = hyper_tls::HttpsConnector::new_with_connector(connector);
+
+        #[cfg(feature = "rustls-tls")]
+        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_or_http()
+            .enable_http1()
+            .wrap_connector(connector);
 
         let client = HyperClient::builder(TokioExecutor::new())
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
