@@ -35,10 +35,10 @@ Note: [ch2rs](https://github.com/loyd/ch2rs) is useful to generate a row type fr
 To use the crate, add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-clickhouse = "0.11.6"
+clickhouse = "0.12.0"
 
 [dev-dependencies]
-clickhouse = { version = "0.11.6", features = ["test-util"] }
+clickhouse = { version = "0.12.0", features = ["test-util"] }
 ```
 
 <details>

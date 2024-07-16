@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+## [0.12.0] - 2024-07-16
 ### Added
 - derive: support `serde::skip_deserializing` ([#83]).
 - insert: apply options set on the client ([#90]).
@@ -289,7 +291,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.6...HEAD
+[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/loyd/clickhouse.rs/compare/v0.11.6...v0.12.0
 [0.11.6]: https://github.com/loyd/clickhouse.rs/compare/v0.11.5...v0.11.6
 [0.11.5]: https://github.com/loyd/clickhouse.rs/compare/v0.11.4...v0.11.5
 [0.11.4]: https://github.com/loyd/clickhouse.rs/compare/v0.11.3...v0.11.4
