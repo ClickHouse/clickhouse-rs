@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    convert::Infallible,
     error::Error,
     net::SocketAddr,
     sync::{Arc, Mutex},
@@ -8,7 +9,7 @@ use std::{
 
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full};
-use hyper::{body::Incoming, server::conn, service, Request, Response};
+use hyper::{body::Incoming, server::conn, service, Request, Response, StatusCode};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::{net::TcpListener, task::AbortHandle};
 
@@ -134,11 +135,7 @@ async fn server(listener: TcpListener, shared: Arc<Mutex<Shared>>) {
             );
 
         if let Err(err) = serving.await {
-            break if let Some(source) = err.source() {
-                source.to_string().into()
-            } else {
-                err.into()
-            };
+            break err.into();
         }
     };
 
@@ -148,9 +145,29 @@ async fn server(listener: TcpListener, shared: Arc<Mutex<Shared>>) {
 async fn handle(
     request: Request<Incoming>,
     shared: &Mutex<Shared>,
+) -> Result<Response<Full<Bytes>>, Infallible> {
+    let response = do_handle(request, shared).await.unwrap_or_else(|err| {
+        let bytes = Bytes::from(err.to_string());
+
+        // Prevents further usage of the mock.
+        shared.lock().unwrap().error.get_or_insert(err);
+
+        Response::builder()
+            .status(StatusCode::BAD_GATEWAY)
+            .body(Full::new(bytes))
+            .unwrap()
+    });
+
+    Ok(response)
+}
+
+async fn do_handle(
+    request: Request<Incoming>,
+    shared: &Mutex<Shared>,
 ) -> Result<Response<Full<Bytes>>, Box<dyn Error + Send + Sync>> {
     let Some(handler) = shared.lock().unwrap().handlers.pop_front() else {
-        return Err("no installed handler for an incoming request".into());
+        // TODO: provide better error, e.g. some part of parsed body.
+        return Err(format!("no installed handler for an incoming request: {request:?}").into());
     };
 
     let (parts, body) = request.into_parts();

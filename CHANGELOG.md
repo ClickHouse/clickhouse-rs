@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - inserter: improve performance of time measurements by using `quanta`.
 - inserter: improve performance if the time limit isn't used.
 - derive: move to syn v2.
+- mock: return a request if no handler is installed ([#89], [#91]).
 
 ### Fixed
 - watch: support a new syntax.
@@ -37,8 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [#103]: https://github.com/loyd/clickhouse.rs/issues/103
 [#102]: https://github.com/loyd/clickhouse.rs/pull/102
-[#83]: https://github.com/loyd/clickhouse.rs/pull/83
+[#91]: https://github.com/loyd/clickhouse.rs/pull/91
 [#90]: https://github.com/loyd/clickhouse.rs/pull/90
+[#89]: https://github.com/loyd/clickhouse.rs/issues/89
+[#83]: https://github.com/loyd/clickhouse.rs/pull/83
 
 ## [0.11.6] - 2023-09-27
 ### Fixed
