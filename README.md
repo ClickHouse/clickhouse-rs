@@ -20,7 +20,7 @@ A typed client for ClickHouse.
 * Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
 * Uses `RowBinary` encoding over HTTP transport.
     * There are plans to switch to `Native` over TCP.
-* Supports TLS.
+* Supports TLS (see `native-tls` and `rustls-tls` features below).
 * Supports compression and decompression (LZ4 and LZ4HC).
 * Provides API for selecting.
 * Provides API for inserting.

@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **BREAKING** bump MSRV to 1.67.
+- **BREAKING** replace the `tls` feature with `native-tls` and `rustls-tls` that must be enabled explicitly now.
 - **BREAKING** http: `HttpClient` API is changed due to moving to hyper v1.
 - **BREAKING** inserter: move under the `inserter` feature.
 - **BREAKING** inserter: there is no default limits anymore.
@@ -33,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - watch: support a new syntax.
 - uuid: possible unsoundness.
 
+[#102]: https://github.com/loyd/clickhouse.rs/pull/102
 [#83]: https://github.com/loyd/clickhouse.rs/pull/83
 [#90]: https://github.com/loyd/clickhouse.rs/pull/90
 
