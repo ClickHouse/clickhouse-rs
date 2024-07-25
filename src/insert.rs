@@ -126,14 +126,14 @@ impl<T> Insert<T> {
     /// `None` disables the timeout, it's a default.
     /// It's roughly equivalent to `tokio::time::timeout(insert.write(..))`.
     ///
-    /// `end_timeout` restricts time on waiting for a response from the CH server.
-    /// Thus, it includes all work needed to handle `INSERT` by the CH server,
-    /// e.g. handling all materialized views and so on.
+    /// `end_timeout` restricts time on waiting for a response from the CH
+    /// server. Thus, it includes all work needed to handle `INSERT` by the
+    /// CH server, e.g. handling all materialized views and so on.
     /// `None` disables the timeout, it's a default.
     /// It's roughly equivalent to `tokio::time::timeout(insert.end(..))`.
     ///
-    /// These timeouts are much more performant (~x10) than wrapping `write()` and `end()` calls
-    /// into `tokio::time::timeout()`.
+    /// These timeouts are much more performant (~x10) than wrapping `write()`
+    /// and `end()` calls into `tokio::time::timeout()`.
     pub fn with_timeouts(
         mut self,
         send_timeout: Option<Duration>,
@@ -153,7 +153,8 @@ impl<T> Insert<T> {
     }
 
     /// Serializes the provided row into an internal buffer.
-    /// Once the buffer is full, it's sent to a background task writing to the socket.
+    /// Once the buffer is full, it's sent to a background task writing to the
+    /// socket.
     ///
     /// Close to:
     /// ```ignore
@@ -162,8 +163,9 @@ impl<T> Insert<T> {
     ///
     /// A returned future doesn't depend on the row's lifetime.
     ///
-    /// Returns an error if the row cannot be serialized or the background task failed.
-    /// Once failed, the whole `INSERT` is aborted and cannot be used anymore.
+    /// Returns an error if the row cannot be serialized or the background task
+    /// failed. Once failed, the whole `INSERT` is aborted and cannot be
+    /// used anymore.
     ///
     /// # Panics
     /// If called after previous call returned an error.
@@ -202,8 +204,8 @@ impl<T> Insert<T> {
 
     /// Ends `INSERT`, the server starts processing the data.
     ///
-    /// Succeeds if the server returns 200, that means the `INSERT` was handled successfully,
-    /// including all materialized views and quorum writes.
+    /// Succeeds if the server returns 200, that means the `INSERT` was handled
+    /// successfully, including all materialized views and quorum writes.
     ///
     /// NOTE: If it isn't called, the whole `INSERT` is aborted.
     pub async fn end(mut self) -> Result<()> {

@@ -73,15 +73,15 @@ macro_rules! forward_to_display {
 }
 
 impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
-    type Ok = ();
     type Error = SqlSerializerError;
+    type Ok = ();
+    type SerializeMap = Impossible;
     type SerializeSeq = SqlListSerializer<'a, W>;
+    type SerializeStruct = Impossible;
+    type SerializeStructVariant = Impossible;
     type SerializeTuple = SqlListSerializer<'a, W>;
     type SerializeTupleStruct = Impossible;
     type SerializeTupleVariant = Impossible;
-    type SerializeMap = Impossible;
-    type SerializeStruct = Impossible;
-    type SerializeStructVariant = Impossible;
 
     unsupported!(
         serialize_map(Option<usize>) -> Result<Impossible>,
@@ -222,8 +222,8 @@ struct SqlListSerializer<'a, W> {
 }
 
 impl<'a, W: Write> SerializeSeq for SqlListSerializer<'a, W> {
-    type Ok = ();
     type Error = SqlSerializerError;
+    type Ok = ();
 
     #[inline]
     fn serialize_element<T>(&mut self, value: &T) -> Result
@@ -249,8 +249,8 @@ impl<'a, W: Write> SerializeSeq for SqlListSerializer<'a, W> {
 }
 
 impl<'a, W: Write> SerializeTuple for SqlListSerializer<'a, W> {
-    type Ok = ();
     type Error = SqlSerializerError;
+    type Ok = ();
 
     #[inline]
     fn serialize_element<T>(&mut self, value: &T) -> Result

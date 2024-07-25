@@ -333,7 +333,7 @@ pub mod time {
             let days: i32 = Deserialize::deserialize(deserializer)?;
 
             // It shouldn't overflow, because clamped by CH and < `Date::MAX`.
-            // TODO: check that CH clamps when an invalid value is inserted in binary format.
+            // TODO: ensure CH clamps when an invalid value is inserted in binary format.
             Ok(ORIGIN.unwrap() + Duration::days(i64::from(days)))
         }
     }

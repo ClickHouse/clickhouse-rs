@@ -1,5 +1,4 @@
-use std::convert::Infallible;
-use std::mem;
+use std::{convert::Infallible, mem};
 
 use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};

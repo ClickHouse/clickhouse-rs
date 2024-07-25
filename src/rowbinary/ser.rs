@@ -31,27 +31,38 @@ macro_rules! impl_num {
 }
 
 impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
+    type SerializeMap = Impossible<(), Error>;
     type SerializeSeq = Self;
+    type SerializeStruct = Self;
+    type SerializeStructVariant = Impossible<(), Error>;
     type SerializeTuple = Self;
     type SerializeTupleStruct = Impossible<(), Error>;
     type SerializeTupleVariant = Impossible<(), Error>;
-    type SerializeMap = Impossible<(), Error>;
-    type SerializeStruct = Self;
-    type SerializeStructVariant = Impossible<(), Error>;
 
     impl_num!(i8, serialize_i8, put_i8);
+
     impl_num!(i16, serialize_i16, put_i16_le);
+
     impl_num!(i32, serialize_i32, put_i32_le);
+
     impl_num!(i64, serialize_i64, put_i64_le);
+
     impl_num!(i128, serialize_i128, put_i128_le);
+
     impl_num!(u8, serialize_u8, put_u8);
+
     impl_num!(u16, serialize_u16, put_u16_le);
+
     impl_num!(u32, serialize_u32, put_u32_le);
+
     impl_num!(u64, serialize_u64, put_u64_le);
+
     impl_num!(u128, serialize_u128, put_u128_le);
+
     impl_num!(f32, serialize_f32, put_f32_le);
+
     impl_num!(f64, serialize_f64, put_f64_le);
 
     #[inline]
@@ -191,8 +202,8 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
 }
 
 impl<'a, B: BufMut> SerializeStruct for &'a mut RowBinarySerializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
 
     #[inline]
     fn serialize_field<T: Serialize + ?Sized>(&mut self, _: &'static str, value: &T) -> Result<()> {
@@ -206,8 +217,8 @@ impl<'a, B: BufMut> SerializeStruct for &'a mut RowBinarySerializer<B> {
 }
 
 impl<'a, B: BufMut> SerializeSeq for &'a mut RowBinarySerializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
 
     fn serialize_element<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<()> {
         value.serialize(&mut **self)
@@ -219,8 +230,8 @@ impl<'a, B: BufMut> SerializeSeq for &'a mut RowBinarySerializer<B> {
 }
 
 impl<'a, B: BufMut> SerializeTuple for &'a mut RowBinarySerializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
 
     #[inline]
     fn serialize_element<T>(&mut self, value: &T) -> Result<()>

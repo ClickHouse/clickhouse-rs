@@ -97,13 +97,14 @@ async fn collect_bad_response(
         Err(_) => return Error::BadResponse(stringify_status(status)),
     };
 
-    // Try to decompress the body, because CH compresses any responses, even with errors.
+    // Try to decompress the body, because CH uses compression even for errors.
     let stream = stream::once(future::ready(Result::<_>::Ok(raw_bytes.slice(..))));
     let stream = Decompress::new(stream, compression);
 
-    // We're collecting already fetched chunks, thus only decompression errors can be here.
-    // If decompression is failed, we should try the raw body because it can be sent without
-    // any compression if some proxy is used, which typically know nothing about CH params.
+    // We're collecting already fetched chunks, thus only decompression errors can
+    // be here. If decompression is failed, we should try the raw body because
+    // it can be sent without any compression if some proxy is used, which
+    // typically know nothing about CH params.
     let bytes = collect_bytes(stream).await.unwrap_or(raw_bytes);
 
     let reason = String::from_utf8(bytes.into())
@@ -261,7 +262,8 @@ where
                     if let Some(err) = extract_exception(chunk) {
                         *self = Self::Exception(Some(err));
 
-                        // NOTE: now `chunk` can be empty, but it's ok for callers.
+                        // NOTE: now `chunk` can be empty, but it's ok for
+                        // callers.
                     }
                 }
 
@@ -273,9 +275,12 @@ where
 }
 
 // Format:
+// ```
 //   <data>Code: <code>. DB::Exception: <desc> (version <version> (official build))\n
+// ```
 fn extract_exception(chunk: &mut Bytes) -> Option<Error> {
-    // `))\n` is very rare in real data and occurs with a probability of ~6*10^-8 in random ones.
+    // `))\n` is very rare in real data, so it's fast dirty check.
+    // In random data, it occurs with a probability of ~6*10^-8 only.
     if chunk.ends_with(b"))\n") {
         extract_exception_slow(chunk)
     } else {

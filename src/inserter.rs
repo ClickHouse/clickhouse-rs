@@ -7,14 +7,14 @@ use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client};
 
 /// Performs multiple consecutive `INSERT`s.
 ///
-/// By default, it doesn't end the current active `INSERT` automatically.
+/// By default, it **doesn't** end the current active `INSERT` automatically.
 /// Use `with_max_bytes`, `with_max_rows` and `with_period` to set limits.
-/// Alternatively, use `force_commit` to end an active `INSERT` whenever you want.
+/// Alternatively, call `force_commit` to forcibly end an active `INSERT`.
 ///
 /// Rows are being sent progressively to spread network load.
 ///
-/// All rows written by [`Inserter::write()`] between [`Inserter::commit()`] calls
-/// are sent in one `INSERT` statement.
+/// All rows written by [`Inserter::write()`] between [`Inserter::commit()`]
+/// calls are sent in one `INSERT` statement.
 #[must_use]
 pub struct Inserter<T> {
     client: Client,
@@ -83,10 +83,12 @@ where
 
     /// The maximum number of uncompressed bytes in one `INSERT` statement.
     ///
-    /// Note: ClickHouse inserts batches atomically only if all rows fit in the same partition
-    /// and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
+    /// Note: ClickHouse inserts batches atomically only if all rows fit in the
+    /// same partition and their number is less [`max_insert_block_size`].
     ///
     /// Unlimited (`u64::MAX`) by default.
+    ///
+    /// [`max_insert_block_size`]: https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size
     pub fn with_max_bytes(mut self, threshold: u64) -> Self {
         self.set_max_bytes(threshold);
         self
@@ -94,10 +96,12 @@ where
 
     /// The maximum number of rows in one `INSERT` statement.
     ///
-    /// Note: ClickHouse inserts batches atomically only if all rows fit in the same partition
-    /// and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
+    /// Note: ClickHouse inserts batches atomically only if all rows fit in the
+    /// same partition and their number is less [`max_insert_block_size`].
     ///
     /// Unlimited (`u64::MAX`) by default.
+    ///
+    /// [`max_insert_block_size`]: https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size
     pub fn with_max_rows(mut self, threshold: u64) -> Self {
         self.set_max_rows(threshold);
         self
@@ -105,10 +109,10 @@ where
 
     /// The time between `INSERT`s.
     ///
-    /// Note that [`Inserter`] doesn't spawn tasks or threads to check the elapsed time,
-    /// all checks are performend only on [`Inserter::commit()`] calls.
-    /// However, it's possible to use [`Inserter::time_left()`] and set a timer up
-    /// to call [`Inserter::commit()`] to check passed time again.
+    /// Note that [`Inserter`] doesn't spawn tasks or threads to check the
+    /// elapsed time, all checks are performend only on [`Inserter::commit()`].
+    /// However, it's possible to use [`Inserter::time_left()`] and set a
+    /// timer up to call [`Inserter::commit()`] to check passed time again.
     ///
     /// Extra ticks are skipped if the previous `INSERT` is still in progress:
     /// ```text
@@ -122,14 +126,16 @@ where
         self
     }
 
-    /// Adds a bias to the period. The actual period will be in the following range:
+    /// Adds a bias to the period, so actual period is in the following range:
+    ///
     /// ```text
     ///   [period * (1 - bias), period * (1 + bias)]
     /// ```
     ///
     /// The `bias` parameter is clamped to the range `[0, 1]`.
     ///
-    /// It helps to avoid producing a lot of `INSERT`s at the same time by multiple inserters.
+    /// It helps to avoid producing a lot of `INSERT`s at the same time by
+    /// multiple inserters.
     pub fn with_period_bias(mut self, bias: f64) -> Self {
         self.set_period_bias(bias);
         self
