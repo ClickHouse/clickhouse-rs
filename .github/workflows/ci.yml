@@ -32,6 +32,9 @@ jobs:
     - run: rustup toolchain install ${{ env.MSRV }} --profile minimal
     - run: rustup override set ${{ env.MSRV }}
     - run: rustup show active-toolchain -v
+    # cargo from toolchain v1.67 doesn't choose versions based on MSRV,
+    # so we downgrade tokio because since v1.39 it requires rustc >=1.70.
+    - run: cargo update -p tokio --precise 1.38.1
     - run: cargo build
     - run: cargo build --no-default-features
     - run: cargo build --features uuid,time
