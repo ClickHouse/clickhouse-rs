@@ -1,8 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use serde_derive_internals::attr::{Container, RenameRule};
 use serde_derive_internals::{
-    attr::{Default as SerdeDefault, Field},
+    attr::{Container, Default as SerdeDefault, Field},
     Ctxt,
 };
 use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields};
