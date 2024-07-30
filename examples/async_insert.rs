@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
             .bind(Identifier(table_name))
             .fetch_all::<Event>()
             .await?;
-        if events.len() > 0 {
+        if !events.is_empty() {
             println!("Async insert was flushed");
             println!("{events:?}");
             break;
