@@ -86,7 +86,6 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
     unsupported!(
         serialize_map(Option<usize>) -> Result<Impossible>,
         serialize_bytes(&[u8]),
-        serialize_none,
         serialize_unit,
         serialize_unit_struct(&'static str),
     );
@@ -141,7 +140,13 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     #[inline]
     fn serialize_some<T: Serialize + ?Sized>(self, _value: &T) -> Result {
-        Err(SqlSerializerError::Unsupported("serialize_some"))
+        _value.serialize(self)
+    }
+
+    #[inline]
+    fn serialize_none(self) -> std::result::Result<Self::Ok, Self::Error> {
+        self.writer.write_str("NULL")?;
+        Ok(())
     }
 
     #[inline]
