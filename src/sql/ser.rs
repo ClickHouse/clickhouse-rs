@@ -345,8 +345,8 @@ mod tests {
     fn it_fails_on_unsupported() {
         let mut out = String::new();
         assert!(write_arg(&mut out, &std::collections::HashMap::<u32, u32>::new()).is_err());
-        assert!(write_arg(&mut out, &None::<u32>).is_err());
-        assert!(write_arg(&mut out, &Some(42)).is_err());
+        assert!(write_arg(&mut out, &None::<u32>).is_ok());
+        assert!(write_arg(&mut out, &Some(42)).is_ok());
         assert!(write_arg(&mut out, &()).is_err());
 
         #[derive(Serialize)]
