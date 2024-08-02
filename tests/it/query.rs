@@ -181,12 +181,16 @@ async fn all_floats() {
 async fn settings_override() {
     let client = prepare_database!();
 
+    let setting_name = "date_time_input_format";
+    let setting_value = "basic";
+
     let value = client
-        .query("SELECT value FROM system.settings WHERE name = 'max_threads'")
-        .with_option("max_threads", "4")
+        .query("SELECT value FROM system.settings WHERE name = ?")
+        .bind(setting_name)
+        .with_option(setting_name, setting_value)
         .fetch_one::<String>()
         .await
         .unwrap();
 
-    assert_eq!(value, "4");
+    assert_eq!(value, setting_value);
 }
