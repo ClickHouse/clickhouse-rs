@@ -109,15 +109,7 @@ impl<T> Insert<T> {
         self
     }
 
-    /// Used to specify options that will be passed to this insert statement only.
-    ///
-    /// # Example
-    /// ```
-    /// # use clickhouse::Client;
-    /// let client = Client::default();
-    /// let inserter = client.insert("my_table")
-    ///     .with_option("max_threads", "16");
-    /// ```
+    /// Similar to [Client::with_option], but for this particular INSERT statement only.
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.client = self.client.clone().with_option(name, value);
         self
