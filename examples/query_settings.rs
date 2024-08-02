@@ -1,11 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-use clickhouse::{error::Result, Client, Row};
-
-#[derive(Debug, Serialize, Deserialize, Row)]
-struct SystemNumber {
-    number: u64,
-}
+use clickhouse::{error::Result, Client};
 
 /// Besides [Client::query], it works similarly with [Client::insert] and [Client::inserter].
 #[tokio::main]
@@ -20,7 +13,7 @@ async fn main() -> Result<()> {
         // This setting will be applied to this particular query only;
         // it will override the global client setting.
         .with_option("limit", "3")
-        .fetch_all::<SystemNumber>()
+        .fetch_all::<u64>()
         .await?;
 
     // note that it prints the first 3 numbers only (because of the setting override)
