@@ -181,6 +181,24 @@ impl Query {
         let future = self.client.http.request(request);
         Ok(Response::new(future, self.client.compression))
     }
+
+    /// Used to specify options that will be passed to this particular query only.
+    ///
+    /// # Example
+    /// ```
+    /// # use clickhouse::Client;
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// let client = Client::default();
+    /// client.query("CREATE TABLE foo (i Int32) ENGINE MergeTree ORDER BY i")
+    ///     .with_option("wait_end_of_query", "1")
+    ///     .execute()
+    ///     .await?;
+    /// # Ok(()) }
+    /// ```
+    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.client = self.client.clone().with_option(name, value);
+        self
+    }
 }
 
 /// A cursor that emits rows.

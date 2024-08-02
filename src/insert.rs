@@ -28,6 +28,7 @@ const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extr
 /// Rows are being sent progressively to spread network load.
 #[must_use]
 pub struct Insert<T> {
+    client: Client,
     buffer: BytesMut,
     sender: Option<ChunkSender>,
     #[cfg(feature = "lz4")]
@@ -108,6 +109,7 @@ impl<T> Insert<T> {
             tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
 
         Ok(Self {
+            client: client.clone(),
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
             sender: Some(sender),
             #[cfg(feature = "lz4")]
@@ -140,6 +142,20 @@ impl<T> Insert<T> {
         end_timeout: Option<Duration>,
     ) -> Self {
         self.set_timeouts(send_timeout, end_timeout);
+        self
+    }
+
+    /// Used to specify options that will be passed to this insert statement only.
+    ///
+    /// # Example
+    /// ```
+    /// # use clickhouse::Client;
+    /// let client = Client::default();
+    /// let inserter = client.insert("my_table")
+    ///     .with_option("max_threads", "16");
+    /// ```
+    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.client = self.client.clone().with_option(name, value);
         self
     }
 
