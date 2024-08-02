@@ -6,6 +6,8 @@ use serde::Serialize;
 
 use clickhouse::{inserter::Quantities, Client, Row};
 
+use crate::{create_simple_table, fetch_simple_rows, SimpleRow};
+
 #[derive(Debug, Row, Serialize)]
 struct MyRow {
     data: String,
@@ -182,4 +184,49 @@ async fn limited_by_time() {
 
     assert_eq!(count, rows);
     assert_eq!(sum, (1..=rows).sum::<u64>());
+}
+
+/// Similar to [crate::insert::settings_override] with minor differences.
+#[tokio::test]
+async fn settings_override() {
+    let table_name = "inserter_settings";
+    let query_id = uuid::Uuid::new_v4().to_string();
+    let client = prepare_database!();
+    create_simple_table(&client, table_name).await;
+
+    let row = SimpleRow::new(42, "foo");
+
+    let mut inserter = client
+        .inserter(table_name)
+        .unwrap()
+        .with_option("async_insert", "1")
+        .with_option("query_id", &query_id);
+
+    inserter.write(&row).unwrap();
+    inserter.end().await.unwrap();
+
+    // flush query_log
+    client.query("SYSTEM FLUSH LOGS").execute().await.unwrap();
+
+    let result = client
+        .query(
+            "
+                SELECT Settings['async_insert'] = '1'
+                FROM system.query_log
+                WHERE query_id = ?
+                AND type = 'QueryFinish'
+                AND query_kind = 'Insert'
+                ",
+        )
+        .bind(&query_id)
+        .fetch_one::<bool>()
+        .await;
+
+    assert!(
+        result.unwrap(),
+        "INSERT statement settings should contain async_insert = 1"
+    );
+
+    let rows = fetch_simple_rows(&client, table_name).await;
+    assert_eq!(rows, vec!(row))
 }

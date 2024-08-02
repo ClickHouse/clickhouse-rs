@@ -64,19 +64,24 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        clickhouse: [ head, latest ]
     steps:
     - uses: actions/checkout@v4
+    - name: Start ClickHouse (version - ${{ matrix.clickhouse }}) in Docker
+      uses: hoverkraft-tech/compose-action@v2.0.1
+      env:
+        CLICKHOUSE_VERSION: ${{ matrix.clickhouse }}
+      with:
+        compose-file: 'docker-compose.yml'
+        down-flags: '--volumes'
     - run: rustup show active-toolchain -v
     - run: cargo test
     - run: cargo test --no-default-features
     - run: cargo test --features uuid,time
     - run: cargo test --all-features
-
-    services:
-      clickhouse:
-        image: clickhouse/clickhouse-server
-        ports:
-          - 8123:8123
 
   docs:
     needs: build

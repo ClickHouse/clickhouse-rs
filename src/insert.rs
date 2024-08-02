@@ -29,8 +29,9 @@ const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extr
 #[must_use]
 pub struct Insert<T> {
     client: Client,
+    table: String,
+    fields: String,
     buffer: BytesMut,
-    sender: Option<ChunkSender>,
     #[cfg(feature = "lz4")]
     compression: Compression,
     send_timeout: Option<Duration>,
@@ -38,8 +39,14 @@ pub struct Insert<T> {
     // Use boxed `Sleep` to reuse a timer entry, it improves performance.
     // Also, `tokio::time::timeout()` significantly increases a future's size.
     sleep: Pin<Box<Sleep>>,
-    handle: JoinHandle<Result<()>>,
+    request: Option<InsertRequest>,
     _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
+}
+
+/// See [Insert::init_request]
+struct InsertRequest {
+    sender: Option<ChunkSender>,
+    handle: JoinHandle<Result<()>>,
 }
 
 // It should be a regular function, but it decreases performance.
@@ -61,63 +68,20 @@ impl<T> Insert<T> {
     where
         T: Row,
     {
-        let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
-        let mut pairs = url.query_pairs_mut();
-        pairs.clear();
-
-        if let Some(database) = &client.database {
-            pairs.append_pair("database", database);
-        }
-
         let fields = row::join_column_names::<T>()
             .expect("the row type must be a struct or a wrapper around it");
 
-        // TODO: what about escaping a table name?
-        // https://clickhouse.yandex/docs/en/query_language/syntax/#syntax-identifiers
-        let query = format!("INSERT INTO {table}({fields}) FORMAT RowBinary");
-        pairs.append_pair("query", &query);
-
-        if client.compression.is_lz4() {
-            pairs.append_pair("decompress", "1");
-        }
-
-        for (name, value) in &client.options {
-            pairs.append_pair(name, value);
-        }
-
-        drop(pairs);
-
-        let mut builder = Request::post(url.as_str());
-
-        if let Some(user) = &client.user {
-            builder = builder.header("X-ClickHouse-User", user);
-        }
-
-        if let Some(password) = &client.password {
-            builder = builder.header("X-ClickHouse-Key", password);
-        }
-
-        let (sender, body) = RequestBody::chunked();
-
-        let request = builder
-            .body(body)
-            .map_err(|err| Error::InvalidParams(Box::new(err)))?;
-
-        let future = client.http.request(request);
-        // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.
-        let handle =
-            tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
-
         Ok(Self {
             client: client.clone(),
+            table: table.to_owned(),
+            fields,
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
-            sender: Some(sender),
+            request: None,
             #[cfg(feature = "lz4")]
             compression: client.compression,
             send_timeout: None,
             end_timeout: None,
             sleep: Box::pin(tokio::time::sleep(Duration::new(0, 0))),
-            handle,
             _marker: PhantomData,
         })
     }
@@ -205,7 +169,9 @@ impl<T> Insert<T> {
     where
         T: Serialize,
     {
-        assert!(self.sender.is_some(), "write() after error");
+        if self.request.is_none() {
+            self.init_request()?;
+        }
 
         let old_buf_size = self.buffer.len();
         let result = rowbinary::serialize_into(&mut self.buffer, row);
@@ -229,12 +195,15 @@ impl<T> Insert<T> {
             self.send_chunk().await?;
         }
 
-        self.sender = None; // terminate the sender successfully
+        // terminate the sender successfully
+        if let Some(request) = self.request.as_mut() {
+            request.sender = None;
+        }
         self.wait_handle().await
     }
 
     async fn send_chunk(&mut self) -> Result<()> {
-        if self.sender.is_none() {
+        if self.request.is_none() {
             return Ok(());
         }
 
@@ -243,7 +212,12 @@ impl<T> Insert<T> {
         // So, instead we control it manually here and rely on the system allocator.
         let chunk = self.take_and_prepare_chunk()?;
 
-        let sender = self.sender.as_mut().unwrap(); // checked above
+        // checked above
+        let sender = self
+            .request
+            .as_mut()
+            .and_then(|r| r.sender.as_mut())
+            .unwrap();
 
         let is_timed_out = match timeout!(self, send_timeout, sender.send(chunk)) {
             Some(true) => return Ok(()),
@@ -267,15 +241,20 @@ impl<T> Insert<T> {
     }
 
     async fn wait_handle(&mut self) -> Result<()> {
-        match timeout!(self, end_timeout, &mut self.handle) {
-            Some(Ok(res)) => res,
-            Some(Err(err)) if err.is_panic() => panic::resume_unwind(err.into_panic()),
-            Some(Err(err)) => Err(Error::Custom(format!("unexpected error: {err}"))),
-            None => {
-                // We can do nothing useful here, so just shut down the background task.
-                self.handle.abort();
-                Err(Error::TimedOut)
+        match self.request.as_mut() {
+            Some(request) => {
+                match timeout!(self, end_timeout, &mut request.handle) {
+                    Some(Ok(res)) => res,
+                    Some(Err(err)) if err.is_panic() => panic::resume_unwind(err.into_panic()),
+                    Some(Err(err)) => Err(Error::Custom(format!("unexpected error: {err}"))),
+                    None => {
+                        // We can do nothing useful here, so just shut down the background task.
+                        request.handle.abort();
+                        Err(Error::TimedOut)
+                    }
+                }
             }
+            _ => Ok(()),
         }
     }
 
@@ -295,9 +274,66 @@ impl<T> Insert<T> {
         Ok(mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze())
     }
 
+    fn init_request(&mut self) -> Result<()> {
+        debug_assert!(self.request.is_none());
+        let mut url =
+            Url::parse(&self.client.url).map_err(|err| Error::InvalidParams(err.into()))?;
+        let mut pairs = url.query_pairs_mut();
+        pairs.clear();
+
+        if let Some(database) = &self.client.database {
+            pairs.append_pair("database", database);
+        }
+
+        // TODO: what about escaping a table name?
+        // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
+        let query = format!(
+            "INSERT INTO {}({}) FORMAT RowBinary",
+            self.table, self.fields
+        );
+        pairs.append_pair("query", &query);
+
+        if self.client.compression.is_lz4() {
+            pairs.append_pair("decompress", "1");
+        }
+
+        for (name, value) in &self.client.options {
+            pairs.append_pair(name, value);
+        }
+
+        drop(pairs);
+
+        let mut builder = Request::post(url.as_str());
+
+        if let Some(user) = &self.client.user {
+            builder = builder.header("X-ClickHouse-User", user);
+        }
+
+        if let Some(password) = &self.client.password {
+            builder = builder.header("X-ClickHouse-Key", password);
+        }
+
+        let (sender, body) = RequestBody::chunked();
+
+        let request = builder
+            .body(body)
+            .map_err(|err| Error::InvalidParams(Box::new(err)))?;
+
+        let future = self.client.http.request(request);
+        // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.
+        let handle =
+            tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
+
+        self.request = Some(InsertRequest {
+            handle,
+            sender: Some(sender),
+        });
+        Ok(())
+    }
+
     fn abort(&mut self) {
-        if let Some(sender) = self.sender.take() {
-            sender.abort();
+        if let Some(s) = self.request.as_ref().and_then(|r| r.sender.as_ref()) {
+            s.abort()
         }
     }
 }

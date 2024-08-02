@@ -176,3 +176,17 @@ async fn all_floats() {
 
     assert_eq!(vec, &[42.5, 43.5]);
 }
+
+#[tokio::test]
+async fn settings_override() {
+    let client = prepare_database!();
+
+    let value = client
+        .query("SELECT value FROM system.settings WHERE name = 'max_threads'")
+        .with_option("max_threads", "4")
+        .fetch_one::<String>()
+        .await
+        .unwrap();
+
+    assert_eq!(value, "4");
+}

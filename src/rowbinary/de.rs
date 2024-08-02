@@ -19,7 +19,7 @@ pub(crate) fn deserialize_from<'de, T: Deserialize<'de>>(
 
 /// A deserializer for the RowBinary format.
 ///
-/// See https://clickhouse.yandex/docs/en/interfaces/formats/#rowbinary for details.
+/// See https://clickhouse.com/docs/en/interfaces/formats#rowbinary for details.
 struct RowBinaryDeserializer<'de, B> {
     input: B,
     temp_buf: &'de mut [u8],

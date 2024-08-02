@@ -1,4 +1,7 @@
+use clickhouse::sql::Identifier;
 use clickhouse::{sql, Client};
+use clickhouse_derive::Row;
+use serde::{Deserialize, Serialize};
 
 macro_rules! prepare_database {
     () => {
@@ -13,8 +16,42 @@ macro_rules! prepare_database {
     };
 }
 
+#[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+struct SimpleRow {
+    id: u64,
+    data: String,
+}
+
+impl SimpleRow {
+    fn new(id: u64, data: impl ToString) -> Self {
+        Self {
+            id,
+            data: data.to_string(),
+        }
+    }
+}
+
+async fn create_simple_table(client: &Client, table_name: &str) {
+    client
+        .query("CREATE TABLE ?(id UInt64, data String) ENGINE = MergeTree ORDER BY id")
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+}
+
+async fn fetch_simple_rows(client: &Client, table_name: &str) -> Vec<SimpleRow> {
+    client
+        .query("SELECT ?fields FROM ?")
+        .bind(Identifier(table_name))
+        .fetch_all::<SimpleRow>()
+        .await
+        .unwrap()
+}
+
 mod compression;
 mod cursor_error;
+mod insert;
 mod inserter;
 mod ip;
 mod nested;
