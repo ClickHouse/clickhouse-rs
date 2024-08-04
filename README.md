@@ -1,20 +1,20 @@
-# clickhouse.rs
+# clickhouse-rs
 
 A typed client for ClickHouse.
 
 [![Crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]
-[![MIT licensed][mit-badge]][mit-url]
+[![License][license-badge]][license-url]
 [![Build Status][actions-badge]][actions-url]
 
 [crates-badge]: https://img.shields.io/crates/v/clickhouse.svg
 [crates-url]: https://crates.io/crates/clickhouse
-[docs-badge]: https://img.shields.io/docsrs/clickhouse
+[docs-badge]: https://docs.rs/clickhouse/badge.svg
 [docs-url]: https://docs.rs/clickhouse
-[mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
-[mit-url]: https://github.com/loyd/clickhouse.rs/blob/master/LICENSE
-[actions-badge]: https://github.com/loyd/clickhouse.rs/actions/workflows/ci.yml/badge.svg
-[actions-url]: https://github.com/loyd/clickhouse.rs/actions/workflows/ci.yml
+[license-badge]: https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg
+[license-url]: https://github.com/ClickHouse/clickhouse-rs/blob/master/LICENSE-MIT
+[actions-badge]: https://github.com/ClickHouse/clickhouse-rs/actions/workflows/ci.yml/badge.svg
+[actions-url]: https://github.com/ClickHouse/clickhouse-rs/actions/workflows/ci.yml
 
 * Uses `serde` for encoding/decoding rows.
 * Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
@@ -28,7 +28,7 @@ A typed client for ClickHouse.
 * Provides API for watching live views.
 * Provides mocks for unit testing.
 
-Note: [ch2rs](https://github.com/loyd/ch2rs) is useful to generate a row type from ClickHouse.
+Note: [ch2rs](https://github.com/ClickHouse/ch2rs) is useful to generate a row type from ClickHouse.
 
 ## Usage
 
@@ -213,14 +213,14 @@ println!("live view updated: version={:?}", cursor.next().await?);
 
 </details>
 
-See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
+See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/master/examples).
 
 ## Feature Flags
 * `lz4` (enabled by default) — enables `Compression::Lz4` and `Compression::Lz4Hc(_)` variants. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
 * `native-tls` — supports urls with the `HTTPS` schema via `hyper-tls`, which links against OpenSSL.
 * `rustls-tls` — supports urls with the `HTTPS` schema via `hyper-rustls`, which does not link against OpenSSL.
 * `inserter` — enables `client.inserter()`.
-* `test-util` — adds mocks. See [the example](https://github.com/loyd/clickhouse.rs/tree/master/examples/mock.rs). Use it only in `dev-dependencies`.
+* `test-util` — adds mocks. See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/master/examples/mock.rs). Use it only in `dev-dependencies`.
 * `watch` — enables `client.watch` functionality. See the corresponding section for details.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
@@ -231,7 +231,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
 
 ## Data Types
 * `(U)Int(8|16|32|64|128)` maps to/from corresponding `(u|i)(8|16|32|64|128)` types or newtypes around them.
-* `(U)Int256` aren't supported directly, but there is [a workaround for it](https://github.com/loyd/clickhouse.rs/issues/48).
+* `(U)Int256` aren't supported directly, but there is [a workaround for it](https://github.com/ClickHouse/clickhouse-rs/issues/48).
 * `Float(32|64)` maps to/from corresponding `f(32|64)` or newtypes around them.
 * `Decimal(32|64|128)` maps to/from corresponding `i(32|64|128)` or newtypes around them. It's more convenient to use [fixnum](https://github.com/loyd/fixnum) or another implementation of signed fixed-point numbers.
 * `Boolean` maps to/from `bool` or newtypes around it.
@@ -251,7 +251,7 @@ See [examples](https://github.com/loyd/clickhouse.rs/tree/master/examples).
     }
     ```
     </details>
-* `FixedString(_)` isn't [supported yet](https://github.com/loyd/clickhouse.rs/issues/49).
+* `FixedString(_)` isn't [supported yet](https://github.com/ClickHouse/clickhouse-rs/issues/49).
 * `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/).
     <details>
     <summary>Example</summary>
@@ -395,4 +395,4 @@ The crate provides utils for mocking CH server and testing DDL, `SELECT`, `INSER
 
 The functionality can be enabled with the `test-util` feature. Use it **only** in dev-dependencies.
 
-See [the example](https://github.com/loyd/clickhouse.rs/tree/master/examples/mock.rs).
+See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/master/examples/mock.rs).
