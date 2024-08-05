@@ -342,11 +342,16 @@ mod tests {
     }
 
     #[test]
+    fn it_writes_options() {
+        assert_eq!(check(None::<i32>), "NULL");
+        assert_eq!(check(Some(32)), "32");
+        assert_eq!(check(Some(vec![42, 43])), "[42,43]");
+    }
+
+    #[test]
     fn it_fails_on_unsupported() {
         let mut out = String::new();
         assert!(write_arg(&mut out, &std::collections::HashMap::<u32, u32>::new()).is_err());
-        assert!(write_arg(&mut out, &None::<u32>).is_ok());
-        assert!(write_arg(&mut out, &Some(42)).is_ok());
         assert!(write_arg(&mut out, &()).is_err());
 
         #[derive(Serialize)]
