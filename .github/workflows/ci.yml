@@ -77,6 +77,7 @@ jobs:
         image: clickhouse/clickhouse-server
         ports:
           - 8123:8123
+
   docs:
     needs: build
     runs-on: ubuntu-latest

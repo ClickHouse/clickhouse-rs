@@ -1,6 +1,6 @@
 use clickhouse::{error::Result, Client};
 
-/// Besides [Client::query], it works similarly with [Client::insert] and [Client::inserter].
+/// Besides [`Client::query`], it works similarly with [`Client::insert`] and [`Client::inserter`].
 #[tokio::main]
 async fn main() -> Result<()> {
     let client = Client::default()
