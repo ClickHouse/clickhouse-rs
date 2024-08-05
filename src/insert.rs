@@ -88,6 +88,10 @@ impl<T> Insert<T> {
 
         let mut builder = Request::post(url.as_str());
 
+        for (name, value) in &client.headers {
+            builder = builder.header(name, value);
+        }
+
         if let Some(user) = &client.user {
             builder = builder.header("X-ClickHouse-User", user);
         }
