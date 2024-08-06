@@ -2,6 +2,7 @@ use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Durat
 
 use bytes::{Bytes, BytesMut};
 use hyper::{self, Request};
+use replace_with::replace_with_or_abort;
 use serde::Serialize;
 use tokio::{
     task::JoinHandle,
@@ -49,22 +50,47 @@ enum InsertState {
         sender: ChunkSender,
         handle: JoinHandle<Result<()>>,
     },
-    Terminated,
-    Aborted,
+    Terminated {
+        handle: JoinHandle<Result<()>>,
+    },
+    Completed,
 }
 
 impl InsertState {
-    fn handle(&mut self) -> Option<&mut JoinHandle<Result<()>>> {
-        match self {
-            InsertState::Active { handle, .. } => Some(handle),
-            _ => None,
-        }
-    }
     fn sender(&mut self) -> Option<&mut ChunkSender> {
         match self {
             InsertState::Active { sender, .. } => Some(sender),
             _ => None,
         }
+    }
+    fn handle(&mut self) -> Option<&mut JoinHandle<Result<()>>> {
+        match self {
+            InsertState::Active { handle, .. } | InsertState::Terminated { handle } => Some(handle),
+            _ => None,
+        }
+    }
+    fn client_with_sql(&self) -> Option<(&Client, &str)> {
+        match self {
+            InsertState::NotStarted { client, sql } => Some((client, sql)),
+            _ => None,
+        }
+    }
+    fn terminated(&mut self) {
+        debug_assert!(matches!(self, InsertState::Active { .. }));
+        replace_with_or_abort(self, |_self| match _self {
+            InsertState::Active { handle, .. } => InsertState::Terminated { handle },
+            _ => unreachable!(),
+        });
+    }
+    fn with_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        assert!(matches!(self, InsertState::NotStarted { .. }));
+        replace_with_or_abort(self, |_self| match _self {
+            InsertState::NotStarted { mut client, sql } => {
+                client.add_option(name, value);
+                InsertState::NotStarted { client, sql }
+            }
+            _ => unreachable!(),
+        });
     }
 }
 
@@ -134,17 +160,11 @@ impl<T> Insert<T> {
     }
 
     /// Similar to [`Client::with_option`], but for this particular INSERT statement only.
+    /// # Panics
+    /// If called after the insert request is started, e.g., after [`Insert::write`].
     #[track_caller]
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        match &self.state {
-            InsertState::NotStarted { client, sql } => {
-                self.state = InsertState::NotStarted {
-                    client: client.clone().with_option(name, value),
-                    sql: sql.to_owned(),
-                }
-            }
-            _ => panic!("`with_option` can be called only before the insert request is started."),
-        }
+        self.state.with_option(name, value);
         self
     }
 
@@ -173,16 +193,11 @@ impl<T> Insert<T> {
     /// used anymore.
     ///
     /// # Panics
-    /// If called after previous call returned an error.
+    /// If called after the previous call that returned an error.
     pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
     where
         T: Serialize,
     {
-        assert!(
-            matches!(self.state, InsertState::Active { .. }),
-            "write() after error"
-        );
-
         let result = self.do_write(row);
 
         async move {
@@ -199,9 +214,11 @@ impl<T> Insert<T> {
     where
         T: Serialize,
     {
-        if matches!(self.state, InsertState::NotStarted { .. }) {
-            self.init_request()?;
-        }
+        match self.state {
+            InsertState::NotStarted { .. } => self.init_request(),
+            InsertState::Active { .. } => Ok(()),
+            _ => panic!("write() after error"),
+        }?;
 
         let old_buf_size = self.buffer.len();
         let result = rowbinary::serialize_into(&mut self.buffer, row);
@@ -224,9 +241,8 @@ impl<T> Insert<T> {
         if !self.buffer.is_empty() {
             self.send_chunk().await?;
         }
-
-        // terminate the sender successfully
-        self.wait_handle_and_terminate().await
+        self.state.terminated();
+        self.wait_handle().await
     }
 
     async fn send_chunk(&mut self) -> Result<()> {
@@ -250,7 +266,7 @@ impl<T> Insert<T> {
         self.abort();
 
         // TODO: is it required to wait the handle in the case of timeout?
-        let res = self.wait_handle_and_terminate().await;
+        let res = self.wait_handle().await;
 
         if is_timed_out {
             Err(Error::TimedOut)
@@ -260,22 +276,23 @@ impl<T> Insert<T> {
         }
     }
 
-    async fn wait_handle_and_terminate(&mut self) -> Result<()> {
-        if let Some(handle) = self.state.handle() {
-            let result = match timeout!(self, end_timeout, handle) {
-                Some(Ok(res)) => res,
-                Some(Err(err)) if err.is_panic() => panic::resume_unwind(err.into_panic()),
-                Some(Err(err)) => Err(Error::Custom(format!("unexpected error: {err}"))),
-                None => {
-                    // We can do nothing useful here, so just shut down the background task.
-                    handle.abort();
-                    Err(Error::TimedOut)
-                }
-            };
-            self.state = InsertState::Terminated;
-            result
-        } else {
-            Ok(())
+    async fn wait_handle(&mut self) -> Result<()> {
+        match self.state.handle() {
+            Some(handle) => {
+                let result = match timeout!(self, end_timeout, &mut *handle) {
+                    Some(Ok(res)) => res,
+                    Some(Err(err)) if err.is_panic() => panic::resume_unwind(err.into_panic()),
+                    Some(Err(err)) => Err(Error::Custom(format!("unexpected error: {err}"))),
+                    None => {
+                        // We can do nothing useful here, so just shut down the background task.
+                        handle.abort();
+                        Err(Error::TimedOut)
+                    }
+                };
+                self.state = InsertState::Completed;
+                result
+            }
+            _ => Ok(()),
         }
     }
 
@@ -299,64 +316,57 @@ impl<T> Insert<T> {
     #[track_caller]
     #[inline(never)]
     fn init_request(&mut self) -> Result<()> {
-        match &self.state {
-            InsertState::NotStarted { client, sql } => {
-                let mut url =
-                    Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
-                let mut pairs = url.query_pairs_mut();
-                pairs.clear();
+        debug_assert!(matches!(self.state, InsertState::NotStarted { .. }));
+        let (client, sql) = self.state.client_with_sql().unwrap(); // checked above
 
-                if let Some(database) = &client.database {
-                    pairs.append_pair("database", database);
-                }
+        let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
+        let mut pairs = url.query_pairs_mut();
+        pairs.clear();
 
-                pairs.append_pair("query", &sql);
-
-                if client.compression.is_lz4() {
-                    pairs.append_pair("decompress", "1");
-                }
-
-                for (name, value) in &client.options {
-                    pairs.append_pair(name, value);
-                }
-
-                drop(pairs);
-
-                let mut builder = Request::post(url.as_str());
-
-                if let Some(user) = &client.user {
-                    builder = builder.header("X-ClickHouse-User", user);
-                }
-
-                if let Some(password) = &client.password {
-                    builder = builder.header("X-ClickHouse-Key", password);
-                }
-
-                let (sender, body) = RequestBody::chunked();
-
-                let request = builder
-                    .body(body)
-                    .map_err(|err| Error::InvalidParams(Box::new(err)))?;
-
-                let future = client.http.request(request);
-                // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.
-                let handle =
-                    tokio::spawn(
-                        async move { Response::new(future, Compression::None).finish().await },
-                    );
-
-                self.state = InsertState::Active { handle, sender };
-                Ok(())
-            }
-            _ => panic!(
-                "`init_request` cannot be called if the request was already started or terminated"
-            ),
+        if let Some(database) = &client.database {
+            pairs.append_pair("database", database);
         }
+
+        pairs.append_pair("query", sql);
+
+        if client.compression.is_lz4() {
+            pairs.append_pair("decompress", "1");
+        }
+
+        for (name, value) in &client.options {
+            pairs.append_pair(name, value);
+        }
+
+        drop(pairs);
+
+        let mut builder = Request::post(url.as_str());
+
+        if let Some(user) = &client.user {
+            builder = builder.header("X-ClickHouse-User", user);
+        }
+
+        if let Some(password) = &client.password {
+            builder = builder.header("X-ClickHouse-Key", password);
+        }
+
+        let (sender, body) = RequestBody::chunked();
+
+        let request = builder
+            .body(body)
+            .map_err(|err| Error::InvalidParams(Box::new(err)))?;
+
+        let future = client.http.request(request);
+        // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.
+        let handle =
+            tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
+
+        self.state = InsertState::Active { handle, sender };
+        Ok(())
     }
 
     fn abort(&mut self) {
-        if let Some(s) = self.state.sender() {
-            s.abort()
+        if let Some(sender) = self.state.sender() {
+            sender.abort();
         }
     }
 }

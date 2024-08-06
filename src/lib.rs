@@ -207,4 +207,9 @@ impl Client {
     pub fn watch(&self, query: &str) -> watch::Watch {
         watch::Watch::new(self, query)
     }
+
+    /// Used internally to modify the options map of an _already cloned_ [`Client`] instance.
+    pub(crate) fn add_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.options.insert(name.into(), value.into());
+    }
 }

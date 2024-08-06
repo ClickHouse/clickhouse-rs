@@ -49,6 +49,10 @@ async fn fetch_simple_rows(client: &Client, table_name: &str) -> Vec<SimpleRow> 
         .unwrap()
 }
 
+async fn flush_query_log(client: &Client) {
+    client.query("SYSTEM FLUSH LOGS").execute().await.unwrap();
+}
+
 mod compression;
 mod cursor_error;
 mod insert;
