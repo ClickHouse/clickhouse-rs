@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse"
-version = "0.12.0"
+version = "0.12.1"
 description = "Official Rust client for ClickHouse DB"
 keywords = ["clickhouse", "database", "driver", "tokio", "hyper"]
 authors = ["ClickHouse Contributors", "Paul Loyd <pavelko95@gmail.com>"]

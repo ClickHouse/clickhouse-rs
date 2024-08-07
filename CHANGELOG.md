@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+## [0.12.1] - 2024-08-07
 ### Added
 - query/bind: support `Option` in `query.bind(arg)` ([#119], [#120]).
 - client: `Client::with_header()` to provide custom headers ([#98], [#108]).
@@ -306,7 +308,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.6...v0.12.0
 [0.11.6]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.5...v0.11.6
 [0.11.5]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.4...v0.11.5
