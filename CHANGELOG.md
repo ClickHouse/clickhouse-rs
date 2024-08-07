@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - ReleaseDate
 ### Added
 - query/bind: support `Option` in `query.bind(arg)` ([#119], [#120]).
+- client: `Client::with_header()` to provide custom headers ([#98], [#108]).
 
-[#119]: https://github.com/ClickHouse/clickhouse.rs/issues/119
 [#120]: https://github.com/ClickHouse/clickhouse.rs/pull/120
+[#119]: https://github.com/ClickHouse/clickhouse.rs/issues/119
+[#108]: https://github.com/ClickHouse/clickhouse.rs/pull/108
+[#98]: https://github.com/ClickHouse/clickhouse.rs/issues/98
 
 ## [0.12.0] - 2024-07-16
 ### Added
