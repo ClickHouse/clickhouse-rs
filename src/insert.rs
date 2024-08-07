@@ -43,7 +43,7 @@ pub struct Insert<T> {
 
 enum InsertState {
     NotStarted {
-        client: Client,
+        client: Box<Client>,
         sql: String,
     },
     Active {
@@ -123,7 +123,7 @@ impl<T> Insert<T> {
 
         Ok(Self {
             state: InsertState::NotStarted {
-                client: client.clone(),
+                client: Box::new(client.clone()),
                 sql,
             },
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
