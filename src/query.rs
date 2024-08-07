@@ -185,6 +185,12 @@ impl Query {
         let future = self.client.http.request(request);
         Ok(Response::new(future, self.client.compression))
     }
+
+    /// Similar to [`Client::with_option`], but for this particular query only.
+    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.client.add_option(name, value);
+        self
+    }
 }
 
 /// A cursor that emits rows.
