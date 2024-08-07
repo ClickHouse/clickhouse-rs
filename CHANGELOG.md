@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Added
+- query/bind: support `Option` in `query.bind(arg)` ([#119], [#120]).
+
+[#119]: https://github.com/ClickHouse/clickhouse.rs/issues/119
+[#120]: https://github.com/ClickHouse/clickhouse.rs/pull/120
 
 ## [0.12.0] - 2024-07-16
 ### Added
