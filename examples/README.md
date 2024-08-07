@@ -15,6 +15,7 @@ If something is missing, or you found a mistake in one of these examples, please
 
 ### Special cases
 
+- [custom_http_client.rs](custom_http_client.rs) - using a custom Hyper client, tweaking its connection pool settings
 - [custom_http_headers.rs](custom_http_headers.rs) - setting additional HTTP headers to the client, or overriding the generated ones
 - [query_id.rs](query_id.rs) - setting a specific `query_id` on the query level
 - [session_id.rs](session_id.rs) - using the client in the session context with temporary tables
