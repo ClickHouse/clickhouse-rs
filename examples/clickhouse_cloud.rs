@@ -10,15 +10,16 @@ use std::env;
 // - CLICKHOUSE_USER
 // - CLICKHOUSE_PASSWORD
 //
-// Additionally, `rustls-tls` or `native-tls` cargo features should be enabled.
+// Works with either `rustls-tls` or `native-tls` cargo features.
 
-async fn cloud_usage() -> clickhouse::error::Result<()> {
+#[tokio::main]
+async fn main() -> clickhouse::error::Result<()> {
     let table_name = "chrs_cloud";
 
     let client = Client::default()
-        .with_url(read_env_var(CLICKHOUSE_URL))
-        .with_user(read_env_var(CLICKHOUSE_USER))
-        .with_password(read_env_var(CLICKHOUSE_PASSWORD));
+        .with_url(read_env_var("CLICKHOUSE_URL"))
+        .with_user(read_env_var("CLICKHOUSE_USER"))
+        .with_password(read_env_var("CLICKHOUSE_PASSWORD"));
 
     // `wait_end_of_query` is required in this case, as we want these DDLs to be executed
     // on the entire Cloud cluster before we receive the response.
@@ -63,25 +64,11 @@ async fn cloud_usage() -> clickhouse::error::Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> clickhouse::error::Result<()> {
-    if cfg!(any(feature = "rustls-tls", feature = "native-tls")) {
-        cloud_usage().await?;
-    } else {
-        println!("This example requires either `rustls-tls` or `native-tls` cargo features")
-    }
-    Ok(())
-}
-
 #[derive(Debug, Serialize, Deserialize, Row)]
 struct Data {
     id: u32,
     name: String,
 }
-
-const CLICKHOUSE_URL: &str = "CLICKHOUSE_URL";
-const CLICKHOUSE_USER: &str = "CLICKHOUSE_USER";
-const CLICKHOUSE_PASSWORD: &str = "CLICKHOUSE_PASSWORD";
 
 fn read_env_var(key: &str) -> String {
     env::var(key).unwrap_or_else(|_| panic!("{key} env variable should be set"))

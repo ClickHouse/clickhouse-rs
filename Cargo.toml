@@ -40,6 +40,10 @@ harness = false
 name = "mock"
 required-features = ["test-util"]
 
+[[example]]
+name = "clickhouse_cloud"
+required-features = ["rustls-tls"]
+
 [profile.release]
 debug = true
 
