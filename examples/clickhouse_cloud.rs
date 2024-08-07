@@ -84,5 +84,5 @@ const CLICKHOUSE_USER: &str = "CLICKHOUSE_USER";
 const CLICKHOUSE_PASSWORD: &str = "CLICKHOUSE_PASSWORD";
 
 fn read_env_var(key: &str) -> String {
-    env::var(key).expect(&format!("{key} env variable should be set"))
+    env::var(key).unwrap_or_else(|_| panic!("{key} env variable should be set"))
 }
