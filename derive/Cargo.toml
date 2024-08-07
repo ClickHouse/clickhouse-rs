@@ -2,7 +2,9 @@
 name = "clickhouse-derive"
 version = "0.2.0"
 description = "A macro for deriving clickhouse::Row"
-authors = ["Paul Loyd <pavelko95@gmail.com>"]
+authors = ["ClickHouse Contributors", "Paul Loyd <pavelko95@gmail.com>"]
+repository = "https://github.com/ClickHouse/clickhouse-rs"
+homepage = "https://clickhouse.com"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.67.0" # update `Cargo.toml` and CI if changed
