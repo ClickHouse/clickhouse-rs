@@ -86,7 +86,6 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
     unsupported!(
         serialize_map(Option<usize>) -> Result<Impossible>,
         serialize_bytes(&[u8]),
-        serialize_none,
         serialize_unit,
         serialize_unit_struct(&'static str),
     );
@@ -141,7 +140,13 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     #[inline]
     fn serialize_some<T: Serialize + ?Sized>(self, _value: &T) -> Result {
-        Err(SqlSerializerError::Unsupported("serialize_some"))
+        _value.serialize(self)
+    }
+
+    #[inline]
+    fn serialize_none(self) -> std::result::Result<Self::Ok, Self::Error> {
+        self.writer.write_str("NULL")?;
+        Ok(())
     }
 
     #[inline]
@@ -337,11 +342,16 @@ mod tests {
     }
 
     #[test]
+    fn it_writes_options() {
+        assert_eq!(check(None::<i32>), "NULL");
+        assert_eq!(check(Some(32)), "32");
+        assert_eq!(check(Some(vec![42, 43])), "[42,43]");
+    }
+
+    #[test]
     fn it_fails_on_unsupported() {
         let mut out = String::new();
         assert!(write_arg(&mut out, &std::collections::HashMap::<u32, u32>::new()).is_err());
-        assert!(write_arg(&mut out, &None::<u32>).is_err());
-        assert!(write_arg(&mut out, &Some(42)).is_err());
         assert!(write_arg(&mut out, &()).is_err());
 
         #[derive(Serialize)]

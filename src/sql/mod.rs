@@ -185,18 +185,25 @@ mod tests {
     }
 
     #[test]
+    fn option_as_null() {
+        let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a = ?");
+        sql.bind_arg(None::<u32>);
+        assert_eq!(sql.finish().unwrap(), r"SELECT 1 FROM test WHERE a = NULL");
+    }
+
+    #[test]
+    fn option_as_value() {
+        let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a = ?");
+        sql.bind_arg(Some(1u32));
+        assert_eq!(sql.finish().unwrap(), r"SELECT 1 FROM test WHERE a = 1");
+    }
+
+    #[test]
     fn failures() {
         let mut sql = SqlBuilder::new("SELECT 1");
         sql.bind_arg(42);
         let err = sql.finish().unwrap_err();
         assert!(err.to_string().contains("all arguments are already bound"));
-
-        let mut sql = SqlBuilder::new("SELECT ?");
-        sql.bind_arg(None::<u32>);
-        let err = sql.finish().unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("invalid argument: serialize_none is unsupported"));
 
         let mut sql = SqlBuilder::new("SELECT ?fields");
         sql.bind_fields::<Unnamed>();
