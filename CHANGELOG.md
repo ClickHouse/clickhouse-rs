@@ -10,7 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - query/bind: support `Option` in `query.bind(arg)` ([#119], [#120]).
 - client: `Client::with_header()` to provide custom headers ([#98], [#108]).
+- query: added `Query::with_option()` similar to `Client::with_option()` ([#123]).
+- insert: added `Insert::with_option()` similar to `Client::with_option()` ([#123]).
+- inserter: added `Inserter::with_option()` similar to `Client::with_option()` ([#123]).
 
+### Changed
+- insert: the outgoing request is now created after the first `Insert::write` call instead of `Insert::new` ([#123]).
+
+[#123]: https://github.com/ClickHouse/clickhouse.rs/pull/123
 [#120]: https://github.com/ClickHouse/clickhouse.rs/pull/120
 [#119]: https://github.com/ClickHouse/clickhouse.rs/issues/119
 [#108]: https://github.com/ClickHouse/clickhouse.rs/pull/108
