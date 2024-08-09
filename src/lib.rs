@@ -8,15 +8,12 @@ extern crate static_assertions;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 pub use clickhouse_derive::Row;
-use hyper::header::USER_AGENT;
 #[cfg(feature = "tls")]
 use hyper_tls::HttpsConnector;
 use hyper_util::{
     client::legacy::{connect::HttpConnector, Client as HyperClient},
     rt::TokioExecutor,
 };
-
-use crate::user_agent::get_user_agent;
 
 pub use self::{compression::Compression, row::Row};
 use self::{error::Result, http_client::HttpClient};
@@ -36,6 +33,7 @@ pub mod watch;
 mod buflist;
 mod compression;
 mod cursor;
+mod headers;
 mod http_client;
 mod request_body;
 mod response;
@@ -43,7 +41,6 @@ mod row;
 mod rowbinary;
 #[cfg(feature = "inserter")]
 mod ticks;
-mod user_agent;
 
 const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 
@@ -63,6 +60,7 @@ pub struct Client {
     compression: Compression,
     options: HashMap<String, String>,
     headers: HashMap<String, String>,
+    app_name: Option<String>,
 }
 
 impl Default for Client {
@@ -99,8 +97,6 @@ impl Client {
     ///
     /// See `HttpClient` for details.
     pub fn with_http_client(client: impl HttpClient) -> Self {
-        let mut headers = HashMap::<String, String>::new();
-        headers.insert(USER_AGENT.to_string(), get_user_agent(None));
         Self {
             http: Arc::new(client),
             url: String::new(),
@@ -109,7 +105,8 @@ impl Client {
             password: None,
             compression: Compression::default(),
             options: HashMap::new(),
-            headers,
+            headers: HashMap::new(),
+            app_name: None,
         }
     }
 
@@ -206,9 +203,8 @@ impl Client {
     /// # use clickhouse::Client;
     /// let client = Client::default().with_app_name("MyApplication");
     /// ```
-    pub fn with_app_name(mut self, app_name: &str) -> Self {
-        self.headers
-            .insert(USER_AGENT.to_string(), get_user_agent(Some(app_name)));
+    pub fn with_app_name(mut self, app_name: impl Into<String>) -> Self {
+        self.app_name = Some(app_name.into());
         self
     }
 

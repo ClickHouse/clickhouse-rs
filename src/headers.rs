@@ -1,6 +1,9 @@
+use hyper::header::USER_AGENT;
+use hyper::http::request::Builder;
+use std::collections::HashMap;
 use std::env;
 
-pub(crate) fn get_user_agent(app_name: Option<&str>) -> String {
+fn get_user_agent(app_name: Option<&str>) -> String {
     // See https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates
     let pkg_version = env!("CARGO_PKG_VERSION");
     let rust_version = env!("CARGO_PKG_RUST_VERSION");
@@ -11,4 +14,16 @@ pub(crate) fn get_user_agent(app_name: Option<&str>) -> String {
     } else {
         default_agent
     }
+}
+
+pub(crate) fn with_request_headers(
+    mut builder: Builder,
+    headers: &HashMap<String, String>,
+    app_name: Option<&str>,
+) -> Builder {
+    for (name, value) in headers {
+        builder = builder.header(name, value);
+    }
+    builder = builder.header(USER_AGENT.to_string(), get_user_agent(app_name));
+    builder
 }
