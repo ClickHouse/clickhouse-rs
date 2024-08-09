@@ -7,6 +7,8 @@ extern crate static_assertions;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+pub use clickhouse_derive::Row;
+use hyper::header::USER_AGENT;
 #[cfg(feature = "tls")]
 use hyper_tls::HttpsConnector;
 use hyper_util::{
@@ -14,7 +16,7 @@ use hyper_util::{
     rt::TokioExecutor,
 };
 
-pub use clickhouse_derive::Row;
+use crate::user_agent::get_user_agent;
 
 pub use self::{compression::Compression, row::Row};
 use self::{error::Result, http_client::HttpClient};
@@ -41,6 +43,7 @@ mod row;
 mod rowbinary;
 #[cfg(feature = "inserter")]
 mod ticks;
+mod user_agent;
 
 const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 
@@ -96,6 +99,8 @@ impl Client {
     ///
     /// See `HttpClient` for details.
     pub fn with_http_client(client: impl HttpClient) -> Self {
+        let mut headers = HashMap::<String, String>::new();
+        headers.insert(USER_AGENT.to_string(), get_user_agent(None));
         Self {
             http: Arc::new(client),
             url: String::new(),
@@ -104,7 +109,7 @@ impl Client {
             password: None,
             compression: Compression::default(),
             options: HashMap::new(),
-            headers: HashMap::new(),
+            headers,
         }
     }
 
@@ -191,6 +196,19 @@ impl Client {
     /// ```
     pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    /// Specifies the application name that will be included in the default User-Agent header.
+    ///
+    /// # Examples
+    /// ```
+    /// # use clickhouse::Client;
+    /// let client = Client::default().with_app_name("MyApplication");
+    /// ```
+    pub fn with_app_name(mut self, app_name: &str) -> Self {
+        self.headers
+            .insert(USER_AGENT.to_string(), get_user_agent(Some(app_name)));
         self
     }
 
