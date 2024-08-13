@@ -219,6 +219,12 @@ impl Row {
     }
 }
 
+impl Default for Row {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn random_str() -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
