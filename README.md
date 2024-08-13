@@ -251,7 +251,17 @@ See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/master/examples)
     }
     ```
     </details>
-* `FixedString(_)` isn't [supported yet](https://github.com/ClickHouse/clickhouse-rs/issues/49).
+* `FixedString(N)` is supported as an array of bytes, e.g. `[u8; N]`.
+    <details>
+    <summary>Example</summary>
+  
+    ```rust,ignore
+    #[derive(Row, Debug, Serialize, Deserialize)]
+    struct MyRow {
+        fixed_str: [u8; 16], // FixedString(16)
+    }
+    ```
+    </details>
 * `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/).
     <details>
     <summary>Example</summary>
@@ -357,7 +367,7 @@ See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/master/examples)
     }
     ```
     </details>
-* `Typle(A, B, ...)` maps to/from `(A, B, ...)` or a newtype around it.
+* `Tuple(A, B, ...)` maps to/from `(A, B, ...)` or a newtype around it.
 * `Array(_)` maps to/from any slice, e.g. `Vec<_>`, `&[_]`. Newtypes are also supported.
 * `Map(K, V)` behaves like `Array((K, V))`.
 * `LowCardinality(_)` is supported seamlessly.
@@ -389,6 +399,10 @@ See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/master/examples)
     ```
     </details>
 * `JSON` and `Geo` aren't supported for now.
+
+See also the additional examples:
+
+* [Simpler ClickHouse data types](examples/data_types_derive_simple.rs)
 
 ## Mocking
 The crate provides utils for mocking CH server and testing DDL, `SELECT`, `INSERT` and `WATCH` queries.

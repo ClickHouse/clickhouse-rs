@@ -14,6 +14,10 @@ If something is missing, or you found a mistake in one of these examples, please
 - [clickhouse_cloud.rs](clickhouse_cloud.rs) - using the client with ClickHouse Cloud, highlighting a few relevant settings (`wait_end_of_query`, `select_sequential_consistency`). Cargo features: requires `rustls-tls`; the code also works with `native-tls`.
 - [clickhouse_settings.rs](clickhouse_settings.rs) - applying various ClickHouse settings on the query level
 
+### Data types
+
+- [data_types_derive_simple.rs](data_types_derive_simple.rs) - deriving simpler ClickHouse data types in a struct. Required cargo features: `time`, `uuid`.
+
 ### Special cases
 
 - [custom_http_client.rs](custom_http_client.rs) - using a custom Hyper client, tweaking its connection pool settings
