@@ -2,6 +2,8 @@ use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Durat
 
 use bytes::{Bytes, BytesMut};
 use hyper::{self, Request};
+use lazy_static::lazy_static;
+use prometheus::{CounterVec, register_counter_vec};
 use replace_with::replace_with_or_abort;
 use serde::Serialize;
 use tokio::{
@@ -17,6 +19,14 @@ use crate::{
     row::{self, Row},
     rowbinary, Client, Compression,
 };
+
+lazy_static! {
+    static ref CLICKHOUSE_SEND_COUNT: CounterVec = register_counter_vec!(
+        "clickhouse_send_count",
+        "clickhouse_send_count.",
+        &["type"]
+    ).unwrap();
+}
 
 const BUFFER_SIZE: usize = 5 * 1024 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extra reallocations
@@ -267,7 +277,7 @@ impl<T> Insert<T> {
 
         // TODO: is it required to wait the handle in the case of timeout?
         let res = self.wait_handle().await;
-
+        CLICKHOUSE_SEND_COUNT.with_label_values(&["real"]).inc();
         if is_timed_out {
             Err(Error::TimedOut)
         } else {
