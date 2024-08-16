@@ -22,9 +22,9 @@ use crate::{
 
 
 lazy_static! {
-    static ref CLICKHOUSE_SEND_COUNT: CounterVec = register_counter_vec!(
-        "clickhouse_send_count",
-        "clickhouse_send_count.",
+    static ref SEND_CHUNK_COUNT: CounterVec = register_counter_vec!(
+        "send_trunk_count",
+        "send_trunk_count.",
         &["type"]
     ).unwrap();
 }
@@ -264,7 +264,7 @@ impl<T> Insert<T> {
         let chunk = self.take_and_prepare_chunk()?;
 
         let sender = self.state.sender().unwrap(); // checked above
-        CLICKHOUSE_SEND_COUNT.with_label_values(&["real"]).inc();
+        SEND_CHUNK_COUNT.with_label_values(&["real"]).inc();
         let is_timed_out = match timeout!(self, send_timeout, sender.send(chunk)) {
             Some(true) => return Ok(()),
             Some(false) => false, // an actual error will be returned from `wait_handle`

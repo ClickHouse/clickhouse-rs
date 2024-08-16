@@ -16,6 +16,8 @@ use hyper::{
     StatusCode,
 };
 use hyper_util::client::legacy::ResponseFuture;
+use lazy_static::lazy_static;
+use prometheus::{CounterVec, register_counter_vec};
 
 #[cfg(feature = "lz4")]
 use crate::compression::lz4::Lz4Decoder;
@@ -34,10 +36,19 @@ pub(crate) enum Response {
     Loading(Chunks),
 }
 
+lazy_static! {
+    static ref RESPONSE_COUNT: CounterVec = register_counter_vec!(
+        "response_count",
+        "response_count.",
+        &["type"]
+    ).unwrap();
+}
+
 impl Response {
     pub(crate) fn new(response: ResponseFuture, compression: Compression) -> Self {
         Self::Waiting(Box::pin(async move {
             let response = response.await?;
+            RESPONSE_COUNT.with_label_values(&["ok"]).inc();
             let status = response.status();
             let body = response.into_body();
 
