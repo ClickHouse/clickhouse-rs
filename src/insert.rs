@@ -28,7 +28,7 @@ lazy_static! {
         &["type"]
     ).unwrap();
 }
-const BUFFER_SIZE: usize = 20 * 1024 * 1024;
+const BUFFER_SIZE: usize = 1 * 1024 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extra reallocations
 
 /// Performs one `INSERT`.
@@ -264,7 +264,7 @@ impl<T> Insert<T> {
         let chunk = self.take_and_prepare_chunk()?;
 
         let sender = self.state.sender().unwrap(); // checked above
-
+        CLICKHOUSE_SEND_COUNT.with_label_values(&["real"]).inc();
         let is_timed_out = match timeout!(self, send_timeout, sender.send(chunk)) {
             Some(true) => return Ok(()),
             Some(false) => false, // an actual error will be returned from `wait_handle`
@@ -277,7 +277,7 @@ impl<T> Insert<T> {
 
         // TODO: is it required to wait the handle in the case of timeout?
         let res = self.wait_handle().await;
-        CLICKHOUSE_SEND_COUNT.with_label_values(&["real"]).inc();
+
         if is_timed_out {
             Err(Error::TimedOut)
         } else {
