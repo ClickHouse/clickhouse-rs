@@ -20,6 +20,7 @@ use crate::{
     rowbinary, Client, Compression,
 };
 
+const BUFFER_SIZE: usize = 20 * 1024 * 1024;
 lazy_static! {
     static ref CLICKHOUSE_SEND_COUNT: CounterVec = register_counter_vec!(
         "clickhouse_send_count",
