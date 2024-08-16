@@ -20,7 +20,7 @@ use crate::{
     rowbinary, Client, Compression,
 };
 
-const BUFFER_SIZE: usize = 20 * 1024 * 1024;
+
 lazy_static! {
     static ref CLICKHOUSE_SEND_COUNT: CounterVec = register_counter_vec!(
         "clickhouse_send_count",
@@ -28,8 +28,7 @@ lazy_static! {
         &["type"]
     ).unwrap();
 }
-
-const BUFFER_SIZE: usize = 5 * 1024 * 1024;
+const BUFFER_SIZE: usize = 20 * 1024 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extra reallocations
 
 /// Performs one `INSERT`.
