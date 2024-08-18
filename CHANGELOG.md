@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Changed
+- insert: increase max size of frames to improve throughput ([#130]).
+
+[#130]: https://github.com/ClickHouse/clickhouse-rs/issues/130
 
 ## [0.12.1] - 2024-08-07
 ### Added

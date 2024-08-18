@@ -4,6 +4,7 @@ use bytes::{Bytes, BytesMut};
 use hyper::{self, Request};
 use replace_with::replace_with_or_abort;
 use serde::Serialize;
+use static_assertions::const_assert;
 use tokio::{
     task::JoinHandle,
     time::{Instant, Sleep},
@@ -18,8 +19,13 @@ use crate::{
     rowbinary, Client, Compression,
 };
 
-const BUFFER_SIZE: usize = 128 * 1024;
-const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extra reallocations
+// The desired max frame size.
+const BUFFER_SIZE: usize = 256 * 1024;
+// Threshold to send a chunk. Should be slightly less than `BUFFER_SIZE`
+// to avoid extra reallocations in case of a big last row.
+const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 2048;
+
+const_assert!(BUFFER_SIZE.is_power_of_two()); // to use the whole buffer's capacity
 
 /// Performs one `INSERT`.
 ///
