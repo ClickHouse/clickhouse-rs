@@ -4,6 +4,7 @@ use std::{
 };
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use cityhash_rs::cityhash_102_128;
 use futures::{ready, stream::Stream};
 use lz4_flex::block;
 
@@ -152,8 +153,8 @@ impl<S> Lz4Decoder<S> {
 }
 
 fn calc_checksum(buffer: &[u8]) -> u128 {
-    let hash = clickhouse_rs_cityhash_sys::city_hash_128(buffer);
-    u128::from(hash.hi) << 64 | u128::from(hash.lo)
+    let hash = cityhash_102_128(buffer);
+    hash << 64 | hash >> 64
 }
 
 fn decompress(compressed: &[u8], uncompressed: &mut [u8]) -> Result<usize> {
