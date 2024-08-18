@@ -63,18 +63,21 @@ impl InsertState {
             _ => None,
         }
     }
+
     fn handle(&mut self) -> Option<&mut JoinHandle<Result<()>>> {
         match self {
             InsertState::Active { handle, .. } | InsertState::Terminated { handle } => Some(handle),
             _ => None,
         }
     }
+
     fn client_with_sql(&self) -> Option<(&Client, &str)> {
         match self {
             InsertState::NotStarted { client, sql } => Some((client, sql)),
             _ => None,
         }
     }
+
     fn terminated(&mut self) {
         debug_assert!(matches!(self, InsertState::Active { .. }));
         replace_with_or_abort(self, |_self| match _self {
@@ -82,6 +85,7 @@ impl InsertState {
             _ => unreachable!(),
         });
     }
+
     fn with_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
         assert!(matches!(self, InsertState::NotStarted { .. }));
         replace_with_or_abort(self, |_self| match _self {
@@ -159,9 +163,11 @@ impl<T> Insert<T> {
         self
     }
 
-    /// Similar to [`Client::with_option`], but for this particular INSERT statement only.
+    /// Similar to [`Client::with_option`], but for this particular INSERT
+    /// statement only.
+    ///
     /// # Panics
-    /// If called after the insert request is started, e.g., after [`Insert::write`].
+    /// If called after the request is started, e.g., after [`Insert::write`].
     #[track_caller]
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.state.with_option(name, value);
