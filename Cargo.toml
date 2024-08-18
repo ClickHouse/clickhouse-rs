@@ -95,4 +95,4 @@ serde_bytes = "0.11.4"
 serde_repr = "0.1.7"
 uuid = { version = "1", features = ["v4"] }
 time = { version = "0.3.17", features = ["macros", "rand"] }
-rand = "0.8.5"
+rand = { version = "0.8.5", features = ["small_rng"] }

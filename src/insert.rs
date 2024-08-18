@@ -4,7 +4,6 @@ use bytes::{Bytes, BytesMut};
 use hyper::{self, Request};
 use replace_with::replace_with_or_abort;
 use serde::Serialize;
-use static_assertions::const_assert;
 use tokio::{
     task::JoinHandle,
     time::{Instant, Sleep},

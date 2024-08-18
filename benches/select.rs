@@ -17,18 +17,36 @@ mod common;
 
 async fn serve(
     request: Request<Incoming>,
+    chunk: Bytes,
 ) -> Response<impl Body<Data = Bytes, Error = Infallible>> {
     common::skip_incoming(request).await;
 
-    let chunk = Bytes::from_static(&[15; 128 * 1024]);
     let stream = stream::repeat(chunk).map(|chunk| Ok(Frame::data(chunk)));
-
     Response::new(StreamBody::new(stream))
+}
+
+fn prepare_chunk() -> Bytes {
+    use rand::{distributions::Standard, rngs::SmallRng, Rng, SeedableRng};
+
+    // Generate random data to avoid _real_ compression.
+    // TODO: It would be more useful to generate real data.
+    let mut rng = SmallRng::seed_from_u64(0xBA5E_FEED);
+    let raw: Vec<_> = (&mut rng).sample_iter(Standard).take(128 * 1024).collect();
+
+    // If the feature is enabled, compress the data even if we use the `None`
+    // compression. The compression ratio is low anyway due to random data.
+    #[cfg(feature = "lz4")]
+    let chunk = clickhouse::_priv::lz4_compress(&raw, Compression::Lz4).unwrap();
+    #[cfg(not(feature = "lz4"))]
+    let chunk = Bytes::from(raw);
+
+    chunk
 }
 
 fn select(c: &mut Criterion) {
     let addr = "127.0.0.1:6543".parse().unwrap();
-    let _server = common::start_server(addr, serve);
+    let chunk = prepare_chunk();
+    let _server = common::start_server(addr, move |req| serve(req, chunk.clone()));
 
     #[allow(dead_code)]
     #[derive(Debug, Row, Deserialize)]
@@ -53,12 +71,24 @@ fn select(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("select");
     group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
-    group.bench_function("select", |b| {
+    group.bench_function("no compression", |b| {
         b.iter_custom(|iters| {
             let rt = Runtime::new().unwrap();
             let client = Client::default()
                 .with_url(format!("http://{addr}"))
                 .with_compression(Compression::None);
+            let start = Instant::now();
+            rt.block_on(run(client, iters)).unwrap();
+            start.elapsed()
+        })
+    });
+    #[cfg(feature = "lz4")]
+    group.bench_function("lz4", |b| {
+        b.iter_custom(|iters| {
+            let rt = Runtime::new().unwrap();
+            let client = Client::default()
+                .with_url(format!("http://{addr}"))
+                .with_compression(Compression::Lz4);
             let start = Instant::now();
             rt.block_on(run(client, iters)).unwrap();
             start.elapsed()
