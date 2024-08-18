@@ -115,7 +115,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
 
     #[inline]
     fn deserialize_char<V: Visitor<'de>>(self, _: V) -> Result<V::Value> {
-        todo!();
+        panic!("character types are unsupported: `char`");
     }
 
     #[inline]
@@ -160,11 +160,11 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     #[inline]
     fn deserialize_enum<V: Visitor<'de>>(
         self,
-        _enum: &'static str,
+        name: &'static str,
         _variants: &'static [&'static str],
         _visitor: V,
     ) -> Result<V::Value> {
-        todo!();
+        panic!("enums are unsupported: `{name}`");
     }
 
     #[inline]
@@ -220,7 +220,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
 
     #[inline]
     fn deserialize_map<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
-        todo!();
+        panic!("maps are unsupported, use `Vec<(A, B)>` instead");
     }
 
     #[inline]
@@ -235,7 +235,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
 
     #[inline]
     fn deserialize_identifier<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
-        todo!();
+        panic!("identifiers are unsupported");
     }
 
     #[inline]
@@ -250,25 +250,25 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     #[inline]
     fn deserialize_unit_struct<V: Visitor<'de>>(
         self,
-        _name: &'static str,
+        name: &'static str,
         _visitor: V,
     ) -> Result<V::Value> {
-        todo!();
+        panic!("unit types are unsupported: `{name}`");
     }
 
     #[inline]
     fn deserialize_tuple_struct<V: Visitor<'de>>(
         self,
-        _name: &'static str,
+        name: &'static str,
         _len: usize,
         _visitor: V,
     ) -> Result<V::Value> {
-        todo!();
+        panic!("tuple struct types are unsupported: `{name}`");
     }
 
     #[inline]
     fn deserialize_ignored_any<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
-        todo!();
+        panic!("ignored types are unsupported");
     }
 
     #[inline]

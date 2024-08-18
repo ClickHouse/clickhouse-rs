@@ -73,7 +73,7 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
 
     #[inline]
     fn serialize_char(self, _v: char) -> Result<()> {
-        todo!();
+        panic!("character types are unsupported: `char`");
     }
 
     #[inline]
@@ -104,22 +104,22 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
 
     #[inline]
     fn serialize_unit(self) -> Result<()> {
-        todo!();
+        panic!("unit types are unsupported: `()`");
     }
 
     #[inline]
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<()> {
-        todo!();
+    fn serialize_unit_struct(self, name: &'static str) -> Result<()> {
+        panic!("unit types are unsupported: `{name}`");
     }
 
     #[inline]
     fn serialize_unit_variant(
         self,
-        _name: &'static str,
+        name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
+        variant: &'static str,
     ) -> Result<()> {
-        todo!();
+        panic!("unit variant types are unsupported: `{name}::{variant}`");
     }
 
     #[inline]
@@ -134,12 +134,12 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     #[inline]
     fn serialize_newtype_variant<T: Serialize + ?Sized>(
         self,
-        _name: &'static str,
+        name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
+        variant: &'static str,
         _value: &T,
     ) -> Result<()> {
-        todo!();
+        panic!("newtype variant types are unsupported: `{name}::{variant}`");
     }
 
     #[inline]
@@ -157,26 +157,26 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     #[inline]
     fn serialize_tuple_struct(
         self,
-        _name: &'static str,
+        name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleStruct> {
-        todo!();
+        panic!("tuple struct types are unsupported: `{name}`");
     }
 
     #[inline]
     fn serialize_tuple_variant(
         self,
-        _name: &'static str,
+        name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
+        variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        todo!();
+        panic!("tuple variant types are unsupported: `{name}::{variant}`");
     }
 
     #[inline]
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
-        todo!();
+        panic!("maps are unsupported, use `Vec<(A, B)>` instead");
     }
 
     #[inline]
@@ -187,12 +187,12 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     #[inline]
     fn serialize_struct_variant(
         self,
-        _name: &'static str,
+        name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
+        variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        todo!();
+        panic!("struct variant types are unsupported: `{name}::{variant}`");
     }
 
     #[inline]
