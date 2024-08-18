@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - ReleaseDate
 ### Changed
 - insert: increase max size of frames to improve throughput ([#130]).
+- compression: replace `lz4` sys binding with `lz4-flex` (pure Rust).
 
 [#130]: https://github.com/ClickHouse/clickhouse-rs/issues/130
 

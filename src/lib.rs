@@ -234,10 +234,7 @@ impl Client {
 #[doc(hidden)]
 pub mod _priv {
     #[cfg(feature = "lz4")]
-    pub fn lz4_compress(
-        uncompressed: &[u8],
-        mode: super::Compression,
-    ) -> super::Result<bytes::Bytes> {
-        crate::compression::lz4::compress(uncompressed, mode)
+    pub fn lz4_compress(uncompressed: &[u8]) -> super::Result<bytes::Bytes> {
+        crate::compression::lz4::compress(uncompressed)
     }
 }

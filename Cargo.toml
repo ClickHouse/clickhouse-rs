@@ -55,7 +55,7 @@ inserter = ["dep:quanta"]
 watch = ["dep:sha-1", "dep:serde_json", "serde/derive"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
-lz4 = ["dep:lz4", "dep:clickhouse-rs-cityhash-sys"]
+lz4 = ["dep:lz4_flex", "dep:clickhouse-rs-cityhash-sys"]
 native-tls = ["dep:hyper-tls"]
 rustls-tls = ["dep:hyper-rustls"]
 
@@ -78,7 +78,7 @@ static_assertions = "1.1"
 sealed = "0.5"
 sha-1 = { version = "0.10", optional = true }
 serde_json = { version = "1.0.68", optional = true }
-lz4 = { version = "1.23.3", optional = true }
+lz4_flex = { version = "0.11.3", default-features = false, features = ["std"], optional = true }
 clickhouse-rs-cityhash-sys = { version = "0.1.2", optional = true }
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }

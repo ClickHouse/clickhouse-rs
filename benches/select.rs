@@ -36,7 +36,7 @@ fn prepare_chunk() -> Bytes {
     // If the feature is enabled, compress the data even if we use the `None`
     // compression. The compression ratio is low anyway due to random data.
     #[cfg(feature = "lz4")]
-    let chunk = clickhouse::_priv::lz4_compress(&raw, Compression::Lz4).unwrap();
+    let chunk = clickhouse::_priv::lz4_compress(&raw).unwrap();
     #[cfg(not(feature = "lz4"))]
     let chunk = Bytes::from(raw);
 

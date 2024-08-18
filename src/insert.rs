@@ -310,7 +310,7 @@ impl<T> Insert<T> {
     #[cfg(feature = "lz4")]
     fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
         Ok(if self.compression.is_lz4() {
-            let compressed = crate::compression::lz4::compress(&self.buffer, self.compression)?;
+            let compressed = crate::compression::lz4::compress(&self.buffer)?;
             self.buffer.clear();
             compressed
         } else {
