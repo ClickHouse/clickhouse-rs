@@ -4,7 +4,6 @@ use bytes::{Bytes, BytesMut};
 use hyper::{self, Request};
 use replace_with::replace_with_or_abort;
 use serde::Serialize;
-use static_assertions::const_assert;
 use tokio::{
     task::JoinHandle,
     time::{Instant, Sleep},
@@ -311,7 +310,7 @@ impl<T> Insert<T> {
     #[cfg(feature = "lz4")]
     fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
         Ok(if self.compression.is_lz4() {
-            let compressed = crate::compression::lz4::compress(&self.buffer, self.compression)?;
+            let compressed = crate::compression::lz4::compress(&self.buffer)?;
             self.buffer.clear();
             compressed
         } else {

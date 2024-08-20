@@ -1,6 +1,6 @@
 # clickhouse-rs
 
-A typed client for ClickHouse.
+Official pure Rust typed client for ClickHouse DB.
 
 [![Crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]

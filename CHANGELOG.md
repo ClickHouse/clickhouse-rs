@@ -8,9 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 ### Changed
+- Now this crate is pure Rust, no more C/C++ dependencies.
 - insert: increase max size of frames to improve throughput ([#130]).
+- compression: replace `lz4` sys binding with `lz4-flex` (pure Rust).
+- compression: replace `clickhouse-rs-cityhash-sys` sys binding with `cityhash-rs` (pure Rust) ([#107]).
+
+### Deprecated
+- compression: `Compression::Lz4Hc` is deprecated and becomes an alias to `Compression::Lz4`.
 
 [#130]: https://github.com/ClickHouse/clickhouse-rs/issues/130
+[#107]: https://github.com/ClickHouse/clickhouse-rs/issues/107
 
 ## [0.12.1] - 2024-08-07
 ### Added
