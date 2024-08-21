@@ -12,7 +12,7 @@ Official pure Rust typed client for ClickHouse DB.
 [docs-badge]: https://docs.rs/clickhouse/badge.svg
 [docs-url]: https://docs.rs/clickhouse
 [license-badge]: https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg
-[license-url]: https://github.com/ClickHouse/clickhouse-rs/blob/master/LICENSE-MIT
+[license-url]: https://github.com/ClickHouse/clickhouse-rs/blob/main/LICENSE-MIT
 [actions-badge]: https://github.com/ClickHouse/clickhouse-rs/actions/workflows/ci.yml/badge.svg
 [actions-url]: https://github.com/ClickHouse/clickhouse-rs/actions/workflows/ci.yml
 
@@ -213,14 +213,14 @@ println!("live view updated: version={:?}", cursor.next().await?);
 
 </details>
 
-See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/master/examples).
+See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples).
 
 ## Feature Flags
 * `lz4` (enabled by default) — enables `Compression::Lz4` and `Compression::Lz4Hc(_)` variants. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
 * `native-tls` — supports urls with the `HTTPS` schema via `hyper-tls`, which links against OpenSSL.
 * `rustls-tls` — supports urls with the `HTTPS` schema via `hyper-rustls`, which does not link against OpenSSL.
 * `inserter` — enables `client.inserter()`.
-* `test-util` — adds mocks. See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/master/examples/mock.rs). Use it only in `dev-dependencies`.
+* `test-util` — adds mocks. See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs). Use it only in `dev-dependencies`.
 * `watch` — enables `client.watch` functionality. See the corresponding section for details.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
@@ -395,4 +395,4 @@ The crate provides utils for mocking CH server and testing DDL, `SELECT`, `INSER
 
 The functionality can be enabled with the `test-util` feature. Use it **only** in dev-dependencies.
 
-See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/master/examples/mock.rs).
+See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs).
