@@ -196,12 +196,18 @@ impl Client {
         self
     }
 
-    /// Specifies the application name that will be included in the default User-Agent header.
+    /// Specifies the name that will be included in the default User-Agent header.
+    /// This could be useful for the applications built on top of this client.
     ///
     /// # Examples
     /// ```
     /// # use clickhouse::Client;
     /// let client = Client::default().with_app_name("MyApplication");
+    /// ```
+    /// # Sample User-Agent header
+    ///
+    /// ```plaintext
+    /// MyApplication clickhouse-rs/0.1.0 (lv:rust/1.55.0, os:linux)
     /// ```
     pub fn with_app_name(mut self, app_name: impl Into<String>) -> Self {
         self.app_name = Some(app_name.into());

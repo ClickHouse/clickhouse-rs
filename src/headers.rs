@@ -1,14 +1,14 @@
 use hyper::header::USER_AGENT;
 use hyper::http::request::Builder;
 use std::collections::HashMap;
-use std::env;
+
+// See https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates
+const PKG_VER: &str = env!("CARGO_PKG_VERSION", "unknown");
+const RUST_VER: &str = env!("CARGO_PKG_RUST_VERSION", "unknown");
+const OS: &str = std::env::consts::OS;
 
 fn get_user_agent(app_name: Option<&str>) -> String {
-    // See https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates
-    let pkg_version = env!("CARGO_PKG_VERSION");
-    let rust_version = env!("CARGO_PKG_RUST_VERSION");
-    let os = env::consts::OS;
-    let default_agent = format!("clickhouse-rs/{pkg_version} (lv:rust/{rust_version}, os:{os})");
+    let default_agent = format!("clickhouse-rs/{PKG_VER} (lv:rust/{RUST_VER}, os:{OS})");
     if let Some(app_name) = app_name {
         format!("{app_name} {default_agent}")
     } else {
