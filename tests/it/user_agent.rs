@@ -15,11 +15,22 @@ async fn default_user_agent() {
 }
 
 #[tokio::test]
-async fn user_agent_with_app_name() {
-    let table_name = "chrs_user_agent_with_app_name";
-    let client = prepare_database!().with_app_name("my-app");
+async fn user_agent_with_single_product_info() {
+    let table_name = "chrs_user_agent_with_single_product_info";
+    let client = prepare_database!().with_product_info("my-app", "0.1.0");
     let expected_user_agent =
-        format!("my-app clickhouse-rs/{PKG_VER} (lv:rust/{RUST_VER}, os:{OS})");
+        format!("my-app/0.1.0 clickhouse-rs/{PKG_VER} (lv:rust/{RUST_VER}, os:{OS})");
+    assert_queries_user_agents(&client, table_name, &expected_user_agent).await;
+}
+
+#[tokio::test]
+async fn user_agent_with_multiple_product_info() {
+    let table_name = "chrs_user_agent_with_multiple_product_info";
+    let client = prepare_database!()
+        .with_product_info("my-datasource", "2.5.0")
+        .with_product_info("my-app", "0.1.0");
+    let expected_user_agent =
+        format!("my-app/0.1.0 my-datasource/2.5.0 clickhouse-rs/{PKG_VER} (lv:rust/{RUST_VER}, os:{OS})");
     assert_queries_user_agents(&client, table_name, &expected_user_agent).await;
 }
 

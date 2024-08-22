@@ -6,7 +6,7 @@
 extern crate static_assertions;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
-
+use std::fmt::Display;
 pub use clickhouse_derive::Row;
 #[cfg(feature = "tls")]
 use hyper_tls::HttpsConnector;
@@ -60,7 +60,19 @@ pub struct Client {
     compression: Compression,
     options: HashMap<String, String>,
     headers: HashMap<String, String>,
-    app_name: Option<String>,
+    products_info: Vec<ProductInfo>,
+}
+
+#[derive(Clone)]
+pub struct ProductInfo {
+    pub name: String,
+    pub version: String,
+}
+
+impl Display for ProductInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", format!("{}/{}", self.name, self.version))
+    }
 }
 
 impl Default for Client {
@@ -106,7 +118,7 @@ impl Client {
             compression: Compression::default(),
             options: HashMap::new(),
             headers: HashMap::new(),
-            app_name: None,
+            products_info: Vec::default(),
         }
     }
 
@@ -196,21 +208,52 @@ impl Client {
         self
     }
 
-    /// Specifies the name that will be included in the default User-Agent header.
+    /// Specifies the product name and version that will be included
+    /// in the default User-Agent header. Multiple products are supported.
     /// This could be useful for the applications built on top of this client.
     ///
     /// # Examples
-    /// ```
-    /// # use clickhouse::Client;
-    /// let client = Client::default().with_app_name("MyApplication");
-    /// ```
-    /// # Sample User-Agent header
+    ///
+    /// Sample default User-Agent header:
     ///
     /// ```plaintext
-    /// MyApplication clickhouse-rs/0.1.0 (lv:rust/1.55.0, os:linux)
+    /// clickhouse-rs/0.12.2 (lv:rust/1.67.0, os:macos)
     /// ```
-    pub fn with_app_name(mut self, app_name: impl Into<String>) -> Self {
-        self.app_name = Some(app_name.into());
+    ///
+    /// Sample User-Agent with a single product information:
+    ///
+    /// ```
+    /// # use clickhouse::Client;
+    /// let client = Client::default().with_product_info("MyDataSource", "v1.0.0");
+    /// ```
+    ///
+    /// ```plaintext
+    /// MyDataSource/v1.0.0 clickhouse-rs/0.12.2 (lv:rust/1.67.0, os:macos)
+    /// ```
+    ///
+    /// Sample User-Agent with multiple products information
+    /// (NB: the products are added in the reverse order of [`Client::with_product_info`] calls,
+    /// which could be useful to add higher abstraction layers first):
+    ///
+    /// ```
+    /// # use clickhouse::Client;
+    /// let client = Client::default()
+    ///     .with_product_info("MyDataSource", "v1.0.0")
+    ///     .with_product_info("MyApp", "0.0.1");
+    /// ```
+    ///
+    /// ```plaintext
+    /// MyApp/0.0.1 MyDataSource/v1.0.0 clickhouse-rs/0.12.2 (lv:rust/1.67.0, os:macos)
+    /// ```
+    pub fn with_product_info(
+        mut self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        self.products_info.push(ProductInfo{
+            name: product_name.into(),
+            version: product_version.into(),
+        });
         self
     }
 

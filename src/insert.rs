@@ -352,7 +352,7 @@ impl<T> Insert<T> {
         drop(pairs);
 
         let mut builder = Request::post(url.as_str());
-        builder = with_request_headers(builder, &client.headers, client.app_name.as_deref());
+        builder = with_request_headers(builder, &client.headers, &client.products_info);
 
         if let Some(user) = &client.user {
             builder = builder.header("X-ClickHouse-User", user);

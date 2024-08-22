@@ -163,7 +163,7 @@ impl Query {
         builder = with_request_headers(
             builder,
             &self.client.headers,
-            self.client.app_name.as_deref(),
+            &self.client.products_info,
         );
 
         if content_length == 0 {
