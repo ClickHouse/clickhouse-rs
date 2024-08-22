@@ -1,6 +1,6 @@
 # clickhouse-rs
 
-A typed client for ClickHouse.
+Official pure Rust typed client for ClickHouse DB.
 
 [![Crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]
@@ -35,10 +35,10 @@ Note: [ch2rs](https://github.com/ClickHouse/ch2rs) is useful to generate a row t
 To use the crate, add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-clickhouse = "0.12.1"
+clickhouse = "0.12.2"
 
 [dev-dependencies]
-clickhouse = { version = "0.12.1", features = ["test-util"] }
+clickhouse = { version = "0.12.2", features = ["test-util"] }
 ```
 
 <details>

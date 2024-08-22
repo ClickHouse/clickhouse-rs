@@ -236,8 +236,19 @@ impl Client {
         watch::Watch::new(self, query)
     }
 
-    /// Used internally to modify the options map of an _already cloned_ [`Client`] instance.
+    /// Used internally to modify the options map of an _already cloned_
+    /// [`Client`] instance.
     pub(crate) fn add_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
         self.options.insert(name.into(), value.into());
+    }
+}
+
+/// This is a private API exported only for internal purposes.
+/// Do not use it in your code directly, it doesn't follow semver.
+#[doc(hidden)]
+pub mod _priv {
+    #[cfg(feature = "lz4")]
+    pub fn lz4_compress(uncompressed: &[u8]) -> super::Result<bytes::Bytes> {
+        crate::compression::lz4::compress(uncompressed)
     }
 }

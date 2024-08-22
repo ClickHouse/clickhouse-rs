@@ -214,6 +214,7 @@ impl<S> Decompress<S> {
         match compression {
             Compression::None => Self::Plain(stream),
             #[cfg(feature = "lz4")]
+            #[allow(deprecated)]
             Compression::Lz4 | Compression::Lz4Hc(_) => Self::Lz4(Lz4Decoder::new(stream)),
         }
     }
