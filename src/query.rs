@@ -160,11 +160,7 @@ impl Query {
         drop(pairs);
 
         let mut builder = Request::builder().method(method).uri(url.as_str());
-        builder = with_request_headers(
-            builder,
-            &self.client.headers,
-            &self.client.products_info,
-        );
+        builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
 
         if content_length == 0 {
             builder = builder.header(CONTENT_LENGTH, "0");

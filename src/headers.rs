@@ -8,7 +8,7 @@ const PKG_VER: &str = env!("CARGO_PKG_VERSION", "unknown");
 const RUST_VER: &str = env!("CARGO_PKG_RUST_VERSION", "unknown");
 const OS: &str = std::env::consts::OS;
 
-fn get_user_agent(products_info: &Vec<ProductInfo>) -> String {
+fn get_user_agent(products_info: &[ProductInfo]) -> String {
     let default_agent = format!("clickhouse-rs/{PKG_VER} (lv:rust/{RUST_VER}, os:{OS})");
     if products_info.is_empty() {
         default_agent
@@ -26,7 +26,7 @@ fn get_user_agent(products_info: &Vec<ProductInfo>) -> String {
 pub(crate) fn with_request_headers(
     mut builder: Builder,
     headers: &HashMap<String, String>,
-    products_info: &Vec<ProductInfo>,
+    products_info: &[ProductInfo],
 ) -> Builder {
     for (name, value) in headers {
         builder = builder.header(name, value);

@@ -5,8 +5,6 @@
 #[macro_use]
 extern crate static_assertions;
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
-use std::fmt::Display;
 pub use clickhouse_derive::Row;
 #[cfg(feature = "tls")]
 use hyper_tls::HttpsConnector;
@@ -14,6 +12,8 @@ use hyper_util::{
     client::legacy::{connect::HttpConnector, Client as HyperClient},
     rt::TokioExecutor,
 };
+use std::fmt::Display;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 pub use self::{compression::Compression, row::Row};
 use self::{error::Result, http_client::HttpClient};
@@ -71,7 +71,7 @@ pub struct ProductInfo {
 
 impl Display for ProductInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("{}/{}", self.name, self.version))
+        write!(f, "{}/{}", self.name, self.version)
     }
 }
 
@@ -250,7 +250,7 @@ impl Client {
         product_name: impl Into<String>,
         product_version: impl Into<String>,
     ) -> Self {
-        self.products_info.push(ProductInfo{
+        self.products_info.push(ProductInfo {
             name: product_name.into(),
             version: product_version.into(),
         });
