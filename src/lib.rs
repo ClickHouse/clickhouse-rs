@@ -64,9 +64,9 @@ pub struct Client {
 }
 
 #[derive(Clone)]
-pub struct ProductInfo {
-    pub name: String,
-    pub version: String,
+struct ProductInfo {
+    name: String,
+    version: String,
 }
 
 impl Display for ProductInfo {
