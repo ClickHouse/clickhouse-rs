@@ -42,11 +42,11 @@ mod rowbinary;
 #[cfg(feature = "inserter")]
 mod ticks;
 
-const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
+const TCP_KEEPALIVE: Duration = Duration::from_secs(600);
 
 // ClickHouse uses 3s by default.
 // See https://github.com/ClickHouse/ClickHouse/blob/368cb74b4d222dc5472a7f2177f6bb154ebae07a/programs/server/config.xml#L201
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// A client containing HTTP pool.
 #[derive(Clone)]
