@@ -28,7 +28,7 @@ lazy_static! {
         &["type"]
     ).unwrap();
 }
-const BUFFER_SIZE: usize = 2 * 1024 * 1024;
+const BUFFER_SIZE: usize = 4 * 1024 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extra reallocations
 
 /// Performs one `INSERT`.
