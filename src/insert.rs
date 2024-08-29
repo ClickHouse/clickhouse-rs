@@ -27,6 +27,12 @@ lazy_static! {
         "send_trunk_count.",
         &["type"]
     ).unwrap();
+
+    static ref CK_BODY_SIZE: CounterVec = register_counter_vec!(
+        "ck_msg_payload",
+        "ck_msg_payload.",
+        &["type"]
+    ).unwrap();
 }
 const BUFFER_SIZE: usize = 50 * 1024 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024; // slightly less to avoid extra reallocations
@@ -233,6 +239,8 @@ impl<T> Insert<T> {
         let old_buf_size = self.buffer.len();
         let result = rowbinary::serialize_into(&mut self.buffer, row);
         let written = self.buffer.len() - old_buf_size;
+
+        CK_BODY_SIZE.with_label_values(&["type"]).inc_by(written as f64);
 
         if result.is_err() {
             self.abort();
