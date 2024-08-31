@@ -102,16 +102,6 @@ where
             rt.block_on((f)(client, iters)).unwrap()
         })
     });
-    #[cfg(feature = "lz4")]
-    group.bench_function("lz4hc(4)", |b| {
-        b.iter_custom(|iters| {
-            let rt = Runtime::new().unwrap();
-            let client = Client::default()
-                .with_url(format!("http://{addr}"))
-                .with_compression(Compression::Lz4Hc(4));
-            rt.block_on((f)(client, iters)).unwrap()
-        })
-    });
     group.finish();
 }
 

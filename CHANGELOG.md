@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.12.2] - 2024-08-20
+### Changed
+- Now this crate is pure Rust, no more C/C++ dependencies.
+- insert: increase max size of frames to improve throughput ([#130]).
+- compression: replace `lz4` sys binding with `lz4-flex` (pure Rust).
+- compression: replace `clickhouse-rs-cityhash-sys` sys binding with `cityhash-rs` (pure Rust) ([#107]).
+
+### Deprecated
+- compression: `Compression::Lz4Hc` is deprecated and becomes an alias to `Compression::Lz4`.
+
+[#130]: https://github.com/ClickHouse/clickhouse-rs/issues/130
+[#107]: https://github.com/ClickHouse/clickhouse-rs/issues/107
+
 ## [0.12.1] - 2024-08-07
 ### Added
 - query/bind: support `Option` in `query.bind(arg)` ([#119], [#120]).
@@ -308,7 +321,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.2...HEAD
+[0.12.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.6...v0.12.0
 [0.11.6]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.5...v0.11.6
