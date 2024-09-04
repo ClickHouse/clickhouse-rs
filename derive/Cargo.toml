@@ -7,7 +7,8 @@ repository = "https://github.com/ClickHouse/clickhouse-rs"
 homepage = "https://clickhouse.com"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-rust-version = "1.67.0" # update `Cargo.toml` and CI if changed
+# update `Cargo.toml` and CI if changed
+rust-version = "1.70.0"
 
 [lib]
 proc-macro = true

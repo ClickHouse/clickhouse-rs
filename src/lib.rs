@@ -48,6 +48,19 @@ const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 // See https://github.com/ClickHouse/ClickHouse/blob/368cb74b4d222dc5472a7f2177f6bb154ebae07a/programs/server/config.xml#L201
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 
+#[cfg(any(feature = "rustls-tls", feature = "rustls-tls-aws"))]
+fn prepare_hyper_rustls_client(
+    connector: HttpConnector,
+    provider: impl Into<Arc<rustls::crypto::CryptoProvider>>,
+) -> hyper_rustls::HttpsConnector<HttpConnector> {
+    hyper_rustls::HttpsConnectorBuilder::new()
+        .with_provider_and_webpki_roots(provider)
+        .unwrap()
+        .https_or_http()
+        .enable_http1()
+        .wrap_connector(connector)
+}
+
 /// A client containing HTTP pool.
 #[derive(Clone)]
 pub struct Client {
@@ -70,18 +83,26 @@ impl Default for Client {
         // TODO: make configurable in `Client::builder()`.
         connector.set_keepalive(Some(TCP_KEEPALIVE));
 
-        #[cfg(any(feature = "native-tls", feature = "rustls-tls"))]
+        #[cfg(any(
+            feature = "native-tls",
+            feature = "rustls-tls",
+            feature = "rustls-tls-aws"
+        ))]
         connector.enforce_http(false);
 
-        #[cfg(all(feature = "native-tls", not(feature = "rustls-tls")))]
+        #[cfg(all(
+            feature = "native-tls",
+            not(feature = "rustls-tls"),
+            not(feature = "rustls-tls-aws")
+        ))]
         let connector = hyper_tls::HttpsConnector::new_with_connector(connector);
 
         #[cfg(feature = "rustls-tls")]
-        let connector = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_webpki_roots()
-            .https_or_http()
-            .enable_http1()
-            .wrap_connector(connector);
+        let connector =
+            prepare_hyper_rustls_client(connector, rustls::crypto::ring::default_provider());
+        #[cfg(feature = "rustls-tls-aws")]
+        let connector =
+            prepare_hyper_rustls_client(connector, rustls::crypto::aws_lc_rs::default_provider());
 
         let client = HyperClient::builder(TokioExecutor::new())
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)

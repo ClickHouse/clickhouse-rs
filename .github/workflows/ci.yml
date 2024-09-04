@@ -60,6 +60,7 @@ jobs:
     - run: cargo clippy --all-targets --no-default-features
     - run: cargo build --all-targets --features native-tls
     - run: cargo build --all-targets --features rustls-tls
+    - run: cargo build --all-targets --features rustls-tls-aws
     - run: cargo clippy --all-targets --all-features
 
   test:
