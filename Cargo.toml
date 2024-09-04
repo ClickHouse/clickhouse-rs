@@ -9,7 +9,8 @@ homepage = "https://clickhouse.com"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 edition = "2021"
-rust-version = "1.67.0" # update `derive/Cargo.toml` and CI if changed
+# update `derive/Cargo.toml` and CI if changed
+rust-version = "1.70.0"
 
 [lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
@@ -57,7 +58,8 @@ uuid = ["dep:uuid"]
 time = ["dep:time"]
 lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
 native-tls = ["dep:hyper-tls"]
-rustls-tls = ["dep:hyper-rustls"]
+rustls-tls = ["dep:hyper-rustls", "dep:rustls", "hyper-rustls?/ring"]
+rustls-tls-aws = ["dep:hyper-rustls", "dep:rustls", "hyper-rustls?/aws-lc-rs"]
 
 [dependencies]
 clickhouse-derive = { version = "0.2.0", path = "derive" }
@@ -70,7 +72,14 @@ http-body-util = "0.1.2"
 hyper = "1.4"
 hyper-util = { version = "0.1.6", features = ["client-legacy", "http1"] }
 hyper-tls = { version = "0.6.0", optional = true }
-hyper-rustls = { version = "0.27.2", features = ["webpki-roots"], optional = true }
+rustls = { version = "0.23", default-features = false, optional = true }
+hyper-rustls = { version = "0.27.2", default-features = false, features = [
+    "http1",
+    "http2",
+    "native-tokio",
+    "tls12",
+    "webpki-roots",
+], optional = true }
 url = "2.1.1"
 futures = "0.3.5"
 futures-channel = "0.3.30"
@@ -78,7 +87,9 @@ static_assertions = "1.1"
 sealed = "0.5"
 sha-1 = { version = "0.10", optional = true }
 serde_json = { version = "1.0.68", optional = true }
-lz4_flex = { version = "0.11.3", default-features = false, features = ["std"], optional = true }
+lz4_flex = { version = "0.11.3", default-features = false, features = [
+    "std",
+], optional = true }
 cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
