@@ -106,20 +106,16 @@ async fn empty_insert() {
 
     let table_name = "insert_empty";
     let query_id = uuid::Uuid::new_v4().to_string();
-    let (setting_name, setting_value, override_value) = ("async_insert", "0", "1");
 
-    let client = prepare_database!().with_option(setting_name, setting_value);
+    let client = prepare_database!();
     create_simple_table(&client, table_name).await;
 
     let insert = client
         .insert::<SimpleRow>(table_name)
         .unwrap()
-        .with_option(setting_name, override_value)
         .with_option("query_id", &query_id);
 
     insert.end().await.unwrap();
-
-    flush_query_log(&client).await;
 
     let rows = fetch_simple_rows(&client, table_name).await;
     assert!(rows.is_empty())

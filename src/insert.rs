@@ -85,7 +85,7 @@ impl InsertState {
 
     fn terminated(&mut self) {
         replace_with_or_abort(self, |_self| match _self {
-            InsertState::NotStarted { .. } => InsertState::Completed,
+            InsertState::NotStarted { .. } => InsertState::Completed, // empty insert
             InsertState::Active { handle, .. } => InsertState::Terminated { handle },
             _ => unreachable!(),
         });
