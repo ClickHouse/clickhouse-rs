@@ -93,21 +93,22 @@ impl Default for Client {
         ))]
         connector.enforce_http(false);
 
-        #[cfg(all(
-            feature = "native-tls",
-            not(feature = "rustls-tls"),
-            not(feature = "rustls-tls-aws")
-        ))]
+        #[cfg(feature = "native-tls")]
         let connector = hyper_tls::HttpsConnector::new_with_connector(connector);
 
-        #[cfg(all(feature = "rustls-tls", not(feature = "rustls-tls-aws")))]
-        let connector =
-            prepare_hyper_rustls_connector(connector, rustls::crypto::ring::default_provider());
-        #[cfg(all(feature = "rustls-tls-aws", not(feature = "rustls-tls")))]
+        #[cfg(all(feature = "rustls-tls-aws", not(feature = "native-tls")))]
         let connector = prepare_hyper_rustls_connector(
             connector,
             rustls::crypto::aws_lc_rs::default_provider(),
         );
+
+        #[cfg(all(
+            feature = "rustls-tls",
+            not(feature = "rustls-tls-aws"),
+            not(feature = "native-tls")
+        ))]
+        let connector =
+            prepare_hyper_rustls_connector(connector, rustls::crypto::ring::default_provider());
 
         let client = HyperClient::builder(TokioExecutor::new())
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
