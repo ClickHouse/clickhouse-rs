@@ -51,3 +51,32 @@ async fn smoke() {
     assert_eq!(row, original_row);
     assert_eq!(row_uuid_str, original_row.uuid.to_string());
 }
+
+#[tokio::test]
+async fn human_readable_smoke() {
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+    struct OursRow {
+        #[serde(with = "clickhouse::serde::uuid")]
+        uuid: Uuid,
+    }
+
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+    struct TheirsRow {
+        uuid: Uuid,
+    }
+
+    let uuid = Uuid::new_v4();
+
+    let row = OursRow { uuid };
+
+    let row2 = TheirsRow { uuid };
+
+    let s1 = serde_json::to_string(&row).unwrap();
+    let s2 = serde_json::to_string(&row2).unwrap();
+
+    assert_eq!(s1, s2);
+
+    let new_row2: TheirsRow = serde_json::from_str(&s2).unwrap();
+
+    assert_eq!(new_row2, row2);
+}

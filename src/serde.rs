@@ -74,6 +74,7 @@ pub mod ipv4 {
 #[cfg(feature = "uuid")]
 pub mod uuid {
     use ::uuid::Uuid;
+    use serde::de::Error;
 
     use super::*;
 
@@ -83,16 +84,25 @@ pub mod uuid {
     where
         S: Serializer,
     {
-        let bytes = uuid.as_u64_pair();
-        bytes.serialize(serializer)
+        if serializer.is_human_readable() {
+            uuid.to_string().serialize(serializer)
+        } else {
+            let bytes = uuid.as_u64_pair();
+            bytes.serialize(serializer)
+        }
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Uuid, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let bytes: (u64, u64) = Deserialize::deserialize(deserializer)?;
-        Ok(Uuid::from_u64_pair(bytes.0, bytes.1))
+        if deserializer.is_human_readable() {
+            let uuid_str: &str = Deserialize::deserialize(deserializer)?;
+            Uuid::parse_str(uuid_str).map_err(D::Error::custom)
+        } else {
+            let bytes: (u64, u64) = Deserialize::deserialize(deserializer)?;
+            Ok(Uuid::from_u64_pair(bytes.0, bytes.1))
+        }
     }
 }
 
