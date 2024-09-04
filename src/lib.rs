@@ -48,8 +48,11 @@ const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 // See https://github.com/ClickHouse/ClickHouse/blob/368cb74b4d222dc5472a7f2177f6bb154ebae07a/programs/server/config.xml#L201
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 
-#[cfg(any(feature = "rustls-tls", feature = "rustls-tls-aws"))]
-fn prepare_hyper_rustls_client(
+#[cfg(all(
+    not(feature = "native-tls"),
+    any(feature = "rustls-tls", feature = "rustls-tls-aws")
+))]
+fn prepare_hyper_rustls_connector(
     connector: HttpConnector,
     provider: impl Into<Arc<rustls::crypto::CryptoProvider>>,
 ) -> hyper_rustls::HttpsConnector<HttpConnector> {
@@ -99,10 +102,12 @@ impl Default for Client {
 
         #[cfg(all(feature = "rustls-tls", not(feature = "rustls-tls-aws")))]
         let connector =
-            prepare_hyper_rustls_client(connector, rustls::crypto::ring::default_provider());
+            prepare_hyper_rustls_connector(connector, rustls::crypto::ring::default_provider());
         #[cfg(all(feature = "rustls-tls-aws", not(feature = "rustls-tls")))]
-        let connector =
-            prepare_hyper_rustls_client(connector, rustls::crypto::aws_lc_rs::default_provider());
+        let connector = prepare_hyper_rustls_connector(
+            connector,
+            rustls::crypto::aws_lc_rs::default_provider(),
+        );
 
         let client = HyperClient::builder(TokioExecutor::new())
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
