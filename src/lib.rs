@@ -97,10 +97,10 @@ impl Default for Client {
         ))]
         let connector = hyper_tls::HttpsConnector::new_with_connector(connector);
 
-        #[cfg(feature = "rustls-tls")]
+        #[cfg(all(feature = "rustls-tls", not(feature = "rustls-tls-aws")))]
         let connector =
             prepare_hyper_rustls_client(connector, rustls::crypto::ring::default_provider());
-        #[cfg(feature = "rustls-tls-aws")]
+        #[cfg(all(feature = "rustls-tls-aws", not(feature = "rustls-tls")))]
         let connector =
             prepare_hyper_rustls_client(connector, rustls::crypto::aws_lc_rs::default_provider());
 
