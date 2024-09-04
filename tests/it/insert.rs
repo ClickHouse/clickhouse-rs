@@ -99,3 +99,24 @@ async fn overrides_client_options() {
     let rows = fetch_simple_rows(&client, table_name).await;
     assert_eq!(rows, vec!(row))
 }
+
+#[tokio::test]
+async fn empty_insert() {
+    // https://github.com/ClickHouse/clickhouse-rs/issues/137
+
+    let table_name = "insert_empty";
+    let query_id = uuid::Uuid::new_v4().to_string();
+
+    let client = prepare_database!();
+    create_simple_table(&client, table_name).await;
+
+    let insert = client
+        .insert::<SimpleRow>(table_name)
+        .unwrap()
+        .with_option("query_id", &query_id);
+
+    insert.end().await.unwrap();
+
+    let rows = fetch_simple_rows(&client, table_name).await;
+    assert!(rows.is_empty())
+}
