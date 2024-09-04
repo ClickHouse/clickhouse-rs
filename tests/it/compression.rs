@@ -21,14 +21,11 @@ async fn check(client: Client) {
         .await
         .unwrap();
 
-    let mut inserter = client.inserter("test").unwrap();
-
+    let mut insert = client.insert("test").unwrap();
     for i in 0..200_000 {
-        inserter.write(&MyRow { no: i, name: "foo" }).await.unwrap();
-        inserter.commit().await.unwrap();
+        insert.write(&MyRow { no: i, name: "foo" }).await.unwrap();
     }
-
-    inserter.end().await.unwrap();
+    insert.end().await.unwrap();
 
     // Check data.
 
@@ -42,7 +39,6 @@ async fn check(client: Client) {
     assert_eq!(sum_len, 600_000);
 }
 
-#[crate::named]
 #[tokio::test]
 async fn none() {
     let client = prepare_database!().with_compression(Compression::None);
@@ -50,17 +46,8 @@ async fn none() {
 }
 
 #[cfg(feature = "lz4")]
-#[crate::named]
 #[tokio::test]
 async fn lz4() {
     let client = prepare_database!().with_compression(Compression::Lz4);
-    check(client).await;
-}
-
-#[cfg(feature = "lz4")]
-#[crate::named]
-#[tokio::test]
-async fn lz4_hc() {
-    let client = prepare_database!().with_compression(Compression::Lz4Hc(4));
     check(client).await;
 }

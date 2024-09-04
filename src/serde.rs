@@ -73,8 +73,6 @@ pub mod ipv4 {
 /// Ser/de [`::uuid::Uuid`] to/from `UUID`.
 #[cfg(feature = "uuid")]
 pub mod uuid {
-    use std::mem;
-
     use ::uuid::Uuid;
     use serde::de::Error;
 
@@ -89,8 +87,7 @@ pub mod uuid {
         if serializer.is_human_readable() {
             uuid.to_string().serialize(serializer)
         } else {
-            let mut bytes = uuid.into_bytes();
-            transform(&mut bytes);
+            let bytes = uuid.as_u64_pair();
             bytes.serialize(serializer)
         }
     }
@@ -103,19 +100,9 @@ pub mod uuid {
             let uuid_str: &str = Deserialize::deserialize(deserializer)?;
             Uuid::parse_str(uuid_str).map_err(D::Error::custom)
         } else {
-            let mut bytes: [u8; 16] = Deserialize::deserialize(deserializer)?;
-            transform(&mut bytes);
-            Ok(Uuid::from_bytes(bytes))
+            let bytes: (u64, u64) = Deserialize::deserialize(deserializer)?;
+            Ok(Uuid::from_u64_pair(bytes.0, bytes.1))
         }
-    }
-
-    /// Swaps bytes inside both 8-byte words of UUID.
-    /// * Input:   0 1 2 3 4 5 6 7   8 9 10 a b c  d e f
-    /// * Output:  7 6 5 4 3 2 1 0   f e  d c b a 10 9 8
-    fn transform(bytes: &mut [u8; 16]) {
-        let words = unsafe { mem::transmute::<&mut [u8; 16], &mut [u64; 2]>(bytes) };
-        words[0] = words[0].swap_bytes();
-        words[1] = words[1].swap_bytes();
     }
 }
 
@@ -356,7 +343,7 @@ pub mod time {
             let days: i32 = Deserialize::deserialize(deserializer)?;
 
             // It shouldn't overflow, because clamped by CH and < `Date::MAX`.
-            // TODO: check that CH clamps when an invalid value is inserted in binary format.
+            // TODO: ensure CH clamps when an invalid value is inserted in binary format.
             Ok(ORIGIN.unwrap() + Duration::days(i64::from(days)))
         }
     }

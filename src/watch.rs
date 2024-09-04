@@ -24,12 +24,14 @@ pub struct Rows;
 pub struct Events;
 
 impl<V> Watch<V> {
+    /// See [`Query::bind()`] for details.
+    ///
+    /// [`Query::bind()`]: crate::query::Query::bind
+    #[track_caller]
     pub fn bind(mut self, value: impl Bind) -> Self {
         self.sql.bind_arg(value);
         self
     }
-
-    // TODO: `timeout()`.
 
     /// Limits the number of updates after initial one.
     pub fn limit(mut self, limit: impl Into<Option<usize>>) -> Self {
@@ -37,7 +39,9 @@ impl<V> Watch<V> {
         self
     }
 
-    /// See [docs](https://clickhouse.tech/docs/en/sql-reference/statements/create/view/#live-view-with-refresh)
+    /// See [docs](https://clickhouse.com/docs/en/sql-reference/statements/create/view#with-refresh-clause).
+    ///
+    /// Makes sense only for SQL queries (`client.watch("SELECT X")`).
     pub fn refresh(mut self, interval: impl Into<Option<Duration>>) -> Self {
         self.refresh = interval.into();
         self
@@ -227,10 +231,10 @@ async fn init_cursor<T>(client: &Client, params: &WatchParams) -> Result<JsonCur
     if let Some(sql) = &params.sql {
         let refresh_sql = params
             .refresh
-            .map_or_else(String::new, |d| format!(" AND REFRESH {}", d.as_secs()));
+            .map_or_else(String::new, |d| format!(" REFRESH {}", d.as_secs()));
 
         let create_sql = format!(
-            "CREATE LIVE VIEW IF NOT EXISTS {} WITH TIMEOUT{} AS {}",
+            "CREATE LIVE VIEW IF NOT EXISTS {}{} AS {}",
             params.view, refresh_sql, sql
         );
 

@@ -8,18 +8,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.12.2] - 2024-08-20
+### Changed
+- Now this crate is pure Rust, no more C/C++ dependencies.
+- insert: increase max size of frames to improve throughput ([#130]).
+- compression: replace `lz4` sys binding with `lz4-flex` (pure Rust).
+- compression: replace `clickhouse-rs-cityhash-sys` sys binding with `cityhash-rs` (pure Rust) ([#107]).
+
+### Deprecated
+- compression: `Compression::Lz4Hc` is deprecated and becomes an alias to `Compression::Lz4`.
+
+[#130]: https://github.com/ClickHouse/clickhouse-rs/issues/130
+[#107]: https://github.com/ClickHouse/clickhouse-rs/issues/107
+
+## [0.12.1] - 2024-08-07
+### Added
+- query/bind: support `Option` in `query.bind(arg)` ([#119], [#120]).
+- client: `Client::with_header()` to provide custom headers ([#98], [#108]).
+- query: added `Query::with_option()` similar to `Client::with_option()` ([#123]).
+- insert: added `Insert::with_option()` similar to `Client::with_option()` ([#123]).
+- inserter: added `Inserter::with_option()` similar to `Client::with_option()` ([#123]).
+
+### Changed
+- insert: the outgoing request is now created after the first `Insert::write` call instead of `Insert::new` ([#123]).
+
+[#123]: https://github.com/ClickHouse/clickhouse-rs/pull/123
+[#120]: https://github.com/ClickHouse/clickhouse-rs/pull/120
+[#119]: https://github.com/ClickHouse/clickhouse-rs/issues/119
+[#108]: https://github.com/ClickHouse/clickhouse-rs/pull/108
+[#98]: https://github.com/ClickHouse/clickhouse-rs/issues/98
+
+## [0.12.0] - 2024-07-16
+### Added
+- derive: support `serde::skip_deserializing` ([#83]).
+- insert: apply options set on the client ([#90]).
+- inserter: can be limited by size, see `Inserter::with_max_bytes()`.
+- inserter: `Inserter::pending()` to get stats about still being inserted data.
+- inserter: `Inserter::force_commit()` to commit and insert immediately.
+- mock: impl `Default` instance for `Mock`.
+
+### Changed
+- **BREAKING** bump MSRV to 1.67.
+- **BREAKING** replace the `tls` feature with `native-tls` and `rustls-tls` that must be enabled explicitly now.
+- **BREAKING** http: `HttpClient` API is changed due to moving to hyper v1.
+- **BREAKING** inserter: move under the `inserter` feature.
+- **BREAKING** inserter: there is no default limits anymore.
+- **BREAKING** inserter: `Inserter::write` is synchronous now.
+- **BREAKING** inserter: rename `entries` to `rows`.
+- **BREAKING** drop the `wa-37420` feature.
+- **BREAKING** remove deprecated items.
+- **BREAKING** mock: `provide()`, `watch()` and `watch_only_events()` now accept iterators instead of streams.
+- inserter: improve performance of time measurements by using `quanta`.
+- inserter: improve performance if the time limit isn't used.
+- derive: move to syn v2.
+- mock: return a request if no handler is installed ([#89], [#91]).
+
+### Fixed
+- watch: support a new syntax.
+- uuid: possible unsoundness.
+- query: avoid panics during `Query::bind()` calls ([#103]).
+
+[#103]: https://github.com/ClickHouse/clickhouse-rs/issues/103
+[#102]: https://github.com/ClickHouse/clickhouse-rs/pull/102
+[#91]: https://github.com/ClickHouse/clickhouse-rs/pull/91
+[#90]: https://github.com/ClickHouse/clickhouse-rs/pull/90
+[#89]: https://github.com/ClickHouse/clickhouse-rs/issues/89
+[#83]: https://github.com/ClickHouse/clickhouse-rs/pull/83
+
 ## [0.11.6] - 2023-09-27
 ### Fixed
 - client: accept HTTPs urls if `tls` feature is enabled ([#58]).
 
-[#58]: https://github.com/loyd/clickhouse.rs/issues/56
+[#58]: https://github.com/ClickHouse/clickhouse-rs/issues/56
 
 ## [0.11.5] - 2023-06-12
 ### Changed
 - inserter: start new insert only when the first row is provided ([#68], [#70]).
 
-[#70]: https://github.com/loyd/clickhouse.rs/pull/70
-[#68]: https://github.com/loyd/clickhouse.rs/pull/68
+[#70]: https://github.com/ClickHouse/clickhouse-rs/pull/70
+[#68]: https://github.com/ClickHouse/clickhouse-rs/pull/68
 
 ## [0.11.4] - 2023-05-14
 ### Added
@@ -38,8 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - cursor: handle errors sent at the end of a response ([#56]).
 
-[#56]: https://github.com/loyd/clickhouse.rs/issues/56
-[#54]: https://github.com/loyd/clickhouse.rs/pull/54
+[#56]: https://github.com/ClickHouse/clickhouse-rs/issues/56
+[#54]: https://github.com/ClickHouse/clickhouse-rs/pull/54
 
 ## [0.11.2] - 2023-01-03
 ### Added
@@ -74,9 +141,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING** decompression: HTTP compression (gzip, zlib and brotli) isn't available anymore, only Lz4.
 - inserter: skip timer ticks if `INSERT` is too long ([#20]).
 
-[#39]: https://github.com/loyd/clickhouse.rs/issues/39
-[#26]: https://github.com/loyd/clickhouse.rs/issues/26
-[#20]: https://github.com/loyd/clickhouse.rs/issues/20
+[#39]: https://github.com/ClickHouse/clickhouse-rs/issues/39
+[#26]: https://github.com/ClickHouse/clickhouse-rs/issues/26
+[#20]: https://github.com/ClickHouse/clickhouse-rs/issues/20
 [ClickHouse#37420]: https://github.com/ClickHouse/ClickHouse/issues/37420
 [`uuid::Uuid`]: https://docs.rs/uuid/latest/uuid/struct.Uuid.html
 
@@ -91,9 +158,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Implement `Primitive` for `f64` ([#31]).
 
-[#33]: https://github.com/loyd/clickhouse.rs/issues/33
-[#31]: https://github.com/loyd/clickhouse.rs/issues/31
-[#27]: https://github.com/loyd/clickhouse.rs/pull/27
+[#33]: https://github.com/ClickHouse/clickhouse-rs/issues/33
+[#31]: https://github.com/ClickHouse/clickhouse-rs/issues/31
+[#27]: https://github.com/ClickHouse/clickhouse-rs/pull/27
 
 ## [0.9.3] - 2021-12-21
 ### Added
@@ -102,8 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Reset quantities on errors to support reusing `Inserter` after errors ([#30]).
 
-[#30]: https://github.com/loyd/clickhouse.rs/pull/30
-[#29]: https://github.com/loyd/clickhouse.rs/issues/29
+[#30]: https://github.com/ClickHouse/clickhouse-rs/pull/30
+[#29]: https://github.com/ClickHouse/clickhouse-rs/issues/29
 
 ## [0.9.2] - 2021-11-01
 ### Changed
@@ -128,8 +195,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - query: queries with invalid URLs fail with `Error::InvalidParams`.
 - watch: use `JSONEachRowWithProgress` because of [ClickHouse#22996] ([#23]).
 
-[#23]: https://github.com/loyd/clickhouse.rs/issues/23
-[#22]: https://github.com/loyd/clickhouse.rs/issues/22
+[#23]: https://github.com/ClickHouse/clickhouse-rs/issues/23
+[#22]: https://github.com/ClickHouse/clickhouse-rs/issues/22
 [ClickHouse#22996]: https://github.com/ClickHouse/ClickHouse/issues/22996
 
 ## [0.8.1] - 2021-08-26
@@ -137,8 +204,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support `?` inside bound arguments ([#18]).
 - Use the `POST` method if a query is bigger than 8KiB ([#19]).
 
-[#19]: https://github.com/loyd/clickhouse.rs/issues/19
-[#18]: https://github.com/loyd/clickhouse.rs/issues/18
+[#19]: https://github.com/ClickHouse/clickhouse-rs/issues/19
+[#18]: https://github.com/ClickHouse/clickhouse-rs/issues/18
 
 ## [0.8.0] - 2021-07-28
 ### Fixed
@@ -199,8 +266,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expose `query::Bind` ([#11]).
 - Deprecate `Compression::encoding()`.
 
-[#11]: https://github.com/loyd/clickhouse.rs/pull/9
-[#9]: https://github.com/loyd/clickhouse.rs/pull/9
+[#11]: https://github.com/ClickHouse/clickhouse-rs/pull/9
+[#9]: https://github.com/ClickHouse/clickhouse-rs/pull/9
 
 ## [0.6.2] - 2021-04-12
 ### Fixed
@@ -210,7 +277,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - compression: decompress error messages ([#7]).
 
-[#7]: https://github.com/loyd/clickhouse.rs/pull/7
+[#7]: https://github.com/ClickHouse/clickhouse-rs/pull/7
 
 ## [0.6.0] - 2021-03-24
 ### Changed
@@ -254,36 +321,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/loyd/clickhouse.rs/compare/v0.11.6...HEAD
-[0.11.6]: https://github.com/loyd/clickhouse.rs/compare/v0.11.5...v0.11.6
-[0.11.5]: https://github.com/loyd/clickhouse.rs/compare/v0.11.4...v0.11.5
-[0.11.4]: https://github.com/loyd/clickhouse.rs/compare/v0.11.3...v0.11.4
-[0.11.3]: https://github.com/loyd/clickhouse.rs/compare/v0.11.2...v0.11.3
-[0.11.2]: https://github.com/loyd/clickhouse.rs/compare/v0.11.1...v0.11.2
-[0.11.1]: https://github.com/loyd/clickhouse.rs/compare/v0.11.0...v0.11.1
-[0.11.0]: https://github.com/loyd/clickhouse.rs/compare/v0.10.0...v0.11.0
-[0.10.0]: https://github.com/loyd/clickhouse.rs/compare/v0.9.3...v0.10.0
-[0.9.3]: https://github.com/loyd/clickhouse.rs/compare/v0.9.2...v0.9.3
-[0.9.2]: https://github.com/loyd/clickhouse.rs/compare/v0.9.1...v0.9.2
-[0.9.1]: https://github.com/loyd/clickhouse.rs/compare/v0.9.0...v0.9.1
-[0.9.0]: https://github.com/loyd/clickhouse.rs/compare/v0.8.1...v0.9.0
-[0.8.1]: https://github.com/loyd/clickhouse.rs/compare/v0.8.0...v0.8.1
-[0.8.0]: https://github.com/loyd/clickhouse.rs/compare/v0.7.2...v0.8.0
-[0.7.2]: https://github.com/loyd/clickhouse.rs/compare/v0.7.1...v0.7.2
-[0.7.1]: https://github.com/loyd/clickhouse.rs/compare/v0.7.0...v0.7.1
-[0.7.0]: https://github.com/loyd/clickhouse.rs/compare/v0.6.8...v0.7.0
-[0.6.8]: https://github.com/loyd/clickhouse.rs/compare/v0.6.7...v0.6.8
-[0.6.7]: https://github.com/loyd/clickhouse.rs/compare/v0.6.6...v0.6.7
-[0.6.6]: https://github.com/loyd/clickhouse.rs/compare/v0.6.5...v0.6.6
-[0.6.5]: https://github.com/loyd/clickhouse.rs/compare/v0.6.4...v0.6.5
-[0.6.4]: https://github.com/loyd/clickhouse.rs/compare/v0.6.3...v0.6.4
-[0.6.3]: https://github.com/loyd/clickhouse.rs/compare/v0.6.2...v0.6.3
-[0.6.2]: https://github.com/loyd/clickhouse.rs/compare/v0.6.1...v0.6.2
-[0.6.1]: https://github.com/loyd/clickhouse.rs/compare/v0.6.0...v0.6.1
-[0.6.0]: https://github.com/loyd/clickhouse.rs/compare/v0.5.1...v0.6.0
-[0.5.1]: https://github.com/loyd/clickhouse.rs/compare/v0.5.0...v0.5.1
-[0.5.0]: https://github.com/loyd/clickhouse.rs/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/loyd/clickhouse.rs/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/loyd/clickhouse.rs/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/loyd/clickhouse.rs/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/loyd/clickhouse.rs/releases/tag/v0.1.0
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.2...HEAD
+[0.12.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.1...v0.12.2
+[0.12.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.6...v0.12.0
+[0.11.6]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.5...v0.11.6
+[0.11.5]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.4...v0.11.5
+[0.11.4]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.3...v0.11.4
+[0.11.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.2...v0.11.3
+[0.11.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.1...v0.11.2
+[0.11.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.11.0...v0.11.1
+[0.11.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.9.3...v0.10.0
+[0.9.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.9.2...v0.9.3
+[0.9.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.9.1...v0.9.2
+[0.9.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.7.2...v0.8.0
+[0.7.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.6.8...v0.7.0
+[0.6.8]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.6.7...v0.6.8
+[0.6.7]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.6.6...v0.6.7
+[0.6.6]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.6.5...v0.6.6
+[0.6.5]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.6.4...v0.6.5
+[0.6.4]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.6.3...v0.6.4
+[0.6.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.5.1...v0.6.0
+[0.5.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/ClickHouse/clickhouse-rs/releases/tag/v0.1.0

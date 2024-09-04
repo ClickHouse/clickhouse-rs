@@ -1,14 +1,24 @@
 [package]
 name = "clickhouse"
-version = "0.11.6"
-description = "A typed client for ClickHouse with killer features"
+version = "0.12.2"
+description = "Official Rust client for ClickHouse DB"
 keywords = ["clickhouse", "database", "driver", "tokio", "hyper"]
-authors = ["Paul Loyd <pavelko95@gmail.com>"]
-repository = "https://github.com/loyd/clickhouse.rs"
+authors = ["ClickHouse Contributors", "Paul Loyd <pavelko95@gmail.com>"]
+repository = "https://github.com/ClickHouse/clickhouse-rs"
+homepage = "https://clickhouse.com"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-edition = "2018"
-rust-version = "1.60"
+edition = "2021"
+rust-version = "1.67.0" # update `derive/Cargo.toml` and CI if changed
+
+[lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+# TODO: missing_docs = "warn"
+unexpected_cfgs = "allow" # for `docsrs`
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -30,52 +40,61 @@ harness = false
 name = "mock"
 required-features = ["test-util"]
 
+[[example]]
+name = "clickhouse_cloud"
+required-features = ["rustls-tls"]
+
 [profile.release]
 debug = true
 
 [features]
-default = ["lz4", "tls"]
+default = ["lz4"]
 
 test-util = ["hyper/server"]
-watch = ["dep:sha-1", "dep:serde_json"]
-lz4 = ["dep:lz4", "dep:clickhouse-rs-cityhash-sys"]
+inserter = ["dep:quanta"]
+watch = ["dep:sha-1", "dep:serde_json", "serde/derive"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
-tls = ["dep:hyper-tls"]
-
-# Temporary workaround for https://github.com/ClickHouse/ClickHouse/issues/37420
-wa-37420 = []
+lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
+native-tls = ["dep:hyper-tls"]
+rustls-tls = ["dep:hyper-rustls"]
 
 [dependencies]
-clickhouse-derive = { version = "0.1.1", path = "derive" }
+clickhouse-derive = { version = "0.2.0", path = "derive" }
 
 thiserror = "1.0.16"
 serde = "1.0.106"
-bytes = "1"
+bytes = "1.5.0"
 tokio = { version = "1.0.1", features = ["rt", "macros"] }
-hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream"] }
-hyper-tls = { version = "0.5.0", optional = true }
+http-body-util = "0.1.2"
+hyper = "1.4"
+hyper-util = { version = "0.1.6", features = ["client-legacy", "http1"] }
+hyper-tls = { version = "0.6.0", optional = true }
+hyper-rustls = { version = "0.27.2", features = ["webpki-roots"], optional = true }
 url = "2.1.1"
 futures = "0.3.5"
+futures-channel = "0.3.30"
 static_assertions = "1.1"
-sealed = "0.4"
+sealed = "0.5"
 sha-1 = { version = "0.10", optional = true }
 serde_json = { version = "1.0.68", optional = true }
-lz4 = { version = "1.23.3", optional = true }
-clickhouse-rs-cityhash-sys = { version = "0.1.2", optional = true }
+lz4_flex = { version = "0.11.3", default-features = false, features = ["std"], optional = true }
+cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
 bstr = { version = "1.2", default-features = false }
+quanta = { version = "0.12", optional = true }
+replace_with = { version = "0.1.7" }
 
 [dev-dependencies]
-criterion = "0.4.0"
+criterion = "0.5.0"
 serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "1.0.1", features = ["full", "test-util"] }
-hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream", "server"] }
+hyper = { version = "1.1", features = ["server"] }
 serde_bytes = "0.11.4"
 serde_repr = "0.1.7"
 serde_json = "1.0.68"
 uuid = { version = "1", features = ["v4", "serde"] }
 function_name = "0.3"
 time = { version = "0.3.17", features = ["macros", "rand"] }
-rand = "0.8.5"
+rand = { version = "0.8.5", features = ["small_rng"] }

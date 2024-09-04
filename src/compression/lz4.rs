@@ -1,17 +1,16 @@
 use std::{
-    os::raw::{c_char, c_int},
     pin::Pin,
     task::{Context, Poll},
 };
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use cityhash_rs::cityhash_102_128;
 use futures::{ready, stream::Stream};
-use lz4::liblz4::LZ4_decompress_safe;
+use lz4_flex::block;
 
 use crate::{
     buflist::BufList,
     error::{Error, Result},
-    Compression,
 };
 
 const MAX_COMPRESSED_SIZE: u32 = 1024 * 1024 * 1024;
@@ -146,49 +145,30 @@ impl<S> Lz4Decoder<S> {
         }
 
         let mut uncompressed = vec![0u8; meta.uncompressed_size as usize];
-        decompress(&self.buffer[LZ4_HEADER_SIZE..], &mut uncompressed)?;
+        let len = decompress(&self.buffer[LZ4_HEADER_SIZE..], &mut uncompressed)?;
+        debug_assert_eq!(len as u32, meta.uncompressed_size);
+
         Ok(uncompressed.into())
     }
 }
 
 fn calc_checksum(buffer: &[u8]) -> u128 {
-    let hash = clickhouse_rs_cityhash_sys::city_hash_128(buffer);
-    u128::from(hash.hi) << 64 | u128::from(hash.lo)
+    let hash = cityhash_102_128(buffer);
+    hash << 64 | hash >> 64
 }
 
-fn decompress(compressed: &[u8], uncompressed: &mut [u8]) -> Result<()> {
-    let status = unsafe {
-        LZ4_decompress_safe(
-            compressed.as_ptr() as *const c_char,
-            uncompressed.as_mut_ptr() as *mut c_char,
-            compressed.len() as c_int,
-            uncompressed.len() as c_int,
-        )
-    };
-
-    if status < 0 {
-        return Err(Error::Decompression("can't decompress data".into()));
-    }
-
-    Ok(())
+fn decompress(compressed: &[u8], uncompressed: &mut [u8]) -> Result<usize> {
+    block::decompress_into(compressed, uncompressed).map_err(|err| Error::Decompression(err.into()))
 }
 
-pub(crate) fn compress(uncompressed: &[u8], mode: Compression) -> Result<Bytes> {
-    do_compress(uncompressed, mode).map_err(|err| Error::Decompression(err.into()))
-}
-
-fn do_compress(uncompressed: &[u8], mode: Compression) -> std::io::Result<Bytes> {
-    let max_compressed_size = lz4::block::compress_bound(uncompressed.len())?;
+pub(crate) fn compress(uncompressed: &[u8]) -> Result<Bytes> {
+    let max_compressed_size = block::get_maximum_output_size(uncompressed.len());
 
     let mut buffer = BytesMut::new();
     buffer.resize(LZ4_META_SIZE + max_compressed_size, 0);
 
-    let compressed_data_size = lz4::block::compress_to_buffer(
-        uncompressed,
-        Some(compression_mode(mode)),
-        false,
-        &mut buffer[LZ4_META_SIZE..],
-    )?;
+    let compressed_data_size = block::compress_into(uncompressed, &mut buffer[LZ4_META_SIZE..])
+        .map_err(|err| Error::Compression(err.into()))?;
 
     buffer.truncate(LZ4_META_SIZE + compressed_data_size);
 
@@ -203,16 +183,6 @@ fn do_compress(uncompressed: &[u8], mode: Compression) -> std::io::Result<Bytes>
     meta.write_checksum(&mut buffer[..]);
 
     Ok(buffer.freeze())
-}
-
-fn compression_mode(mode: Compression) -> lz4::block::CompressionMode {
-    use lz4::block::CompressionMode;
-
-    match mode {
-        Compression::None => unreachable!(),
-        Compression::Lz4 => CompressionMode::DEFAULT,
-        Compression::Lz4Hc(level) => CompressionMode::HIGHCOMPRESSION(level),
-    }
 }
 
 #[tokio::test]
@@ -272,6 +242,6 @@ fn it_compresses() {
         110, 103, 3, 97, 98, 99,
     ];
 
-    let actual = compress(&source, Compression::Lz4).unwrap();
+    let actual = compress(&source).unwrap();
     assert_eq!(actual, expected);
 }

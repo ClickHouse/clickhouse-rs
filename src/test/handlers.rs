@@ -1,62 +1,54 @@
-use std::{convert::Infallible, marker::PhantomData};
+use std::marker::PhantomData;
 
-use bytes::{Buf, Bytes, BytesMut};
-use futures::{
-    channel::{mpsc, oneshot},
-    stream, Stream, StreamExt,
-};
-use hyper::{body, Body, Request, Response, StatusCode};
+use bytes::{Buf, Bytes};
+use futures::channel::oneshot;
+use hyper::{Request, Response, StatusCode};
 use sealed::sealed;
 use serde::{Deserialize, Serialize};
 
 use super::{Handler, HandlerFn};
-use crate::{error::Result, rowbinary};
+use crate::rowbinary;
 
-// === raw ===
+const BUFFER_INITIAL_CAPACITY: usize = 1024;
 
-struct RawHandler<F>(Option<F>);
+// === Thunk ===
+
+struct Thunk(Response<Bytes>);
 
 #[sealed]
-impl<F> super::Handler for RawHandler<F>
-where
-    F: FnOnce(Request<Body>) -> Response<Body> + Send + 'static,
-{
+impl super::Handler for Thunk {
     type Control = ();
 
-    fn make(&mut self) -> (HandlerFn, Self::Control) {
-        let h = Box::new(self.0.take().expect("raw handler must be called only once"));
-        (h, ())
+    fn make(self) -> (HandlerFn, Self::Control) {
+        (Box::new(|_| self.0), ())
     }
-}
-
-fn raw(f: impl FnOnce(Request<Body>) -> Response<Body> + Send + 'static) -> impl Handler {
-    RawHandler(Some(f))
 }
 
 // === failure ===
 
+#[track_caller]
 pub fn failure(status: StatusCode) -> impl Handler {
     let reason = status.canonical_reason().unwrap_or("<unknown status code>");
-    raw(move |_req| {
-        Response::builder()
-            .status(status)
-            .body(Body::from(reason))
-            .expect("invalid builder")
-    })
+
+    Response::builder()
+        .status(status)
+        .body(Bytes::from(reason))
+        .map(Thunk)
+        .expect("invalid builder")
 }
 
 // === provide ===
 
-pub fn provide<T>(rows: impl Stream<Item = T> + Send + 'static) -> impl Handler
+#[track_caller]
+pub fn provide<T>(rows: impl IntoIterator<Item = T>) -> impl Handler
 where
     T: Serialize,
 {
-    let s = rows.map(|row| -> Result<Bytes> {
-        let mut buffer = BytesMut::with_capacity(256);
-        rowbinary::serialize_into(&mut buffer, &row)?;
-        Ok(buffer.freeze())
-    });
-    raw(move |_req| Response::new(Body::wrap_stream(s)))
+    let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
+    for row in rows {
+        rowbinary::serialize_into(&mut buffer, &row).expect("failed to serialize");
+    }
+    Thunk(Response::new(buffer.into()))
 }
 
 // === record ===
@@ -64,53 +56,53 @@ where
 struct RecordHandler<T>(PhantomData<T>);
 
 #[sealed]
-impl<T> super::Handler for RecordHandler<T>
-where
-    T: for<'a> Deserialize<'a> + Send + 'static,
-{
+impl<T> super::Handler for RecordHandler<T> {
     type Control = RecordControl<T>;
 
     #[doc(hidden)]
-    fn make(&mut self) -> (HandlerFn, Self::Control) {
-        let (tx, rx) = mpsc::unbounded();
-        let control = RecordControl(rx);
+    fn make(self) -> (HandlerFn, Self::Control) {
+        let (tx, rx) = oneshot::channel();
+        let marker = PhantomData;
+        let control = RecordControl { rx, marker };
 
-        let h = Box::new(move |req: Request<Body>| -> Response<Body> {
-            let fut = async move {
-                let body = req.into_body();
-                let mut buf = body::aggregate(body).await.expect("invalid request");
-
-                while buf.has_remaining() {
-                    let row = rowbinary::deserialize_from(&mut buf, &mut [])
-                        .expect("failed to deserialize");
-                    tx.unbounded_send(row).expect("failed to send, test ended?");
-                }
-
-                Ok::<_, Infallible>("")
-            };
-
-            Response::new(Body::wrap_stream(stream::once(fut)))
+        let h = Box::new(move |request: Request<Bytes>| -> Response<Bytes> {
+            let body = request.into_body();
+            let _ = tx.send(body);
+            Response::new(<_>::default())
         });
 
         (h, control)
     }
 }
 
-pub struct RecordControl<T>(mpsc::UnboundedReceiver<T>);
+pub struct RecordControl<T> {
+    rx: oneshot::Receiver<Bytes>,
+    marker: PhantomData<T>,
+}
 
-impl<T> RecordControl<T> {
+impl<T> RecordControl<T>
+where
+    T: for<'a> Deserialize<'a>,
+{
     pub async fn collect<C>(self) -> C
     where
         C: Default + Extend<T>,
     {
-        self.0.collect().await
+        let mut buffer = self.rx.await.expect("query canceled");
+        let mut result = C::default();
+
+        while buffer.has_remaining() {
+            let row: T =
+                rowbinary::deserialize_from(&mut buffer, &mut []).expect("failed to deserialize");
+            result.extend(std::iter::once(row));
+        }
+
+        result
     }
 }
 
-pub fn record<T>() -> impl Handler<Control = RecordControl<T>>
-where
-    T: for<'a> Deserialize<'a> + Send + 'static,
-{
+#[track_caller]
+pub fn record<T>() -> impl Handler<Control = RecordControl<T>> {
     RecordHandler(PhantomData)
 }
 
@@ -123,19 +115,14 @@ impl super::Handler for RecordDdlHandler {
     type Control = RecordDdlControl;
 
     #[doc(hidden)]
-    fn make(&mut self) -> (HandlerFn, Self::Control) {
+    fn make(self) -> (HandlerFn, Self::Control) {
         let (tx, rx) = oneshot::channel();
         let control = RecordDdlControl(rx);
 
-        let h = Box::new(move |req: Request<Body>| -> Response<Body> {
-            let fut = async move {
-                let body = req.into_body();
-                let buf = body::to_bytes(body).await.expect("invalid request");
-                let _ = tx.send(buf);
-                Ok::<_, Infallible>("")
-            };
-
-            Response::new(Body::wrap_stream(stream::once(fut)))
+        let h = Box::new(move |request: Request<Bytes>| -> Response<Bytes> {
+            let body = request.into_body();
+            let _ = tx.send(body);
+            Response::new(<_>::default())
         });
 
         (h, control)
@@ -146,8 +133,8 @@ pub struct RecordDdlControl(oneshot::Receiver<Bytes>);
 
 impl RecordDdlControl {
     pub async fn query(self) -> String {
-        let buf = self.0.await.expect("query canceled");
-        String::from_utf8(buf.to_vec()).expect("query is not DDL")
+        let buffer = self.0.await.expect("query canceled");
+        String::from_utf8(buffer.to_vec()).expect("query is not DDL")
     }
 }
 
@@ -165,7 +152,8 @@ enum JsonRow<T> {
 }
 
 #[cfg(feature = "watch")]
-pub fn watch<T>(rows: impl Stream<Item = (u64, T)> + Send + 'static) -> impl Handler
+#[track_caller]
+pub fn watch<T>(rows: impl IntoIterator<Item = (u64, T)>) -> impl Handler
 where
     T: Serialize,
 {
@@ -176,29 +164,32 @@ where
         data: T,
     }
 
-    let s = rows.map(|(_version, data)| -> Result<Bytes> {
+    let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
+    for (_version, data) in rows {
         let payload = RowPayload { _version, data };
         let row = JsonRow::Row(payload);
-        let mut json = serde_json::to_string(&row).expect("invalid json");
-        json.push('\n');
-        Ok(json.into())
-    });
-    raw(move |_req| Response::new(Body::wrap_stream(s)))
+        serde_json::to_writer(&mut buffer, &row).expect("failed to serialize");
+        buffer.push(b'\n');
+    }
+
+    Thunk(Response::new(Bytes::from(buffer)))
 }
 
 #[cfg(feature = "watch")]
-pub fn watch_only_events(rows: impl Stream<Item = u64> + Send + 'static) -> impl Handler {
+#[track_caller]
+pub fn watch_only_events(rows: impl IntoIterator<Item = u64>) -> impl Handler {
     #[derive(Serialize)]
     struct EventPayload {
         version: u64,
     }
 
-    let s = rows.map(|version| -> Result<Bytes> {
+    let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
+    for version in rows {
         let payload = EventPayload { version };
         let row = JsonRow::Row(payload);
-        let mut json = serde_json::to_string(&row).expect("invalid json");
-        json.push('\n');
-        Ok(json.into())
-    });
-    raw(move |_req| Response::new(Body::wrap_stream(s)))
+        serde_json::to_writer(&mut buffer, &row).expect("failed to serialize");
+        buffer.push(b'\n');
+    }
+
+    Thunk(Response::new(Bytes::from(buffer)))
 }

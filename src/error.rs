@@ -54,6 +54,12 @@ impl From<hyper::Error> for Error {
     }
 }
 
+impl From<hyper_util::client::legacy::Error> for Error {
+    fn from(error: hyper_util::client::legacy::Error) -> Self {
+        Self::Network(Box::new(error))
+    }
+}
+
 impl ser::Error for Error {
     fn custom<T: fmt::Display>(msg: T) -> Self {
         Self::Custom(msg.to_string())

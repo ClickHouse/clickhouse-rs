@@ -5,7 +5,6 @@ use uuid::Uuid;
 
 use clickhouse::Row;
 
-#[crate::named]
 #[tokio::test]
 async fn smoke() {
     let client = prepare_database!();

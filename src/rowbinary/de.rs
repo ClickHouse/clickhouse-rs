@@ -8,7 +8,7 @@ use serde::{
 
 use crate::error::{Error, Result};
 
-/// Deserializes a value from `buffer` with a message encoded in the RowBinary format.
+/// Deserializes a value from `buffer` with a row encoded in `RowBinary`.
 pub(crate) fn deserialize_from<'de, T: Deserialize<'de>>(
     input: impl Buf,
     temp_buf: &'de mut [u8],
@@ -19,7 +19,7 @@ pub(crate) fn deserialize_from<'de, T: Deserialize<'de>>(
 
 /// A deserializer for the RowBinary format.
 ///
-/// See https://clickhouse.yandex/docs/en/interfaces/formats/#rowbinary for details.
+/// See https://clickhouse.com/docs/en/interfaces/formats#rowbinary for details.
 struct RowBinaryDeserializer<'de, B> {
     input: B,
     temp_buf: &'de mut [u8],
@@ -78,23 +78,34 @@ macro_rules! impl_num {
 impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B> {
     type Error = Error;
 
+    impl_num!(i8, deserialize_i8, visit_i8, get_i8);
+
+    impl_num!(i16, deserialize_i16, visit_i16, get_i16_le);
+
+    impl_num!(i32, deserialize_i32, visit_i32, get_i32_le);
+
+    impl_num!(i64, deserialize_i64, visit_i64, get_i64_le);
+
+    impl_num!(i128, deserialize_i128, visit_i128, get_i128_le);
+
+    impl_num!(u8, deserialize_u8, visit_u8, get_u8);
+
+    impl_num!(u16, deserialize_u16, visit_u16, get_u16_le);
+
+    impl_num!(u32, deserialize_u32, visit_u32, get_u32_le);
+
+    impl_num!(u64, deserialize_u64, visit_u64, get_u64_le);
+
+    impl_num!(u128, deserialize_u128, visit_u128, get_u128_le);
+
+    impl_num!(f32, deserialize_f32, visit_f32, get_f32_le);
+
+    impl_num!(f64, deserialize_f64, visit_f64, get_f64_le);
+
     #[inline]
     fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value> {
         Err(Error::DeserializeAnyNotSupported)
     }
-
-    impl_num!(i8, deserialize_i8, visit_i8, get_i8);
-    impl_num!(i16, deserialize_i16, visit_i16, get_i16_le);
-    impl_num!(i32, deserialize_i32, visit_i32, get_i32_le);
-    impl_num!(i64, deserialize_i64, visit_i64, get_i64_le);
-    impl_num!(i128, deserialize_i128, visit_i128, get_i128_le);
-    impl_num!(u8, deserialize_u8, visit_u8, get_u8);
-    impl_num!(u16, deserialize_u16, visit_u16, get_u16_le);
-    impl_num!(u32, deserialize_u32, visit_u32, get_u32_le);
-    impl_num!(u64, deserialize_u64, visit_u64, get_u64_le);
-    impl_num!(u128, deserialize_u128, visit_u128, get_u128_le);
-    impl_num!(f32, deserialize_f32, visit_f32, get_f32_le);
-    impl_num!(f64, deserialize_f64, visit_f64, get_f64_le);
 
     #[inline]
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -104,7 +115,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
 
     #[inline]
     fn deserialize_char<V: Visitor<'de>>(self, _: V) -> Result<V::Value> {
-        todo!();
+        panic!("character types are unsupported: `char`");
     }
 
     #[inline]
@@ -149,11 +160,11 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     #[inline]
     fn deserialize_enum<V: Visitor<'de>>(
         self,
-        _enum: &'static str,
+        name: &'static str,
         _variants: &'static [&'static str],
         _visitor: V,
     ) -> Result<V::Value> {
-        todo!();
+        panic!("enums are unsupported: `{name}`");
     }
 
     #[inline]
@@ -209,7 +220,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
 
     #[inline]
     fn deserialize_map<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
-        todo!();
+        panic!("maps are unsupported, use `Vec<(A, B)>` instead");
     }
 
     #[inline]
@@ -224,7 +235,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
 
     #[inline]
     fn deserialize_identifier<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
-        todo!();
+        panic!("identifiers are unsupported");
     }
 
     #[inline]
@@ -239,25 +250,25 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     #[inline]
     fn deserialize_unit_struct<V: Visitor<'de>>(
         self,
-        _name: &'static str,
+        name: &'static str,
         _visitor: V,
     ) -> Result<V::Value> {
-        todo!();
+        panic!("unit types are unsupported: `{name}`");
     }
 
     #[inline]
     fn deserialize_tuple_struct<V: Visitor<'de>>(
         self,
-        _name: &'static str,
+        name: &'static str,
         _len: usize,
         _visitor: V,
     ) -> Result<V::Value> {
-        todo!();
+        panic!("tuple struct types are unsupported: `{name}`");
     }
 
     #[inline]
     fn deserialize_ignored_any<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
-        todo!();
+        panic!("ignored types are unsupported");
     }
 
     #[inline]

@@ -1,20 +1,67 @@
+use clickhouse::sql::Identifier;
 use clickhouse::{sql, Client};
-use function_name::named;
+use clickhouse_derive::Row;
+use serde::{Deserialize, Serialize};
 
 macro_rules! prepare_database {
     () => {
-        crate::_priv::prepare_database(file!(), function_name!()).await
+        crate::_priv::prepare_database({
+            fn f() {}
+            fn type_name_of_val<T>(_: T) -> &'static str {
+                std::any::type_name::<T>()
+            }
+            type_name_of_val(f)
+        })
+        .await
     };
+}
+
+#[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+struct SimpleRow {
+    id: u64,
+    data: String,
+}
+
+impl SimpleRow {
+    fn new(id: u64, data: impl ToString) -> Self {
+        Self {
+            id,
+            data: data.to_string(),
+        }
+    }
+}
+
+async fn create_simple_table(client: &Client, table_name: &str) {
+    client
+        .query("CREATE TABLE ?(id UInt64, data String) ENGINE = MergeTree ORDER BY id")
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+}
+
+async fn fetch_simple_rows(client: &Client, table_name: &str) -> Vec<SimpleRow> {
+    client
+        .query("SELECT ?fields FROM ?")
+        .bind(Identifier(table_name))
+        .fetch_all::<SimpleRow>()
+        .await
+        .unwrap()
+}
+
+async fn flush_query_log(client: &Client) {
+    client.query("SYSTEM FLUSH LOGS").execute().await.unwrap();
 }
 
 mod compression;
 mod cursor_error;
+mod insert;
+mod inserter;
 mod ip;
 mod nested;
 mod query;
 mod time;
 mod uuid;
-mod wa_37420;
 mod watch;
 
 const HOST: &str = "localhost:8123";
@@ -22,8 +69,8 @@ const HOST: &str = "localhost:8123";
 mod _priv {
     use super::*;
 
-    pub(crate) async fn prepare_database(file_path: &str, fn_name: &str) -> Client {
-        let name = make_db_name(file_path, fn_name);
+    pub(crate) async fn prepare_database(fn_path: &str) -> Client {
+        let name = make_db_name(fn_path);
         let client = Client::default().with_url(format!("http://{HOST}"));
 
         client
@@ -43,9 +90,12 @@ mod _priv {
         client.with_database(name)
     }
 
-    fn make_db_name(file_path: &str, fn_name: &str) -> String {
-        let (_, basename) = file_path.rsplit_once('/').expect("invalid file's path");
-        let prefix = basename.strip_suffix(".rs").expect("invalid file's path");
-        format!("{prefix}__{fn_name}")
+    // `it::compression::lz4::{{closure}}::f` -> `chrs__compression__lz4`
+    fn make_db_name(fn_path: &str) -> String {
+        assert!(fn_path.starts_with("it::"));
+        let mut iter = fn_path.split("::").skip(1);
+        let module = iter.next().unwrap();
+        let test = iter.next().unwrap();
+        format!("chrs__{module}__{test}")
     }
 }
