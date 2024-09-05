@@ -1,6 +1,5 @@
 use clickhouse::sql::Identifier;
-use clickhouse::{sql, Client};
-use clickhouse_derive::Row;
+use clickhouse::{sql, Client, Row};
 use serde::{Deserialize, Serialize};
 
 macro_rules! prepare_database {
@@ -31,6 +30,16 @@ impl SimpleRow {
     }
 }
 
+#[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameRow {
+    #[serde(rename = "fix_id")]
+    pub fix_id: i64,
+    #[serde(rename = "extComplexId")]
+    pub complex_id: String,
+    pub ext_float: f64,
+}
+
 async fn create_simple_table(client: &Client, table_name: &str) {
     client
         .query("CREATE TABLE ?(id UInt64, data String) ENGINE = MergeTree ORDER BY id")
@@ -40,11 +49,23 @@ async fn create_simple_table(client: &Client, table_name: &str) {
         .unwrap();
 }
 
-async fn fetch_simple_rows(client: &Client, table_name: &str) -> Vec<SimpleRow> {
+async fn create_rename_table(client: &Client, table_name: &str) {
+    client
+        .query("CREATE TABLE ?(fixId UInt64, extComplexId String, extFloat Float64) ENGINE = MergeTree ORDER BY fixId")
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+}
+
+async fn fetch_rows<T>(client: &Client, table_name: &str) -> Vec<T>
+where
+    T: Row + for<'b> Deserialize<'b>,
+{
     client
         .query("SELECT ?fields FROM ?")
         .bind(Identifier(table_name))
-        .fetch_all::<SimpleRow>()
+        .fetch_all::<T>()
         .await
         .unwrap()
 }
