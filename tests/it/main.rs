@@ -1,6 +1,5 @@
 use clickhouse::sql::Identifier;
-use clickhouse::{sql, Client};
-use clickhouse_derive::Row;
+use clickhouse::{sql, Client, Row};
 use serde::{Deserialize, Serialize};
 
 macro_rules! prepare_database {
@@ -40,11 +39,14 @@ async fn create_simple_table(client: &Client, table_name: &str) {
         .unwrap();
 }
 
-async fn fetch_simple_rows(client: &Client, table_name: &str) -> Vec<SimpleRow> {
+async fn fetch_rows<T>(client: &Client, table_name: &str) -> Vec<T>
+where
+    T: Row + for<'b> Deserialize<'b>,
+{
     client
         .query("SELECT ?fields FROM ?")
         .bind(Identifier(table_name))
-        .fetch_all::<SimpleRow>()
+        .fetch_all::<T>()
         .await
         .unwrap()
 }

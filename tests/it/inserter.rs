@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use clickhouse::{inserter::Quantities, Client, Row};
 
-use crate::{create_simple_table, fetch_simple_rows, flush_query_log, SimpleRow};
+use crate::{create_simple_table, fetch_rows, flush_query_log, SimpleRow};
 
 #[derive(Debug, Row, Serialize)]
 struct MyRow {
@@ -236,7 +236,7 @@ async fn keeps_client_options() {
         format!("should contain {client_setting_name} = {client_setting_value} (from the client options)")
     );
 
-    let rows = fetch_simple_rows(&client, table_name).await;
+    let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
     assert_eq!(rows, vec!(row))
 }
 
@@ -284,6 +284,6 @@ async fn overrides_client_options() {
         format!("should contain {setting_name} = {override_value} (from the inserter options)")
     );
 
-    let rows = fetch_simple_rows(&client, table_name).await;
+    let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
     assert_eq!(rows, vec!(row))
 }

@@ -1,4 +1,25 @@
-use crate::{create_simple_table, fetch_simple_rows, flush_query_log, SimpleRow};
+use crate::{create_simple_table, fetch_rows, flush_query_log, SimpleRow};
+use clickhouse::{sql::Identifier, Client, Row};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RenameRow {
+    #[serde(rename = "fix_id")]
+    pub fix_id: i64,
+    #[serde(rename = "extComplexId")]
+    pub complex_id: String,
+    pub ext_float: f64,
+}
+
+async fn create_rename_table(client: &Client, table_name: &str) {
+    client
+        .query("CREATE TABLE ?(fixId UInt64, extComplexId String, extFloat Float64) ENGINE = MergeTree ORDER BY fixId")
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+}
 
 #[tokio::test]
 async fn keeps_client_options() {
@@ -49,7 +70,7 @@ async fn keeps_client_options() {
         format!("should contain {client_setting_name} = {client_setting_value} (from the client options)")
     );
 
-    let rows = fetch_simple_rows(&client, table_name).await;
+    let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
     assert_eq!(rows, vec!(row))
 }
 
@@ -96,7 +117,7 @@ async fn overrides_client_options() {
         format!("should contain {setting_name} = {override_value} (from the insert options)")
     );
 
-    let rows = fetch_simple_rows(&client, table_name).await;
+    let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
     assert_eq!(rows, vec!(row))
 }
 
@@ -117,6 +138,34 @@ async fn empty_insert() {
 
     insert.end().await.unwrap();
 
-    let rows = fetch_simple_rows(&client, table_name).await;
+    let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
     assert!(rows.is_empty())
+}
+
+#[tokio::test]
+async fn rename_insert() {
+    let table_name = "insert_rename";
+    let query_id = uuid::Uuid::new_v4().to_string();
+
+    let client = prepare_database!();
+    create_rename_table(&client, table_name).await;
+
+    let row = RenameRow {
+        fix_id: 42,
+        complex_id: String::from("foo"),
+        ext_float: 0.5,
+    };
+
+    let mut insert = client
+        .insert(table_name)
+        .unwrap()
+        .with_option("query_id", &query_id);
+
+    insert.write(&row).await.unwrap();
+    insert.end().await.unwrap();
+
+    flush_query_log(&client).await;
+
+    let rows = fetch_rows::<RenameRow>(&client, table_name).await;
+    assert_eq!(rows, vec!(row))
 }
