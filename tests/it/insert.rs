@@ -1,6 +1,25 @@
-use crate::{
-    create_rename_table, create_simple_table, fetch_rows, flush_query_log, RenameRow, SimpleRow,
-};
+use crate::{create_simple_table, fetch_rows, flush_query_log, SimpleRow};
+use clickhouse::{sql::Identifier, Client, Row};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RenameRow {
+    #[serde(rename = "fix_id")]
+    pub fix_id: i64,
+    #[serde(rename = "extComplexId")]
+    pub complex_id: String,
+    pub ext_float: f64,
+}
+
+async fn create_rename_table(client: &Client, table_name: &str) {
+    client
+        .query("CREATE TABLE ?(fixId UInt64, extComplexId String, extFloat Float64) ENGINE = MergeTree ORDER BY fixId")
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+}
 
 #[tokio::test]
 async fn keeps_client_options() {

@@ -30,28 +30,9 @@ impl SimpleRow {
     }
 }
 
-#[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct RenameRow {
-    #[serde(rename = "fix_id")]
-    pub fix_id: i64,
-    #[serde(rename = "extComplexId")]
-    pub complex_id: String,
-    pub ext_float: f64,
-}
-
 async fn create_simple_table(client: &Client, table_name: &str) {
     client
         .query("CREATE TABLE ?(id UInt64, data String) ENGINE = MergeTree ORDER BY id")
-        .bind(Identifier(table_name))
-        .execute()
-        .await
-        .unwrap();
-}
-
-async fn create_rename_table(client: &Client, table_name: &str) {
-    client
-        .query("CREATE TABLE ?(fixId UInt64, extComplexId String, extFloat Float64) ENGINE = MergeTree ORDER BY fixId")
         .bind(Identifier(table_name))
         .execute()
         .await
