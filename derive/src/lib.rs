@@ -6,7 +6,7 @@ use serde_derive_internals::{
 };
 use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields};
 
-fn column_names(data: &DataStruct, cx: Ctxt, container: &Container) -> TokenStream {
+fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> TokenStream {
     match &data.fields {
         Fields::Named(fields) => {
             let rename_rule = container.rename_all_rules().deserialize;
@@ -14,7 +14,7 @@ fn column_names(data: &DataStruct, cx: Ctxt, container: &Container) -> TokenStre
                 .named
                 .iter()
                 .enumerate()
-                .map(|(index, field)| Field::from_ast(&cx, index, field, None, &SerdeDefault::None))
+                .map(|(index, field)| Field::from_ast(cx, index, field, None, &SerdeDefault::None))
                 .filter(|field| !field.skip_serializing() && !field.skip_deserializing())
                 .map(|field| {
                     rename_rule
@@ -22,13 +22,9 @@ fn column_names(data: &DataStruct, cx: Ctxt, container: &Container) -> TokenStre
                         .to_string()
                 });
 
-            let tokens = quote! {
+            quote! {
                 &[#( #column_names_iter,)*]
-            };
-
-            // TODO: do something more clever?
-            let _ = cx.check();
-            tokens
+            }
         }
         Fields::Unnamed(_) => {
             quote! { &[] }
@@ -49,9 +45,12 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let name = input.ident;
 
     let column_names = match &input.data {
-        Data::Struct(data) => column_names(data, cx, &container),
+        Data::Struct(data) => column_names(data, &cx, &container),
         Data::Enum(_) | Data::Union(_) => panic!("`Row` can be derived only for structs"),
     };
+
+    // TODO: do something more clever?
+    let _ = cx.check().expect("derive context error");
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
