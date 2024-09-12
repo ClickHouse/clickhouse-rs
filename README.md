@@ -227,8 +227,8 @@ See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples).
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
 
 > **NOTE**:
-> When connecting to ClickHouse via an `HTTPS` url, you must enable either the `native-tls` or `rustls-tls` features.
-> If both are enabled, the `rustls-tls` feature will take precedence.
+> When connecting to ClickHouse via an `HTTPS` url, you must enable either the `native-tls`, `rustls-tls` or `rustls-tls-aws` features.
+> If all are enabled, the priority is `native-tls` > `rustls-tls-aws` > `rustls-tls`.
 
 ## Data Types
 * `(U)Int(8|16|32|64|128)` maps to/from corresponding `(u|i)(8|16|32|64|128)` types or newtypes around them.
