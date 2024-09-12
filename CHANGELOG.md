@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Changed
+- MSRV is now 1.70 due to changes in `hyper-rustls` (see [v0.27.3](https://github.com/rustls/hyper-rustls/releases/tag/v%2F0.27.3)).
+- client: `hyper-rustls` now uses pure Rust `ring` backend by default with an option to use `aws-lc-rs` through `rustls-tls-aws` feature. ([#140])
+- client: TLS features priority is now `nativetls` > `aws-rs-lc` > `ring` ([#141]).
+### Fixed
+- insert: fix a panic on empty insert ([#139]).
+
+[#139]: https://github.com/ClickHouse/clickhouse-rs/pull/139
+[#140]: https://github.com/ClickHouse/clickhouse-rs/pull/140
+[#141]: https://github.com/ClickHouse/clickhouse-rs/pull/141
 
 ## [0.12.2] - 2024-08-20
 ### Changed
