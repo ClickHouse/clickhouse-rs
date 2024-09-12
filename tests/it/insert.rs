@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 struct RenameRow {
     #[serde(rename = "fix_id")]
-    pub fix_id: i64,
+    pub(crate) fix_id: i64,
     #[serde(rename = "extComplexId")]
-    pub complex_id: String,
-    pub ext_float: f64,
+    pub(crate) complex_id: String,
+    pub(crate) ext_float: f64,
 }
 
 async fn create_rename_table(client: &Client, table_name: &str) {
