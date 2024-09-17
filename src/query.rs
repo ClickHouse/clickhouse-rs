@@ -1,5 +1,6 @@
 use hyper::{header::CONTENT_LENGTH, Method, Request};
 use serde::Deserialize;
+use std::fmt;
 use url::Url;
 
 use crate::headers::with_request_headers;
@@ -20,6 +21,12 @@ const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 pub struct Query {
     client: Client,
     sql: SqlBuilder,
+}
+
+impl fmt::Debug for Query {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{sql}", sql = self.sql)
+    }
 }
 
 impl Query {
