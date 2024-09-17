@@ -203,7 +203,7 @@ impl<T> JsonCursor<T> {
                 match serde_json::from_str(workaround_51132(line)) {
                     Ok(JsonRow::Row(value)) => return Ok(Some(value)),
                     Ok(JsonRow::Progress { .. }) => continue,
-                    Err(err) => return Err(Error::BadResponse(err.to_string())),
+                    Err(err) => return Err(Error::BadResponse(format!("{err} in {line:?}"))),
                 }
             }
 
