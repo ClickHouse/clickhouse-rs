@@ -174,7 +174,9 @@ impl<T> JsonCursor<T> {
                                 Ok(JsonRow::Row(value)) => ControlFlow::Yield(value),
                                 Ok(JsonRow::Progress { .. }) => ControlFlow::Skip,
                                 // TODO: another reason?
-                                Err(err) => ControlFlow::Err(Error::BadResponse(err.to_string())),
+                                Err(err) => ControlFlow::Err(Error::BadResponse(format!(
+                                    "{err} in {line:?}"
+                                ))),
                             }
                         } else {
                             ControlFlow::Err(Error::NotEnoughData)
