@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use url::Url;
 
+#[cfg(feature = "watch")]
+use crate::watch;
 use crate::{
     error::{Error, Result},
     headers::with_request_headers,
@@ -88,6 +90,60 @@ impl Query {
 
         let response = self.do_execute(true)?;
         Ok(RowCursor::new(response))
+    }
+
+    /// Executes the query, returning a [`watch::RowJsonCursor`] to obtain results.
+    #[cfg(feature = "watch")]
+    pub fn fetch_json<T>(mut self) -> Result<watch::RowJsonCursor<T>> {
+        self.sql.append(" FORMAT JSONEachRowWithProgress");
+
+        let response = self.do_execute(true)?;
+        Ok(watch::RowJsonCursor::new(response))
+    }
+
+    /// Executes the query and returns just a single row.
+    ///
+    /// Note that `T` must be owned.
+    #[cfg(feature = "watch")]
+    pub async fn fetch_json_one<T>(self) -> Result<T>
+    where
+        T: for<'b> Deserialize<'b>,
+    {
+        match self.fetch_json()?.next().await {
+            Ok(Some(row)) => Ok(row),
+            Ok(None) => Err(Error::RowNotFound),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Executes the query and returns at most one row.
+    ///
+    /// Note that `T` must be owned.
+    #[cfg(feature = "watch")]
+    pub async fn fetch_json_optional<T>(self) -> Result<Option<T>>
+    where
+        T: for<'b> Deserialize<'b>,
+    {
+        self.fetch_json()?.next().await
+    }
+
+    /// Executes the query and returns all the generated results,
+    /// collected into a [`Vec`].
+    ///
+    /// Note that `T` must be owned.
+    #[cfg(feature = "watch")]
+    pub async fn fetch_json_all<T>(self) -> Result<Vec<T>>
+    where
+        T: for<'b> Deserialize<'b>,
+    {
+        let mut result = Vec::new();
+        let mut cursor = self.fetch_json::<T>()?;
+
+        while let Some(row) = cursor.next().await? {
+            result.push(row);
+        }
+
+        Ok(result)
     }
 
     /// Executes the query and returns just a single row.

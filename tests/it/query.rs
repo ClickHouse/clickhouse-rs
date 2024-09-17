@@ -263,3 +263,98 @@ async fn prints_query() {
         "SELECT ?fields FROM test WHERE a = ? AND b < ?"
     );
 }
+
+#[cfg(feature = "watch")]
+#[tokio::test]
+async fn fetches_json_row() {
+    let client = prepare_database!();
+
+    let value = client
+        .query("SELECT 1,2,3")
+        .fetch_json_one::<serde_json::Value>()
+        .await
+        .unwrap();
+
+    assert_eq!(value, serde_json::json!({ "1": 1, "2": 2, "3": 3}));
+
+    let value = client
+        .query("SELECT (1,2,3) as data")
+        .fetch_json_one::<serde_json::Value>()
+        .await
+        .unwrap();
+
+    assert_eq!(value, serde_json::json!({ "data": [1,2,3]}));
+}
+
+#[cfg(feature = "watch")]
+#[tokio::test]
+async fn fetches_json_struct() {
+    let client = prepare_database!();
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Row {
+        one: i8,
+        two: String,
+        three: f32,
+        four: bool,
+    }
+
+    let value = client
+        .query("SELECT -1 as one, '2' as two, 3.0 as three, false as four")
+        .fetch_json_one::<Row>()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        value,
+        Row {
+            one: -1,
+            two: "2".to_owned(),
+            three: 3.0,
+            four: false,
+        }
+    );
+}
+
+#[cfg(feature = "watch")]
+#[tokio::test]
+async fn describes_table() {
+    let client = prepare_database!();
+
+    let columns = client
+        .query("DESCRIBE TABLE system.users")
+        .fetch_json_all::<serde_json::Value>()
+        .await
+        .unwrap();
+    for c in &columns {
+        println!("{c}");
+    }
+    let columns = columns
+        .into_iter()
+        .map(|row| {
+            let column_name = row
+                .as_object()
+                .expect("JSONEachRow")
+                .get("name")
+                .expect("`system.users` must contain the `name` column");
+            (column_name.as_str().unwrap().to_owned(), row)
+        })
+        .collect::<std::collections::HashMap<String, serde_json::Value>>();
+    dbg!(&columns);
+
+    let name_column = columns
+        .get("name")
+        .expect("`system.users` must contain the `name` column");
+    assert_eq!(
+        name_column.as_object().unwrap().get("type").unwrap(),
+        &serde_json::json!("String")
+    );
+
+    let id_column = columns
+        .get("id")
+        .expect("`system.users` must contain the `id` column");
+    assert_eq!(
+        id_column.as_object().unwrap().get("type").unwrap(),
+        &serde_json::json!("UUID")
+    );
+}

@@ -6,6 +6,7 @@ use sha1::{Digest, Sha1};
 use crate::{
     cursor::JsonCursor,
     error::{Error, Result},
+    response::Response,
     row::Row,
     sql::{Bind, SqlBuilder},
     Client, Compression,
@@ -162,6 +163,23 @@ impl EventCursor {
     /// An result is unspecified if it's called after `Err` is returned.
     pub async fn next(&mut self) -> Result<Option<Version>> {
         Ok(self.0.next().await?.map(|payload| payload.version))
+    }
+}
+
+/// A cursor that emits rows in JSON format.
+pub struct RowJsonCursor<T>(JsonCursor<T>);
+
+impl<T> RowJsonCursor<T> {
+    pub(crate) fn new(response: Response) -> Self {
+        Self(JsonCursor::new(response))
+    }
+
+    /// Emits the next row.
+    pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
+    where
+        T: Deserialize<'b>,
+    {
+        self.0.next().await
     }
 }
 
