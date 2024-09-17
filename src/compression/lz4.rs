@@ -154,7 +154,7 @@ impl<S> Lz4Decoder<S> {
 
 fn calc_checksum(buffer: &[u8]) -> u128 {
     let hash = cityhash_102_128(buffer);
-    hash << 64 | hash >> 64
+    hash.rotate_right(64)
 }
 
 fn decompress(compressed: &[u8], uncompressed: &mut [u8]) -> Result<usize> {
