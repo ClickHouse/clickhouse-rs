@@ -300,7 +300,12 @@ impl Client {
 
     /// Starts a new SELECT/DDL query.
     pub fn query(&self, query: &str) -> query::Query {
-        query::Query::new(self, query)
+        query::Query::new(self, query, "?")
+    }
+
+    /// Starts a new SELECT/DDL query using the given arg for binding.
+    pub fn query_with_arg(&self, query: &str, arg: &str) -> query::Query {
+        query::Query::new(self, query, arg)
     }
 
     /// Starts a new WATCH query.

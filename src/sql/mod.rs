@@ -25,8 +25,8 @@ pub(crate) enum Part {
 }
 
 impl SqlBuilder {
-    pub(crate) fn new(template: &str) -> Self {
-        let mut iter = template.split('?');
+    pub(crate) fn new(template: &str, arg: &str) -> Self {
+        let mut iter = template.split(arg);
         let prefix = String::from(iter.next().unwrap());
         let mut parts = vec![Part::Text(prefix)];
 
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn bound_args() {
-        let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE a = ? AND b < ?");
+        let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE a = ? AND b < ?", "?");
         sql.bind_arg("foo");
         sql.bind_arg(42);
         sql.bind_fields::<Row>();
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn in_clause() {
         fn t(arg: &[&str], expected: &str) {
-            let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE a IN ?");
+            let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE a IN ?", "?");
             sql.bind_arg(arg);
             sql.bind_fields::<Row>();
             assert_eq!(sql.finish().unwrap(), expected);
@@ -175,7 +175,7 @@ mod tests {
     // See #18.
     #[test]
     fn question_marks_inside() {
-        let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a IN ? AND b = ?");
+        let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a IN ? AND b = ?", "?");
         sql.bind_arg(&["a?b", "c?"][..]);
         sql.bind_arg("a?");
         assert_eq!(
@@ -186,38 +186,38 @@ mod tests {
 
     #[test]
     fn option_as_null() {
-        let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a = ?");
+        let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a = ?", "?");
         sql.bind_arg(None::<u32>);
         assert_eq!(sql.finish().unwrap(), r"SELECT 1 FROM test WHERE a = NULL");
     }
 
     #[test]
     fn option_as_value() {
-        let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a = ?");
+        let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a = ?", "?");
         sql.bind_arg(Some(1u32));
         assert_eq!(sql.finish().unwrap(), r"SELECT 1 FROM test WHERE a = 1");
     }
 
     #[test]
     fn failures() {
-        let mut sql = SqlBuilder::new("SELECT 1");
+        let mut sql = SqlBuilder::new("SELECT 1", "?");
         sql.bind_arg(42);
         let err = sql.finish().unwrap_err();
         assert!(err.to_string().contains("all arguments are already bound"));
 
-        let mut sql = SqlBuilder::new("SELECT ?fields");
+        let mut sql = SqlBuilder::new("SELECT ?fields", "?");
         sql.bind_fields::<Unnamed>();
         let err = sql.finish().unwrap_err();
         assert!(err
             .to_string()
             .contains("argument ?fields cannot be used with non-struct row types"));
 
-        let mut sql = SqlBuilder::new("SELECT a FROM test WHERE b = ? AND c = ?");
+        let mut sql = SqlBuilder::new("SELECT a FROM test WHERE b = ? AND c = ?", "?");
         sql.bind_arg(42);
         let err = sql.finish().unwrap_err();
         assert!(err.to_string().contains("unbound query argument"));
 
-        let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE b = ?");
+        let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE b = ?", "?");
         sql.bind_arg(42);
         let err = sql.finish().unwrap_err();
         assert!(err.to_string().contains("unbound query argument ?fields"));
