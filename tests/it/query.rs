@@ -222,7 +222,7 @@ async fn fetches_json_row() {
 
     let value = client
         .query("SELECT 1,2,3")
-        .json_one::<serde_json::Value>()
+        .fetch_json_one::<serde_json::Value>()
         .await
         .unwrap();
 
@@ -230,7 +230,7 @@ async fn fetches_json_row() {
 
     let value = client
         .query("SELECT (1,2,3) as data")
-        .json_one::<serde_json::Value>()
+        .fetch_json_one::<serde_json::Value>()
         .await
         .unwrap();
 
@@ -252,7 +252,7 @@ async fn fetches_json_struct() {
 
     let value = client
         .query("SELECT -1 as one, '2' as two, 3.0 as three, false as four")
-        .json_one::<Row>()
+        .fetch_json_one::<Row>()
         .await
         .unwrap();
 
@@ -274,7 +274,7 @@ async fn describes_table() {
 
     let columns = client
         .query("DESCRIBE TABLE system.users")
-        .json_all::<serde_json::Value>()
+        .fetch_json_all::<serde_json::Value>()
         .await
         .unwrap();
     for c in &columns {

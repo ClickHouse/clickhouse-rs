@@ -87,7 +87,7 @@ impl Query {
 
     /// Executes the query, returning a [`RowJsonCursor`] to obtain results.
     #[cfg(feature = "watch")]
-    pub fn json<T>(mut self) -> Result<watch::RowJsonCursor<T>> {
+    pub fn fetch_json<T>(mut self) -> Result<watch::RowJsonCursor<T>> {
         self.sql.append(" FORMAT JSONEachRowWithProgress");
 
         let response = self.do_execute(true)?;
@@ -98,11 +98,11 @@ impl Query {
     ///
     /// Note that `T` must be owned.
     #[cfg(feature = "watch")]
-    pub async fn json_one<T>(self) -> Result<T>
+    pub async fn fetch_json_one<T>(self) -> Result<T>
     where
         T: for<'b> Deserialize<'b>,
     {
-        match self.json()?.next().await {
+        match self.fetch_json()?.next().await {
             Ok(Some(row)) => Ok(row),
             Ok(None) => Err(Error::RowNotFound),
             Err(err) => Err(err),
@@ -113,11 +113,11 @@ impl Query {
     ///
     /// Note that `T` must be owned.
     #[cfg(feature = "watch")]
-    pub async fn json_optional<T>(self) -> Result<Option<T>>
+    pub async fn fetch_json_optional<T>(self) -> Result<Option<T>>
     where
         T: for<'b> Deserialize<'b>,
     {
-        self.json()?.next().await
+        self.fetch_json()?.next().await
     }
 
     /// Executes the query and returns all the generated results,
@@ -125,12 +125,12 @@ impl Query {
     ///
     /// Note that `T` must be owned.
     #[cfg(feature = "watch")]
-    pub async fn json_all<T>(self) -> Result<Vec<T>>
+    pub async fn fetch_json_all<T>(self) -> Result<Vec<T>>
     where
         T: for<'b> Deserialize<'b>,
     {
         let mut result = Vec::new();
-        let mut cursor = self.json::<T>()?;
+        let mut cursor = self.fetch_json::<T>()?;
 
         while let Some(row) = cursor.next().await? {
             result.push(row);
