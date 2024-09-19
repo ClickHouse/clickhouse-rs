@@ -85,7 +85,7 @@ impl Query {
         Ok(RowCursor(RowBinaryCursor::new(response)))
     }
 
-    /// Executes the query, returning a [`RowJsonCursor`] to obtain results.
+    /// Executes the query, returning a [`watch::RowJsonCursor`] to obtain results.
     #[cfg(feature = "watch")]
     pub fn fetch_json<T>(mut self) -> Result<watch::RowJsonCursor<T>> {
         self.sql.append(" FORMAT JSONEachRowWithProgress");
