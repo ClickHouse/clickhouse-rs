@@ -221,7 +221,7 @@ async fn prints_query() {
 
     let q = client.query("SELECT ?fields FROM test WHERE a = ? AND b < ?");
     assert_eq!(
-        format!("{q:?}"),
+        format!("{}", q.sql_display()),
         "SELECT ?fields FROM test WHERE a = ? AND b < ?"
     );
 }

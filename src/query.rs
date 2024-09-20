@@ -1,6 +1,6 @@
 use hyper::{header::CONTENT_LENGTH, Method, Request};
 use serde::Deserialize;
-use std::fmt;
+use std::fmt::Display;
 use url::Url;
 
 use crate::headers::with_request_headers;
@@ -23,18 +23,17 @@ pub struct Query {
     sql: SqlBuilder,
 }
 
-impl fmt::Debug for Query {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{sql}", sql = self.sql)
-    }
-}
-
 impl Query {
     pub(crate) fn new(client: &Client, template: &str) -> Self {
         Self {
             client: client.clone(),
             sql: SqlBuilder::new(template),
         }
+    }
+
+    /// Display SQL query as string.
+    pub fn sql_display(&self) -> &impl Display {
+        &self.sql
     }
 
     /// Binds `value` to the next `?` in the query.
