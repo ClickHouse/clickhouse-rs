@@ -1,5 +1,13 @@
+use std::time::Duration;
+
 use hyper::Request;
-use hyper_util::client::legacy::{connect::Connect, Client, ResponseFuture};
+use hyper_util::{
+    client::legacy::{
+        connect::{Connect, HttpConnector},
+        Client, Client as HyperClient, ResponseFuture,
+    },
+    rt::TokioExecutor,
+};
 use sealed::sealed;
 
 use crate::request_body::RequestBody;
@@ -26,4 +34,76 @@ where
     fn request(&self, req: Request<RequestBody>) -> ResponseFuture {
         self.request(req)
     }
+}
+
+// === Default ===
+
+const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
+
+// ClickHouse uses 3s by default.
+// See https://github.com/ClickHouse/ClickHouse/blob/368cb74b4d222dc5472a7f2177f6bb154ebae07a/programs/server/config.xml#L201
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
+
+pub(crate) fn default() -> impl HttpClient {
+    let mut connector = HttpConnector::new();
+
+    // TODO: make configurable in `Client::builder()`.
+    connector.set_keepalive(Some(TCP_KEEPALIVE));
+
+    connector.enforce_http(!cfg!(any(
+        feature = "native-tls",
+        feature = "rustls-tls-aws-lc",
+        feature = "rustls-tls-ring",
+    )));
+
+    #[cfg(feature = "native-tls")]
+    let connector = hyper_tls::HttpsConnector::new_with_connector(connector);
+
+    #[cfg(all(feature = "rustls-tls-aws-lc", not(feature = "native-tls")))]
+    let connector =
+        prepare_hyper_rustls_connector(connector, rustls::crypto::aws_lc_rs::default_provider());
+
+    #[cfg(all(
+        feature = "rustls-tls-ring",
+        not(feature = "rustls-tls-aws-lc"),
+        not(feature = "native-tls"),
+    ))]
+    let connector =
+        prepare_hyper_rustls_connector(connector, rustls::crypto::ring::default_provider());
+
+    HyperClient::builder(TokioExecutor::new())
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+        .build(connector)
+}
+
+#[cfg(not(feature = "native-tls"))]
+#[cfg(any(feature = "rustls-tls-aws-lc", feature = "rustls-tls-ring"))]
+fn prepare_hyper_rustls_connector(
+    connector: HttpConnector,
+    provider: rustls::crypto::CryptoProvider,
+) -> hyper_rustls::HttpsConnector<HttpConnector> {
+    #[cfg(not(feature = "rustls-tls-webpki-roots"))]
+    #[cfg(not(feature = "rustls-tls-native-roots"))]
+    compile_error!(
+        "`rustls-tls-aws-lc` and `rustls-tls-ring` features require either \
+         `rustls-tls-webpki-roots` or `rustls-tls-native-roots` feature to be enabled"
+    );
+
+    #[cfg(feature = "rustls-tls-native-roots")]
+    let builder = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_provider_and_native_roots(provider)
+        .unwrap();
+
+    #[cfg(all(
+        feature = "rustls-tls-webpki-roots",
+        not(feature = "rustls-tls-native-roots")
+    ))]
+    let builder = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_provider_and_webpki_roots(provider)
+        .unwrap();
+
+    builder
+        .https_or_http()
+        .enable_http1()
+        .wrap_connector(connector)
 }

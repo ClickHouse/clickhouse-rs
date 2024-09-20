@@ -61,9 +61,17 @@ watch = ["dep:sha-1", "dep:serde_json", "serde/derive"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
 lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
+
+##  TLS
 native-tls = ["dep:hyper-tls"]
-rustls-tls = ["dep:hyper-rustls", "dep:rustls", "hyper-rustls?/ring"]
-rustls-tls-aws = ["dep:hyper-rustls", "dep:rustls", "hyper-rustls?/aws-lc-rs"]
+# ext: native-tls-alpn
+# ext: native-tls-vendored
+
+rustls-tls = ["rustls-tls-aws-lc", "rustls-tls-webpki-roots"]
+rustls-tls-aws-lc = ["dep:rustls", "dep:hyper-rustls", "hyper-rustls?/aws-lc-rs"]
+rustls-tls-ring = ["dep:rustls", "dep:hyper-rustls", "hyper-rustls?/ring"]
+rustls-tls-webpki-roots = ["dep:rustls", "dep:hyper-rustls", "hyper-rustls?/webpki-tokio"]
+rustls-tls-native-roots = ["dep:rustls", "dep:hyper-rustls", "hyper-rustls?/native-tokio"]
 
 [dependencies]
 clickhouse-derive = { version = "0.2.0", path = "derive" }
@@ -80,7 +88,6 @@ rustls = { version = "0.23", default-features = false, optional = true }
 hyper-rustls = { version = "0.27.2", default-features = false, features = [
     "http1",
     "tls12",
-    "webpki-roots",
 ], optional = true }
 url = "2.1.1"
 futures = "0.3.5"
