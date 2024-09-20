@@ -84,7 +84,7 @@ impl Watch<Rows> {
 
         Self {
             client,
-            sql: SqlBuilder::new(template),
+            sql: SqlBuilder::new(template, "?"),
             refresh: None,
             limit: None,
             _kind: Rows,
