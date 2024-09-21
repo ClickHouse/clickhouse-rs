@@ -5,18 +5,11 @@
 #[macro_use]
 extern crate static_assertions;
 
-pub use clickhouse_derive::Row;
-#[cfg(feature = "tls")]
-use hyper_tls::HttpsConnector;
-use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client as HyperClient},
-    rt::TokioExecutor,
-};
-use std::fmt::Display;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use self::{error::Result, http_client::HttpClient};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub use self::{compression::Compression, row::Row};
-use self::{error::Result, http_client::HttpClient};
+pub use clickhouse_derive::Row;
 
 pub mod error;
 pub mod insert;
@@ -41,28 +34,6 @@ mod row;
 mod rowbinary;
 #[cfg(feature = "inserter")]
 mod ticks;
-
-const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
-
-// ClickHouse uses 3s by default.
-// See https://github.com/ClickHouse/ClickHouse/blob/368cb74b4d222dc5472a7f2177f6bb154ebae07a/programs/server/config.xml#L201
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
-
-#[cfg(all(
-    not(feature = "native-tls"),
-    any(feature = "rustls-tls", feature = "rustls-tls-aws")
-))]
-fn prepare_hyper_rustls_connector(
-    connector: HttpConnector,
-    provider: impl Into<Arc<rustls::crypto::CryptoProvider>>,
-) -> hyper_rustls::HttpsConnector<HttpConnector> {
-    hyper_rustls::HttpsConnectorBuilder::new()
-        .with_provider_and_webpki_roots(provider)
-        .unwrap()
-        .https_or_http()
-        .enable_http1()
-        .wrap_connector(connector)
-}
 
 /// A client containing HTTP pool.
 #[derive(Clone)]
@@ -93,41 +64,7 @@ impl Display for ProductInfo {
 
 impl Default for Client {
     fn default() -> Self {
-        #[allow(unused_mut)]
-        let mut connector = HttpConnector::new();
-
-        // TODO: make configurable in `Client::builder()`.
-        connector.set_keepalive(Some(TCP_KEEPALIVE));
-
-        #[cfg(any(
-            feature = "native-tls",
-            feature = "rustls-tls",
-            feature = "rustls-tls-aws"
-        ))]
-        connector.enforce_http(false);
-
-        #[cfg(feature = "native-tls")]
-        let connector = hyper_tls::HttpsConnector::new_with_connector(connector);
-
-        #[cfg(all(feature = "rustls-tls-aws", not(feature = "native-tls")))]
-        let connector = prepare_hyper_rustls_connector(
-            connector,
-            rustls::crypto::aws_lc_rs::default_provider(),
-        );
-
-        #[cfg(all(
-            feature = "rustls-tls",
-            not(feature = "rustls-tls-aws"),
-            not(feature = "native-tls")
-        ))]
-        let connector =
-            prepare_hyper_rustls_connector(connector, rustls::crypto::ring::default_provider());
-
-        let client = HyperClient::builder(TokioExecutor::new())
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build(connector);
-
-        Self::with_http_client(client)
+        Self::with_http_client(http_client::default())
     }
 }
 
@@ -259,8 +196,9 @@ impl Client {
     /// ```
     ///
     /// Sample User-Agent with multiple products information
-    /// (NB: the products are added in the reverse order of [`Client::with_product_info`] calls,
-    /// which could be useful to add higher abstraction layers first):
+    /// (NB: the products are added in the reverse order of
+    /// [`Client::with_product_info`] calls, which could be useful to add
+    /// higher abstraction layers first):
     ///
     /// ```
     /// # use clickhouse::Client;
