@@ -219,7 +219,6 @@ See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples).
 * `lz4` (enabled by default) — enables `Compression::Lz4` and `Compression::Lz4Hc(_)` variants. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
 * `native-tls` — supports urls with the `HTTPS` schema via `hyper-tls`, which links against OpenSSL.
 * `rustls-tls` — supports urls with the `HTTPS` schema via `hyper-rustls`, which does not link against OpenSSL.
-* `rustls-tls-aws` - use [`aws-lc-rs`](https://github.com/rustls/hyper-rustls?tab=readme-ov-file#crate-features) instead of the default pure Rust `ring` backend for `hyper-rustls`.
 * `inserter` — enables `client.inserter()`.
 * `test-util` — adds mocks. See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs). Use it only in `dev-dependencies`.
 * `watch` — enables `client.watch` functionality. See the corresponding section for details.
@@ -227,8 +226,8 @@ See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples).
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
 
 > **NOTE**:
-> When connecting to ClickHouse via an `HTTPS` url, you must enable either the `native-tls`, `rustls-tls` or `rustls-tls-aws` features.
-> If all are enabled, the priority is `native-tls` > `rustls-tls-aws` > `rustls-tls`.
+> When connecting to ClickHouse via an `HTTPS` url, you must enable either the `native-tls` or `rustls-tls` features.
+> If both are enabled, the `rustls-tls` feature will take precedence.
 
 ## Data Types
 * `(U)Int(8|16|32|64|128)` maps to/from corresponding `(u|i)(8|16|32|64|128)` types or newtypes around them.
