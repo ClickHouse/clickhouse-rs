@@ -399,11 +399,36 @@ See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples).
     }
     ```
     </details>
-* `JSON` and `Geo` aren't supported for now.
+* `Geo` types are supported. `Point` behaves like a tuple `(f64, f64)`, and the rest of the types are just slices of points. 
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    type Point = (f64, f64);
+    type Ring = Vec<Point>;
+    type Polygon = Vec<Ring>;
+    type MultiPolygon = Vec<Polygon>;
+    type LineString = Vec<Point>;
+    type MultiLineString = Vec<LineString>;
+  
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        point: Point,
+        ring: Ring,
+        polygon: Polygon,
+        multi_polygon: MultiPolygon,
+        line_string: LineString,
+        multi_line_string: MultiLineString,
+    }
+    ```
+    </details>
+
+* `JSON`, `Variant`, `Dynamic` types are not supported for now.
 
 See also the additional examples:
 
 * [Simpler ClickHouse data types](examples/data_types_derive_simple.rs)
+* [Container-like ClickHouse data types](examples/data_types_derive_containers.rs)
 
 ## Mocking
 The crate provides utils for mocking CH server and testing DDL, `SELECT`, `INSERT` and `WATCH` queries.

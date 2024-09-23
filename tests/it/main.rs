@@ -63,6 +63,7 @@ mod ip;
 mod nested;
 mod query;
 mod time;
+mod user_agent;
 mod uuid;
 mod watch;
 

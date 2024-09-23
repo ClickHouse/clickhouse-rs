@@ -5,16 +5,8 @@
 #[macro_use]
 extern crate static_assertions;
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
-
-#[cfg(feature = "tls")]
-use hyper_tls::HttpsConnector;
-use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client as HyperClient},
-    rt::TokioExecutor,
-};
-
 use self::{error::Result, http_client::HttpClient};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub use self::{compression::Compression, row::Row};
 pub use clickhouse_derive::Row;
@@ -34,6 +26,7 @@ pub mod watch;
 mod buflist;
 mod compression;
 mod cursor;
+mod headers;
 mod http_client;
 mod request_body;
 mod response;
@@ -41,28 +34,6 @@ mod row;
 mod rowbinary;
 #[cfg(feature = "inserter")]
 mod ticks;
-
-const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
-
-// ClickHouse uses 3s by default.
-// See https://github.com/ClickHouse/ClickHouse/blob/368cb74b4d222dc5472a7f2177f6bb154ebae07a/programs/server/config.xml#L201
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
-
-#[cfg(all(
-    not(feature = "native-tls"),
-    any(feature = "rustls-tls", feature = "rustls-tls-aws")
-))]
-fn prepare_hyper_rustls_connector(
-    connector: HttpConnector,
-    provider: impl Into<Arc<rustls::crypto::CryptoProvider>>,
-) -> hyper_rustls::HttpsConnector<HttpConnector> {
-    hyper_rustls::HttpsConnectorBuilder::new()
-        .with_provider_and_webpki_roots(provider)
-        .unwrap()
-        .https_or_http()
-        .enable_http1()
-        .wrap_connector(connector)
-}
 
 /// A client containing HTTP pool.
 #[derive(Clone)]
@@ -76,45 +47,24 @@ pub struct Client {
     compression: Compression,
     options: HashMap<String, String>,
     headers: HashMap<String, String>,
+    products_info: Vec<ProductInfo>,
+}
+
+#[derive(Clone)]
+struct ProductInfo {
+    name: String,
+    version: String,
+}
+
+impl Display for ProductInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.name, self.version)
+    }
 }
 
 impl Default for Client {
     fn default() -> Self {
-        #[allow(unused_mut)]
-        let mut connector = HttpConnector::new();
-
-        // TODO: make configurable in `Client::builder()`.
-        connector.set_keepalive(Some(TCP_KEEPALIVE));
-
-        #[cfg(any(
-            feature = "native-tls",
-            feature = "rustls-tls",
-            feature = "rustls-tls-aws"
-        ))]
-        connector.enforce_http(false);
-
-        #[cfg(feature = "native-tls")]
-        let connector = hyper_tls::HttpsConnector::new_with_connector(connector);
-
-        #[cfg(all(feature = "rustls-tls-aws", not(feature = "native-tls")))]
-        let connector = prepare_hyper_rustls_connector(
-            connector,
-            rustls::crypto::aws_lc_rs::default_provider(),
-        );
-
-        #[cfg(all(
-            feature = "rustls-tls",
-            not(feature = "rustls-tls-aws"),
-            not(feature = "native-tls")
-        ))]
-        let connector =
-            prepare_hyper_rustls_connector(connector, rustls::crypto::ring::default_provider());
-
-        let client = HyperClient::builder(TokioExecutor::new())
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build(connector);
-
-        Self::with_http_client(client)
+        Self::with_http_client(http_client::default())
     }
 }
 
@@ -132,6 +82,7 @@ impl Client {
             compression: Compression::default(),
             options: HashMap::new(),
             headers: HashMap::new(),
+            products_info: Vec::default(),
         }
     }
 
@@ -218,6 +169,56 @@ impl Client {
     /// ```
     pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    /// Specifies the product name and version that will be included
+    /// in the default User-Agent header. Multiple products are supported.
+    /// This could be useful for the applications built on top of this client.
+    ///
+    /// # Examples
+    ///
+    /// Sample default User-Agent header:
+    ///
+    /// ```plaintext
+    /// clickhouse-rs/0.12.2 (lv:rust/1.67.0, os:macos)
+    /// ```
+    ///
+    /// Sample User-Agent with a single product information:
+    ///
+    /// ```
+    /// # use clickhouse::Client;
+    /// let client = Client::default().with_product_info("MyDataSource", "v1.0.0");
+    /// ```
+    ///
+    /// ```plaintext
+    /// MyDataSource/v1.0.0 clickhouse-rs/0.12.2 (lv:rust/1.67.0, os:macos)
+    /// ```
+    ///
+    /// Sample User-Agent with multiple products information
+    /// (NB: the products are added in the reverse order of
+    /// [`Client::with_product_info`] calls, which could be useful to add
+    /// higher abstraction layers first):
+    ///
+    /// ```
+    /// # use clickhouse::Client;
+    /// let client = Client::default()
+    ///     .with_product_info("MyDataSource", "v1.0.0")
+    ///     .with_product_info("MyApp", "0.0.1");
+    /// ```
+    ///
+    /// ```plaintext
+    /// MyApp/0.0.1 MyDataSource/v1.0.0 clickhouse-rs/0.12.2 (lv:rust/1.67.0, os:macos)
+    /// ```
+    pub fn with_product_info(
+        mut self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        self.products_info.push(ProductInfo {
+            name: product_name.into(),
+            version: product_version.into(),
+        });
         self
     }
 

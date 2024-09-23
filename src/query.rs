@@ -2,6 +2,7 @@ use hyper::{header::CONTENT_LENGTH, Method, Request};
 use serde::Deserialize;
 use url::Url;
 
+use crate::headers::with_request_headers;
 use crate::{
     cursor::RowBinaryCursor,
     error::{Error, Result},
@@ -159,10 +160,7 @@ impl Query {
         drop(pairs);
 
         let mut builder = Request::builder().method(method).uri(url.as_str());
-
-        for (name, value) in &self.client.headers {
-            builder = builder.header(name, value);
-        }
+        builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
 
         if content_length == 0 {
             builder = builder.header(CONTENT_LENGTH, "0");

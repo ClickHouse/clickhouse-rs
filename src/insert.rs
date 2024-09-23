@@ -10,6 +10,7 @@ use tokio::{
 };
 use url::Url;
 
+use crate::headers::with_request_headers;
 use crate::{
     error::{Error, Result},
     request_body::{ChunkSender, RequestBody},
@@ -351,10 +352,7 @@ impl<T> Insert<T> {
         drop(pairs);
 
         let mut builder = Request::post(url.as_str());
-
-        for (name, value) in &client.headers {
-            builder = builder.header(name, value);
-        }
+        builder = with_request_headers(builder, &client.headers, &client.products_info);
 
         if let Some(user) = &client.user {
             builder = builder.header("X-ClickHouse-User", user);
