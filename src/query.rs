@@ -45,7 +45,7 @@ impl Query {
     /// during query execution (`execute()`, `fetch()` etc).
     ///
     /// WARNING: This means that the query must not have any extra `?`, even if
-    /// they are in a string literal!
+    /// they are in a string literal! Use `??` to have plain `?` in query.
     ///
     /// [`Serialize`]: serde::Serialize
     /// [`Identifier`]: crate::sql::Identifier
