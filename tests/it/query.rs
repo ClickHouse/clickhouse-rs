@@ -214,3 +214,14 @@ async fn overrides_client_options() {
     // should override the client options
     assert_eq!(value, override_value);
 }
+
+#[tokio::test]
+async fn prints_query() {
+    let client = prepare_database!();
+
+    let q = client.query("SELECT ?fields FROM test WHERE a = ? AND b < ?");
+    assert_eq!(
+        format!("{}", q.sql_display()),
+        "SELECT ?fields FROM test WHERE a = ? AND b < ?"
+    );
+}

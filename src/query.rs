@@ -1,5 +1,6 @@
 use hyper::{header::CONTENT_LENGTH, Method, Request};
 use serde::Deserialize;
+use std::fmt::Display;
 use url::Url;
 
 use crate::headers::with_request_headers;
@@ -28,6 +29,11 @@ impl Query {
             client: client.clone(),
             sql: SqlBuilder::new(template),
         }
+    }
+
+    /// Display SQL query as string.
+    pub fn sql_display(&self) -> &impl Display {
+        &self.sql
     }
 
     /// Binds `value` to the next `?` in the query.

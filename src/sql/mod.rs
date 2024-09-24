@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{self, Display};
 
 use crate::{
     error::{Error, Result},
@@ -11,17 +11,36 @@ mod bind;
 pub(crate) mod escape;
 mod ser;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum SqlBuilder {
     InProgress(Vec<Part>),
     Failed(String),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum Part {
     Arg,
     Fields,
     Text(String),
+}
+
+/// Display SQL query as string.
+impl fmt::Display for SqlBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SqlBuilder::InProgress(parts) => {
+                for part in parts {
+                    match part {
+                        Part::Arg => write!(f, "?")?,
+                        Part::Fields => write!(f, "?fields")?,
+                        Part::Text(text) => write!(f, "{text}")?,
+                    }
+                }
+            }
+            SqlBuilder::Failed(err) => write!(f, "{err}")?,
+        }
+        Ok(())
+    }
 }
 
 impl SqlBuilder {
@@ -141,9 +160,29 @@ mod tests {
     #[test]
     fn bound_args() {
         let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE a = ? AND b < ?");
+        assert_eq!(
+            sql.to_string(),
+            "SELECT ?fields FROM test WHERE a = ? AND b < ?"
+        );
+
         sql.bind_arg("foo");
+        assert_eq!(
+            sql.to_string(),
+            "SELECT ?fields FROM test WHERE a = 'foo' AND b < ?"
+        );
+
         sql.bind_arg(42);
+        assert_eq!(
+            sql.to_string(),
+            "SELECT ?fields FROM test WHERE a = 'foo' AND b < 42"
+        );
+
         sql.bind_fields::<Row>();
+        assert_eq!(
+            sql.to_string(),
+            "SELECT `a`,`b` FROM test WHERE a = 'foo' AND b < 42"
+        );
+
         assert_eq!(
             sql.finish().unwrap(),
             r"SELECT `a`,`b` FROM test WHERE a = 'foo' AND b < 42"
