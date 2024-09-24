@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Write};
 
 use crate::{
     error::{Error, Result},
@@ -32,13 +32,14 @@ impl fmt::Display for SqlBuilder {
             SqlBuilder::InProgress(parts) => {
                 for part in parts {
                     match part {
-                        Part::Arg => write!(f, "?")?,
-                        Part::Fields => write!(f, "?fields")?,
-                        Part::Text(text) => write!(f, "{text}")?,
+                        Part::Arg => f.write_char('?')?,
+                        Part::Fields => f.write_str("?fields")?,
+                        Part::Str(text) => f.write_str(text)?,
+                        Part::Text(text) => f.write_str(text)?,
                     }
                 }
             }
-            SqlBuilder::Failed(err) => write!(f, "{err}")?,
+            SqlBuilder::Failed(err) => f.write_str(err)?,
         }
         Ok(())
     }
