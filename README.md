@@ -216,18 +216,35 @@ println!("live view updated: version={:?}", cursor.next().await?);
 See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples).
 
 ## Feature Flags
-* `lz4` (enabled by default) — enables `Compression::Lz4` and `Compression::Lz4Hc(_)` variants. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
-* `native-tls` — supports urls with the `HTTPS` schema via `hyper-tls`, which links against OpenSSL.
-* `rustls-tls` — supports urls with the `HTTPS` schema via `hyper-rustls`, which does not link against OpenSSL.
+* `lz4` (enabled by default) — enables `Compression::Lz4`. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
 * `inserter` — enables `client.inserter()`.
 * `test-util` — adds mocks. See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs). Use it only in `dev-dependencies`.
 * `watch` — enables `client.watch` functionality. See the corresponding section for details.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
 
-> **NOTE**:
-> When connecting to ClickHouse via an `HTTPS` url, you must enable either the `native-tls` or `rustls-tls` features.
-> If both are enabled, the `rustls-tls` feature will take precedence.
+### TLS
+By default, TLS is disabled and one or more following features must be enabled to use HTTPS urls:
+* `native-tls` — uses [native-tls], utilizing dynamic linking (e.g. against OpenSSL).
+* `rustls-tls` — enables `rustls-tls-aws-lc` and `rustls-tls-webpki-roots` features.
+* `rustls-tls-aws-lc` — uses [rustls] with the `aws-lc` cryptography implementation.
+* `rustls-tls-ring` — uses [rustls] with the `ring` cryptography implementation.
+* `rustls-tls-webpki-roots` — uses [rustls] with certificates provided by the [webpki-roots] crate.
+* `rustls-tls-native-roots` — uses [rustls] with certificates provided by the [rustls-native-certs] crate.
+
+If multiple features are enabled, the following priority is applied:
+* `native-tls` > `rustls-tls-aws-lc` > `rustls-tls-ring`
+* `rustls-tls-native-roots` > `rustls-tls-webpki-roots`
+
+How to choose between all these features? Here are some considerations:
+* A good starting point is `rustls-tls`, e.g. if you use ClickHouse Cloud.
+* To be more environment-agnostic, prefer `rustls-tls` over `native-tls`.
+* Enable `rustls-tls-native-roots` or `native-tls` if you want to use self-signed certificates.
+
+[native-tls]: https://docs.rs/native-tls
+[rustls]: https://docs.rs/rustls
+[webpki-roots]: https://docs.rs/webpki-roots
+[rustls-native-certs]: https://docs.rs/rustls-native-certs
 
 ## Data Types
 * `(U)Int(8|16|32|64|128)` maps to/from corresponding `(u|i)(8|16|32|64|128)` types or newtypes around them.
