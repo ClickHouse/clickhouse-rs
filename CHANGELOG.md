@@ -7,15 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Added
+- query: add `Query::sql_display()` ([#155]).
+- client: add `Client::with_product_info()` ([#135]).
+- client: add the `User-Agent` header to all requests ([#135]).
+
 ### Changed
-- MSRV is now 1.70 due to changes in `hyper-rustls` (see [v0.27.3](https://github.com/rustls/hyper-rustls/releases/tag/v%2F0.27.3)).
+- MSRV is now 1.70 due to changes in [hyper-rustls v0.27.3].
+- tls: revise HTTPS-related features, see README for details ([#140],[#141],[#156]).
+- query: support `??` for escaping the `?` symbol in SQL ([#154]).
 
 ### Fixed
-- insert: fix a panic on empty insert ([#139]).
+- insert: don't panic on empty inserts ([#139]).
+- uuid: serialization in human-readable formats ([#76]).
 
+[#76]: https://github.com/ClickHouse/clickhouse-rs/pull/76
+[#135]: https://github.com/ClickHouse/clickhouse-rs/pull/135
 [#139]: https://github.com/ClickHouse/clickhouse-rs/pull/139
 [#140]: https://github.com/ClickHouse/clickhouse-rs/pull/140
 [#141]: https://github.com/ClickHouse/clickhouse-rs/pull/141
+[#154]: https://github.com/ClickHouse/clickhouse-rs/pull/154
+[#155]: https://github.com/ClickHouse/clickhouse-rs/pull/155
+[#156]: https://github.com/ClickHouse/clickhouse-rs/pull/156
+[hyper-rustls v0.27.3]: https://github.com/rustls/hyper-rustls/releases/tag/v%2F0.27.3
 
 ## [0.12.2] - 2024-08-20
 ### Changed
