@@ -1,5 +1,4 @@
-use clickhouse::sql::Identifier;
-use clickhouse::{sql, Client, Row};
+use clickhouse::{sql, sql::Identifier, Client, Row};
 use serde::{Deserialize, Serialize};
 
 macro_rules! prepare_database {
@@ -60,6 +59,7 @@ mod cursor_error;
 mod insert;
 mod inserter;
 mod ip;
+mod mock;
 mod nested;
 mod query;
 mod time;
