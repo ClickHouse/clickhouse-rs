@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Fixed
+- mock: work with the advanced time via `tokio::time::advance()` ([#165]).
+
+[#165]: https://github.com/ClickHouse/clickhouse-rs/pull/165
 
 ## [0.13.0] - 2024-09-27
 ### Added

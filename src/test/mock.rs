@@ -10,7 +10,7 @@ use std::{
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full};
 use hyper::{body::Incoming, server::conn, service, Request, Response, StatusCode};
-use hyper_util::rt::{TokioIo, TokioTimer};
+use hyper_util::rt::TokioIo;
 use tokio::{net::TcpListener, task::AbortHandle};
 
 use super::{Handler, HandlerFn};
@@ -127,7 +127,8 @@ async fn server(listener: TcpListener, shared: Arc<Mutex<Shared>>) {
         };
 
         let serving = conn::http1::Builder::new()
-            .timer(TokioTimer::new())
+            // N.B.: We set no timeouts here because it works incorrectly with
+            // advanced time via `tokio::time::advance(duration)`.
             .keep_alive(false)
             .serve_connection(
                 TokioIo::new(stream),
