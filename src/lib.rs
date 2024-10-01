@@ -266,3 +266,24 @@ pub mod _priv {
         crate::compression::lz4::compress(uncompressed)
     }
 }
+
+#[derive(Debug, ::serde::Deserialize)]
+pub struct SomeRow {
+    a: u64,
+    b: i64,
+    c: i32,
+    d: u32,
+}
+
+// cargo asm --release --rust --lib --color -- clickhouse::lolkek | bat
+#[inline(never)]
+pub fn lolkek(
+    mut c: query::RowCursor<SomeRow>,
+    cx: &mut std::task::Context<'_>,
+) -> std::task::Poll<Result<Option<SomeRow>>> {
+    use std::future::Future;
+
+    let mut fut = c.next();
+
+    unsafe { std::pin::Pin::new_unchecked(&mut fut) }.poll(cx)
+}

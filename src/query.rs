@@ -3,10 +3,10 @@ use serde::Deserialize;
 use std::fmt::Display;
 use url::Url;
 
-use crate::headers::with_request_headers;
 use crate::{
     cursor::RowBinaryCursor,
     error::{Error, Result},
+    headers::with_request_headers,
     request_body::RequestBody,
     response::Response,
     row::Row,
