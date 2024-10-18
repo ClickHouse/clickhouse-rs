@@ -1,15 +1,23 @@
 use serde::Deserialize;
 
-use clickhouse::{error::Result, Client, Compression, Row};
+use clickhouse::{Client, Compression, Row};
 
 #[derive(Row, Deserialize)]
 struct Data {
     no: u64,
 }
 
-async fn bench() -> u64 {
+async fn bench(name: &str, compression: Compression) {
+    let start = std::time::Instant::now();
+    let sum = tokio::spawn(do_bench(compression)).await.unwrap();
+    assert_eq!(sum, 124999999750000000);
+    let elapsed = start.elapsed();
+    println!("{name:>8}  {elapsed:>7.3?}");
+}
+
+async fn do_bench(compression: Compression) -> u64 {
     let client = Client::default()
-        .with_compression(Compression::None)
+        .with_compression(compression)
         .with_url("http://localhost:8123");
 
     let mut cursor = client
@@ -26,11 +34,9 @@ async fn bench() -> u64 {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    println!("Started");
-    let start = std::time::Instant::now();
-    let sum = tokio::spawn(bench()).await.unwrap();
-    let elapsed = start.elapsed();
-    println!("Done: elapsed={elapsed:?} sum={sum}");
-    Ok(())
+async fn main() {
+    println!("compress  elapsed");
+    bench("none", Compression::None).await;
+    #[cfg(feature = "lz4")]
+    bench("lz4", Compression::Lz4).await;
 }

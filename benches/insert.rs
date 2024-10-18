@@ -1,11 +1,14 @@
-use std::{future::Future, mem, time::Duration};
+use std::{
+    future::Future,
+    mem,
+    time::{Duration, Instant},
+};
 
 use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use http_body_util::Empty;
 use hyper::{body::Incoming, Request, Response};
 use serde::Serialize;
-use tokio::{runtime::Runtime, time::Instant};
 
 use clickhouse::{error::Result, Client, Compression, Row};
 
@@ -76,30 +79,29 @@ async fn run_inserter<const WITH_PERIOD: bool>(client: Client, iters: u64) -> Re
 
 fn run<F>(c: &mut Criterion, name: &str, port: u16, f: impl Fn(Client, u64) -> F)
 where
-    F: Future<Output = Result<Duration>>,
+    F: Future<Output = Result<Duration>> + Send + 'static,
 {
     let addr = format!("127.0.0.1:{port}").parse().unwrap();
     let _server = common::start_server(addr, serve);
+    let runner = common::start_runner();
 
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
     group.bench_function("no compression", |b| {
         b.iter_custom(|iters| {
-            let rt = Runtime::new().unwrap();
             let client = Client::default()
                 .with_url(format!("http://{addr}"))
                 .with_compression(Compression::None);
-            rt.block_on((f)(client, iters)).unwrap()
+            runner.run((f)(client, iters))
         })
     });
     #[cfg(feature = "lz4")]
     group.bench_function("lz4", |b| {
         b.iter_custom(|iters| {
-            let rt = Runtime::new().unwrap();
             let client = Client::default()
                 .with_url(format!("http://{addr}"))
                 .with_compression(Compression::Lz4);
-            rt.block_on((f)(client, iters)).unwrap()
+            runner.run((f)(client, iters))
         })
     });
     group.finish();
