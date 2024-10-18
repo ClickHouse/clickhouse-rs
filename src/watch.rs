@@ -158,6 +158,8 @@ impl Row for EventPayload {
 
 impl EventCursor {
     /// Emits the next version.
+    ///
+    /// An result is unspecified if it's called after `Err` is returned.
     pub async fn next(&mut self) -> Result<Option<Version>> {
         Ok(self.0.next().await?.map(|payload| payload.version))
     }
@@ -181,6 +183,8 @@ impl<T: Row> Row for RowPayload<T> {
 
 impl<T> RowCursor<T> {
     /// Emits the next row.
+    ///
+    /// An result is unspecified if it's called after `Err` is returned.
     pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<(Version, T)>>
     where
         T: Deserialize<'b> + Row,

@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 use futures::channel::oneshot;
 use hyper::{Request, Response, StatusCode};
 use sealed::sealed;
@@ -88,12 +88,12 @@ where
     where
         C: Default + Extend<T>,
     {
-        let mut buffer = self.rx.await.expect("query canceled");
+        let bytes = self.rx.await.expect("query canceled");
+        let slice = &mut (&bytes[..]);
         let mut result = C::default();
 
-        while buffer.has_remaining() {
-            let row: T =
-                rowbinary::deserialize_from(&mut buffer, &mut []).expect("failed to deserialize");
+        while !slice.is_empty() {
+            let row: T = rowbinary::deserialize_from(slice).expect("failed to deserialize");
             result.extend(std::iter::once(row));
         }
 

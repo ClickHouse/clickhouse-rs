@@ -23,7 +23,7 @@ pub mod test;
 #[cfg(feature = "watch")]
 pub mod watch;
 
-mod buflist;
+mod bytes_ext;
 mod compression;
 mod cursor;
 mod headers;

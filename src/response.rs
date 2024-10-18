@@ -15,7 +15,7 @@ use hyper::{
     body::{Body as _, Incoming},
     StatusCode,
 };
-use hyper_util::client::legacy::ResponseFuture;
+use hyper_util::client::legacy::ResponseFuture as HyperResponseFuture;
 
 #[cfg(feature = "lz4")]
 use crate::compression::lz4::Lz4Decoder;
@@ -29,13 +29,15 @@ use crate::{
 pub(crate) enum Response {
     // Headers haven't been received yet.
     // `Box<_>` improves performance by reducing the size of the whole future.
-    Waiting(Pin<Box<dyn Future<Output = Result<Chunks>> + Send>>),
+    Waiting(ResponseFuture),
     // Headers have been received, streaming the body.
     Loading(Chunks),
 }
 
+pub(crate) type ResponseFuture = Pin<Box<dyn Future<Output = Result<Chunks>> + Send>>;
+
 impl Response {
-    pub(crate) fn new(response: ResponseFuture, compression: Compression) -> Self {
+    pub(crate) fn new(response: HyperResponseFuture, compression: Compression) -> Self {
         Self::Waiting(Box::pin(async move {
             let response = response.await?;
             let status = response.status();
@@ -52,27 +54,21 @@ impl Response {
         }))
     }
 
-    #[inline]
-    pub(crate) fn chunks(&mut self) -> Option<&mut Chunks> {
+    pub(crate) fn into_future(self) -> ResponseFuture {
         match self {
-            Self::Waiting(_) => None,
-            Self::Loading(chunks) => Some(chunks),
-        }
-    }
-
-    #[cold]
-    #[inline(never)]
-    pub(crate) async fn chunks_slow(&mut self) -> Result<&mut Chunks> {
-        loop {
-            match self {
-                Self::Waiting(future) => *self = Self::Loading(future.await?),
-                Self::Loading(chunks) => break Ok(chunks),
-            }
+            Self::Waiting(future) => future,
+            Self::Loading(_) => panic!("response is already streaming"),
         }
     }
 
     pub(crate) async fn finish(&mut self) -> Result<()> {
-        let chunks = self.chunks_slow().await?;
+        let chunks = loop {
+            match self {
+                Self::Waiting(future) => *self = Self::Loading(future.await?),
+                Self::Loading(chunks) => break chunks,
+            }
+        };
+
         while chunks.try_next().await?.is_some() {}
         Ok(())
     }
@@ -99,7 +95,7 @@ async fn collect_bad_response(
 
     // Try to decompress the body, because CH uses compression even for errors.
     let stream = stream::once(future::ready(Result::<_>::Ok(raw_bytes.slice(..))));
-    let stream = Decompress::new(stream, compression);
+    let stream = Decompress::new(stream, compression).map_ok(|chunk| chunk.data);
 
     // We're collecting already fetched chunks, thus only decompression errors can
     // be here. If decompression is failed, we should try the raw body because
@@ -138,6 +134,11 @@ fn stringify_status(status: StatusCode) -> String {
 
 // === Chunks ===
 
+pub(crate) struct Chunk {
+    pub(crate) data: Bytes,
+    pub(crate) net_size: usize,
+}
+
 // * Uses `Option<_>` to make this stream fused.
 // * Uses `Box<_>` in order to reduce the size of cursors.
 pub(crate) struct Chunks(Option<Box<DetectDbException<Decompress<IncomingStream>>>>);
@@ -152,7 +153,7 @@ impl Chunks {
 }
 
 impl Stream for Chunks {
-    type Item = Result<Bytes>;
+    type Item = Result<Chunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // `take()` prevents from use after caught panic.
@@ -224,11 +225,17 @@ impl<S> Stream for Decompress<S>
 where
     S: Stream<Item = Result<Bytes>> + Unpin,
 {
-    type Item = Result<Bytes>;
+    type Item = Result<Chunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match &mut *self {
-            Self::Plain(stream) => Pin::new(stream).poll_next(cx).map_err(Into::into),
+            Self::Plain(stream) => Pin::new(stream)
+                .poll_next(cx)
+                .map_ok(|bytes| Chunk {
+                    net_size: bytes.len(),
+                    data: bytes,
+                })
+                .map_err(Into::into),
             #[cfg(feature = "lz4")]
             Self::Lz4(stream) => Pin::new(stream).poll_next(cx),
         }
@@ -250,9 +257,9 @@ impl<S> DetectDbException<S> {
 
 impl<S> Stream for DetectDbException<S>
 where
-    S: Stream<Item = Result<Bytes>> + Unpin,
+    S: Stream<Item = Result<Chunk>> + Unpin,
 {
-    type Item = Result<Bytes>;
+    type Item = Result<Chunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match &mut *self {
@@ -260,11 +267,10 @@ where
                 let mut res = Pin::new(stream).poll_next(cx);
 
                 if let Poll::Ready(Some(Ok(chunk))) = &mut res {
-                    if let Some(err) = extract_exception(chunk) {
+                    if let Some(err) = extract_exception(&mut chunk.data) {
                         *self = Self::Exception(Some(err));
 
-                        // NOTE: now `chunk` can be empty, but it's ok for
-                        // callers.
+                        // NOTE: `chunk` can be empty, but it's ok for callers.
                     }
                 }
 
