@@ -1,16 +1,23 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Added
+- query/cursor: add `RowCursor::{decoded_bytes,received_bytes}` methods ([#169]).
+
+### Changed
+- query/cursor: improve performance of `RowCursor::next()` ([#169]).
+
 ### Fixed
 - mock: work with the advanced time via `tokio::time::advance()` ([#165]).
 
 [#165]: https://github.com/ClickHouse/clickhouse-rs/pull/165
+[#169]: https://github.com/ClickHouse/clickhouse-rs/pull/169
 
 ## [0.13.0] - 2024-09-27
 ### Added
