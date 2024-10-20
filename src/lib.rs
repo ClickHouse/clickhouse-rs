@@ -5,7 +5,8 @@
 #[macro_use]
 extern crate static_assertions;
 
-use self::{error::Result, http_client::HttpClient};
+use self::{error::Result, http_client::HttpClient, sql::ser};
+use ::serde::Serialize;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub use self::{compression::Compression, row::Row};
@@ -158,6 +159,13 @@ impl Client {
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.options.insert(name.into(), value.into());
         self
+    }
+
+    /// Specify server side parameter for all this client's queries.
+    pub fn with_param(self, name: &str, value: impl Serialize) -> Result<Self, String> {
+        let mut param = String::from("");
+        ser::write_param(&mut param, &value)?;
+        Ok(self.with_option(format!("param_{name}"), param))
     }
 
     /// Used to specify a header that will be passed to all queries.
