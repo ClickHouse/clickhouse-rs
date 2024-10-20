@@ -5,123 +5,147 @@ use futures::TryStreamExt;
 use serde::Deserialize;
 
 use crate::{
-    buflist::BufList,
+    bytes_ext::BytesExt,
     error::{Error, Result},
-    response::Response,
+    response::{Chunks, Response, ResponseFuture},
     rowbinary,
 };
 
-const INITIAL_BUFFER_SIZE: usize = 1024;
-
 // === RawCursor ===
 
-struct RawCursor {
-    response: Response,
-    pending: BufList<Bytes>,
+struct RawCursor(RawCursorInner);
+
+enum RawCursorInner {
+    Waiting(ResponseFuture),
+    Loading(RawCursorLoading),
+}
+
+struct RawCursorLoading {
+    chunks: Chunks,
+    net_size: u64,
+    data_size: u64,
 }
 
 impl RawCursor {
     fn new(response: Response) -> Self {
-        Self {
-            response,
-            pending: BufList::default(),
-        }
+        Self(RawCursorInner::Waiting(response.into_future()))
     }
 
-    #[inline(always)]
-    async fn next<T>(
-        &mut self,
-        mut f: impl FnMut(&mut BufList<Bytes>) -> ControlFlow<T>,
-    ) -> Result<Option<T>> {
-        let chunks = if let Some(chunks) = self.response.chunks() {
-            chunks
-        } else {
-            self.response.chunks_slow().await?
+    async fn next(&mut self) -> Result<Option<Bytes>> {
+        if matches!(self.0, RawCursorInner::Waiting(_)) {
+            self.resolve().await?;
+        }
+
+        let state = match &mut self.0 {
+            RawCursorInner::Loading(state) => state,
+            RawCursorInner::Waiting(_) => unreachable!(),
         };
 
-        loop {
-            match f(&mut self.pending) {
-                ControlFlow::Yield(value) => {
-                    self.pending.commit();
-                    return Ok(Some(value));
-                }
-                #[cfg(feature = "watch")]
-                ControlFlow::Skip => {
-                    self.pending.commit();
-                    continue;
-                }
-                ControlFlow::Retry => {
-                    self.pending.rollback();
-                    continue;
-                }
-                ControlFlow::Err(Error::NotEnoughData) => {
-                    self.pending.rollback();
-                }
-                ControlFlow::Err(err) => return Err(err),
+        match state.chunks.try_next().await {
+            Ok(Some(chunk)) => {
+                state.net_size += chunk.net_size as u64;
+                state.data_size += chunk.data.len() as u64;
+                Ok(Some(chunk.data))
             }
-
-            match chunks.try_next().await? {
-                Some(chunk) => self.pending.push(chunk),
-                None if self.pending.bufs_cnt() > 0 => return Err(Error::NotEnoughData),
-                None => return Ok(None),
-            }
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
         }
     }
-}
 
-enum ControlFlow<T> {
-    Yield(T),
-    #[cfg(feature = "watch")]
-    Skip,
-    Retry,
-    Err(Error),
+    async fn resolve(&mut self) -> Result<()> {
+        if let RawCursorInner::Waiting(future) = &mut self.0 {
+            let chunks = future.await;
+            self.0 = RawCursorInner::Loading(RawCursorLoading {
+                chunks: chunks?,
+                net_size: 0,
+                data_size: 0,
+            });
+        }
+        Ok(())
+    }
+
+    fn received_bytes(&self) -> u64 {
+        match &self.0 {
+            RawCursorInner::Waiting(_) => 0,
+            RawCursorInner::Loading(state) => state.net_size,
+        }
+    }
+
+    fn decoded_bytes(&self) -> u64 {
+        match &self.0 {
+            RawCursorInner::Waiting(_) => 0,
+            RawCursorInner::Loading(state) => state.data_size,
+        }
+    }
 }
 
 // XXX: it was a workaround for https://github.com/rust-lang/rust/issues/51132,
 //      but introduced #24 and must be fixed.
-fn workaround_51132<'a, T>(ptr: &mut T) -> &'a mut T {
+fn workaround_51132<'a, T: ?Sized>(ptr: &T) -> &'a T {
     // SAFETY: actually, it leads to unsoundness, see #24
-    unsafe { &mut *(ptr as *mut T) }
+    unsafe { &*(ptr as *const T) }
 }
 
-// === RowBinaryCursor ===
+// === RowCursor ===
 
-pub(crate) struct RowBinaryCursor<T> {
+/// A cursor that emits rows.
+#[must_use]
+pub struct RowCursor<T> {
     raw: RawCursor,
-    buffer: Vec<u8>,
+    bytes: BytesExt,
     _marker: PhantomData<T>,
 }
 
-impl<T> RowBinaryCursor<T> {
+impl<T> RowCursor<T> {
     pub(crate) fn new(response: Response) -> Self {
         Self {
             raw: RawCursor::new(response),
-            buffer: vec![0; INITIAL_BUFFER_SIZE],
+            bytes: BytesExt::default(),
             _marker: PhantomData,
         }
     }
 
-    pub(crate) async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
+    /// Emits the next row.
+    ///
+    /// An result is unspecified if it's called after `Err` is returned.
+    pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
     where
         T: Deserialize<'b>,
     {
-        let buffer = &mut self.buffer;
+        loop {
+            let mut slice = workaround_51132(self.bytes.slice());
 
-        self.raw
-            .next(|pending| {
-                match rowbinary::deserialize_from(pending, &mut workaround_51132(buffer)[..]) {
-                    Ok(value) => ControlFlow::Yield(value),
-                    Err(Error::TooSmallBuffer(need)) => {
-                        let new_len = (buffer.len() + need)
-                            .checked_next_power_of_two()
-                            .expect("oom");
-                        buffer.resize(new_len, 0);
-                        ControlFlow::Retry
-                    }
-                    Err(err) => ControlFlow::Err(err),
+            match rowbinary::deserialize_from(&mut slice) {
+                Ok(value) => {
+                    self.bytes.set_remaining(slice.len());
+                    return Ok(Some(value));
                 }
-            })
-            .await
+                Err(Error::NotEnoughData) => {}
+                Err(err) => return Err(err),
+            }
+
+            match self.raw.next().await? {
+                Some(chunk) => self.bytes.extend(chunk),
+                None => return Ok(None),
+            }
+        }
+    }
+
+    /// Returns the total size in bytes received from the CH server since
+    /// the cursor was created.
+    ///
+    /// This method counts only size without HTTP headers for now.
+    /// It can be changed in the future without notice.
+    #[inline]
+    pub fn received_bytes(&self) -> u64 {
+        self.raw.received_bytes()
+    }
+
+    /// Returns the total size in bytes decompressed since the cursor was
+    /// created.
+    #[inline]
+    pub fn decoded_bytes(&self) -> u64 {
+        self.raw.decoded_bytes()
     }
 }
 
@@ -130,6 +154,7 @@ impl<T> RowBinaryCursor<T> {
 #[cfg(feature = "watch")]
 pub(crate) struct JsonCursor<T> {
     raw: RawCursor,
+    bytes: BytesExt,
     line: String,
     _marker: PhantomData<T>,
 }
@@ -146,10 +171,13 @@ enum JsonRow<T> {
 
 #[cfg(feature = "watch")]
 impl<T> JsonCursor<T> {
+    const INITIAL_BUFFER_SIZE: usize = 1024;
+
     pub(crate) fn new(response: Response) -> Self {
         Self {
             raw: RawCursor::new(response),
-            line: String::with_capacity(INITIAL_BUFFER_SIZE),
+            bytes: BytesExt::default(),
+            line: String::with_capacity(Self::INITIAL_BUFFER_SIZE),
             _marker: PhantomData,
         }
     }
@@ -161,32 +189,28 @@ impl<T> JsonCursor<T> {
         use bytes::Buf;
         use std::io::BufRead;
 
-        let line = &mut self.line;
+        loop {
+            self.line.clear();
 
-        self.raw
-            .next(|pending| {
-                line.clear();
-                match pending.reader().read_line(line) {
-                    Ok(_) => {
-                        let line = workaround_51132(line);
-                        if let Some(line) = line.strip_suffix('\n') {
-                            match serde_json::from_str(line) {
-                                Ok(JsonRow::Row(value)) => ControlFlow::Yield(value),
-                                Ok(JsonRow::Progress { .. }) => ControlFlow::Skip,
-                                // TODO: another reason?
-                                Err(err) => ControlFlow::Err(Error::BadResponse(err.to_string())),
-                            }
-                        } else {
-                            ControlFlow::Err(Error::NotEnoughData)
-                        }
-                    }
-                    Err(err) => {
-                        // Actually, it's an unreachable branch, because
-                        // `bytes::buf::Reader` doesn't fail.
-                        ControlFlow::Err(Error::Custom(err.to_string()))
-                    }
+            let read = match self.bytes.slice().reader().read_line(&mut self.line) {
+                Ok(read) => read,
+                Err(err) => return Err(Error::Custom(err.to_string())),
+            };
+
+            if let Some(line) = self.line.strip_suffix('\n') {
+                self.bytes.advance(read);
+
+                match serde_json::from_str(workaround_51132(line)) {
+                    Ok(JsonRow::Row(value)) => return Ok(Some(value)),
+                    Ok(JsonRow::Progress { .. }) => continue,
+                    Err(err) => return Err(Error::BadResponse(err.to_string())),
                 }
-            })
-            .await
+            }
+
+            match self.raw.next().await? {
+                Some(chunk) => self.bytes.extend(chunk),
+                None => return Ok(None),
+            }
+        }
     }
 }

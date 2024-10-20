@@ -116,20 +116,16 @@ fn it_serializes() {
 
 #[test]
 fn it_deserializes() {
-    use bytes::buf::Buf;
-
     let input = sample_serialized();
-    let mut temp_buf = [0; 1024];
 
     for i in 0..input.len() {
-        let (left, right) = input.split_at(i);
+        let (mut left, mut right) = input.split_at(i);
 
         // It shouldn't panic.
-        let _: Result<Sample<'_>, _> = super::deserialize_from(left, &mut temp_buf);
-        let _: Result<Sample<'_>, _> = super::deserialize_from(right, &mut temp_buf);
+        let _: Result<Sample<'_>, _> = super::deserialize_from(&mut left);
+        let _: Result<Sample<'_>, _> = super::deserialize_from(&mut right);
 
-        let buf = left.chain(right);
-        let actual: Sample<'_> = super::deserialize_from(buf, &mut temp_buf).unwrap();
+        let actual: Sample<'_> = super::deserialize_from(&mut input.as_slice()).unwrap();
         assert_eq!(actual, sample());
     }
 }

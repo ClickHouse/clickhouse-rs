@@ -8,43 +8,32 @@ use serde::{
 
 use crate::error::{Error, Result};
 
-/// Deserializes a value from `buffer` with a row encoded in `RowBinary`.
-pub(crate) fn deserialize_from<'de, T: Deserialize<'de>>(
-    input: impl Buf,
-    temp_buf: &'de mut [u8],
-) -> Result<T> {
-    let mut deserializer = RowBinaryDeserializer { input, temp_buf };
+/// Deserializes a value from `input` with a row encoded in `RowBinary`.
+///
+/// It accepts _a reference to_ a byte slice because it somehow leads to a more
+/// performant generated code than `(&[u8]) -> Result<(T, usize)>` and even
+/// `(&[u8], &mut Option<T>) -> Result<usize>`.
+pub(crate) fn deserialize_from<'data, T: Deserialize<'data>>(input: &mut &'data [u8]) -> Result<T> {
+    let mut deserializer = RowBinaryDeserializer { input };
     T::deserialize(&mut deserializer)
 }
 
 /// A deserializer for the RowBinary format.
 ///
 /// See https://clickhouse.com/docs/en/interfaces/formats#rowbinary for details.
-struct RowBinaryDeserializer<'de, B> {
-    input: B,
-    temp_buf: &'de mut [u8],
+struct RowBinaryDeserializer<'cursor, 'data> {
+    input: &'cursor mut &'data [u8],
 }
 
-impl<'de, B: Buf> RowBinaryDeserializer<'de, B> {
+impl<'cursor, 'data> RowBinaryDeserializer<'cursor, 'data> {
     fn read_vec(&mut self, size: usize) -> Result<Vec<u8>> {
-        ensure_size(&mut self.input, size)?;
-        let mut vec = vec![0; size];
-        self.input.copy_to_slice(&mut vec[..]);
-        Ok(vec)
+        Ok(self.read_slice(size)?.to_vec())
     }
 
-    fn read_slice(&mut self, size: usize) -> Result<&'de [u8]> {
+    fn read_slice(&mut self, size: usize) -> Result<&'data [u8]> {
         ensure_size(&mut self.input, size)?;
-
-        if self.temp_buf.len() < size {
-            return Err(Error::TooSmallBuffer(size - self.temp_buf.len()));
-        }
-
-        let temp_buf = mem::take(&mut self.temp_buf);
-        let (slice, rest) = temp_buf.split_at_mut(size);
-        self.temp_buf = rest;
-        self.input.copy_to_slice(slice);
-
+        let slice = &self.input[..size];
+        self.input.advance(size);
         Ok(slice)
     }
 
@@ -67,7 +56,7 @@ fn ensure_size(buffer: impl Buf, size: usize) -> Result<()> {
 macro_rules! impl_num {
     ($ty:ty, $deser_method:ident, $visitor_method:ident, $reader_method:ident) => {
         #[inline]
-        fn $deser_method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        fn $deser_method<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
             ensure_size(&mut self.input, mem::size_of::<$ty>())?;
             let value = self.input.$reader_method();
             visitor.$visitor_method(value)
@@ -75,7 +64,7 @@ macro_rules! impl_num {
     };
 }
 
-impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B> {
+impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor, 'data> {
     type Error = Error;
 
     impl_num!(i8, deserialize_i8, visit_i8, get_i8);
@@ -103,23 +92,23 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     impl_num!(f64, deserialize_f64, visit_f64, get_f64_le);
 
     #[inline]
-    fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value> {
+    fn deserialize_any<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
         Err(Error::DeserializeAnyNotSupported)
     }
 
     #[inline]
-    fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_unit<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         // TODO: revise this.
         visitor.visit_unit()
     }
 
     #[inline]
-    fn deserialize_char<V: Visitor<'de>>(self, _: V) -> Result<V::Value> {
+    fn deserialize_char<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
         panic!("character types are unsupported: `char`");
     }
 
     #[inline]
-    fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_bool<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         ensure_size(&mut self.input, 1)?;
         match self.input.get_u8() {
             0 => visitor.visit_bool(false),
@@ -129,7 +118,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_str<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
         let slice = self.read_slice(size)?;
         let str = str::from_utf8(slice).map_err(Error::from)?;
@@ -137,7 +126,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_string<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
         let vec = self.read_vec(size)?;
         let string = String::from_utf8(vec).map_err(|err| Error::from(err.utf8_error()))?;
@@ -145,20 +134,20 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_bytes<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
         let slice = self.read_slice(size)?;
         visitor.visit_borrowed_bytes(slice)
     }
 
     #[inline]
-    fn deserialize_byte_buf<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_byte_buf<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
         visitor.visit_byte_buf(self.read_vec(size)?)
     }
 
     #[inline]
-    fn deserialize_enum<V: Visitor<'de>>(
+    fn deserialize_enum<V: Visitor<'data>>(
         self,
         name: &'static str,
         _variants: &'static [&'static str],
@@ -168,18 +157,18 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_tuple<V: Visitor<'de>>(self, len: usize, visitor: V) -> Result<V::Value> {
-        struct Access<'de, 'a, B> {
-            deserializer: &'a mut RowBinaryDeserializer<'de, B>,
+    fn deserialize_tuple<V: Visitor<'data>>(self, len: usize, visitor: V) -> Result<V::Value> {
+        struct Access<'de, 'cursor, 'data> {
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data>,
             len: usize,
         }
 
-        impl<'de, 'a, B: Buf> SeqAccess<'de> for Access<'de, 'a, B> {
+        impl<'de, 'cursor, 'data> SeqAccess<'data> for Access<'de, 'cursor, 'data> {
             type Error = Error;
 
             fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
             where
-                T: DeserializeSeed<'de>,
+                T: DeserializeSeed<'data>,
             {
                 if self.len > 0 {
                     self.len -= 1;
@@ -202,7 +191,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_option<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         ensure_size(&mut self.input, 1)?;
 
         match self.input.get_u8() {
@@ -213,18 +202,18 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn deserialize_seq<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let len = self.read_size()?;
         self.deserialize_tuple(len, visitor)
     }
 
     #[inline]
-    fn deserialize_map<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
+    fn deserialize_map<V: Visitor<'data>>(self, _visitor: V) -> Result<V::Value> {
         panic!("maps are unsupported, use `Vec<(A, B)>` instead");
     }
 
     #[inline]
-    fn deserialize_struct<V: Visitor<'de>>(
+    fn deserialize_struct<V: Visitor<'data>>(
         self,
         _name: &str,
         fields: &'static [&'static str],
@@ -234,12 +223,12 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_identifier<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
+    fn deserialize_identifier<V: Visitor<'data>>(self, _visitor: V) -> Result<V::Value> {
         panic!("identifiers are unsupported");
     }
 
     #[inline]
-    fn deserialize_newtype_struct<V: Visitor<'de>>(
+    fn deserialize_newtype_struct<V: Visitor<'data>>(
         self,
         _name: &str,
         visitor: V,
@@ -248,7 +237,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_unit_struct<V: Visitor<'de>>(
+    fn deserialize_unit_struct<V: Visitor<'data>>(
         self,
         name: &'static str,
         _visitor: V,
@@ -257,7 +246,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_tuple_struct<V: Visitor<'de>>(
+    fn deserialize_tuple_struct<V: Visitor<'data>>(
         self,
         name: &'static str,
         _len: usize,
@@ -267,7 +256,7 @@ impl<'de, 'a, B: Buf> Deserializer<'de> for &'a mut RowBinaryDeserializer<'de, B
     }
 
     #[inline]
-    fn deserialize_ignored_any<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
+    fn deserialize_ignored_any<V: Visitor<'data>>(self, _visitor: V) -> Result<V::Value> {
         panic!("ignored types are unsupported");
     }
 

@@ -1,36 +1,20 @@
-use serde::{Deserialize, Serialize};
+use clickhouse::{Client, Compression};
 
-use clickhouse::{Client, Compression, Row};
+use crate::{create_simple_table, SimpleRow};
 
 async fn check(client: Client) {
-    #[derive(Debug, Row, Serialize, Deserialize)]
-    struct MyRow<'a> {
-        no: u32,
-        name: &'a str,
-    }
-
-    client
-        .query(
-            "
-            CREATE TABLE test(no UInt32, name LowCardinality(String))
-            ENGINE = MergeTree
-            ORDER BY no
-        ",
-        )
-        .execute()
-        .await
-        .unwrap();
+    create_simple_table(&client, "test").await;
 
     let mut insert = client.insert("test").unwrap();
     for i in 0..200_000 {
-        insert.write(&MyRow { no: i, name: "foo" }).await.unwrap();
+        insert.write(&SimpleRow::new(i, "foo")).await.unwrap();
     }
     insert.end().await.unwrap();
 
     // Check data.
 
     let (sum_no, sum_len) = client
-        .query("SELECT sum(no), sum(length(name)) FROM test")
+        .query("SELECT sum(id), sum(length(data)) FROM test")
         .fetch_one::<(u64, u64)>()
         .await
         .unwrap();

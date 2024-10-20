@@ -1,4 +1,8 @@
-use std::{convert::Infallible, mem};
+use std::{
+    convert::Infallible,
+    mem,
+    time::{Duration, Instant},
+};
 
 use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
@@ -9,7 +13,6 @@ use hyper::{
     Request, Response,
 };
 use serde::Deserialize;
-use tokio::{runtime::Runtime, time::Instant};
 
 use clickhouse::{error::Result, Client, Compression, Row};
 
@@ -47,6 +50,7 @@ fn select(c: &mut Criterion) {
     let addr = "127.0.0.1:6543".parse().unwrap();
     let chunk = prepare_chunk();
     let _server = common::start_server(addr, move |req| serve(req, chunk.clone()));
+    let runner = common::start_runner();
 
     #[allow(dead_code)]
     #[derive(Debug, Row, Deserialize)]
@@ -57,7 +61,8 @@ fn select(c: &mut Criterion) {
         d: u32,
     }
 
-    async fn run(client: Client, iters: u64) -> Result<()> {
+    async fn run(client: Client, iters: u64) -> Result<Duration> {
+        let start = Instant::now();
         let mut cursor = client
             .query("SELECT ?fields FROM some")
             .fetch::<SomeRow>()?;
@@ -66,32 +71,26 @@ fn select(c: &mut Criterion) {
             black_box(cursor.next().await?);
         }
 
-        Ok(())
+        Ok(start.elapsed())
     }
 
     let mut group = c.benchmark_group("select");
     group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
     group.bench_function("no compression", |b| {
         b.iter_custom(|iters| {
-            let rt = Runtime::new().unwrap();
             let client = Client::default()
                 .with_url(format!("http://{addr}"))
                 .with_compression(Compression::None);
-            let start = Instant::now();
-            rt.block_on(run(client, iters)).unwrap();
-            start.elapsed()
+            runner.run(run(client, iters))
         })
     });
     #[cfg(feature = "lz4")]
     group.bench_function("lz4", |b| {
         b.iter_custom(|iters| {
-            let rt = Runtime::new().unwrap();
             let client = Client::default()
                 .with_url(format!("http://{addr}"))
                 .with_compression(Compression::Lz4);
-            let start = Instant::now();
-            rt.block_on(run(client, iters)).unwrap();
-            start.elapsed()
+            runner.run(run(client, iters))
         })
     });
     group.finish();

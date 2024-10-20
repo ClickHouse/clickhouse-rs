@@ -3,10 +3,9 @@ use serde::Deserialize;
 use std::fmt::Display;
 use url::Url;
 
-use crate::headers::with_request_headers;
 use crate::{
-    cursor::RowBinaryCursor,
     error::{Error, Result},
+    headers::with_request_headers,
     request_body::RequestBody,
     response::Response,
     row::Row,
@@ -15,6 +14,8 @@ use crate::{
 };
 
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
+
+pub use crate::cursor::RowCursor;
 
 #[must_use]
 #[derive(Clone)]
@@ -86,7 +87,7 @@ impl Query {
         self.sql.append(" FORMAT RowBinary");
 
         let response = self.do_execute(true)?;
-        Ok(RowCursor(RowBinaryCursor::new(response)))
+        Ok(RowCursor::new(response))
     }
 
     /// Executes the query and returns just a single row.
@@ -194,18 +195,5 @@ impl Query {
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.client.add_option(name, value);
         self
-    }
-}
-
-/// A cursor that emits rows.
-pub struct RowCursor<T>(RowBinaryCursor<T>);
-
-impl<T> RowCursor<T> {
-    /// Emits the next row.
-    pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
-    where
-        T: Deserialize<'b>,
-    {
-        self.0.next().await
     }
 }
