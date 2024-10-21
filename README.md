@@ -35,10 +35,10 @@ Note: [ch2rs](https://github.com/ClickHouse/ch2rs) is useful to generate a row t
 To use the crate, add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-clickhouse = "0.13.0"
+clickhouse = "0.13.1"
 
 [dev-dependencies]
-clickhouse = { version = "0.13.0", features = ["test-util"] }
+clickhouse = { version = "0.13.1", features = ["test-util"] }
 ```
 
 <details>
