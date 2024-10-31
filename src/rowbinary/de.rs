@@ -299,20 +299,20 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
     #[inline]
     fn deserialize_unit_struct<V: Visitor<'data>>(
         self,
-        _name: &'static str,
+        name: &'static str,
         _visitor: V,
     ) -> Result<V::Value> {
-        panic!("unit types are unsupported: `{_name}`");
+        panic!("unit types are unsupported: `{name}`");
     }
 
     #[inline]
     fn deserialize_tuple_struct<V: Visitor<'data>>(
         self,
-        _name: &'static str,
+        name: &'static str,
         _len: usize,
         _visitor: V,
     ) -> Result<V::Value> {
-        panic!("tuple struct types are unsupported: `{_name}`");
+        panic!("tuple struct types are unsupported: `{name}`");
     }
 
     #[inline]
