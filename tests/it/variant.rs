@@ -1,8 +1,9 @@
 #![cfg(feature = "time")]
 
-use clickhouse::Row;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use time::Month::January;
+
+use clickhouse::Row;
 
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types/variant
 
@@ -12,7 +13,7 @@ async fn variant_data_type() {
 
     // NB: Inner Variant types are _always_ sorted alphabetically,
     // and should be defined in _exactly_ the same order in the enum.
-    #[derive(Debug, PartialEq, Deserialize)]
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
     enum MyRowVariant {
         Array(Vec<i16>),
         Boolean(bool),
@@ -35,7 +36,7 @@ async fn variant_data_type() {
         UInt8(i8),
     }
 
-    #[derive(Debug, Row, Deserialize)]
+    #[derive(Debug, PartialEq, Row, Serialize, Deserialize)]
     struct MyRow {
         var: MyRowVariant,
     }
@@ -67,55 +68,78 @@ async fn variant_data_type() {
         .await
         .unwrap();
 
+    let rows = vec![
+        MyRow {
+            var: MyRowVariant::Array(vec![1, 2]),
+        },
+        MyRow {
+            var: MyRowVariant::Boolean(true),
+        },
+        MyRow {
+            var: MyRowVariant::Date(time::Date::from_calendar_date(2021, January, 1).unwrap()),
+        },
+        MyRow {
+            var: MyRowVariant::FixedString(*b"foobar"),
+        },
+        MyRow {
+            var: MyRowVariant::Float32(100.5),
+        },
+        MyRow {
+            var: MyRowVariant::Float64(200.1),
+        },
+        MyRow {
+            var: MyRowVariant::Int8(2),
+        },
+        MyRow {
+            var: MyRowVariant::Int16(3),
+        },
+        MyRow {
+            var: MyRowVariant::Int32(4),
+        },
+        MyRow {
+            var: MyRowVariant::Int64(5),
+        },
+        MyRow {
+            var: MyRowVariant::Int128(6),
+        },
+        MyRow {
+            var: MyRowVariant::String("my_string".to_string()),
+        },
+        MyRow {
+            var: MyRowVariant::UInt8(7),
+        },
+        MyRow {
+            var: MyRowVariant::UInt16(8),
+        },
+        MyRow {
+            var: MyRowVariant::UInt32(9),
+        },
+        MyRow {
+            var: MyRowVariant::UInt64(10),
+        },
+        MyRow {
+            var: MyRowVariant::UInt128(11),
+        },
+    ];
+
     // Write to the table.
-    client
-        .query(
-            "
-            INSERT INTO test_var VALUES
-                ([1, 2]),
-                (true),
-                ('2021-01-01' :: Date),
-                ('foobar' :: FixedString(6)),
-                (100.5 :: Float32), (200.1 :: Float64),
-                (2 :: Int8), (3 :: Int16), (4 :: Int32), (5 :: Int64), (6 :: Int128),
-                ('my_string' :: String),
-                (7 :: UInt8), (8 :: UInt16), (9 :: UInt32), (10 :: UInt64), (11 :: UInt128)",
-        )
-        .execute()
-        .await
-        .unwrap();
+    let mut insert = client.insert("test_var").unwrap();
+    for row in &rows {
+        insert.write(row).await.unwrap();
+    }
+    insert.end().await.unwrap();
 
     // Read from the table.
-    let rows = client
+    let result_rows = client
         .query("SELECT ?fields FROM test_var")
         .fetch_all::<MyRow>()
         .await
         .unwrap();
 
-    let expected = vec![
-        MyRowVariant::Array(vec![1, 2]),
-        MyRowVariant::Boolean(true),
-        MyRowVariant::Date(time::Date::from_calendar_date(2021, January, 1).unwrap()),
-        MyRowVariant::FixedString(*b"foobar"),
-        MyRowVariant::Float32(100.5),
-        MyRowVariant::Float64(200.1),
-        MyRowVariant::Int8(2),
-        MyRowVariant::Int16(3),
-        MyRowVariant::Int32(4),
-        MyRowVariant::Int64(5),
-        MyRowVariant::Int128(6),
-        MyRowVariant::String("my_string".to_string()),
-        MyRowVariant::UInt8(7),
-        MyRowVariant::UInt16(8),
-        MyRowVariant::UInt32(9),
-        MyRowVariant::UInt64(10),
-        MyRowVariant::UInt128(11),
-    ];
-
-    assert_eq!(rows.len(), expected.len());
+    assert_eq!(result_rows.len(), rows.len());
     rows.iter()
-        .zip(expected.iter())
-        .for_each(|(row, expected)| {
-            assert_eq!(row.var, *expected);
+        .zip(result_rows.iter())
+        .for_each(|(row, result_row)| {
+            assert_eq!(row, result_row);
         });
 }

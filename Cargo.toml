@@ -49,6 +49,10 @@ required-features = ["rustls-tls"]
 name = "data_types_derive_simple"
 required-features = ["time", "uuid"]
 
+[[example]]
+name = "data_types_variant"
+required-features = ["time"]
+
 [profile.release]
 debug = true
 
