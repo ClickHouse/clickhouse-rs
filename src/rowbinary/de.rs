@@ -1,12 +1,12 @@
 use std::{convert::TryFrom, mem, str};
 
+use crate::error::{Error, Result};
 use bytes::Buf;
+use serde::de::{EnumAccess, VariantAccess};
 use serde::{
     de::{DeserializeSeed, Deserializer, SeqAccess, Visitor},
     Deserialize,
 };
-
-use crate::error::{Error, Result};
 
 /// Deserializes a value from `input` with a row encoded in `RowBinary`.
 ///
@@ -147,13 +147,78 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
     }
 
     #[inline]
+    fn deserialize_identifier<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        self.deserialize_u8(visitor)
+    }
+
+    #[inline]
     fn deserialize_enum<V: Visitor<'data>>(
         self,
-        name: &'static str,
+        _name: &'static str,
         _variants: &'static [&'static str],
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value> {
-        panic!("enums are unsupported: `{name}`");
+        struct Access<'de, 'cursor, 'data> {
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data>,
+        }
+        struct VariantDeserializer<'de, 'cursor, 'data> {
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data>,
+        }
+        impl<'data> VariantAccess<'data> for VariantDeserializer<'_, '_, 'data> {
+            type Error = Error;
+
+            fn unit_variant(self) -> Result<()> {
+                Ok(())
+            }
+
+            fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
+            where
+                T: DeserializeSeed<'data>,
+            {
+                DeserializeSeed::deserialize(seed, &mut *self.deserializer)
+            }
+
+            fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value>
+            where
+                V: Visitor<'data>,
+            {
+                self.deserializer.deserialize_tuple(len, visitor)
+            }
+
+            fn struct_variant<V>(
+                self,
+                fields: &'static [&'static str],
+                visitor: V,
+            ) -> Result<V::Value>
+            where
+                V: Visitor<'data>,
+            {
+                self.deserializer.deserialize_tuple(fields.len(), visitor)
+            }
+        }
+
+        impl<'de, 'cursor, 'data> EnumAccess<'data> for Access<'de, 'cursor, 'data> {
+            type Error = Error;
+            type Variant = VariantDeserializer<'de, 'cursor, 'data>;
+
+            fn variant_seed<T>(
+                self,
+                seed: T,
+            ) -> std::result::Result<(T::Value, Self::Variant), Self::Error>
+            where
+                T: DeserializeSeed<'data>,
+            {
+                seed.deserialize(&mut *self.deserializer).map(|v| {
+                    (
+                        v,
+                        VariantDeserializer {
+                            deserializer: self.deserializer,
+                        },
+                    )
+                })
+            }
+        }
+        visitor.visit_enum(Access { deserializer: self })
     }
 
     #[inline]
@@ -223,11 +288,6 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
     }
 
     #[inline]
-    fn deserialize_identifier<V: Visitor<'data>>(self, _visitor: V) -> Result<V::Value> {
-        panic!("identifiers are unsupported");
-    }
-
-    #[inline]
     fn deserialize_newtype_struct<V: Visitor<'data>>(
         self,
         _name: &str,
@@ -239,20 +299,20 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
     #[inline]
     fn deserialize_unit_struct<V: Visitor<'data>>(
         self,
-        name: &'static str,
+        _name: &'static str,
         _visitor: V,
     ) -> Result<V::Value> {
-        panic!("unit types are unsupported: `{name}`");
+        panic!("unit types are unsupported: `{_name}`");
     }
 
     #[inline]
     fn deserialize_tuple_struct<V: Visitor<'data>>(
         self,
-        name: &'static str,
+        _name: &'static str,
         _len: usize,
         _visitor: V,
     ) -> Result<V::Value> {
-        panic!("tuple struct types are unsupported: `{name}`");
+        panic!("tuple struct types are unsupported: `{_name}`");
     }
 
     #[inline]

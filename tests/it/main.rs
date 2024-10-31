@@ -66,6 +66,7 @@ mod query;
 mod time;
 mod user_agent;
 mod uuid;
+mod variant;
 mod watch;
 
 const HOST: &str = "localhost:8123";
