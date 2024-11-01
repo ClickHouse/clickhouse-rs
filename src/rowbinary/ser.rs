@@ -4,6 +4,7 @@ use serde::{
     Serialize,
 };
 
+use crate::buffer::put_unsigned_leb128;
 use crate::error::{Error, Result};
 
 /// Serializes `value` using the RowBinary format and writes to `buffer`.
@@ -253,28 +254,4 @@ impl<'a, B: BufMut> SerializeTuple for &'a mut RowBinarySerializer<B> {
     fn end(self) -> Result<()> {
         Ok(())
     }
-}
-
-fn put_unsigned_leb128(mut buffer: impl BufMut, mut value: u64) {
-    while {
-        let mut byte = value as u8 & 0x7f;
-        value >>= 7;
-
-        if value != 0 {
-            byte |= 0x80;
-        }
-
-        buffer.put_u8(byte);
-
-        value != 0
-    } {}
-}
-
-#[test]
-fn it_serializes_unsigned_leb128() {
-    let mut vec = Vec::new();
-
-    put_unsigned_leb128(&mut vec, 624_485);
-
-    assert_eq!(vec, [0xe5, 0x8e, 0x26]);
 }

@@ -1,5 +1,7 @@
 use std::{convert::TryFrom, mem, str};
 
+use crate::buffer::get_unsigned_leb128;
+use crate::dynamic::DynamicType;
 use crate::error::{Error, Result};
 use bytes::Buf;
 use serde::de::{EnumAccess, VariantAccess};
@@ -92,8 +94,25 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
     impl_num!(f64, deserialize_f64, visit_f64, get_f64_le);
 
     #[inline]
-    fn deserialize_any<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
-        Err(Error::DeserializeAnyNotSupported)
+    fn deserialize_any<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        let dynamic_type = DynamicType::new(self.input)?;
+        match dynamic_type {
+            DynamicType::Int8 => self.deserialize_i8(visitor),
+            DynamicType::Int16 => self.deserialize_i16(visitor),
+            DynamicType::Int32 => self.deserialize_i32(visitor),
+            DynamicType::Int64 => self.deserialize_i64(visitor),
+            DynamicType::Int128 => self.deserialize_i128(visitor),
+            DynamicType::UInt8 => self.deserialize_u8(visitor),
+            DynamicType::UInt16 => self.deserialize_u16(visitor),
+            DynamicType::UInt32 => self.deserialize_u32(visitor),
+            DynamicType::UInt64 => self.deserialize_u64(visitor),
+            DynamicType::UInt128 => self.deserialize_u128(visitor),
+            DynamicType::Float32 => self.deserialize_f32(visitor),
+            DynamicType::Float64 => self.deserialize_f64(visitor),
+            DynamicType::String => self.deserialize_string(visitor),
+            DynamicType::Boolean => self.deserialize_bool(visitor),
+            DynamicType::Array { .. } => self.deserialize_seq(visitor),
+        }
     }
 
     #[inline]
@@ -324,34 +343,4 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
     fn is_human_readable(&self) -> bool {
         false
     }
-}
-
-fn get_unsigned_leb128(mut buffer: impl Buf) -> Result<u64> {
-    let mut value = 0u64;
-    let mut shift = 0;
-
-    loop {
-        ensure_size(&mut buffer, 1)?;
-
-        let byte = buffer.get_u8();
-        value |= (byte as u64 & 0x7f) << shift;
-
-        if byte & 0x80 == 0 {
-            break;
-        }
-
-        shift += 7;
-        if shift > 57 {
-            // TODO: what about another error?
-            return Err(Error::NotEnoughData);
-        }
-    }
-
-    Ok(value)
-}
-
-#[test]
-fn it_deserializes_unsigned_leb128() {
-    let buf = &[0xe5, 0x8e, 0x26][..];
-    assert_eq!(get_unsigned_leb128(buf).unwrap(), 624_485);
 }

@@ -57,6 +57,7 @@ async fn flush_query_log(client: &Client) {
 mod compression;
 mod cursor_error;
 mod cursor_stats;
+mod dynamic;
 mod insert;
 mod inserter;
 mod ip;

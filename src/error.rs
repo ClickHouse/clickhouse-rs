@@ -34,6 +34,8 @@ pub enum Error {
     InvalidTagEncoding(usize),
     #[error("max number of types in the Variant data type is 255, got {0}")]
     VariantDiscriminatorIsOutOfBound(usize),
+    #[error("invalid data type in binary encoding: {0}")]
+    InvalidDataTypeBinaryEncoding(u8),
     #[error("a custom error message from serde: {0}")]
     Custom(String),
     #[error("bad response: {0}")]
