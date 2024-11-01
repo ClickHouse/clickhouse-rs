@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+### Added
+- [Variant data type](https://clickhouse.com/docs/en/sql-reference/data-types/variant) support.
 
 ## [0.13.1] - 2024-10-21
 ### Added
