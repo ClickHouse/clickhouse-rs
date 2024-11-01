@@ -438,8 +438,8 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-
-* `JSON`, `Variant`, `Dynamic` types are not supported for now.
+* [New `JSON` data type](https://clickhouse.com/docs/en/sql-reference/data-types/newjson) is currently supported as a string when using ClickHouse 24.10+. See [this example](examples/data_types_new_json.rs) for more details.
+* `Variant`, `Dynamic` types are not supported for now.
 
 See also the additional examples:
 
