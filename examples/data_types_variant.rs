@@ -135,10 +135,9 @@ fn get_rows() -> Vec<MyRow> {
 }
 
 // As the inner Variant types are _always_ sorted alphabetically,
-// it should be defined in _exactly_ the same order in the enum.
-//
-// Rust enum variants names are irrelevant, only the order of the types matters.
-// This enum represents Variant(Array(UInt16), Bool, FixedString(6), Float32, Float64, Int128, Int16, Int32, Int64, Int8, String, UInt128, UInt16, UInt32, UInt64, UInt8)
+// Rust enum variants should be defined in the _exactly_ same order as it is in the data type;
+// their names are irrelevant, only the order of the types matters.
+// This enum represents Variant(Array(UInt16), Bool, Date, FixedString(6), Float32, Float64, Int128, Int16, Int32, Int64, Int8, String, UInt128, UInt16, UInt32, UInt64, UInt8)
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 enum MyRowVariant {
     Array(Vec<i16>),
