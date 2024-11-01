@@ -460,6 +460,7 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
+* [New `JSON` data type](https://clickhouse.com/docs/en/sql-reference/data-types/newjson) is currently supported as a string when using ClickHouse 24.10+. See [this example](examples/data_types_new_json.rs) for more details.
 * `Dynamic` data type is not supported for now.
 
 See also the additional examples:
