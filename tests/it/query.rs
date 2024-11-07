@@ -88,12 +88,12 @@ async fn fetch_one_and_optional() {
 #[tokio::test]
 async fn server_side_param() {
     let client = prepare_database!()
-        .with_param("val1", 42)
+        .param("val1", 42)
         .expect("failed to bind 42");
 
     let result = client
         .query("SELECT plus({val1: Int32}, {val2: Int32}) AS result")
-        .with_param("val2", 144)
+        .param("val2", 144)
         .fetch_one::<u64>()
         .await
         .expect("failed to fetch u64");
@@ -101,7 +101,7 @@ async fn server_side_param() {
 
     let result = client
         .query("SELECT {val1: String} AS result")
-        .with_param("val1", "string")
+        .param("val1", "string")
         .fetch_one::<String>()
         .await
         .expect("failed to fetch string");
@@ -109,7 +109,7 @@ async fn server_side_param() {
 
     let result = client
         .query("SELECT {val1: String} AS result")
-        .with_param("val1", "\x01\x02\x03\\ \"\'")
+        .param("val1", "\x01\x02\x03\\ \"\'")
         .fetch_one::<String>()
         .await
         .expect("failed to fetch string");
@@ -117,7 +117,7 @@ async fn server_side_param() {
 
     let result = client
         .query("SELECT {val1: Array(String)} AS result")
-        .with_param("val1", vec!["a", "bc"])
+        .param("val1", vec!["a", "bc"])
         .fetch_one::<Vec<String>>()
         .await
         .expect("failed to fetch string");

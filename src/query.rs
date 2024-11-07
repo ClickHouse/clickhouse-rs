@@ -200,7 +200,7 @@ impl Query {
     /// Specify server side parameter for query.
     ///
     /// In queries you can reference params as {name: type} e.g. {val: Int32}.
-    pub fn with_param(mut self, name: &str, value: impl Serialize) -> Self {
+    pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
         let mut param = String::from("");
         if let Err(err) = ser::write_param(&mut param, &value) {
             self.sql = SqlBuilder::Failed(format!("invalid param: {err}"));

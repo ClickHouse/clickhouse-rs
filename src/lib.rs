@@ -162,7 +162,7 @@ impl Client {
     }
 
     /// Specify server side parameter for all this client's queries.
-    pub fn with_param(self, name: &str, value: impl Serialize) -> Result<Self, String> {
+    pub fn param(self, name: &str, value: impl Serialize) -> Result<Self, String> {
         let mut param = String::from("");
         ser::write_param(&mut param, &value)?;
         Ok(self.with_option(format!("param_{name}"), param))
