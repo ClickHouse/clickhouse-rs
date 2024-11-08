@@ -2,6 +2,8 @@ use clickhouse::Client;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
+/// An example of streaming the result of a query in an arbitrary format to a file.
+
 #[tokio::main]
 async fn main() -> clickhouse::error::Result<()> {
     let client = Client::default().with_url("http://localhost:8123");

@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use bstr::ByteSlice;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use serde::Deserialize;
@@ -29,6 +30,13 @@ struct RawCursorLoading {
 impl RawCursor {
     pub(crate) fn new(response: Response) -> Self {
         Self(RawCursorInner::Waiting(response.into_future()))
+    }
+
+    pub fn newline(self) -> RawCursorNewline {
+        RawCursorNewline {
+            raw: self,
+            bytes: BytesExt::default(),
+        }
     }
 
     pub async fn next(&mut self) -> Result<Option<Bytes>> {
@@ -84,6 +92,40 @@ impl RawCursor {
 fn workaround_51132<'a, T: ?Sized>(ptr: &T) -> &'a T {
     // SAFETY: actually, it leads to unsoundness, see #24
     unsafe { &*(ptr as *const T) }
+}
+
+/// Similar to [`RawCursor`], but emits chunks of data split by the `\n` (`0x0a`) character.
+/// See [`RawCursorNewline::next`] for more details.
+pub struct RawCursorNewline {
+    raw: RawCursor,
+    bytes: BytesExt,
+}
+
+impl RawCursorNewline {
+    /// Emits a chunk of data before the next `\n` (`0x0a`) character.
+    ///
+    /// With stream-friendly formats such as `CSV`, `JSONEachRow`, and similar,
+    /// each iteration will produce the entire row (excluding the newline character itself).
+    ///
+    /// The result is unspecified if it's called after `Err` is returned.
+    pub async fn next<'a>(&mut self) -> Result<Option<&'a [u8]>> {
+        loop {
+            if self.bytes.remaining() > 0 {
+                let slice = workaround_51132(self.bytes.slice());
+                let newline_pos = slice.find_byte(b'\n');
+                if let Some(pos) = newline_pos {
+                    let (row, rest) = slice.split_at(pos);
+                    self.bytes.set_remaining(rest.len() - 1); // skip the newline character
+                    return Ok(Some(row));
+                }
+            }
+
+            match self.raw.next().await? {
+                Some(chunk) => self.bytes.extend(chunk),
+                None => return Ok(None),
+            }
+        }
+    }
 }
 
 // === RowCursor ===
