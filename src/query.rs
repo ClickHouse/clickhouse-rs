@@ -3,6 +3,7 @@ use serde::Deserialize;
 use std::fmt::Display;
 use url::Url;
 
+use crate::cursor::RawCursor;
 use crate::{
     error::{Error, Result},
     headers::with_request_headers,
@@ -88,6 +89,12 @@ impl Query {
 
         let response = self.do_execute(true)?;
         Ok(RowCursor::new(response))
+    }
+
+    /// Executes the query, returning a [`RawCursor`] to obtain results.
+    pub fn fetch_raw(self) -> Result<RawCursor> {
+        let response = self.do_execute(true)?;
+        Ok(RawCursor::new(response))
     }
 
     /// Executes the query and returns just a single row.

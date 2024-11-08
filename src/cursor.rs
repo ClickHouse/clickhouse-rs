@@ -13,7 +13,7 @@ use crate::{
 
 // === RawCursor ===
 
-struct RawCursor(RawCursorInner);
+pub struct RawCursor(RawCursorInner);
 
 enum RawCursorInner {
     Waiting(ResponseFuture),
@@ -27,11 +27,11 @@ struct RawCursorLoading {
 }
 
 impl RawCursor {
-    fn new(response: Response) -> Self {
+    pub(crate) fn new(response: Response) -> Self {
         Self(RawCursorInner::Waiting(response.into_future()))
     }
 
-    async fn next(&mut self) -> Result<Option<Bytes>> {
+    pub async fn next(&mut self) -> Result<Option<Bytes>> {
         if matches!(self.0, RawCursorInner::Waiting(_)) {
             self.resolve().await?;
         }
@@ -107,7 +107,7 @@ impl<T> RowCursor<T> {
 
     /// Emits the next row.
     ///
-    /// An result is unspecified if it's called after `Err` is returned.
+    /// The result is unspecified if it's called after `Err` is returned.
     pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
     where
         T: Deserialize<'b>,
