@@ -147,7 +147,7 @@ impl Query {
         let use_post = !read_only || query.len() > MAX_QUERY_LEN_TO_USE_GET;
 
         let (method, body, content_length) = if use_post {
-            if read_only {
+            if read_only && !self.client.options.contains_key("readonly") {
                 pairs.append_pair("readonly", "1");
             }
             let len = query.len();

@@ -106,6 +106,16 @@ async fn long_query() {
         .unwrap();
 
     assert_eq!(got_string, long_string);
+
+    let got_string = client
+        .query("select ?")
+        .bind(&long_string)
+        .with_option("readonly", "2")
+        .fetch_one::<String>()
+        .await
+        .unwrap();
+
+    assert_eq!(got_string, long_string);
 }
 
 // See #22.
