@@ -87,12 +87,11 @@ async fn fetch_one_and_optional() {
 
 #[tokio::test]
 async fn server_side_param() {
-    let client = prepare_database!()
-        .param("val1", 42)
-        .expect("failed to bind 42");
+    let client = prepare_database!();
 
     let result = client
         .query("SELECT plus({val1: Int32}, {val2: Int32}) AS result")
+        .param("val1", 42)
         .param("val2", 144)
         .fetch_one::<u64>()
         .await
