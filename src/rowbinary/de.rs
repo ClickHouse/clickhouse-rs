@@ -168,7 +168,7 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
             type Error = Error;
 
             fn unit_variant(self) -> Result<()> {
-                Ok(())
+                Err(Error::Unsupported("unit variants".to_string()))
             }
 
             fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
@@ -201,21 +201,15 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
             type Error = Error;
             type Variant = VariantDeserializer<'de, 'cursor, 'data>;
 
-            fn variant_seed<T>(
-                self,
-                seed: T,
-            ) -> std::result::Result<(T::Value, Self::Variant), Self::Error>
+            fn variant_seed<T>(self, seed: T) -> Result<(T::Value, Self::Variant), Self::Error>
             where
                 T: DeserializeSeed<'data>,
             {
-                seed.deserialize(&mut *self.deserializer).map(|v| {
-                    (
-                        v,
-                        VariantDeserializer {
-                            deserializer: self.deserializer,
-                        },
-                    )
-                })
+                let value = seed.deserialize(&mut *self.deserializer)?;
+                let deserializer = VariantDeserializer {
+                    deserializer: self.deserializer,
+                };
+                Ok((value, deserializer))
             }
         }
         visitor.visit_enum(Access { deserializer: self })

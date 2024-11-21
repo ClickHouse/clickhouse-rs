@@ -40,6 +40,8 @@ pub enum Error {
     BadResponse(String),
     #[error("timeout expired")]
     TimedOut,
+    #[error("unsupported: {0}")]
+    Unsupported(String),
 }
 
 assert_impl_all!(Error: StdError, Send, Sync);
