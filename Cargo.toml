@@ -38,6 +38,10 @@ name = "select"
 harness = false
 
 [[example]]
+name = "inserter"
+required-features = ["inserter"]
+
+[[example]]
 name = "mock"
 required-features = ["test-util"]
 
