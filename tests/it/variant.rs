@@ -68,59 +68,27 @@ async fn variant_data_type() {
         .await
         .unwrap();
 
-    let rows = vec![
-        MyRow {
-            var: MyRowVariant::Array(vec![1, 2]),
-        },
-        MyRow {
-            var: MyRowVariant::Boolean(true),
-        },
-        MyRow {
-            var: MyRowVariant::Date(time::Date::from_calendar_date(2021, January, 1).unwrap()),
-        },
-        MyRow {
-            var: MyRowVariant::FixedString(*b"foobar"),
-        },
-        MyRow {
-            var: MyRowVariant::Float32(100.5),
-        },
-        MyRow {
-            var: MyRowVariant::Float64(200.1),
-        },
-        MyRow {
-            var: MyRowVariant::Int8(2),
-        },
-        MyRow {
-            var: MyRowVariant::Int16(3),
-        },
-        MyRow {
-            var: MyRowVariant::Int32(4),
-        },
-        MyRow {
-            var: MyRowVariant::Int64(5),
-        },
-        MyRow {
-            var: MyRowVariant::Int128(6),
-        },
-        MyRow {
-            var: MyRowVariant::String("my_string".to_string()),
-        },
-        MyRow {
-            var: MyRowVariant::UInt8(7),
-        },
-        MyRow {
-            var: MyRowVariant::UInt16(8),
-        },
-        MyRow {
-            var: MyRowVariant::UInt32(9),
-        },
-        MyRow {
-            var: MyRowVariant::UInt64(10),
-        },
-        MyRow {
-            var: MyRowVariant::UInt128(11),
-        },
+    let vars = [
+        MyRowVariant::Array(vec![1, 2]),
+        MyRowVariant::Boolean(true),
+        MyRowVariant::Date(time::Date::from_calendar_date(2021, January, 1).unwrap()),
+        MyRowVariant::FixedString(*b"foobar"),
+        MyRowVariant::Float32(100.5),
+        MyRowVariant::Float64(200.1),
+        MyRowVariant::Int8(2),
+        MyRowVariant::Int16(3),
+        MyRowVariant::Int32(4),
+        MyRowVariant::Int64(5),
+        MyRowVariant::Int128(6),
+        MyRowVariant::String("my_string".to_string()),
+        MyRowVariant::UInt8(7),
+        MyRowVariant::UInt16(8),
+        MyRowVariant::UInt32(9),
+        MyRowVariant::UInt64(10),
+        MyRowVariant::UInt128(11),
     ];
+
+    let rows = vars.map(|var| MyRow { var });
 
     // Write to the table.
     let mut insert = client.insert("test_var").unwrap();
@@ -136,10 +104,5 @@ async fn variant_data_type() {
         .await
         .unwrap();
 
-    assert_eq!(result_rows.len(), rows.len());
-    rows.iter()
-        .zip(result_rows.iter())
-        .for_each(|(row, result_row)| {
-            assert_eq!(row, result_row);
-        });
+    assert_eq!(result_rows, rows)
 }
