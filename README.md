@@ -440,13 +440,36 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
+* `Variant` data type is supported as a Rust enum. As the inner Variant types are _always_ sorted alphabetically, Rust enum variants should be defined in the _exactly_ same order as it is in the data type; their names are irrelevant, only the order of the types matters. This following example has a column defined as `Variant(Array(UInt16), Bool, Date, String, UInt32)`:
+    <details>
+    <summary>Example</summary>
+    
+    ```rust,ignore
+    #[derive(Serialize, Deserialize)]
+    enum MyRowVariant {
+        Array(Vec<i16>),
+        Boolean(bool),
+        #[serde(with = "clickhouse::serde::time::date")]
+        Date(time::Date),
+        String(String),
+        UInt32(u32),
+    }
+    
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        id: u64,
+        var: MyRowVariant,
+    }
+    ```
+    </details>
 * [New `JSON` data type](https://clickhouse.com/docs/en/sql-reference/data-types/newjson) is currently supported as a string when using ClickHouse 24.10+. See [this example](examples/data_types_new_json.rs) for more details.
-* `Variant`, `Dynamic` types are not supported for now.
+* `Dynamic` data type is not supported for now.
 
 See also the additional examples:
 
 * [Simpler ClickHouse data types](examples/data_types_derive_simple.rs)
 * [Container-like ClickHouse data types](examples/data_types_derive_containers.rs)
+* [Variant data type](examples/data_types_variant.rs)
 
 ## Mocking
 The crate provides utils for mocking CH server and testing DDL, `SELECT`, `INSERT` and `WATCH` queries.

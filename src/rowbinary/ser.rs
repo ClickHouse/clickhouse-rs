@@ -134,12 +134,26 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     #[inline]
     fn serialize_newtype_variant<T: Serialize + ?Sized>(
         self,
-        name: &'static str,
-        _variant_index: u32,
-        variant: &'static str,
-        _value: &T,
+        _name: &'static str,
+        variant_index: u32,
+        _variant: &'static str,
+        value: &T,
     ) -> Result<()> {
-        panic!("newtype variant types are unsupported: `{name}::{variant}`");
+        // TODO:
+        //  - Now this code implicitly allows using enums at the top level.
+        //    However, instead of a more descriptive panic, it ends with a "not enough data." error.
+        //  - Also, it produces an unclear message for a forgotten `serde_repr` (Enum8 and Enum16).
+        //  See https://github.com/ClickHouse/clickhouse-rs/pull/170#discussion_r1848549636
+
+        // Max number of types in the Variant data type is 255
+        // See also: https://github.com/ClickHouse/ClickHouse/issues/54864
+        if variant_index > 255 {
+            return Err(Error::VariantDiscriminatorIsOutOfBound(
+                variant_index as usize,
+            ));
+        }
+        self.buffer.put_u8(variant_index as u8);
+        value.serialize(self)
     }
 
     #[inline]
