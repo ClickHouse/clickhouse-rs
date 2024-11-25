@@ -18,12 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - query/cursor: improve performance of `RowCursor::next()` ([#169]).
+- exposed method to control the `readonly` query parameter ([#181]).
 
 ### Fixed
 - mock: work with the advanced time via `tokio::time::advance()` ([#165]).
 
 [#165]: https://github.com/ClickHouse/clickhouse-rs/pull/165
 [#169]: https://github.com/ClickHouse/clickhouse-rs/pull/169
+[#181]: https://github.com/ClickHouse/clickhouse-rs/pull/181
 
 ## [0.13.0] - 2024-09-27
 ### Added
