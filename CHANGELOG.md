@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - query/cursor: improve performance of `RowCursor::next()` ([#169]).
-- exposed method to control the `readonly` query parameter ([#181]).
+- query: exposed method to control the `readonly` query parameter ([#181]).
 
 ### Fixed
 - mock: work with the advanced time via `tokio::time::advance()` ([#165]).
