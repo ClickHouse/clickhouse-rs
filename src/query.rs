@@ -60,7 +60,7 @@ impl Query {
 
     /// Executes the query.
     pub async fn execute(self) -> Result<()> {
-        self.read_only(false).do_execute()?.finish().await
+        self.do_execute()?.finish().await
     }
 
     /// Executes the query, returning a [`RowCursor`] to obtain results.
