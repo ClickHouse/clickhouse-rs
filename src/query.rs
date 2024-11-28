@@ -93,6 +93,9 @@ impl Query {
     }
 
     /// Executes the query, returning a [`watch::RowJsonCursor`] to obtain results.
+    ///
+    /// Beware that with `JSONEachRow` format, Clickhouse always returns
+    /// a JSON object in the `{ "column1": value1, "column2": value2 }` format and not as `[value1, value2]`.
     #[cfg(feature = "watch")]
     pub fn fetch_json<T>(mut self) -> Result<watch::RowJsonCursor<T>> {
         self.sql.append(" FORMAT JSONEachRowWithProgress");
@@ -104,6 +107,9 @@ impl Query {
     /// Executes the query and returns just a single row.
     ///
     /// Note that `T` must be owned.
+    ///
+    /// Beware that with `JSONEachRow` format, Clickhouse always returns
+    /// a JSON object in the `{ "column1": value1, "column2": value2 }` format and not as `[value1, value2]`.
     #[cfg(feature = "watch")]
     pub async fn fetch_json_one<T>(self) -> Result<T>
     where
@@ -119,6 +125,9 @@ impl Query {
     /// Executes the query and returns at most one row.
     ///
     /// Note that `T` must be owned.
+    ///
+    /// Beware that with `JSONEachRow` format, Clickhouse always returns
+    /// a JSON object in the `{ "column1": value1, "column2": value2 }` format and not as `[value1, value2]`.
     #[cfg(feature = "watch")]
     pub async fn fetch_json_optional<T>(self) -> Result<Option<T>>
     where
@@ -131,6 +140,9 @@ impl Query {
     /// collected into a [`Vec`].
     ///
     /// Note that `T` must be owned.
+    ///
+    /// Beware that with `JSONEachRow` format, Clickhouse always returns
+    /// a JSON object in the `{ "column1": value1, "column2": value2 }` format and not as `[value1, value2]`.
     #[cfg(feature = "watch")]
     pub async fn fetch_json_all<T>(self) -> Result<Vec<T>>
     where
