@@ -102,7 +102,7 @@ lz4_flex = { version = "0.11.3", default-features = false, features = [
 cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
-bstr = { version = "1.11.0", default-features = false } # 1.11.0+ is Rust 1.73+ only
+bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
 replace_with = { version = "0.1.7" }
 
