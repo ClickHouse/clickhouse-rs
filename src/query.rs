@@ -13,8 +13,6 @@ use crate::{
     Client,
 };
 
-const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
-
 pub use crate::cursor::RowCursor;
 
 #[must_use]
@@ -43,7 +41,7 @@ impl Query {
     /// [`Identifier`], will be appropriately escaped.
     ///
     /// All possible errors will be returned as [`Error::InvalidParams`]
-    /// during query execution (`execute()`, `fetch()` etc).
+    /// during query execution (`execute()`, `fetch()` etc.).
     ///
     /// WARNING: This means that the query must not have any extra `?`, even if
     /// they are in a string literal! Use `??` to have plain `?` in query.
@@ -58,7 +56,7 @@ impl Query {
 
     /// Executes the query.
     pub async fn execute(self) -> Result<()> {
-        self.do_execute(false)?.finish().await
+        self.do_execute()?.finish().await
     }
 
     /// Executes the query, returning a [`RowCursor`] to obtain results.
@@ -86,7 +84,7 @@ impl Query {
         self.sql.bind_fields::<T>();
         self.sql.append(" FORMAT RowBinary");
 
-        let response = self.do_execute(true)?;
+        let response = self.do_execute()?;
         Ok(RowCursor::new(response))
     }
 
@@ -132,7 +130,7 @@ impl Query {
         Ok(result)
     }
 
-    pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {
+    pub(crate) fn do_execute(self) -> Result<Response> {
         let query = self.sql.finish()?;
 
         let mut url =
@@ -144,19 +142,6 @@ impl Query {
             pairs.append_pair("database", database);
         }
 
-        let use_post = !read_only || query.len() > MAX_QUERY_LEN_TO_USE_GET;
-
-        let (method, body, content_length) = if use_post {
-            if read_only {
-                pairs.append_pair("readonly", "1");
-            }
-            let len = query.len();
-            (Method::POST, RequestBody::full(query), len)
-        } else {
-            pairs.append_pair("query", &query);
-            (Method::GET, RequestBody::empty(), 0)
-        };
-
         if self.client.compression.is_lz4() {
             pairs.append_pair("compress", "1");
         }
@@ -166,14 +151,9 @@ impl Query {
         }
         drop(pairs);
 
-        let mut builder = Request::builder().method(method).uri(url.as_str());
+        let mut builder = Request::builder().method(Method::POST).uri(url.as_str());
         builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
-
-        if content_length == 0 {
-            builder = builder.header(CONTENT_LENGTH, "0");
-        } else {
-            builder = builder.header(CONTENT_LENGTH, content_length.to_string());
-        }
+        builder = builder.header(CONTENT_LENGTH, query.len().to_string());
 
         if let Some(user) = &self.client.user {
             builder = builder.header("X-ClickHouse-User", user);
@@ -184,7 +164,7 @@ impl Query {
         }
 
         let request = builder
-            .body(body)
+            .body(RequestBody::full(query))
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
         let future = self.client.http.request(request);
