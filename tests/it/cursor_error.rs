@@ -3,46 +3,51 @@ use clickhouse::{Client, Compression};
 #[tokio::test]
 async fn deferred() {
     let client = prepare_database!();
-    max_execution_time(client, false).await;
+    let results = max_execution_time(client).await;
+    assert_eq!(results, vec![0u64, 1u64]);
 }
 
 #[tokio::test]
 async fn wait_end_of_query() {
     let client = prepare_database!();
-    max_execution_time(client, true).await;
+    let results = max_execution_time(client.with_option("wait_end_of_query", "1")).await;
+    // the entire response is buffered before sending to the client (and it fails)
+    // so we don't get any results in this case
+    assert_eq!(results, Vec::<u64>::new());
 }
 
-async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
-    if wait_end_of_query {
-        client = client.with_option("wait_end_of_query", "1")
+async fn max_execution_time(client: Client) -> Vec<u64> {
+    #[derive(Debug, clickhouse::Row, serde::Deserialize)]
+    struct Res {
+        number: u64,
+        _sleep: u8,
     }
 
     // TODO: check different `timeout_overflow_mode`
     let mut cursor = client
         .with_compression(Compression::None)
-        .with_option("max_execution_time", "0.05")
-        .query("SELECT toUInt8(65 + number % 100) FROM system.numbers LIMIT 1000000000")
-        .fetch::<u8>()
+        // reducing max_block_size to force the server to stream one row at a time
+        .with_option("max_block_size", "1")
+        // with sleepEachRow(0.01) this ensures that the query will fail after the second row
+        .with_option("max_execution_time", "0.025")
+        .query("SELECT number, sleepEachRow(0.01) AS sleep FROM system.numbers LIMIT 3")
+        .fetch::<Res>()
         .unwrap();
 
-    let mut i = 0u64;
-
+    let mut results: Vec<u64> = Vec::new();
     let err = loop {
         match cursor.next().await {
-            Ok(Some(no)) => {
-                // Check that we haven't parsed something extra.
-                assert_eq!(no, (65 + i % 100) as u8);
-                i += 1;
+            Ok(Some(res)) => {
+                println!("no: {:?}", res);
+                results.push(res.number);
             }
             Ok(None) => panic!("DB exception hasn't been found"),
             Err(err) => break err,
         }
     };
 
-    println!("i: {}", i);
-
-    assert!(wait_end_of_query ^ (i != 0));
     assert!(err.to_string().contains("TIMEOUT_EXCEEDED"));
+    results
 }
 
 #[cfg(feature = "lz4")]
