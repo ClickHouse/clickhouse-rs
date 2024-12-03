@@ -20,8 +20,8 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
     // TODO: check different `timeout_overflow_mode`
     let mut cursor = client
         .with_compression(Compression::None)
-        .with_option("max_execution_time", "0.01")
-        .query("SELECT toUInt8(65 + number % 5) FROM system.numbers LIMIT 100000000")
+        .with_option("max_execution_time", "0.05")
+        .query("SELECT toUInt8(65 + number % 5) FROM system.numbers LIMIT 1000000000")
         .fetch::<u8>()
         .unwrap();
 
@@ -38,6 +38,8 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
             Err(err) => break err,
         }
     };
+
+    println!("i: {}", i);
 
     assert!(wait_end_of_query ^ (i != 0));
     assert!(err.to_string().contains("TIMEOUT_EXCEEDED"));
