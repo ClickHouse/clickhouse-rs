@@ -28,9 +28,9 @@ async fn max_execution_time(client: Client) -> Vec<u64> {
         .with_compression(Compression::None)
         // reducing max_block_size to force the server to stream one row at a time
         .with_option("max_block_size", "1")
-        // with sleepEachRow(0.01) this ensures that the query will fail after the second row
-        .with_option("max_execution_time", "0.025")
-        .query("SELECT number, sleepEachRow(0.01) AS sleep FROM system.numbers LIMIT 3")
+        // with sleepEachRow(0.1) this ensures that the query will fail after the second row
+        .with_option("max_execution_time", "0.25")
+        .query("SELECT number, sleepEachRow(0.1) AS sleep FROM system.numbers LIMIT 3")
         .fetch::<Res>()
         .unwrap();
 
