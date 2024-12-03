@@ -21,7 +21,7 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
     let mut cursor = client
         .with_compression(Compression::None)
         .with_option("max_execution_time", "0.05")
-        .query("SELECT toUInt8(65 + number % 5) FROM system.numbers LIMIT 1000000000")
+        .query("SELECT toUInt8(65 + number % 100) FROM system.numbers LIMIT 1000000000")
         .fetch::<u8>()
         .unwrap();
 
@@ -31,7 +31,7 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
         match cursor.next().await {
             Ok(Some(no)) => {
                 // Check that we haven't parsed something extra.
-                assert_eq!(no, (65 + i % 5) as u8);
+                assert_eq!(no, (65 + i % 100) as u8);
                 i += 1;
             }
             Ok(None) => panic!("DB exception hasn't been found"),
