@@ -25,7 +25,7 @@ struct RowBinaryDeserializer<'cursor, 'data> {
     input: &'cursor mut &'data [u8],
 }
 
-impl<'cursor, 'data> RowBinaryDeserializer<'cursor, 'data> {
+impl<'data> RowBinaryDeserializer<'_, 'data> {
     fn read_vec(&mut self, size: usize) -> Result<Vec<u8>> {
         Ok(self.read_slice(size)?.to_vec())
     }
@@ -64,7 +64,7 @@ macro_rules! impl_num {
     };
 }
 
-impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor, 'data> {
+impl<'data> Deserializer<'data> for &mut RowBinaryDeserializer<'_, 'data> {
     type Error = Error;
 
     impl_num!(i8, deserialize_i8, visit_i8, get_i8);
@@ -163,7 +163,7 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
             len: usize,
         }
 
-        impl<'de, 'cursor, 'data> SeqAccess<'data> for Access<'de, 'cursor, 'data> {
+        impl<'data> SeqAccess<'data> for Access<'_, '_, 'data> {
             type Error = Error;
 
             fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
