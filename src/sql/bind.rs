@@ -24,7 +24,7 @@ impl<S: Serialize> Bind for S {
 pub struct Identifier<'a>(pub &'a str);
 
 #[sealed]
-impl<'a> Bind for Identifier<'a> {
+impl Bind for Identifier<'_> {
     #[inline]
     fn write(&self, dst: &mut impl fmt::Write) -> Result<(), String> {
         escape::identifier(self.0, dst).map_err(|err| err.to_string())
