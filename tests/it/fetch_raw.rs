@@ -5,9 +5,9 @@ async fn fetch_raw_with_error() {
     let client = prepare_database!();
 
     let mut raw_cursor = client
-        .query("SELECT sleepEachRow(0.01) AS s FROM system.numbers LIMIT 30")
+        .query("SELECT sleepEachRow(0.05) AS s FROM system.numbers LIMIT 30")
         .with_option("max_block_size", "1")
-        .with_option("max_execution_time", "0.015")
+        .with_option("max_execution_time", "0.08")
         .fetch_raw(OutputFormat::JSONEachRow)
         .unwrap();
 
