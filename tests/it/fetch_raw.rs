@@ -11,10 +11,7 @@ async fn fetch_raw_with_error() {
         .fetch_raw(OutputFormat::JSONEachRow)
         .unwrap();
 
-    let err = match raw_cursor.next().await {
-        Ok(res) => Ok(res),
-        Err(err) => Err(err),
-    };
+    let err = raw_cursor.next().await;
 
     println!("{err:?}");
     assert!(matches!(err, Err(clickhouse::error::Error::BadResponse(_))));
