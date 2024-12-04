@@ -30,7 +30,7 @@ macro_rules! impl_num {
     };
 }
 
-impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
+impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
     type Error = Error;
     type Ok = ();
     type SerializeMap = Impossible<(), Error>;
@@ -215,7 +215,7 @@ impl<'a, B: BufMut> Serializer for &'a mut RowBinarySerializer<B> {
     }
 }
 
-impl<'a, B: BufMut> SerializeStruct for &'a mut RowBinarySerializer<B> {
+impl<B: BufMut> SerializeStruct for &mut RowBinarySerializer<B> {
     type Error = Error;
     type Ok = ();
 
@@ -230,7 +230,7 @@ impl<'a, B: BufMut> SerializeStruct for &'a mut RowBinarySerializer<B> {
     }
 }
 
-impl<'a, B: BufMut> SerializeSeq for &'a mut RowBinarySerializer<B> {
+impl<B: BufMut> SerializeSeq for &'_ mut RowBinarySerializer<B> {
     type Error = Error;
     type Ok = ();
 
@@ -243,7 +243,7 @@ impl<'a, B: BufMut> SerializeSeq for &'a mut RowBinarySerializer<B> {
     }
 }
 
-impl<'a, B: BufMut> SerializeTuple for &'a mut RowBinarySerializer<B> {
+impl<B: BufMut> SerializeTuple for &'_ mut RowBinarySerializer<B> {
     type Error = Error;
     type Ok = ();
 

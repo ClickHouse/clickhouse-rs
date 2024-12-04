@@ -226,7 +226,7 @@ struct SqlListSerializer<'a, W> {
     closing_char: char,
 }
 
-impl<'a, W: Write> SerializeSeq for SqlListSerializer<'a, W> {
+impl<W: Write> SerializeSeq for SqlListSerializer<'_, W> {
     type Error = SerializerError;
     type Ok = ();
 
@@ -253,7 +253,7 @@ impl<'a, W: Write> SerializeSeq for SqlListSerializer<'a, W> {
     }
 }
 
-impl<'a, W: Write> SerializeTuple for SqlListSerializer<'a, W> {
+impl<W: Write> SerializeTuple for SqlListSerializer<'_, W> {
     type Error = SerializerError;
     type Ok = ();
 
