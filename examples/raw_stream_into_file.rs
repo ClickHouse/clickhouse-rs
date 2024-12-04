@@ -1,3 +1,4 @@
+use clickhouse::format::OutputFormat;
 use clickhouse::Client;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
@@ -6,6 +7,7 @@ use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() -> clickhouse::error::Result<()> {
+    let filename = "output.csv";
     let client = Client::default().with_url("http://localhost:8123");
 
     let mut raw_cursor = client
@@ -14,12 +16,11 @@ async fn main() -> clickhouse::error::Result<()> {
                 SELECT number, randomPrintableASCII(20)
                 FROM system.numbers
                 LIMIT 100000
-                FORMAT CSV
             ",
         )
-        .fetch_raw()?;
+        .fetch_raw(OutputFormat::CSV)?;
 
-    let mut file = File::create("output_async.txt").await.unwrap();
+    let mut file = File::create(filename).await.unwrap();
 
     loop {
         match raw_cursor.next().await {
@@ -32,6 +33,6 @@ async fn main() -> clickhouse::error::Result<()> {
         }
     }
 
-    println!("Bytes written to output_async.txt");
+    println!("Bytes written to {filename}");
     Ok(())
 }

@@ -17,6 +17,7 @@ use crate::{
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
 pub use crate::cursor::RowCursor;
+use crate::format::OutputFormat;
 
 #[must_use]
 #[derive(Clone)]
@@ -85,14 +86,15 @@ impl Query {
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
-        self.sql.append(" FORMAT RowBinary");
+        self.sql.set_output_format(OutputFormat::RowBinary);
 
         let response = self.do_execute(true)?;
         Ok(RowCursor::new(response))
     }
 
     /// Executes the query, returning a [`RawCursor`] to obtain results.
-    pub fn fetch_raw(self) -> Result<RawCursor> {
+    pub fn fetch_raw(mut self, format: OutputFormat) -> Result<RawCursor> {
+        self.sql.set_output_format(format);
         let response = self.do_execute(true)?;
         Ok(RawCursor::new(response))
     }

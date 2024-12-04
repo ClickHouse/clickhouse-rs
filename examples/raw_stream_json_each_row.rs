@@ -2,6 +2,7 @@ use std::str::from_utf8;
 
 use serde::Deserialize;
 
+use clickhouse::format::OutputFormat;
 use clickhouse::Client;
 
 /// An example of streaming raw data row-by-row in an arbitrary format.
@@ -18,13 +19,12 @@ async fn main() -> clickhouse::error::Result<()> {
                 SELECT number, hex(randomPrintableASCII(20)) AS hex_str
                 FROM system.numbers
                 LIMIT 10
-                FORMAT JSONEachRow
             ",
         )
         // By default, ClickHouse quotes (U)Int64 in JSON* family formats;
         // disable it to simplify this example.
         .with_option("output_format_json_quote_64bit_integers", "0")
-        .fetch_raw()?
+        .fetch_raw(OutputFormat::JSONEachRow)?
         .newline();
 
     loop {

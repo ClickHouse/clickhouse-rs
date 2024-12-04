@@ -11,7 +11,9 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 pub use self::{compression::Compression, row::Row};
 pub use clickhouse_derive::Row;
 
+pub mod cursor;
 pub mod error;
+pub mod format;
 pub mod insert;
 #[cfg(feature = "inserter")]
 pub mod inserter;
@@ -25,7 +27,6 @@ pub mod watch;
 
 mod bytes_ext;
 mod compression;
-mod cursor;
 mod headers;
 mod http_client;
 mod request_body;
