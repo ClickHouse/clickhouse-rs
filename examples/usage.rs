@@ -37,6 +37,8 @@ async fn insert(client: &Client) -> Result<()> {
     insert.end().await
 }
 
+// This is a very basic example of using the `inserter` feature.
+// See `inserter.rs` for real-world patterns.
 #[cfg(feature = "inserter")]
 async fn inserter(client: &Client) -> Result<()> {
     let mut inserter = client
@@ -45,10 +47,6 @@ async fn inserter(client: &Client) -> Result<()> {
         .with_period(Some(std::time::Duration::from_secs(15)));
 
     for i in 0..1000 {
-        if i == 500 {
-            inserter.set_max_rows(300);
-        }
-
         inserter.write(&MyRow { no: i, name: "foo" })?;
         inserter.commit().await?;
     }

@@ -85,6 +85,44 @@ async fn fetch_one_and_optional() {
     assert_eq!(got_string, "bar");
 }
 
+#[tokio::test]
+async fn server_side_param() {
+    let client = prepare_database!();
+
+    let result = client
+        .query("SELECT plus({val1: Int32}, {val2: Int32}) AS result")
+        .param("val1", 42)
+        .param("val2", 144)
+        .fetch_one::<u64>()
+        .await
+        .expect("failed to fetch u64");
+    assert_eq!(result, 186);
+
+    let result = client
+        .query("SELECT {val1: String} AS result")
+        .param("val1", "string")
+        .fetch_one::<String>()
+        .await
+        .expect("failed to fetch string");
+    assert_eq!(result, "string");
+
+    let result = client
+        .query("SELECT {val1: String} AS result")
+        .param("val1", "\x01\x02\x03\\ \"\'")
+        .fetch_one::<String>()
+        .await
+        .expect("failed to fetch string");
+    assert_eq!(result, "\x01\x02\x03\\ \"\'");
+
+    let result = client
+        .query("SELECT {val1: Array(String)} AS result")
+        .param("val1", vec!["a", "bc"])
+        .fetch_one::<Vec<String>>()
+        .await
+        .expect("failed to fetch string");
+    assert_eq!(result, &["a", "bc"]);
+}
+
 // See #19.
 #[tokio::test]
 async fn long_query() {

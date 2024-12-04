@@ -1,5 +1,5 @@
 use hyper::{header::CONTENT_LENGTH, Method, Request};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use url::Url;
 
@@ -10,7 +10,7 @@ use crate::{
     request_body::RequestBody,
     response::Response,
     row::Row,
-    sql::{Bind, SqlBuilder},
+    sql::{ser, Bind, SqlBuilder},
     Client,
 };
 
@@ -202,5 +202,18 @@ impl Query {
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.client.add_option(name, value);
         self
+    }
+
+    /// Specify server side parameter for query.
+    ///
+    /// In queries you can reference params as {name: type} e.g. {val: Int32}.
+    pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
+        let mut param = String::from("");
+        if let Err(err) = ser::write_param(&mut param, &value) {
+            self.sql = SqlBuilder::Failed(format!("invalid param: {err}"));
+            self
+        } else {
+            self.with_option(format!("param_{name}"), param)
+        }
     }
 }

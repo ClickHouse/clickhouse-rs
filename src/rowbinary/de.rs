@@ -1,12 +1,12 @@
 use std::{convert::TryFrom, mem, str};
 
+use crate::error::{Error, Result};
 use bytes::Buf;
+use serde::de::{EnumAccess, VariantAccess};
 use serde::{
     de::{DeserializeSeed, Deserializer, SeqAccess, Visitor},
     Deserialize,
 };
-
-use crate::error::{Error, Result};
 
 /// Deserializes a value from `input` with a row encoded in `RowBinary`.
 ///
@@ -25,7 +25,7 @@ struct RowBinaryDeserializer<'cursor, 'data> {
     input: &'cursor mut &'data [u8],
 }
 
-impl<'cursor, 'data> RowBinaryDeserializer<'cursor, 'data> {
+impl<'data> RowBinaryDeserializer<'_, 'data> {
     fn read_vec(&mut self, size: usize) -> Result<Vec<u8>> {
         Ok(self.read_slice(size)?.to_vec())
     }
@@ -64,7 +64,7 @@ macro_rules! impl_num {
     };
 }
 
-impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor, 'data> {
+impl<'data> Deserializer<'data> for &mut RowBinaryDeserializer<'_, 'data> {
     type Error = Error;
 
     impl_num!(i8, deserialize_i8, visit_i8, get_i8);
@@ -147,13 +147,72 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
     }
 
     #[inline]
+    fn deserialize_identifier<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        self.deserialize_u8(visitor)
+    }
+
+    #[inline]
     fn deserialize_enum<V: Visitor<'data>>(
         self,
-        name: &'static str,
+        _name: &'static str,
         _variants: &'static [&'static str],
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value> {
-        panic!("enums are unsupported: `{name}`");
+        struct Access<'de, 'cursor, 'data> {
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data>,
+        }
+        struct VariantDeserializer<'de, 'cursor, 'data> {
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data>,
+        }
+        impl<'data> VariantAccess<'data> for VariantDeserializer<'_, '_, 'data> {
+            type Error = Error;
+
+            fn unit_variant(self) -> Result<()> {
+                Err(Error::Unsupported("unit variants".to_string()))
+            }
+
+            fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
+            where
+                T: DeserializeSeed<'data>,
+            {
+                DeserializeSeed::deserialize(seed, &mut *self.deserializer)
+            }
+
+            fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value>
+            where
+                V: Visitor<'data>,
+            {
+                self.deserializer.deserialize_tuple(len, visitor)
+            }
+
+            fn struct_variant<V>(
+                self,
+                fields: &'static [&'static str],
+                visitor: V,
+            ) -> Result<V::Value>
+            where
+                V: Visitor<'data>,
+            {
+                self.deserializer.deserialize_tuple(fields.len(), visitor)
+            }
+        }
+
+        impl<'de, 'cursor, 'data> EnumAccess<'data> for Access<'de, 'cursor, 'data> {
+            type Error = Error;
+            type Variant = VariantDeserializer<'de, 'cursor, 'data>;
+
+            fn variant_seed<T>(self, seed: T) -> Result<(T::Value, Self::Variant), Self::Error>
+            where
+                T: DeserializeSeed<'data>,
+            {
+                let value = seed.deserialize(&mut *self.deserializer)?;
+                let deserializer = VariantDeserializer {
+                    deserializer: self.deserializer,
+                };
+                Ok((value, deserializer))
+            }
+        }
+        visitor.visit_enum(Access { deserializer: self })
     }
 
     #[inline]
@@ -163,7 +222,7 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
             len: usize,
         }
 
-        impl<'de, 'cursor, 'data> SeqAccess<'data> for Access<'de, 'cursor, 'data> {
+        impl<'data> SeqAccess<'data> for Access<'_, '_, 'data> {
             type Error = Error;
 
             fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
@@ -220,11 +279,6 @@ impl<'cursor, 'data> Deserializer<'data> for &mut RowBinaryDeserializer<'cursor,
         visitor: V,
     ) -> Result<V::Value> {
         self.deserialize_tuple(fields.len(), visitor)
-    }
-
-    #[inline]
-    fn deserialize_identifier<V: Visitor<'data>>(self, _visitor: V) -> Result<V::Value> {
-        panic!("identifiers are unsupported");
     }
 
     #[inline]

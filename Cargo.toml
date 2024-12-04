@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 edition = "2021"
 # update `derive/Cargo.toml` and CI if changed
-rust-version = "1.70.0"
+rust-version = "1.73.0"
 
 [lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
@@ -38,6 +38,10 @@ name = "select"
 harness = false
 
 [[example]]
+name = "inserter"
+required-features = ["inserter"]
+
+[[example]]
 name = "mock"
 required-features = ["test-util"]
 
@@ -48,6 +52,10 @@ required-features = ["rustls-tls"]
 [[example]]
 name = "data_types_derive_simple"
 required-features = ["time", "uuid"]
+
+[[example]]
+name = "data_types_variant"
+required-features = ["time"]
 
 [profile.release]
 debug = true
@@ -85,7 +93,7 @@ hyper = "1.4"
 hyper-util = { version = "0.1.6", features = ["client-legacy", "http1"] }
 hyper-tls = { version = "0.6.0", optional = true }
 rustls = { version = "0.23", default-features = false, optional = true }
-hyper-rustls = { version = "0.27.2", default-features = false, features = [
+hyper-rustls = { version = "0.27.3", default-features = false, features = [
     "http1",
     "tls12",
 ], optional = true }
@@ -102,7 +110,7 @@ lz4_flex = { version = "0.11.3", default-features = false, features = [
 cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
-bstr = { version = "1.2", default-features = false }
+bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
 replace_with = { version = "0.1.7" }
 

@@ -9,7 +9,7 @@ pub use bind::{Bind, Identifier};
 
 mod bind;
 pub(crate) mod escape;
-mod ser;
+pub(crate) mod ser;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SqlBuilder {

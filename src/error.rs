@@ -32,12 +32,16 @@ pub enum Error {
     InvalidUtf8Encoding(#[from] Utf8Error),
     #[error("tag for enum is not valid")]
     InvalidTagEncoding(usize),
+    #[error("max number of types in the Variant data type is 255, got {0}")]
+    VariantDiscriminatorIsOutOfBound(usize),
     #[error("a custom error message from serde: {0}")]
     Custom(String),
     #[error("bad response: {0}")]
     BadResponse(String),
     #[error("timeout expired")]
     TimedOut,
+    #[error("unsupported: {0}")]
+    Unsupported(String),
 }
 
 assert_impl_all!(Error: StdError, Send, Sync);
