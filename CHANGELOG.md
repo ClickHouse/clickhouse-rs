@@ -10,7 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - [Variant data type](https://clickhouse.com/docs/en/sql-reference/data-types/variant) support ([#170]).
 
+### Fixed
+- query/cursor: return `NotEnoughData` if a row is unparsed when the stream ends ([#185]).
+
 [#170]: https://github.com/ClickHouse/clickhouse-rs/pull/170
+[#185]: https://github.com/ClickHouse/clickhouse-rs/pull/185
 
 ## [0.13.1] - 2024-10-21
 ### Added
