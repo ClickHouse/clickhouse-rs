@@ -25,10 +25,6 @@ enum Message {
 }
 
 impl RequestBody {
-    pub(crate) fn empty() -> Self {
-        Self(Inner::Full(Bytes::new()))
-    }
-
     pub(crate) fn full(content: String) -> Self {
         Self(Inner::Full(Bytes::from(content)))
     }
