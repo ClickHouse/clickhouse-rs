@@ -106,6 +106,45 @@ pub mod uuid {
     }
 }
 
+#[cfg(feature = "chrono")]
+pub mod chrono {
+    use super::*;
+    use ::chrono::{DateTime, Utc};
+    use serde::{de::Error as _, ser::Error as _};
+
+    pub mod datetime {
+        use super::*;
+
+        type DateTimeUtc = DateTime<Utc>;
+
+        option!(
+            DateTimeUtc,
+            "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime)`."
+        );
+
+        pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let ts = dt.timestamp();
+
+            u32::try_from(ts)
+                .map_err(|_| S::Error::custom(format!("{dt} cannot be represented as DateTime")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let ts: u32 = Deserialize::deserialize(deserializer)?;
+            DateTime::<Utc>::from_timestamp(i64::from(ts), 0).ok_or_else(|| {
+                D::Error::custom(format!("{ts} cannot be converted to DateTime<Utc>"))
+            })
+        }
+    }
+}
+
 /// Ser/de [`::time::OffsetDateTime`] and [`::time::Date`].
 #[cfg(feature = "time")]
 pub mod time {
