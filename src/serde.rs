@@ -106,6 +106,355 @@ pub mod uuid {
     }
 }
 
+#[cfg(feature = "chrono")]
+pub mod chrono {
+    use super::*;
+    use ::chrono::{DateTime, Utc};
+    use serde::{de::Error as _, ser::Error as _};
+
+    pub mod datetime {
+        use super::*;
+
+        type DateTimeUtc = DateTime<Utc>;
+
+        option!(
+            DateTimeUtc,
+            "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime)`."
+        );
+
+        pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let ts = dt.timestamp();
+
+            u32::try_from(ts)
+                .map_err(|_| S::Error::custom(format!("{dt} cannot be represented as DateTime")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let ts: u32 = Deserialize::deserialize(deserializer)?;
+            DateTime::<Utc>::from_timestamp(i64::from(ts), 0).ok_or_else(|| {
+                D::Error::custom(format!("{ts} cannot be converted to DateTime<Utc>"))
+            })
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use ::chrono::{DateTime, Utc};
+            use serde::{Deserialize, Serialize};
+
+            #[derive(Serialize, Deserialize)]
+            struct WithDateTime {
+                #[serde(with = "super::datetime")]
+                dt: DateTime<Utc>,
+            }
+
+            #[test]
+            fn test_serde() {
+                let dt = WithDateTime { dt: Utc::now() };
+                let serde_dt: WithDateTime =
+                    serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
+                // we have to compare `timestamp` because we lose information when serializing
+                // and deserializing using clickhouse `DateTime` format
+                assert!(dt.dt.timestamp() == serde_dt.dt.timestamp());
+            }
+        }
+    }
+
+    /// Contains modules to ser/de `DateTime<Utc>` to/from `DateTime64(_)`.
+    pub mod datetime64 {
+        use super::*;
+        type DateTimeUtc = DateTime<Utc>;
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(0)` (seconds).
+        pub mod secs {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(0))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                DateTime::<Utc>::from_timestamp(ts, 0).ok_or_else(|| {
+                    D::Error::custom(format!("Can't create DateTime<Utc> from {ts}"))
+                })
+            }
+        }
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(3)` (milliseconds).
+        pub mod millis {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(3))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp_millis();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                DateTime::<Utc>::from_timestamp_millis(ts).ok_or_else(|| {
+                    D::Error::custom(format!("Can't create DateTime<Utc> from {ts}"))
+                })
+            }
+        }
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(6)` (microseconds).
+        pub mod micros {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(6))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp_micros();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                DateTime::<Utc>::from_timestamp_micros(ts).ok_or_else(|| {
+                    D::Error::custom(format!("Can't create DateTime<Utc> from {ts}"))
+                })
+            }
+        }
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(9)` (nanoseconds).
+        pub mod nanos {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(9))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp_nanos_opt().ok_or_else(|| {
+                    S::Error::custom(format!("Can't create a timestamp from {dt}"))
+                })?;
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(DateTime::<Utc>::from_timestamp_nanos(ts))
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use ::chrono::{DateTime, Utc};
+            use serde::{Deserialize, Serialize};
+
+            #[derive(Serialize, Deserialize)]
+            struct WithDateTime {
+                #[serde(with = "super::datetime64::nanos")]
+                dt_nanos: DateTime<Utc>,
+                #[serde(with = "super::datetime64::micros")]
+                dt_micros: DateTime<Utc>,
+                #[serde(with = "super::datetime64::millis")]
+                dt_millis: DateTime<Utc>,
+                #[serde(with = "super::datetime64::secs")]
+                dt_secs: DateTime<Utc>,
+            }
+
+            #[test]
+            fn test_serde() {
+                let now = Utc::now();
+                let dt = WithDateTime {
+                    dt_nanos: now,
+                    dt_micros: now,
+                    dt_millis: now,
+                    dt_secs: now,
+                };
+                let serde_dt: WithDateTime =
+                    serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
+                assert!(dt.dt_nanos == serde_dt.dt_nanos);
+                assert!(dt.dt_micros == serde_dt.dt_micros);
+                assert!(dt.dt_millis.timestamp_millis() == serde_dt.dt_millis.timestamp_millis());
+                assert!(dt.dt_secs.timestamp() == serde_dt.dt_secs.timestamp());
+            }
+        }
+    }
+
+    /// Ser/de `time::Date` to/from `Date`.
+    pub mod date {
+        use super::*;
+        use ::chrono::{Duration, NaiveDate};
+
+        option!(
+            NaiveDate,
+            "Ser/de `Option<time::Date>` to/from `Nullable(Date)`."
+        );
+
+        const ORIGIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1970, 1);
+
+        pub fn serialize<S>(date: &NaiveDate, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let origin = ORIGIN.unwrap();
+            if *date < origin {
+                let msg = format!("{date} cannot be represented as Date");
+                return Err(S::Error::custom(msg));
+            }
+
+            let elapsed = *date - origin; // cannot underflow: checked above
+            let days = elapsed.num_days();
+
+            u16::try_from(days)
+                .map_err(|_| S::Error::custom(format!("{date} cannot be represented as Date")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveDate, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let days: u16 = Deserialize::deserialize(deserializer)?;
+            Ok(ORIGIN.unwrap() + Duration::days(i64::from(days))) // cannot overflow: always < `Date::MAX`
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use ::chrono::{NaiveDate, Utc};
+            use serde::{Deserialize, Serialize};
+
+            #[derive(Serialize, Deserialize)]
+            struct WithDate {
+                #[serde(with = "super::date")]
+                d: NaiveDate,
+            }
+
+            #[test]
+            fn test_serde() {
+                let now = Utc::now().date_naive();
+                let dt = WithDate { d: now };
+                let serde_dt: WithDate =
+                    serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
+                assert!(dt.d == serde_dt.d);
+            }
+        }
+    }
+
+    /// Ser/de `time::Date` to/from `Date32`.
+    pub mod date32 {
+        use ::chrono::{Duration, NaiveDate};
+
+        use super::*;
+
+        option!(
+            NaiveDate,
+            "Ser/de `Option<time::Date>` to/from `Nullable(Date32)`."
+        );
+
+        const ORIGIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1970, 1);
+
+        // NOTE: actually, it's 1925 and 2283 with a tail for versions before 22.8-lts.
+        const MIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1900, 1);
+        const MAX: Option<NaiveDate> = NaiveDate::from_yo_opt(2299, 365);
+
+        pub fn serialize<S>(date: &NaiveDate, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            if *date < MIN.unwrap() || *date > MAX.unwrap() {
+                let msg = format!("{date} cannot be represented as Date");
+                return Err(S::Error::custom(msg));
+            }
+
+            let elapsed = *date - ORIGIN.unwrap(); // cannot underflow: checked above
+            let days = elapsed.num_days();
+
+            i32::try_from(days)
+                .map_err(|_| S::Error::custom(format!("{date} cannot be represented as Date32")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveDate, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let days: i32 = Deserialize::deserialize(deserializer)?;
+
+            // It shouldn't overflow, because clamped by CH and < `Date::MAX`.
+            // TODO: ensure CH clamps when an invalid value is inserted in binary format.
+            Ok(ORIGIN.unwrap() + Duration::days(i64::from(days)))
+        }
+        #[cfg(test)]
+        mod tests {
+            use ::chrono::{NaiveDate, Utc};
+            use serde::{Deserialize, Serialize};
+
+            #[derive(Serialize, Deserialize)]
+            struct WithDate {
+                #[serde(with = "super::date32")]
+                d_32: NaiveDate,
+            }
+
+            #[test]
+            fn test_serde() {
+                let now = Utc::now().date_naive();
+                let dt = WithDate { d_32: now };
+                let serde_dt: WithDate =
+                    serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
+                assert!(dt.d_32 == serde_dt.d_32);
+            }
+
+            #[test]
+            fn test_serde_invalid() {
+                let french_revolution = NaiveDate::from_ymd_opt(1789, 7, 14).unwrap();
+                let dt = WithDate {
+                    d_32: french_revolution,
+                };
+                assert!(serde_json::to_string(&dt).is_err());
+            }
+        }
+    }
+}
+
 /// Ser/de [`::time::OffsetDateTime`] and [`::time::Date`].
 #[cfg(feature = "time")]
 pub mod time {
