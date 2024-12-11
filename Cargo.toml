@@ -69,7 +69,7 @@ watch = ["dep:sha-1", "dep:serde_json", "serde/derive"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
 lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
-chrono = ["dep:chrono"]
+chrono = ["dep:chrono", "dep:serde_json"]
 ##  TLS
 native-tls = ["dep:hyper-tls"]
 # ext: native-tls-alpn

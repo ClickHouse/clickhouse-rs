@@ -142,6 +142,28 @@ pub mod chrono {
                 D::Error::custom(format!("{ts} cannot be converted to DateTime<Utc>"))
             })
         }
+
+        #[cfg(test)]
+        mod tests {
+            use ::chrono::{DateTime, Utc};
+            use serde::{Deserialize, Serialize};
+
+            #[derive(Serialize, Deserialize)]
+            struct WithDateTime {
+                #[serde(with = "super::datetime")]
+                dt: DateTime<Utc>,
+            }
+
+            #[test]
+            fn test_serde() {
+                let dt = WithDateTime { dt: Utc::now() };
+                let serde_dt: WithDateTime =
+                    serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
+                // we have to compare `timestamp` because we lose information when serializing
+                // and deserializing using clickhouse `DateTime` format
+                assert!(dt.dt.timestamp() == serde_dt.dt.timestamp());
+            }
+        }
     }
 
     /// Contains modules to ser/de `DateTime<Utc>` to/from `DateTime64(_)`.
@@ -260,6 +282,41 @@ pub mod chrono {
                 Ok(DateTime::<Utc>::from_timestamp_nanos(ts))
             }
         }
+
+        #[cfg(test)]
+        mod tests {
+            use ::chrono::{DateTime, Utc};
+            use serde::{Deserialize, Serialize};
+
+            #[derive(Serialize, Deserialize)]
+            struct WithDateTime {
+                #[serde(with = "super::datetime64::nanos")]
+                dt_nanos: DateTime<Utc>,
+                #[serde(with = "super::datetime64::micros")]
+                dt_micros: DateTime<Utc>,
+                #[serde(with = "super::datetime64::millis")]
+                dt_millis: DateTime<Utc>,
+                #[serde(with = "super::datetime64::secs")]
+                dt_secs: DateTime<Utc>,
+            }
+
+            #[test]
+            fn test_serde() {
+                let now = Utc::now();
+                let dt = WithDateTime {
+                    dt_nanos: now.clone(),
+                    dt_micros: now.clone(),
+                    dt_millis: now.clone(),
+                    dt_secs: now.clone(),
+                };
+                let serde_dt: WithDateTime =
+                    serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
+                assert!(dt.dt_nanos == serde_dt.dt_nanos);
+                assert!(dt.dt_micros == serde_dt.dt_micros);
+                assert!(dt.dt_millis.timestamp_millis() == serde_dt.dt_millis.timestamp_millis());
+                assert!(dt.dt_secs.timestamp() == serde_dt.dt_secs.timestamp());
+            }
+        }
     }
 
     /// Ser/de `time::Date` to/from `Date`.
@@ -272,7 +329,7 @@ pub mod chrono {
             "Ser/de `Option<time::Date>` to/from `Nullable(Date)`."
         );
 
-        const ORIGIN: Option<NaiveDate> = NaiveDate::from_ymd_opt(1970, 0, 0);
+        const ORIGIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1970, 1);
 
         pub fn serialize<S>(date: &NaiveDate, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -299,6 +356,27 @@ pub mod chrono {
             let days: u16 = Deserialize::deserialize(deserializer)?;
             Ok(ORIGIN.unwrap() + Duration::days(i64::from(days))) // cannot overflow: always < `Date::MAX`
         }
+
+        #[cfg(test)]
+        mod tests {
+            use ::chrono::{NaiveDate, Utc};
+            use serde::{Deserialize, Serialize};
+
+            #[derive(Serialize, Deserialize)]
+            struct WithDate {
+                #[serde(with = "super::date")]
+                d: NaiveDate,
+            }
+
+            #[test]
+            fn test_serde() {
+                let now = Utc::now().date_naive();
+                let dt = WithDate { d: now.clone() };
+                let serde_dt: WithDate =
+                    serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
+                assert!(dt.d == serde_dt.d);
+            }
+        }
     }
 
     /// Ser/de `time::Date` to/from `Date32`.
@@ -312,11 +390,11 @@ pub mod chrono {
             "Ser/de `Option<time::Date>` to/from `Nullable(Date32)`."
         );
 
-        const ORIGIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1970, 0);
+        const ORIGIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1970, 1);
 
         // NOTE: actually, it's 1925 and 2283 with a tail for versions before 22.8-lts.
-        const MIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1900, 0);
-        const MAX: Option<NaiveDate> = NaiveDate::from_yo_opt(2299, 364);
+        const MIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1900, 1);
+        const MAX: Option<NaiveDate> = NaiveDate::from_yo_opt(2299, 365);
 
         pub fn serialize<S>(date: &NaiveDate, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -344,6 +422,35 @@ pub mod chrono {
             // It shouldn't overflow, because clamped by CH and < `Date::MAX`.
             // TODO: ensure CH clamps when an invalid value is inserted in binary format.
             Ok(ORIGIN.unwrap() + Duration::days(i64::from(days)))
+        }
+        #[cfg(test)]
+        mod tests {
+            use ::chrono::{NaiveDate, Utc};
+            use serde::{Deserialize, Serialize};
+
+            #[derive(Serialize, Deserialize)]
+            struct WithDate {
+                #[serde(with = "super::date32")]
+                d_32: NaiveDate,
+            }
+
+            #[test]
+            fn test_serde() {
+                let now = Utc::now().date_naive();
+                let dt = WithDate { d_32: now.clone() };
+                let serde_dt: WithDate =
+                    serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
+                assert!(dt.d_32 == serde_dt.d_32);
+            }
+
+            #[test]
+            fn test_serde_invalid() {
+                let french_revolution = NaiveDate::from_ymd_opt(1789, 7, 14).unwrap();
+                let dt = WithDate {
+                    d_32: french_revolution.clone(),
+                };
+                assert!(serde_json::to_string(&dt).is_err());
+            }
         }
     }
 }
