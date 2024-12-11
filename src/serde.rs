@@ -304,10 +304,10 @@ pub mod chrono {
             fn test_serde() {
                 let now = Utc::now();
                 let dt = WithDateTime {
-                    dt_nanos: now.clone(),
-                    dt_micros: now.clone(),
-                    dt_millis: now.clone(),
-                    dt_secs: now.clone(),
+                    dt_nanos: now,
+                    dt_micros: now,
+                    dt_millis: now,
+                    dt_secs: now,
                 };
                 let serde_dt: WithDateTime =
                     serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
@@ -371,7 +371,7 @@ pub mod chrono {
             #[test]
             fn test_serde() {
                 let now = Utc::now().date_naive();
-                let dt = WithDate { d: now.clone() };
+                let dt = WithDate { d: now };
                 let serde_dt: WithDate =
                     serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
                 assert!(dt.d == serde_dt.d);
@@ -437,7 +437,7 @@ pub mod chrono {
             #[test]
             fn test_serde() {
                 let now = Utc::now().date_naive();
-                let dt = WithDate { d_32: now.clone() };
+                let dt = WithDate { d_32: now };
                 let serde_dt: WithDate =
                     serde_json::from_str(&serde_json::to_string(&dt).unwrap()).unwrap();
                 assert!(dt.d_32 == serde_dt.d_32);
@@ -447,7 +447,7 @@ pub mod chrono {
             fn test_serde_invalid() {
                 let french_revolution = NaiveDate::from_ymd_opt(1789, 7, 14).unwrap();
                 let dt = WithDate {
-                    d_32: french_revolution.clone(),
+                    d_32: french_revolution,
                 };
                 assert!(serde_json::to_string(&dt).is_err());
             }

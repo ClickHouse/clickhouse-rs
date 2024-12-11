@@ -51,7 +51,7 @@ required-features = ["rustls-tls"]
 
 [[example]]
 name = "data_types_derive_simple"
-required-features = ["time", "uuid"]
+required-features = ["time", "uuid", "chrono"]
 
 [[example]]
 name = "data_types_variant"
