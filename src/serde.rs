@@ -143,6 +143,209 @@ pub mod chrono {
             })
         }
     }
+
+    /// Contains modules to ser/de `DateTime<Utc>` to/from `DateTime64(_)`.
+    pub mod datetime64 {
+        use super::*;
+        type DateTimeUtc = DateTime<Utc>;
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(0)` (seconds).
+        pub mod secs {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(0))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                DateTime::<Utc>::from_timestamp(ts, 0).ok_or_else(|| {
+                    D::Error::custom(format!("Can't create DateTime<Utc> from {ts}"))
+                })
+            }
+        }
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(3)` (milliseconds).
+        pub mod millis {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(3))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp_millis();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                DateTime::<Utc>::from_timestamp_millis(ts).ok_or_else(|| {
+                    D::Error::custom(format!("Can't create DateTime<Utc> from {ts}"))
+                })
+            }
+        }
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(6)` (microseconds).
+        pub mod micros {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(6))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp_micros();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                DateTime::<Utc>::from_timestamp_micros(ts).ok_or_else(|| {
+                    D::Error::custom(format!("Can't create DateTime<Utc> from {ts}"))
+                })
+            }
+        }
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(9)` (nanoseconds).
+        pub mod nanos {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(9))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp_nanos_opt().ok_or_else(|| {
+                    S::Error::custom(format!("Can't create a timestamp from {dt}"))
+                })?;
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(DateTime::<Utc>::from_timestamp_nanos(ts))
+            }
+        }
+    }
+
+    /// Ser/de `time::Date` to/from `Date`.
+    pub mod date {
+        use super::*;
+        use ::chrono::{Duration, NaiveDate};
+
+        option!(
+            NaiveDate,
+            "Ser/de `Option<time::Date>` to/from `Nullable(Date)`."
+        );
+
+        const ORIGIN: Option<NaiveDate> = NaiveDate::from_ymd_opt(1970, 0, 0);
+
+        pub fn serialize<S>(date: &NaiveDate, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let origin = ORIGIN.unwrap();
+            if *date < origin {
+                let msg = format!("{date} cannot be represented as Date");
+                return Err(S::Error::custom(msg));
+            }
+
+            let elapsed = *date - origin; // cannot underflow: checked above
+            let days = elapsed.num_days();
+
+            u16::try_from(days)
+                .map_err(|_| S::Error::custom(format!("{date} cannot be represented as Date")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveDate, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let days: u16 = Deserialize::deserialize(deserializer)?;
+            Ok(ORIGIN.unwrap() + Duration::days(i64::from(days))) // cannot overflow: always < `Date::MAX`
+        }
+    }
+
+    /// Ser/de `time::Date` to/from `Date32`.
+    pub mod date32 {
+        use ::chrono::{Duration, NaiveDate};
+
+        use super::*;
+
+        option!(
+            NaiveDate,
+            "Ser/de `Option<time::Date>` to/from `Nullable(Date32)`."
+        );
+
+        const ORIGIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1970, 0);
+
+        // NOTE: actually, it's 1925 and 2283 with a tail for versions before 22.8-lts.
+        const MIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1900, 0);
+        const MAX: Option<NaiveDate> = NaiveDate::from_yo_opt(2299, 364);
+
+        pub fn serialize<S>(date: &NaiveDate, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            if *date < MIN.unwrap() || *date > MAX.unwrap() {
+                let msg = format!("{date} cannot be represented as Date");
+                return Err(S::Error::custom(msg));
+            }
+
+            let elapsed = *date - ORIGIN.unwrap(); // cannot underflow: checked above
+            let days = elapsed.num_days();
+
+            i32::try_from(days)
+                .map_err(|_| S::Error::custom(format!("{date} cannot be represented as Date32")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveDate, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let days: i32 = Deserialize::deserialize(deserializer)?;
+
+            // It shouldn't overflow, because clamped by CH and < `Date::MAX`.
+            // TODO: ensure CH clamps when an invalid value is inserted in binary format.
+            Ok(ORIGIN.unwrap() + Duration::days(i64::from(days)))
+        }
+    }
 }
 
 /// Ser/de [`::time::OffsetDateTime`] and [`::time::Date`].
