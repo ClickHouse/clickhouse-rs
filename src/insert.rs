@@ -37,6 +37,7 @@ const_assert!(BUFFER_SIZE.is_power_of_two()); // to use the whole buffer's capac
 pub struct Insert<T> {
     state: InsertState,
     buffer: BytesMut,
+    written_bytes: usize,
     #[cfg(feature = "lz4")]
     compression: Compression,
     send_timeout: Option<Duration>,
@@ -137,6 +138,7 @@ impl<T> Insert<T> {
                 sql,
             },
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
+            written_bytes: 0,
             #[cfg(feature = "lz4")]
             compression: client.compression,
             send_timeout: None,
@@ -222,7 +224,7 @@ impl<T> Insert<T> {
     }
 
     #[inline(always)]
-    pub(crate) fn do_write(&mut self, row: &T) -> Result<usize>
+    pub(crate) fn do_write(&mut self, row: &T) -> Result<()>
     where
         T: Serialize,
     {
@@ -240,7 +242,8 @@ impl<T> Insert<T> {
             self.abort();
         }
 
-        result.and(Ok(written))
+        self.written_bytes += written;
+        result.and(Ok(()))
     }
 
     /// Ends `INSERT`, the server starts processing the data.
@@ -255,6 +258,12 @@ impl<T> Insert<T> {
         }
         self.state.terminated();
         self.wait_handle().await
+    }
+    
+    /// Returns the number of serialized bytes that have been written because of
+    /// write operations.
+    pub fn written_bytes(&self) -> usize {
+        self.written_bytes
     }
 
     async fn send_chunk(&mut self) -> Result<()> {

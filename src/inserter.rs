@@ -224,8 +224,8 @@ where
         }
 
         match self.insert.as_mut().unwrap().do_write(row) {
-            Ok(bytes) => {
-                self.pending.bytes += bytes as u64;
+            Ok(()) => {
+                self.pending.bytes = self.insert.as_ref().unwrap().written_bytes() as u64;
                 self.pending.rows += 1;
 
                 if !self.in_transaction {
