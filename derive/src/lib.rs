@@ -7,7 +7,7 @@ use serde_derive_internals::{
 use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields};
 
 struct Attributes {
-    crate_name: syn::Path,
+    crate_path: syn::Path,
 }
 
 impl From<&[syn::Attribute]> for Attributes {
@@ -15,8 +15,8 @@ impl From<&[syn::Attribute]> for Attributes {
         const ATTRIBUTE_NAME: &str = "row";
         const ATTRIBUTE_SYNTAX: &str = "#[row(crate = ...)]";
 
-        const CRATE_NAME: &str = "crate";
-        const DEFAULT_CRATE_NAME: &str = "clickhouse";
+        const CRATE_PATH: &str = "crate";
+        const DEFAULT_CRATE_PATH: &str = "clickhouse";
 
         let mut crate_name = None;
         for attr in attrs {
@@ -25,7 +25,7 @@ impl From<&[syn::Attribute]> for Attributes {
                 let syn::Expr::Assign(syn::ExprAssign { left, right, .. }) = row else {
                     panic!("expected `{}`", ATTRIBUTE_SYNTAX);
                 };
-                if left.to_token_stream().to_string() != CRATE_NAME {
+                if left.to_token_stream().to_string() != CRATE_PATH {
                     panic!("expected `{}`", ATTRIBUTE_SYNTAX);
                 }
                 let syn::Expr::Path(syn::ExprPath { path, .. }) = *right else {
@@ -36,11 +36,11 @@ impl From<&[syn::Attribute]> for Attributes {
         }
         let crate_name = crate_name.unwrap_or_else(|| {
             syn::Path::from(syn::Ident::new(
-                DEFAULT_CRATE_NAME,
+                DEFAULT_CRATE_PATH,
                 proc_macro2::Span::call_site(),
             ))
         });
-        Self { crate_name }
+        Self { crate_path: crate_name }
     }
 }
 
@@ -79,7 +79,7 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     let cx = Ctxt::new();
-    let Attributes { crate_name } = Attributes::from(input.attrs.as_slice());
+    let Attributes { crate_path } = Attributes::from(input.attrs.as_slice());
     let container = Container::from_ast(&cx, &input);
     let name = input.ident;
 
@@ -95,7 +95,7 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     let expanded = quote! {
         #[automatically_derived]
-        impl #impl_generics #crate_name::Row for #name #ty_generics #where_clause {
+        impl #impl_generics #crate_path::Row for #name #ty_generics #where_clause {
             const COLUMN_NAMES: &'static [&'static str] = #column_names;
         }
     };
