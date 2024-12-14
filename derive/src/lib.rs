@@ -55,7 +55,6 @@ fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> TokenStr
 
 // TODO: support wrappers `Wrapper(Inner)` and `Wrapper<T>(T)`.
 // TODO: support the `nested` attribute.
-// TODO: support the `crate` attribute.
 #[proc_macro_derive(Row, attributes(row))]
 pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
