@@ -12,9 +12,11 @@ async fn smoke() {
     struct MyRow {
         #[serde(with = "clickhouse::serde::ipv4")]
         ipv4: Ipv4Addr,
+        #[serde(with = "clickhouse::serde::ipv6")]
         ipv6: Ipv6Addr, // requires no annotations.
         #[serde(with = "clickhouse::serde::ipv4::option")]
         ipv4_opt: Option<Ipv4Addr>,
+        #[serde(with = "clickhouse::serde::ipv6::option")]
         ipv6_opt: Option<Ipv6Addr>, // requires no annotations.
     }
 
@@ -52,5 +54,7 @@ async fn smoke() {
 
     assert_eq!(row, original_row);
     assert_eq!(row_ipv4_str, original_row.ipv4.to_string());
+    print!("{}", row_ipv6_str);
+    print!("{}", original_row.ipv6.to_string());
     assert_eq!(row_ipv6_str, original_row.ipv6.to_string());
 }

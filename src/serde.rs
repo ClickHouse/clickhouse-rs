@@ -70,6 +70,35 @@ pub mod ipv4 {
     }
 }
 
+pub mod ipv6 {
+    use std::net::Ipv6Addr;
+
+    use super::*;
+
+    option!(
+        Ipv6Addr,
+        "Ser/de `Option<Ipv6Addr>` to/from `Nullable(IPv6)`."
+    );
+
+    pub fn serialize<S>(ipv6: &Ipv6Addr, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let bytes = ipv6.octets();
+        let value = u128::from_le_bytes(bytes);
+        value.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Ipv6Addr, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: u128 = Deserialize::deserialize(deserializer)?;
+        let bytes = value.to_le_bytes();
+        Ok(Ipv6Addr::from(bytes))
+    }
+}
+
 /// Ser/de [`::uuid::Uuid`] to/from `UUID`.
 #[cfg(feature = "uuid")]
 pub mod uuid {
