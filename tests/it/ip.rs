@@ -54,7 +54,5 @@ async fn smoke() {
 
     assert_eq!(row, original_row);
     assert_eq!(row_ipv4_str, original_row.ipv4.to_string());
-    print!("{}", row_ipv6_str);
-    print!("{}", original_row.ipv6.to_string());
     assert_eq!(row_ipv6_str, original_row.ipv6.to_string());
 }
