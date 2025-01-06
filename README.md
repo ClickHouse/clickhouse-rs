@@ -329,7 +329,9 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* `Date` maps to/from `u16` or a newtype around it and represents a number of days elapsed since `1970-01-01`. Also, [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date`, that requires the `time` feature. `chrono::NaiveDate` is supported by using `serde::chrono::date`, requiring the `chrono` feature. 
+* `Date` maps to/from `u16` or a newtype around it and represents a number of days elapsed since `1970-01-01`. The following external types are supported: 
+    * [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date`, requiring the `time` feature. 
+    * [`chrono::NaiveDate`](https://docs.rs/chrono/latest/chrono/struct.NaiveDate.html) is supported by using `serde::chrono::date`, requiring the `chrono` feature. 
     <details>
     <summary>Example</summary>
 
@@ -350,7 +352,9 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* `Date32` maps to/from `i32` or a newtype around it and represents a number of days elapsed since `1970-01-01`. Also, [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date32`, that requires the `time` feature. `chrono::NaiveDate` is supported by using `serde::chrono::date`, requiring the `chrono` feature. 
+* `Date32` maps to/from `i32` or a newtype around it and represents a number of days elapsed since `1970-01-01`. The following external types are supported: 
+    * [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date32`, requiring the `time` feature. 
+    * [`chrono::NaiveDate`](https://docs.rs/chrono/latest/chrono/struct.NaiveDate.html) is supported by using `serde::chrono::date32`, requiring the `chrono` feature. 
     <details>
     <summary>Example</summary>
 
@@ -372,7 +376,9 @@ How to choose between all these features? Here are some considerations:
 
     ```
     </details>
-* `DateTime` maps to/from `u32` or a newtype around it and represents a number of seconds elapsed since UNIX epoch. Also, [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime`, that requires the `time` feature. `chrono::DateTime<Utc>` is supported by using `serde::chrono::datetime`, which requires the `chrono` feature. 
+* `DateTime` maps to/from `u32` or a newtype around it and represents a number of seconds elapsed since UNIX epoch. The following external types are supported:
+    * [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime`, requiring the `time` feature. 
+    * [`chrono::DateTime<Utc>`](https://docs.rs/chrono/latest/chrono/struct.DateTime.html) is supported by using `serde::chrono::datetime`, requiring the `chrono` feature. 
     <details>
     <summary>Example</summary>
 
@@ -382,17 +388,14 @@ How to choose between all these features? Here are some considerations:
         ts: u32,
         #[serde(with = "clickhouse::serde::time::datetime")]
         dt: OffsetDateTime,
-    }
-    // or if you prefer chrono: 
-    #[derive(Row, Serialize, Deserialize)]
-    struct MyRow {
-        ts: u32,
         #[serde(with = "clickhouse::serde::chrono::datetime")]
-        dt: DateTime<Utc>,
+        dt_chrono: DateTime<Utc>,        
     }
     ```
     </details>
-* `DateTime64(_)` maps to/from `i32` or a newtype around it and represents a time elapsed since UNIX epoch. Also, [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime64::*`, that requires the `time` feature. `chrono::DateTime<Utc>` is supported by using `serde::chrono::datetime`, which requires the `chrono` feature. 
+* `DateTime64(_)` maps to/from `i32` or a newtype around it and represents a time elapsed since UNIX epoch. The following external types are supported: 
+    * [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime64::*`, requiring the `time` feature. 
+    * [`chrono::DateTime<Utc>`](https://docs.rs/chrono/latest/chrono/struct.DateTime.html) is supported by using `serde::chrono::datetime64::*`, requiring the `chrono` feature. 
     <details>
     <summary>Example</summary>
 
@@ -408,21 +411,17 @@ How to choose between all these features? Here are some considerations:
         dt64us: OffsetDateTime, // `DateTime64(6)`
         #[serde(with = "clickhouse::serde::time::datetime64::nanos")]
         dt64ns: OffsetDateTime, // `DateTime64(9)`
+        // if you prefer using chrono: 
+        #[serde(with = "clickhouse::serde::chrono::datetime64::secs")]
+        dt64s_chrono: DateTime<Utc>,  // `DateTime64(0)`
+        #[serde(with = "clickhouse::serde::chrono::datetime64::millis")]
+        dt64ms_chrono: DateTime<Utc>, // `DateTime64(3)`
+        #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+        dt64us_chrono: DateTime<Utc>, // `DateTime64(6)`
+        #[serde(with = "clickhouse::serde::chrono::datetime64::nanos")]
+        dt64ns_chrono: DateTime<Utc>, // `DateTime64(9)`
     }
 
-    // or if you prefer chrono: 
-    #[derive(Row, Serialize, Deserialize)]
-    struct MyRow {
-        ts: u32,
-        #[serde(with = "clickhouse::serde::chrono::datetime64::secs")]
-        dt64s: DateTime<Utc>,  // `DateTime64(0)`
-        #[serde(with = "clickhouse::serde::chrono::datetime64::millis")]
-        dt64ms: DateTime<Utc>, // `DateTime64(3)`
-        #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
-        dt64us: DateTime<Utc>, // `DateTime64(6)`
-        #[serde(with = "clickhouse::serde::chrono::datetime64::nanos")]
-        dt64ns: DateTime<Utc>, // `DateTime64(9)`
-    }
 
     ```
     </details>

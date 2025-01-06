@@ -121,23 +121,23 @@ pub struct Row {
     pub decimal64_18_8: Decimal64,
     pub decimal128_38_12: Decimal128,
     #[serde(with = "clickhouse::serde::time::date")]
-    pub date: Date,
+    pub time_date: Date,
     #[serde(with = "clickhouse::serde::time::date32")]
-    pub date32: Date,
+    pub time_date32: Date,
     #[serde(with = "clickhouse::serde::time::datetime")]
-    pub datetime: OffsetDateTime,
+    pub time_datetime: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime")]
-    pub datetime_tz: OffsetDateTime,
+    pub time_datetime_tz: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime64::secs")]
-    pub datetime64_0: OffsetDateTime,
+    pub time_datetime64_0: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime64::millis")]
-    pub datetime64_3: OffsetDateTime,
+    pub time_datetime64_3: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
-    pub datetime64_6: OffsetDateTime,
+    pub time_datetime64_6: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime64::nanos")]
-    pub datetime64_9: OffsetDateTime,
+    pub time_datetime64_9: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime64::nanos")]
-    pub datetime64_9_tz: OffsetDateTime,
+    pub time_datetime64_9_tz: OffsetDateTime,
 
     #[serde(with = "clickhouse::serde::chrono::date")]
     pub chrono_date: NaiveDate,
@@ -225,15 +225,15 @@ impl Row {
             // See
             // - https://clickhouse.com/docs/en/sql-reference/data-types/date
             // - https://clickhouse.com/docs/en/sql-reference/data-types/date32
-            date: Date::from_calendar_date(2149, Month::June, 6).unwrap(),
-            date32: Date::from_calendar_date(2299, Month::December, 31).unwrap(),
-            datetime: max_datetime(),
-            datetime_tz: max_datetime(),
-            datetime64_0: max_datetime64(),
-            datetime64_3: max_datetime64(),
-            datetime64_6: max_datetime64(),
-            datetime64_9: max_datetime64_nanos(),
-            datetime64_9_tz: max_datetime64_nanos(),
+            time_date: Date::from_calendar_date(2149, Month::June, 6).unwrap(),
+            time_date32: Date::from_calendar_date(2299, Month::December, 31).unwrap(),
+            time_datetime: max_datetime(),
+            time_datetime_tz: max_datetime(),
+            time_datetime64_0: max_datetime64(),
+            time_datetime64_3: max_datetime64(),
+            time_datetime64_6: max_datetime64(),
+            time_datetime64_9: max_datetime64_nanos(),
+            time_datetime64_9_tz: max_datetime64_nanos(),
 
             chrono_date: NaiveDate::from_ymd_opt(2149, 6, 6).unwrap(),
             chrono_date32: NaiveDate::from_ymd_opt(2299, 12, 31).unwrap(),

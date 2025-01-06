@@ -54,6 +54,7 @@ async fn flush_query_log(client: &Client) {
     client.query("SYSTEM FLUSH LOGS").execute().await.unwrap();
 }
 
+mod chrono;
 mod compression;
 mod cursor_error;
 mod cursor_stats;
