@@ -393,7 +393,7 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* `DateTime64(_)` maps to/from `i32` or a newtype around it and represents a time elapsed since UNIX epoch. The following external types are supported: 
+* `DateTime64(_)` maps to/from `i64` or a newtype around it and represents a time elapsed since UNIX epoch. The following external types are supported:
     * [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime64::*`, requiring the `time` feature. 
     * [`chrono::DateTime<Utc>`](https://docs.rs/chrono/latest/chrono/struct.DateTime.html) is supported by using `serde::chrono::datetime64::*`, requiring the `chrono` feature. 
     <details>
