@@ -34,7 +34,7 @@ jobs:
     - run: rustup show active-toolchain -v
     - run: cargo build
     - run: cargo build --no-default-features
-    - run: cargo build --features uuid,time
+    - run: cargo build --features uuid,time,chrono
     - run: cargo build --all-features
 
   rustfmt:
