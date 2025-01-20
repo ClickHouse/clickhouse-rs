@@ -341,15 +341,11 @@ How to choose between all these features? Here are some considerations:
         days: u16,
         #[serde(with = "clickhouse::serde::time::date")]
         date: Date,
+        // if you prefer using chrono:
+        #[serde(with = "clickhouse::serde::chrono::date")]
+        date_chrono: NaiveDate,
     }
 
-    // or if you want to use `chrono`: 
-      #[derive(Row, Serialize, Deserialize)]
-    struct MyRow {
-        days: u16,
-        #[serde(with = "clickhouse::serde::chrono::date")]
-        date: NaiveDate,
-    }
     ```
     </details>
 * `Date32` maps to/from `i32` or a newtype around it and represents a number of days elapsed since `1970-01-01`. The following external types are supported: 
@@ -364,14 +360,10 @@ How to choose between all these features? Here are some considerations:
         days: i32,
         #[serde(with = "clickhouse::serde::time::date32")]
         date: Date,
-    }
-
-    // or if you want to use `chrono`: 
-    #[derive(Row, Serialize, Deserialize)]
-    struct MyRow {
-        days: u16,
+        // if you prefer using chrono:
         #[serde(with = "clickhouse::serde::chrono::date32")]
-        date: NaiveDate,
+        date_chrono: NaiveDate,
+
     }
 
     ```
@@ -388,6 +380,7 @@ How to choose between all these features? Here are some considerations:
         ts: u32,
         #[serde(with = "clickhouse::serde::time::datetime")]
         dt: OffsetDateTime,
+        // if you prefer using chrono:
         #[serde(with = "clickhouse::serde::chrono::datetime")]
         dt_chrono: DateTime<Utc>,        
     }
@@ -411,7 +404,7 @@ How to choose between all these features? Here are some considerations:
         dt64us: OffsetDateTime, // `DateTime64(6)`
         #[serde(with = "clickhouse::serde::time::datetime64::nanos")]
         dt64ns: OffsetDateTime, // `DateTime64(9)`
-        // if you prefer using chrono: 
+        // if you prefer using chrono:
         #[serde(with = "clickhouse::serde::chrono::datetime64::secs")]
         dt64s_chrono: DateTime<Utc>,  // `DateTime64(0)`
         #[serde(with = "clickhouse::serde::chrono::datetime64::millis")]
