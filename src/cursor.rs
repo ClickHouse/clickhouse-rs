@@ -168,6 +168,11 @@ impl<T> RowCursor<T> {
 
             match self.raw.next().await? {
                 Some(chunk) => self.bytes.extend(chunk),
+                None if self.bytes.remaining() > 0 => {
+                    // If some data is left, we have an incomplete row in the buffer.
+                    // This is usually a schema mismatch on the client side.
+                    return Err(Error::NotEnoughData);
+                }
                 None => return Ok(None),
             }
         }

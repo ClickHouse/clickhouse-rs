@@ -367,7 +367,7 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* `DateTime64(_)` maps to/from `i32` or a newtype around it and represents a time elapsed since UNIX epoch. Also, [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime64::*`, that requires the `time` feature.
+* `DateTime64(_)` maps to/from `i64` or a newtype around it and represents a time elapsed since UNIX epoch. Also, [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime64::*`, that requires the `time` feature.
     <details>
     <summary>Example</summary>
 

@@ -2,9 +2,8 @@ use std::{convert::TryFrom, mem, str};
 
 use crate::error::{Error, Result};
 use bytes::Buf;
-use serde::de::{EnumAccess, VariantAccess};
 use serde::{
-    de::{DeserializeSeed, Deserializer, SeqAccess, Visitor},
+    de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
     Deserialize,
 };
 
