@@ -51,7 +51,7 @@ required-features = ["rustls-tls"]
 
 [[example]]
 name = "data_types_derive_simple"
-required-features = ["time", "uuid"]
+required-features = ["time", "uuid", "chrono"]
 
 [[example]]
 name = "data_types_variant"
@@ -77,6 +77,7 @@ watch = ["dep:sha-1", "dep:serde_json", "serde/derive"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
 lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
+chrono = ["dep:chrono"]
 futures03 = []
 
 ##  TLS
@@ -85,10 +86,22 @@ native-tls = ["dep:hyper-tls"]
 # ext: native-tls-vendored
 
 rustls-tls = ["rustls-tls-aws-lc", "rustls-tls-webpki-roots"]
-rustls-tls-aws-lc = ["dep:rustls", "dep:hyper-rustls", "hyper-rustls?/aws-lc-rs"]
+rustls-tls-aws-lc = [
+    "dep:rustls",
+    "dep:hyper-rustls",
+    "hyper-rustls?/aws-lc-rs",
+]
 rustls-tls-ring = ["dep:rustls", "dep:hyper-rustls", "hyper-rustls?/ring"]
-rustls-tls-webpki-roots = ["dep:rustls", "dep:hyper-rustls", "hyper-rustls?/webpki-tokio"]
-rustls-tls-native-roots = ["dep:rustls", "dep:hyper-rustls", "hyper-rustls?/native-tokio"]
+rustls-tls-webpki-roots = [
+    "dep:rustls",
+    "dep:hyper-rustls",
+    "hyper-rustls?/webpki-tokio",
+]
+rustls-tls-native-roots = [
+    "dep:rustls",
+    "dep:hyper-rustls",
+    "hyper-rustls?/native-tokio",
+]
 
 [dependencies]
 clickhouse-derive = { version = "0.2.0", path = "derive" }
@@ -119,6 +132,7 @@ lz4_flex = { version = "0.11.3", default-features = false, features = [
 cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
+chrono = { version = "0.4", optional = true, features = ["serde"] }
 bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
 replace_with = { version = "0.1.7" }
