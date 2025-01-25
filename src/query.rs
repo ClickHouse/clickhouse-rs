@@ -94,7 +94,7 @@ impl Query {
 
     /// Executes the query, returning a [`crate::cursor::BytesCursor`]
     /// to obtain results as raw bytes.
-    /// For available formats, see https://clickhouse.com/docs/en/interfaces/formats
+    /// For available formats, see <https://clickhouse.com/docs/en/interfaces/formats>
     #[cfg(feature = "futures03")]
     pub fn fetch_bytes(mut self, format: impl Into<String>) -> Result<crate::cursor::BytesCursor> {
         self.sql.set_output_format(format);
