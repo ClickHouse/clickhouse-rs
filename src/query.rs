@@ -15,6 +15,8 @@ use crate::{
 
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
+#[cfg(feature = "futures03")]
+pub use crate::cursor::BytesCursor;
 pub use crate::cursor::RowCursor;
 
 #[must_use]
@@ -84,10 +86,20 @@ impl Query {
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
-        self.sql.append(" FORMAT RowBinary");
+        self.sql.set_output_format("RowBinary");
 
         let response = self.do_execute(true)?;
         Ok(RowCursor::new(response))
+    }
+
+    /// Executes the query, returning a [`crate::cursor::BytesCursor`]
+    /// to obtain results as raw bytes.
+    /// For available formats, see <https://clickhouse.com/docs/en/interfaces/formats>
+    #[cfg(feature = "futures03")]
+    pub fn fetch_bytes(mut self, format: impl Into<String>) -> Result<crate::cursor::BytesCursor> {
+        self.sql.set_output_format(format);
+        let response = self.do_execute(true)?;
+        Ok(crate::cursor::BytesCursor::new(response))
     }
 
     /// Executes the query and returns just a single row.
