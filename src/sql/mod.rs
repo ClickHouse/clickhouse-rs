@@ -5,7 +5,6 @@ use crate::{
     row::{self, Row},
 };
 
-use crate::format::OutputFormat;
 pub use bind::{Bind, Identifier};
 
 mod bind;
@@ -14,7 +13,7 @@ pub(crate) mod ser;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SqlBuilder {
-    InProgress(Vec<Part>, Option<OutputFormat>),
+    InProgress(Vec<Part>, Option<String>),
     Failed(String),
 }
 
@@ -76,9 +75,9 @@ impl SqlBuilder {
         SqlBuilder::InProgress(parts, None)
     }
 
-    pub(crate) fn set_output_format(&mut self, format: OutputFormat) {
+    pub(crate) fn set_output_format(&mut self, format: impl Into<String>) {
         if let Self::InProgress(_, format_opt) = self {
-            *format_opt = Some(format);
+            *format_opt = Some(format.into());
         }
     }
 

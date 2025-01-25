@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use url::Url;
 
-use crate::cursor::RawCursor;
 use crate::{
     error::{Error, Result},
     headers::with_request_headers,
@@ -16,8 +15,9 @@ use crate::{
 
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
+#[cfg(feature = "futures03")]
+pub use crate::cursor::BytesCursor;
 pub use crate::cursor::RowCursor;
-use crate::format::OutputFormat;
 
 #[must_use]
 #[derive(Clone)]
@@ -86,17 +86,20 @@ impl Query {
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
-        self.sql.set_output_format(OutputFormat::RowBinary);
+        self.sql.set_output_format("RowBinary");
 
         let response = self.do_execute(true)?;
         Ok(RowCursor::new(response))
     }
 
-    /// Executes the query, returning a [`RawCursor`] to obtain results.
-    pub fn fetch_raw(mut self, format: OutputFormat) -> Result<RawCursor> {
+    /// Executes the query, returning a [`crate::cursor::BytesCursor`]
+    /// to obtain results as raw bytes.
+    /// For available formats, see https://clickhouse.com/docs/en/interfaces/formats
+    #[cfg(feature = "futures03")]
+    pub fn fetch_bytes(mut self, format: impl Into<String>) -> Result<crate::cursor::BytesCursor> {
         self.sql.set_output_format(format);
         let response = self.do_execute(true)?;
-        Ok(RawCursor::new(response))
+        Ok(crate::cursor::BytesCursor::new(response))
     }
 
     /// Executes the query and returns just a single row.

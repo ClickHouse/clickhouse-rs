@@ -57,6 +57,14 @@ required-features = ["time", "uuid"]
 name = "data_types_variant"
 required-features = ["time"]
 
+[[example]]
+name = "stream_into_file"
+required-features = ["futures03"]
+
+[[example]]
+name = "stream_arbitrary_format_rows"
+required-features = ["futures03"]
+
 [profile.release]
 debug = true
 
@@ -69,6 +77,7 @@ watch = ["dep:sha-1", "dep:serde_json", "serde/derive"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
 lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
+futures03 = []
 
 ##  TLS
 native-tls = ["dep:hyper-tls"]
