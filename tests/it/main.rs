@@ -58,7 +58,7 @@ mod chrono;
 mod compression;
 mod cursor_error;
 mod cursor_stats;
-mod fetch_raw;
+mod fetch_bytes;
 mod insert;
 mod inserter;
 mod ip;
