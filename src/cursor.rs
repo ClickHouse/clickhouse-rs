@@ -5,12 +5,15 @@ use crate::{
     rowbinary,
 };
 use bytes::Bytes;
-use futures::TryStreamExt;
+use futures::{FutureExt, TryStreamExt};
 use serde::Deserialize;
-use std::marker::PhantomData;
-
-#[cfg(feature = "futures03")]
-const INITIAL_BYTES_CURSOR_BUFFER_SIZE: usize = 1024;
+use std::{
+    io::Result as IoResult,
+    marker::PhantomData,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
+use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 
 // === RawCursor ===
 
@@ -53,6 +56,11 @@ impl RawCursor {
         }
     }
 
+    fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<Bytes>>> {
+        // TODO: implement `next()` based on `poll_next()` and avoid `boxed()`.
+        self.next().boxed().poll_unpin(cx)
+    }
+
     async fn resolve(&mut self) -> Result<()> {
         if let RawCursorState::Waiting(future) = &mut self.0 {
             let chunks = future.await;
@@ -82,29 +90,111 @@ impl RawCursor {
 
 // === BytesCursor ===
 
-/// Unlike [`RowCursor`] which emits rows deserialized as structures from RowBinary,
-/// this cursor emits raw bytes without deserialization.
+/// Unlike [`RowCursor`] which emits rows deserialized as structures from
+/// RowBinary, this cursor emits raw bytes without deserialization.
 /// It can be iterated over using [`futures::StreamExt::next`].
 /// Additionally, if the requested format emits each row on a newline
-/// (e.g. `JSONEachRow`, `CSV`, `TSV`, etc.), the cursor can be converted into a stream of lines
-/// using [`futures::AsyncBufReadExt::lines`]`, which will allow for more convenient processing.
-#[cfg(feature = "futures03")]
+/// (e.g. `JSONEachRow`, `CSV`, `TSV`, etc.), the cursor can be converted into a
+/// stream of lines using [`futures::AsyncBufReadExt::lines`]`, which will allow
+/// for more convenient processing.
+// TODO: note about errors
 pub struct BytesCursor {
     raw: RawCursor,
-    buffer: Vec<u8>,
-    filled: usize,
-    consumed: usize,
+    bytes: BytesExt,
 }
 
-#[cfg(feature = "futures03")]
+// TODO: what if any poll_* called AFTER error returned?
+
 impl BytesCursor {
     pub(crate) fn new(response: Response) -> Self {
         Self {
             raw: RawCursor::new(response),
-            buffer: Vec::with_capacity(INITIAL_BYTES_CURSOR_BUFFER_SIZE),
-            filled: 0,
-            consumed: 0,
+            bytes: BytesExt::default(),
         }
+    }
+
+    #[cold]
+    fn poll_refill(&mut self, cx: &mut Context<'_>) -> Poll<IoResult<bool>> {
+        debug_assert_eq!(self.bytes.remaining(), 0);
+
+        // TODO: should we repeat if `poll_next` returns an empty buffer?
+
+        match ready!(self.raw.poll_next(cx).map_err(Error::into_io)?) {
+            Some(chunk) => {
+                self.bytes.extend(chunk);
+                Poll::Ready(Ok(true))
+            }
+            None => Poll::Ready(Ok(false)),
+        }
+    }
+}
+
+impl AsyncRead for BytesCursor {
+    #[inline]
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<IoResult<()>> {
+        while buf.remaining() > 0 {
+            if self.bytes.is_empty() && !ready!(self.poll_refill(cx)?) {
+                break;
+            }
+
+            let bytes = self.bytes.slice();
+            let len = bytes.len().min(buf.remaining());
+            buf.put_slice(&bytes[..len]);
+            self.bytes.advance(len);
+        }
+
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncBufRead for BytesCursor {
+    #[inline]
+    fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<&[u8]>> {
+        if self.bytes.is_empty() && !ready!(self.poll_refill(cx)?) {
+            return Poll::Ready(Ok(&[]));
+        }
+
+        Poll::Ready(Ok(self.get_mut().bytes.slice()))
+    }
+
+    #[inline]
+    fn consume(mut self: Pin<&mut Self>, amt: usize) {
+        assert!(
+            amt <= self.bytes.remaining(),
+            "invalid `AsyncBufRead::consume` usage"
+        );
+        self.bytes.advance(amt);
+    }
+}
+
+#[cfg(feature = "futures03")]
+impl futures::AsyncRead for BytesCursor {
+    #[inline]
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<IoResult<usize>> {
+        let mut buf = ReadBuf::new(buf);
+        ready!(AsyncRead::poll_read(self, cx, &mut buf)?);
+        Poll::Ready(Ok(buf.filled().len()))
+    }
+}
+
+#[cfg(feature = "futures03")]
+impl futures::AsyncBufRead for BytesCursor {
+    #[inline]
+    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<&[u8]>> {
+        AsyncBufRead::poll_fill_buf(self, cx)
+    }
+
+    #[inline]
+    fn consume(self: Pin<&mut Self>, amt: usize) {
+        AsyncBufRead::consume(self, amt);
     }
 }
 
@@ -112,80 +202,13 @@ impl BytesCursor {
 impl futures::stream::Stream for BytesCursor {
     type Item = Result<Bytes>;
 
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        use futures::FutureExt;
-        match self.raw.next().boxed().poll_unpin(cx) {
-            std::task::Poll::Ready(result) => match result {
-                Ok(Some(bytes)) => std::task::Poll::Ready(Some(Ok(bytes))),
-                Ok(None) => std::task::Poll::Ready(None),
-                Err(err) => std::task::Poll::Ready(Some(Err(err))),
-            },
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        assert!(
+            self.bytes.is_empty(),
+            "mixing `Stream` and `AsyncRead` API methods is not allowed"
+        );
 
-#[cfg(feature = "futures03")]
-impl futures::AsyncRead for BytesCursor {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut [u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        use futures::FutureExt;
-        let buf = match buf.len() {
-            0 => return std::task::Poll::Ready(Ok(0)),
-            len => &mut buf[..len],
-        };
-
-        match self.raw.next().boxed().poll_unpin(cx) {
-            std::task::Poll::Ready(Ok(Some(bytes))) => {
-                let len = std::cmp::min(bytes.len(), buf.len());
-                buf[..len].copy_from_slice(&bytes[..len]);
-                std::task::Poll::Ready(Ok(len))
-            }
-            std::task::Poll::Ready(Ok(None)) => std::task::Poll::Ready(Ok(0)),
-            std::task::Poll::Ready(Err(err)) => std::task::Poll::Ready(Err(err.into_io())),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-#[cfg(feature = "futures03")]
-impl futures::AsyncBufRead for BytesCursor {
-    fn poll_fill_buf(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<&[u8]>> {
-        use futures::FutureExt;
-        let this = self.get_mut();
-        if this.filled == this.consumed {
-            let poll_result = this.raw.next().boxed().poll_unpin(cx);
-            match poll_result {
-                std::task::Poll::Ready(Ok(Some(bytes))) => {
-                    this.filled = bytes.len();
-                    this.buffer.extend(bytes);
-                }
-                std::task::Poll::Ready(Ok(None)) => return std::task::Poll::Ready(Ok(&[])),
-                std::task::Poll::Ready(Err(err)) => {
-                    return std::task::Poll::Ready(Err(err.into_io()))
-                }
-                std::task::Poll::Pending => return std::task::Poll::Pending,
-            }
-        }
-        std::task::Poll::Ready(Ok(&this.buffer[this.consumed..]))
-    }
-
-    fn consume(mut self: std::pin::Pin<&mut Self>, amt: usize) {
-        self.consumed += amt;
-        if self.consumed == self.filled {
-            self.filled = 0;
-            self.consumed = 0;
-            self.buffer.clear();
-        }
+        self.raw.poll_next(cx).map(Result::transpose)
     }
 }
 

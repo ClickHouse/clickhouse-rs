@@ -58,10 +58,6 @@ name = "data_types_variant"
 required-features = ["time"]
 
 [[example]]
-name = "stream_into_file"
-required-features = ["futures03"]
-
-[[example]]
 name = "stream_arbitrary_format_rows"
 required-features = ["futures03"]
 

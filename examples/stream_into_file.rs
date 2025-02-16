@@ -1,37 +1,63 @@
-use clickhouse::Client;
-use futures::StreamExt;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+use clickhouse::{query::BytesCursor, Client};
+use std::time::Instant;
+use tokio::{fs::File, io::AsyncWriteExt};
 
-/// An example of streaming the result of a query in an arbitrary format into a file
-/// leveraging the [`StreamExt`] helper. In this case, `CSVWithNamesAndTypes` format is used.
-/// See also: https://clickhouse.com/docs/en/interfaces/formats
+// Examples of streaming the result of a query in an arbitrary format into a
+// file. In this case, `CSVWithNamesAndTypes` format is used.
+// Check also other formats in https://clickhouse.com/docs/en/interfaces/formats.
+//
+// Note: there is no need to wrap `File` into `BufWriter` because `BytesCursor`
+// is buffered internally already and produces chunks of data.
+
+const NUMBERS: u32 = 100_000;
+
+fn query(numbers: u32) -> BytesCursor {
+    let client = Client::default().with_url("http://localhost:8123");
+
+    client
+        .query(
+            "SELECT number, hex(randomPrintableASCII(20)) AS hex_str
+             FROM system.numbers
+             LIMIT {limit: Int32}",
+        )
+        .param("limit", numbers)
+        .fetch_bytes("CSVWithNamesAndTypes")
+        .unwrap()
+}
+
+// Pattern 1: use the `tokio::io::copy_buf` helper.
+async fn tokio_copy_buf(filename: &str) {
+    let mut cursor = query(NUMBERS);
+    let mut file = File::create(filename).await.unwrap();
+    tokio::io::copy_buf(&mut cursor, &mut file).await.unwrap();
+}
+
+// TODO: add `next()`
+
+// Pattern 3: use the `futures::(Try)StreamExt` traits.
+#[cfg(feature = "futures03")]
+async fn futures03_stream(filename: &str) {
+    use futures::TryStreamExt;
+
+    let mut cursor = query(NUMBERS);
+    let mut file = File::create(filename).await.unwrap();
+
+    while let Some(bytes) = cursor.try_next().await.unwrap() {
+        file.write_all(&bytes).await.unwrap();
+        println!("chunk of {}B written to {filename}", bytes.len());
+    }
+}
 
 #[tokio::main]
-async fn main() -> clickhouse::error::Result<()> {
-    let client = Client::default().with_url("http://localhost:8123");
-    let filename = "output.csv";
-    let mut bytes_cursor = client
-        .query(
-            "
-                SELECT number, hex(randomPrintableASCII(20)) AS hex_str
-                FROM system.numbers
-                LIMIT 10000
-            ",
-        )
-        .fetch_bytes("CSVWithNamesAndTypes")?;
+async fn main() {
+    let start = Instant::now();
+    tokio_copy_buf("output-1.csv").await;
+    println!("written to output-1.csv in {:?}", start.elapsed());
 
-    let mut file = File::create(filename).await.unwrap();
-    while let Some(data) = bytes_cursor.next().await {
-        match data {
-            Ok(bytes) => {
-                file.write_all(&bytes).await.unwrap();
-                println!("Bytes written: {}", bytes.len());
-            }
-            Err(err) => return Err(err),
-        }
+    #[cfg(feature = "futures03")]
+    {
+        let start = Instant::now();
+        futures03_stream("output-3.csv").await;
+        println!("written to output-3.csv in {:?}", start.elapsed());
     }
-
-    println!("Raw data is written to {filename}");
-    Ok(())
 }

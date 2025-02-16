@@ -18,6 +18,12 @@ impl BytesExt {
     }
 
     #[inline(always)]
+    pub(crate) fn is_empty(&self) -> bool {
+        debug_assert!(self.cursor <= self.bytes.len());
+        self.cursor >= self.bytes.len()
+    }
+
+    #[inline(always)]
     pub(crate) fn set_remaining(&mut self, n: usize) {
         // We can use `bytes.advance()` here, but it's slower.
         self.cursor = self.bytes.len() - n;
@@ -26,13 +32,15 @@ impl BytesExt {
     #[cfg(any(test, feature = "lz4", feature = "watch"))]
     #[inline(always)]
     pub(crate) fn advance(&mut self, n: usize) {
+        debug_assert!(n <= self.remaining());
+
         // We can use `bytes.advance()` here, but it's slower.
         self.cursor += n;
     }
 
     #[inline(always)]
     pub(crate) fn extend(&mut self, chunk: Bytes) {
-        if self.cursor == self.bytes.len() {
+        if self.is_empty() {
             // Most of the time, we read the next chunk after consuming the previous one.
             self.bytes = chunk;
             self.cursor = 0;

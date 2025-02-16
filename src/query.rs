@@ -15,9 +15,7 @@ use crate::{
 
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
-#[cfg(feature = "futures03")]
-pub use crate::cursor::BytesCursor;
-pub use crate::cursor::RowCursor;
+pub use crate::cursor::{BytesCursor, RowCursor};
 
 #[must_use]
 #[derive(Clone)]
@@ -92,16 +90,6 @@ impl Query {
         Ok(RowCursor::new(response))
     }
 
-    /// Executes the query, returning a [`crate::cursor::BytesCursor`]
-    /// to obtain results as raw bytes.
-    /// For available formats, see <https://clickhouse.com/docs/en/interfaces/formats>
-    #[cfg(feature = "futures03")]
-    pub fn fetch_bytes(mut self, format: impl Into<String>) -> Result<crate::cursor::BytesCursor> {
-        self.sql.set_output_format(format);
-        let response = self.do_execute(true)?;
-        Ok(crate::cursor::BytesCursor::new(response))
-    }
-
     /// Executes the query and returns just a single row.
     ///
     /// Note that `T` must be owned.
@@ -142,6 +130,15 @@ impl Query {
         }
 
         Ok(result)
+    }
+
+    /// Executes the query, returning a [`BytesCursor`]
+    /// to obtain results as raw bytes.
+    /// For available formats, see <https://clickhouse.com/docs/en/interfaces/formats>
+    pub fn fetch_bytes(mut self, format: impl Into<String>) -> Result<BytesCursor> {
+        self.sql.set_output_format(format);
+        let response = self.do_execute(true)?;
+        Ok(BytesCursor::new(response))
     }
 
     pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {
