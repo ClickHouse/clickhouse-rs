@@ -48,28 +48,25 @@ impl RawCursor {
     }
 
     pub(crate) fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<Bytes>>> {
-        if matches!(self.0, RawCursorState::Waiting(_)) {
+        if let RawCursorState::Loading(state) = &mut self.0 {
+            let chunks = pin!(&mut state.chunks);
+
+            Poll::Ready(match ready!(chunks.poll_next(cx)?) {
+                Some(chunk) => {
+                    state.net_size += chunk.net_size as u64;
+                    state.data_size += chunk.data.len() as u64;
+                    Ok(Some(chunk.data))
+                }
+                None => Ok(None),
+            })
+        } else {
             ready!(self.poll_resolve(cx)?);
+            self.poll_next(cx)
         }
-
-        let state = match &mut self.0 {
-            RawCursorState::Loading(state) => state,
-            RawCursorState::Waiting(_) => unreachable!(),
-        };
-
-        let chunks = pin!(&mut state.chunks);
-
-        Poll::Ready(match ready!(chunks.poll_next(cx)?) {
-            Some(chunk) => {
-                state.net_size += chunk.net_size as u64;
-                state.data_size += chunk.data.len() as u64;
-                Ok(Some(chunk.data))
-            }
-            None => Ok(None),
-        })
     }
 
     #[cold]
+    #[inline(never)]
     fn poll_resolve(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
         if let RawCursorState::Waiting(future) = &mut self.0 {
             let chunks = ready!(future.as_mut().poll(cx)?);
