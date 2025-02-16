@@ -1,6 +1,6 @@
 use clickhouse::{query::BytesCursor, Client};
 use std::time::Instant;
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::fs::File;
 
 // Examples of streaming the result of a query in an arbitrary format into a
 // file. In this case, `CSVWithNamesAndTypes` format is used.
@@ -38,6 +38,7 @@ async fn tokio_copy_buf(filename: &str) {
 #[cfg(feature = "futures03")]
 async fn futures03_stream(filename: &str) {
     use futures::TryStreamExt;
+    use tokio::io::AsyncWriteExt;
 
     let mut cursor = query(NUMBERS);
     let mut file = File::create(filename).await.unwrap();

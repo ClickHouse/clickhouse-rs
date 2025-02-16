@@ -15,7 +15,7 @@ use crate::{
 
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
-pub use crate::cursor::{BytesCursor, RowCursor};
+pub use crate::cursors::{BytesCursor, RowCursor};
 
 #[must_use]
 #[derive(Clone)]
