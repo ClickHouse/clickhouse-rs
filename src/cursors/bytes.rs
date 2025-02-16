@@ -43,6 +43,23 @@ impl BytesCursor {
             None => Poll::Ready(Ok(false)),
         }
     }
+
+    /// Returns the total size in bytes received from the CH server since
+    /// the cursor was created.
+    ///
+    /// This method counts only size without HTTP headers for now.
+    /// It can be changed in the future without notice.
+    #[inline]
+    pub fn received_bytes(&self) -> u64 {
+        self.raw.received_bytes()
+    }
+
+    /// Returns the total size in bytes decompressed since the cursor was
+    /// created.
+    #[inline]
+    pub fn decoded_bytes(&self) -> u64 {
+        self.raw.decoded_bytes()
+    }
 }
 
 impl AsyncRead for BytesCursor {
