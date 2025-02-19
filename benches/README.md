@@ -23,8 +23,7 @@ Then upload the `perf.script` file to [Firefox Profiler](https://profiler.firefo
 
 These benchmarks are run against a real ClickHouse server, so it must be started:
 ```bash
-docker run -d -p 8123:8123 -p 9000:9000 --name ch clickhouse/clickhouse-server
-
+docker compose up -d
 cargo bench --bench <case>
 ```
 
