@@ -57,10 +57,6 @@ required-features = ["time", "uuid", "chrono"]
 name = "data_types_variant"
 required-features = ["time"]
 
-[[example]]
-name = "stream_arbitrary_format_rows"
-required-features = ["futures03"]
-
 [profile.release]
 debug = true
 

@@ -1,33 +1,33 @@
-#![cfg(feature = "futures03")]
-
-use futures::{AsyncBufReadExt, StreamExt};
+use clickhouse::error::Error;
 use std::str::from_utf8;
+use tokio::io::AsyncBufReadExt;
 
 #[tokio::test]
-async fn fetch_bytes_single_chunk() {
+async fn single_chunk() {
     let client = prepare_database!();
 
-    let mut raw_cursor = client
+    let mut cursor = client
         .query("SELECT number FROM system.numbers LIMIT 3")
         .fetch_bytes("CSV")
         .unwrap();
 
     let mut total_chunks = 0;
     let mut buffer = Vec::<u8>::new();
-    while let Some(chunk) = raw_cursor.next().await {
-        buffer.extend(chunk.unwrap());
+    while let Some(chunk) = cursor.next().await.unwrap() {
+        buffer.extend(chunk);
         total_chunks += 1;
     }
 
-    assert_eq!(from_utf8(&buffer).unwrap(), "0\n1\n2\n",);
+    assert_eq!(from_utf8(&buffer).unwrap(), "0\n1\n2\n");
     assert_eq!(total_chunks, 1);
+    assert_eq!(cursor.decoded_bytes(), 6);
 }
 
 #[tokio::test]
-async fn fetch_bytes_multiple_chunks() {
+async fn multiple_chunks() {
     let client = prepare_database!();
 
-    let mut bytes_cursor = client
+    let mut cursor = client
         .query("SELECT number FROM system.numbers LIMIT 3")
         // each number will go into a separate chunk
         .with_option("max_block_size", "1")
@@ -36,17 +36,18 @@ async fn fetch_bytes_multiple_chunks() {
 
     let mut total_chunks = 0;
     let mut buffer = Vec::<u8>::new();
-    while let Some(data) = bytes_cursor.next().await {
-        buffer.extend(data.unwrap());
+    while let Some(data) = cursor.next().await.unwrap() {
+        buffer.extend(data);
         total_chunks += 1;
     }
 
-    assert_eq!(from_utf8(&buffer).unwrap(), "0\n1\n2\n",);
+    assert_eq!(from_utf8(&buffer).unwrap(), "0\n1\n2\n");
     assert_eq!(total_chunks, 3);
+    assert_eq!(cursor.decoded_bytes(), 6);
 }
 
 #[tokio::test]
-async fn fetch_bytes_with_error() {
+async fn error() {
     let client = prepare_database!();
 
     let mut bytes_cursor = client
@@ -56,45 +57,53 @@ async fn fetch_bytes_with_error() {
         .fetch_bytes("JSONEachRow")
         .unwrap();
 
-    let err = bytes_cursor.next().await.unwrap();
+    let err = bytes_cursor.next().await;
     println!("{:?}", err);
-    assert!(matches!(err, Err(clickhouse::error::Error::BadResponse(_))));
+    assert!(matches!(err, Err(Error::BadResponse(_))));
 }
 
 #[tokio::test]
-async fn fetch_bytes_lines_single_chunk() {
+async fn lines() {
     let client = prepare_database!();
+    let expected = ["0", "1", "2"];
 
-    let mut lines_cursor = client
-        .query("SELECT number FROM system.numbers LIMIT 3")
-        .fetch_bytes("CSV")
-        .unwrap()
-        .lines();
+    for n in 0..4 {
+        let mut lines = client
+            .query("SELECT number FROM system.numbers LIMIT {limit: Int32}")
+            .param("limit", n)
+            // each number will go into a separate chunk
+            .with_option("max_block_size", "1")
+            .fetch_bytes("CSV")
+            .unwrap()
+            .lines();
 
-    let mut buffer = Vec::<String>::new();
-    while let Some(data) = lines_cursor.next().await {
-        buffer.push(data.unwrap());
+        let mut actual = Vec::<String>::new();
+        while let Some(data) = lines.next_line().await.unwrap() {
+            actual.push(data);
+        }
+
+        assert_eq!(actual, &expected[..n]);
     }
-
-    assert_eq!(buffer, vec!["0", "1", "2"],);
 }
 
 #[tokio::test]
-async fn fetch_bytes_lines_multiple_chunks() {
+async fn collect() {
     let client = prepare_database!();
+    let expected = b"0\n1\n2\n3\n";
 
-    let mut lines_cursor = client
-        .query("SELECT number FROM system.numbers LIMIT 3")
-        // each number will go into a separate chunk
-        .with_option("max_block_size", "1")
-        .fetch_bytes("CSV")
-        .unwrap()
-        .lines();
+    for n in 0..4 {
+        let mut cursor = client
+            .query("SELECT number FROM system.numbers LIMIT {limit: Int32}")
+            .param("limit", n)
+            // each number will go into a separate chunk
+            .with_option("max_block_size", "1")
+            .fetch_bytes("CSV")
+            .unwrap();
 
-    let mut buffer = Vec::<String>::new();
-    while let Some(data) = lines_cursor.next().await {
-        buffer.push(data.unwrap());
+        let data = cursor.collect().await.unwrap();
+        assert_eq!(&data[..], &expected[..n * 2]);
+
+        // The cursor is fused.
+        assert_eq!(&cursor.collect().await.unwrap()[..], b"");
     }
-
-    assert_eq!(buffer, vec!["0", "1", "2"],);
 }

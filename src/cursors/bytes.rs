@@ -1,4 +1,10 @@
-use crate::{bytes_ext::BytesExt, cursors::RawCursor, error::Error, response::Response};
+use crate::{
+    bytes_ext::BytesExt,
+    cursors::RawCursor,
+    error::{Error, Result},
+    response::Response,
+};
+use bytes::{Bytes, BytesMut};
 use std::{
     io::Result as IoResult,
     pin::Pin,
@@ -6,20 +12,38 @@ use std::{
 };
 use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 
+/// A cursor over raw bytes of the response returned by [`Query::fetch_bytes`].
+///
 /// Unlike [`RowCursor`] which emits rows deserialized as structures from
 /// RowBinary, this cursor emits raw bytes without deserialization.
-/// It can be iterated over using [`futures::StreamExt::next`].
-/// Additionally, if the requested format emits each row on a newline
-/// (e.g. `JSONEachRow`, `CSV`, `TSV`, etc.), the cursor can be converted into a
-/// stream of lines using [`futures::AsyncBufReadExt::lines`]`, which will allow
-/// for more convenient processing.
-// TODO: note about errors
+///
+/// # Integration
+///
+/// Additionally to [`BytesCursor::next`] and [`BytesCursor::collect`],
+/// this cursor implements:
+/// * [`AsyncRead`] and [`AsyncBufRead`] for `tokio`-based ecosystem.
+/// * [`futures::Stream`], [`futures::AsyncRead`] and [`futures::AsyncBufRead`]
+///   for `futures`-based ecosystem. (requires the `futures03` feature)
+///
+/// For instance, if the requested format emits each row on a newline
+/// (e.g. `JSONEachRow`, `CSV`, `TSV`, etc.), the cursor can be read line by
+/// line using [`AsyncBufReadExt::lines`]. Note that this method
+/// produces a new `String` for each line, so it's not the most performant way
+/// to iterate.
+///
+/// Note: methods of these traits use [`std::io::Error`] for errors.
+/// To get an original error from this crate, see TODO.
+///
+/// [`RowCursor`]: crate::query::RowCursor
+/// [`Query::fetch_bytes`]: crate::query::Query::fetch_bytes
+/// [`AsyncBufReadExt::lines`]: tokio::io::AsyncBufReadExt::lines
 pub struct BytesCursor {
     raw: RawCursor,
     bytes: BytesExt,
 }
 
-// TODO: what if any poll_* called AFTER error returned?
+// TODO: what if any next/poll_* called AFTER error returned?
+// TODO: describe io::Error <-> Error conversion.
 
 impl BytesCursor {
     pub(crate) fn new(response: Response) -> Self {
@@ -27,6 +51,40 @@ impl BytesCursor {
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
         }
+    }
+
+    /// Emits the next bytes chunk.
+    pub async fn next(&mut self) -> Result<Option<Bytes>> {
+        assert!(
+            self.bytes.is_empty(),
+            "mixing `BytesCursor::next()` and `AsyncRead` API methods is not allowed"
+        );
+
+        self.raw.next().await
+    }
+
+    /// Collects the whole response into a single [`Bytes`].
+    pub async fn collect(&mut self) -> Result<Bytes> {
+        let mut chunks = Vec::new();
+        let mut total_len = 0;
+
+        while let Some(chunk) = self.next().await? {
+            total_len += chunk.len();
+            chunks.push(chunk);
+        }
+
+        // The whole response is in a single chunk.
+        if chunks.len() == 1 {
+            return Ok(chunks.pop().unwrap());
+        }
+
+        let mut collected = BytesMut::with_capacity(total_len);
+        for chunk in chunks {
+            collected.extend_from_slice(&chunk);
+        }
+        debug_assert_eq!(collected.capacity(), total_len);
+
+        Ok(collected.freeze())
     }
 
     #[cold]

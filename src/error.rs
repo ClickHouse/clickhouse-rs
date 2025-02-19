@@ -71,7 +71,6 @@ impl de::Error for Error {
 }
 
 impl Error {
-    #[allow(dead_code)]
     pub(crate) fn into_io(self) -> io::Error {
         io::Error::new(io::ErrorKind::Other, self)
     }
