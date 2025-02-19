@@ -1,6 +1,6 @@
 use clickhouse::error::Error;
 use std::str::from_utf8;
-use tokio::io::AsyncBufReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 
 #[tokio::test]
 async fn single_chunk() {
@@ -106,4 +106,36 @@ async fn collect() {
         // The cursor is fused.
         assert_eq!(&cursor.collect().await.unwrap()[..], b"");
     }
+}
+
+#[tokio::test]
+async fn async_read() {
+    let client = prepare_database!();
+    let limit = 1000;
+
+    let mut cursor = client
+        .query("SELECT number, number FROM system.numbers LIMIT {limit: Int32}")
+        .param("limit", limit)
+        .with_option("max_block_size", "3")
+        .fetch_bytes("CSV")
+        .unwrap();
+
+    #[allow(clippy::format_collect)]
+    let expected = (0..limit)
+        .map(|n| format!("{n},{n}\n"))
+        .collect::<String>()
+        .into_bytes();
+
+    let mut actual = vec![0; expected.len()];
+    let mut index = 0;
+    while index < actual.len() {
+        let step = (1 + index % 10).min(actual.len() - index);
+        let buf = &mut actual[index..(index + step)];
+        assert_eq!(cursor.read_exact(buf).await.unwrap(), step);
+        index += step;
+    }
+
+    assert_eq!(cursor.read(&mut [0]).await.unwrap(), 0); // EOF
+    assert_eq!(cursor.decoded_bytes(), expected.len() as u64);
+    assert_eq!(actual, expected);
 }
