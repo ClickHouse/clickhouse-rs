@@ -10,6 +10,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 edition = "2021"
 # update `derive/Cargo.toml` and CI if changed
+# TODO: after bumping to v1.80, remove `--precise` in the "msrv" CI job
 rust-version = "1.73.0"
 
 [lints.rust]
