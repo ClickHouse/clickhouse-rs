@@ -1,9 +1,4 @@
-use crate::{
-    bytes_ext::BytesExt,
-    cursors::RawCursor,
-    error::{Error, Result},
-    response::Response,
-};
+use crate::{bytes_ext::BytesExt, cursors::RawCursor, error::Result, response::Response};
 use bytes::{Bytes, BytesMut};
 use std::{
     io::Result as IoResult,
@@ -27,23 +22,21 @@ use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 ///
 /// For instance, if the requested format emits each row on a newline
 /// (e.g. `JSONEachRow`, `CSV`, `TSV`, etc.), the cursor can be read line by
-/// line using [`AsyncBufReadExt::lines`]. Note that this method
+/// line using `AsyncBufReadExt::lines`. Note that this method
 /// produces a new `String` for each line, so it's not the most performant way
 /// to iterate.
 ///
 /// Note: methods of these traits use [`std::io::Error`] for errors.
-/// To get an original error from this crate, see TODO.
+/// To get an original error from this crate, use `From` conversion.
 ///
 /// [`RowCursor`]: crate::query::RowCursor
 /// [`Query::fetch_bytes`]: crate::query::Query::fetch_bytes
-/// [`AsyncBufReadExt::lines`]: tokio::io::AsyncBufReadExt::lines
 pub struct BytesCursor {
     raw: RawCursor,
     bytes: BytesExt,
 }
 
 // TODO: what if any next/poll_* called AFTER error returned?
-// TODO: describe io::Error <-> Error conversion.
 
 impl BytesCursor {
     pub(crate) fn new(response: Response) -> Self {
@@ -93,7 +86,7 @@ impl BytesCursor {
 
         // TODO: should we repeat if `poll_next` returns an empty buffer?
 
-        match ready!(self.raw.poll_next(cx).map_err(Error::into_io)?) {
+        match ready!(self.raw.poll_next(cx)?) {
             Some(chunk) => {
                 self.bytes.extend(chunk);
                 Poll::Ready(Ok(true))

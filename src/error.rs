@@ -7,19 +7,21 @@ use serde::{de, ser};
 /// A result with a specified [`Error`] type.
 pub type Result<T, E = Error> = result::Result<T, E>;
 
+type BoxedError = Box<dyn StdError + Send + Sync>;
+
 /// Represents all possible errors.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum Error {
     #[error("invalid params: {0}")]
-    InvalidParams(#[source] Box<dyn StdError + Send + Sync>),
+    InvalidParams(#[source] BoxedError),
     #[error("network error: {0}")]
-    Network(#[source] Box<dyn StdError + Send + Sync>),
+    Network(#[source] BoxedError),
     #[error("compression error: {0}")]
-    Compression(#[source] Box<dyn StdError + Send + Sync>),
+    Compression(#[source] BoxedError),
     #[error("decompression error: {0}")]
-    Decompression(#[source] Box<dyn StdError + Send + Sync>),
+    Decompression(#[source] BoxedError),
     #[error("no rows returned by a query that expected to return at least one row")]
     RowNotFound,
     #[error("sequences must have a known size ahead of time")]
@@ -42,6 +44,8 @@ pub enum Error {
     TimedOut,
     #[error("unsupported: {0}")]
     Unsupported(String),
+    #[error("{0}")]
+    Other(BoxedError),
 }
 
 assert_impl_all!(Error: StdError, Send, Sync);
@@ -70,17 +74,19 @@ impl de::Error for Error {
     }
 }
 
-impl Error {
-    pub(crate) fn into_io(self) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, self)
+impl From<Error> for io::Error {
+    fn from(error: Error) -> Self {
+        io::Error::new(io::ErrorKind::Other, error)
     }
+}
 
-    #[allow(dead_code)]
-    pub(crate) fn decode_io(err: io::Error) -> Self {
-        if err.get_ref().map(|r| r.is::<Error>()).unwrap_or(false) {
-            *err.into_inner().unwrap().downcast::<Error>().unwrap()
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
+        // TODO: after MSRV 1.79 replace with `io::Error::downcast`.
+        if error.get_ref().is_some_and(|r| r.is::<Error>()) {
+            *error.into_inner().unwrap().downcast::<Error>().unwrap()
         } else {
-            Self::Decompression(Box::new(err))
+            Self::Other(error.into())
         }
     }
 }
@@ -88,7 +94,14 @@ impl Error {
 #[test]
 fn roundtrip_io_error() {
     let orig = Error::NotEnoughData;
-    let io = orig.into_io();
-    let err = Error::decode_io(io);
-    assert!(matches!(err, Error::NotEnoughData));
+
+    // Error -> io::Error
+    let orig_str = orig.to_string();
+    let io = io::Error::from(orig);
+    assert_eq!(io.kind(), io::ErrorKind::Other);
+    assert_eq!(io.to_string(), orig_str);
+
+    // io::Error -> Error
+    let orig = Error::from(io);
+    assert!(matches!(orig, Error::NotEnoughData));
 }
