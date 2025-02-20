@@ -25,7 +25,7 @@ pub mod watch;
 
 mod bytes_ext;
 mod compression;
-mod cursor;
+mod cursors;
 mod headers;
 mod http_client;
 mod request_body;

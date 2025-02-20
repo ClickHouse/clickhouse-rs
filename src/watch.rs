@@ -4,7 +4,7 @@ use serde::Deserialize;
 use sha1::{Digest, Sha1};
 
 use crate::{
-    cursor::JsonCursor,
+    cursors::JsonCursor,
     error::{Error, Result},
     row::Row,
     sql::{Bind, SqlBuilder},
