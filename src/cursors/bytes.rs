@@ -1,5 +1,5 @@
-use crate::{bytes_ext::BytesExt, cursors::RawCursor, error::Result, response::Response};
-use bytes::{Bytes, BytesMut};
+use crate::{cursors::RawCursor, error::Result, response::Response};
+use bytes::{Buf, Bytes, BytesMut};
 use std::{
     io::Result as IoResult,
     pin::Pin,
@@ -33,7 +33,7 @@ use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 /// [`Query::fetch_bytes`]: crate::query::Query::fetch_bytes
 pub struct BytesCursor {
     raw: RawCursor,
-    bytes: BytesExt,
+    bytes: Bytes,
 }
 
 // TODO: what if any next/poll_* called AFTER error returned?
@@ -42,7 +42,7 @@ impl BytesCursor {
     pub(crate) fn new(response: Response) -> Self {
         Self {
             raw: RawCursor::new(response),
-            bytes: BytesExt::default(),
+            bytes: Bytes::default(),
         }
     }
 
@@ -82,17 +82,19 @@ impl BytesCursor {
 
     #[cold]
     fn poll_refill(&mut self, cx: &mut Context<'_>) -> Poll<IoResult<bool>> {
-        debug_assert_eq!(self.bytes.remaining(), 0);
+        debug_assert_eq!(self.bytes.len(), 0);
 
-        // TODO: should we repeat if `poll_next` returns an empty buffer?
-
-        match ready!(self.raw.poll_next(cx)?) {
-            Some(chunk) => {
-                self.bytes.extend(chunk);
-                Poll::Ready(Ok(true))
+        // Theoretically, `self.raw.poll_next(cx)` can return empty chunks.
+        // In this case, we should continue polling until we get a non-empty chunk or
+        // end of stream in order to avoid false positive `Ok(0)` in I/O traits.
+        while self.bytes.is_empty() {
+            match ready!(self.raw.poll_next(cx)?) {
+                Some(chunk) => self.bytes = chunk,
+                None => return Poll::Ready(Ok(false)),
             }
-            None => Poll::Ready(Ok(false)),
         }
+
+        Poll::Ready(Ok(true))
     }
 
     /// Returns the total size in bytes received from the CH server since
@@ -125,9 +127,9 @@ impl AsyncRead for BytesCursor {
                 break;
             }
 
-            let bytes = self.bytes.slice();
-            let len = bytes.len().min(buf.remaining());
-            buf.put_slice(&bytes[..len]);
+            let len = self.bytes.len().min(buf.remaining());
+            let bytes = self.bytes.slice(..len);
+            buf.put_slice(&bytes[0..len]);
             self.bytes.advance(len);
         }
 
@@ -138,17 +140,17 @@ impl AsyncRead for BytesCursor {
 impl AsyncBufRead for BytesCursor {
     #[inline]
     fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<&[u8]>> {
-        if self.bytes.is_empty() && !ready!(self.poll_refill(cx)?) {
-            return Poll::Ready(Ok(&[]));
+        if self.bytes.is_empty() {
+            ready!(self.poll_refill(cx)?);
         }
 
-        Poll::Ready(Ok(self.get_mut().bytes.slice()))
+        Poll::Ready(Ok(&self.get_mut().bytes))
     }
 
     #[inline]
     fn consume(mut self: Pin<&mut Self>, amt: usize) {
         assert!(
-            amt <= self.bytes.remaining(),
+            amt <= self.bytes.len(),
             "invalid `AsyncBufRead::consume` usage"
         );
         self.bytes.advance(amt);
