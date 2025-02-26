@@ -147,7 +147,7 @@ impl Chunks {
     fn new(stream: Incoming, compression: Compression) -> Self {
         let stream = IncomingStream(stream);
         let stream = Decompress::new(stream, compression);
-        let stream = DetectDbException::new(stream);
+        let stream = DetectDbException(stream);
         Self(Some(Box::new(stream)))
     }
 }
@@ -156,14 +156,12 @@ impl Stream for Chunks {
     type Item = Result<Chunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // `take()` prevents from use after caught panic.
+        // We use `take()` to make the stream fused, including the case of panics.
         if let Some(mut stream) = self.0.take() {
             let res = Pin::new(&mut stream).poll_next(cx);
 
             if matches!(res, Poll::Pending | Poll::Ready(Some(Ok(_)))) {
                 self.0 = Some(stream);
-            } else {
-                assert!(self.0.is_none());
             }
 
             res
@@ -244,16 +242,7 @@ where
 
 // === DetectDbException ===
 
-enum DetectDbException<S> {
-    Stream(S),
-    Exception(Option<Error>),
-}
-
-impl<S> DetectDbException<S> {
-    fn new(stream: S) -> Self {
-        Self::Stream(stream)
-    }
-}
+struct DetectDbException<S>(S);
 
 impl<S> Stream for DetectDbException<S>
 where
@@ -262,22 +251,15 @@ where
     type Item = Result<Chunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match &mut *self {
-            Self::Stream(stream) => {
-                let mut res = Pin::new(stream).poll_next(cx);
+        let res = Pin::new(&mut self.0).poll_next(cx);
 
-                if let Poll::Ready(Some(Ok(chunk))) = &mut res {
-                    if let Some(err) = extract_exception(&mut chunk.data) {
-                        *self = Self::Exception(Some(err));
-
-                        // NOTE: `chunk` can be empty, but it's ok for callers.
-                    }
-                }
-
-                res
+        if let Poll::Ready(Some(Ok(chunk))) = &res {
+            if let Some(err) = extract_exception(&chunk.data) {
+                return Poll::Ready(Some(Err(err)));
             }
-            Self::Exception(err) => Poll::Ready(err.take().map(Err)),
         }
+
+        res
     }
 }
 
@@ -285,7 +267,7 @@ where
 // ```
 //   <data>Code: <code>. DB::Exception: <desc> (version <version> (official build))\n
 // ```
-fn extract_exception(chunk: &mut Bytes) -> Option<Error> {
+fn extract_exception(chunk: &[u8]) -> Option<Error> {
     // `))\n` is very rare in real data, so it's fast dirty check.
     // In random data, it occurs with a probability of ~6*10^-8 only.
     if chunk.ends_with(b"))\n") {
@@ -297,14 +279,13 @@ fn extract_exception(chunk: &mut Bytes) -> Option<Error> {
 
 #[cold]
 #[inline(never)]
-fn extract_exception_slow(chunk: &mut Bytes) -> Option<Error> {
+fn extract_exception_slow(chunk: &[u8]) -> Option<Error> {
     let index = chunk.rfind(b"Code:")?;
 
     if !chunk[index..].contains_str(b"DB::Exception:") {
         return None;
     }
 
-    let exception = chunk.split_off(index);
-    let exception = String::from_utf8_lossy(&exception[..exception.len() - 1]);
+    let exception = String::from_utf8_lossy(&chunk[index..chunk.len() - 1]);
     Some(Error::BadResponse(exception.into()))
 }

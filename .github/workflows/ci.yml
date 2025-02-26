@@ -35,6 +35,7 @@ jobs:
     - run: cargo build
     - run: cargo build --no-default-features
     - run: cargo build --features uuid,time,chrono
+    - run: cargo update -p native-tls --precise 0.2.13 # 0.2.14 requires rustc 1.80
     - run: cargo build --all-features
 
   rustfmt:
