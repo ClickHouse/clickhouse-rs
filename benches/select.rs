@@ -14,7 +14,10 @@ use hyper::{
 };
 use serde::Deserialize;
 
-use clickhouse::{error::Result, Client, Compression, Row};
+use clickhouse::{
+    error::{Error, Result},
+    Client, Compression, Row,
+};
 
 mod common;
 
@@ -52,8 +55,7 @@ fn select(c: &mut Criterion) {
     let _server = common::start_server(addr, move |req| serve(req, chunk.clone()));
     let runner = common::start_runner();
 
-    #[allow(dead_code)]
-    #[derive(Debug, Row, Deserialize)]
+    #[derive(Default, Debug, Row, Deserialize)]
     struct SomeRow {
         a: u64,
         b: i64,
@@ -62,15 +64,23 @@ fn select(c: &mut Criterion) {
     }
 
     async fn select_rows(client: Client, iters: u64) -> Result<Duration> {
+        let mut sum = SomeRow::default();
         let start = Instant::now();
         let mut cursor = client
             .query("SELECT ?fields FROM some")
             .fetch::<SomeRow>()?;
 
         for _ in 0..iters {
-            black_box(cursor.next().await?);
+            let Some(row) = cursor.next().await? else {
+                return Err(Error::NotEnoughData);
+            };
+            sum.a = sum.a.wrapping_add(row.a);
+            sum.b = sum.b.wrapping_add(row.b);
+            sum.c = sum.c.wrapping_add(row.c);
+            sum.d = sum.d.wrapping_add(row.d);
         }
 
+        black_box(sum);
         Ok(start.elapsed())
     }
 
