@@ -47,6 +47,10 @@ impl BytesCursor {
     }
 
     /// Emits the next bytes chunk.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancellation safe.
     pub async fn next(&mut self) -> Result<Option<Bytes>> {
         assert!(
             self.bytes.is_empty(),
@@ -57,6 +61,11 @@ impl BytesCursor {
     }
 
     /// Collects the whole response into a single [`Bytes`].
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is NOT cancellation safe.
+    /// If cancelled, already collected bytes are lost.
     pub async fn collect(&mut self) -> Result<Bytes> {
         let mut chunks = Vec::new();
         let mut total_len = 0;

@@ -28,6 +28,10 @@ impl<T> RowCursor<T> {
     /// Emits the next row.
     ///
     /// The result is unspecified if it's called after `Err` is returned.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancellation safe.
     pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
     where
         T: Deserialize<'b>,

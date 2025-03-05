@@ -132,9 +132,10 @@ impl Query {
         Ok(result)
     }
 
-    /// Executes the query, returning a [`BytesCursor`]
-    /// to obtain results as raw bytes.
-    /// For available formats, see <https://clickhouse.com/docs/en/interfaces/formats>
+    /// Executes the query, returning a [`BytesCursor`] to obtain results as raw
+    /// bytes containing data in the [provided format].
+    ///
+    /// [provided format]: https://clickhouse.com/docs/en/interfaces/formats
     pub fn fetch_bytes(mut self, format: impl Into<String>) -> Result<BytesCursor> {
         self.sql.set_output_format(format);
         let response = self.do_execute(true)?;
