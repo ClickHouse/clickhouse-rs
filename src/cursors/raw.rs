@@ -54,28 +54,45 @@ impl RawCursor {
     #[cold]
     #[inline(never)]
     fn poll_resolve(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
-        if let RawCursorState::Waiting(future) = &mut self.0 {
-            let chunks = ready!(future.as_mut().poll(cx)?);
-            self.0 = RawCursorState::Loading(RawCursorLoading {
-                chunks,
-                net_size: 0,
-                data_size: 0,
-            });
-        }
-        Poll::Ready(Ok(()))
+        let RawCursorState::Waiting(future) = &mut self.0 else {
+            panic!("poll_resolve called in invalid state");
+        };
+
+        // Poll the future, but don't return the result yet.
+        // In case of an error, we should replace the current state anyway
+        // in order to provide proper fused behavior of the cursor.
+        let res = ready!(future.as_mut().poll(cx));
+        let mut chunks = Chunks::empty();
+        let res = res.map(|c| chunks = c);
+
+        self.0 = RawCursorState::Loading(RawCursorLoading {
+            chunks,
+            net_size: 0,
+            data_size: 0,
+        });
+
+        Poll::Ready(res)
     }
 
     pub(crate) fn received_bytes(&self) -> u64 {
         match &self.0 {
-            RawCursorState::Waiting(_) => 0,
             RawCursorState::Loading(state) => state.net_size,
+            RawCursorState::Waiting(_) => 0,
         }
     }
 
     pub(crate) fn decoded_bytes(&self) -> u64 {
         match &self.0 {
-            RawCursorState::Waiting(_) => 0,
             RawCursorState::Loading(state) => state.data_size,
+            RawCursorState::Waiting(_) => 0,
+        }
+    }
+
+    #[cfg(feature = "futures03")]
+    pub(crate) fn is_terminated(&self) -> bool {
+        match &self.0 {
+            RawCursorState::Loading(state) => state.chunks.is_terminated(),
+            RawCursorState::Waiting(_) => false,
         }
     }
 }

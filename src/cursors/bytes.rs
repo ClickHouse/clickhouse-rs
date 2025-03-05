@@ -197,6 +197,7 @@ impl futures::AsyncBufRead for BytesCursor {
 impl futures::stream::Stream for BytesCursor {
     type Item = crate::error::Result<bytes::Bytes>;
 
+    #[inline]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         assert!(
             self.bytes.is_empty(),
@@ -204,5 +205,13 @@ impl futures::stream::Stream for BytesCursor {
         );
 
         self.raw.poll_next(cx).map(Result::transpose)
+    }
+}
+
+#[cfg(feature = "futures03")]
+impl futures::stream::FusedStream for BytesCursor {
+    #[inline]
+    fn is_terminated(&self) -> bool {
+        self.bytes.is_empty() && self.raw.is_terminated()
     }
 }

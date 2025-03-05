@@ -150,6 +150,15 @@ impl Chunks {
         let stream = DetectDbException(stream);
         Self(Some(Box::new(stream)))
     }
+
+    pub(crate) fn empty() -> Self {
+        Self(None)
+    }
+
+    #[cfg(feature = "futures03")]
+    pub(crate) fn is_terminated(&self) -> bool {
+        self.0.is_none()
+    }
 }
 
 impl Stream for Chunks {
