@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+## [0.13.2] - 2025-03-12
 ### Added
 - query: added `Query::with_param` to support server-side parameters binding ([#159])
 - derive: added [Variant data type](https://clickhouse.com/docs/en/sql-reference/data-types/variant) support ([#170]).
@@ -377,7 +379,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.2...HEAD
+[0.13.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.2...v0.13.0
 [0.12.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.1...v0.12.2
