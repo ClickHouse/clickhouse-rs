@@ -8,7 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 ### Added
-- [Variant data type](https://clickhouse.com/docs/en/sql-reference/data-types/variant) support ([#170]).
+- query: added `Query::with_param` to support server-side parameters binding ([#159])
+- derive: added [Variant data type](https://clickhouse.com/docs/en/sql-reference/data-types/variant) support ([#170]).
+- query: added `Query::fetch_bytes` that allows streaming data in an arbitrary format ([#182])
+- serde: added support for [chrono](https://docs.rs/chrono/latest/chrono/) ([#188])
 
 ### Changed
 - MSRV is now 1.73 due to changes in `bstr` and `hyper-rustls` dependencies ([#180]).
@@ -16,9 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - query/cursor: return `NotEnoughData` if a row is unparsed when the stream ends ([#185]).
 
+[#159]: https://github.com/ClickHouse/clickhouse-rs/pull/159
 [#170]: https://github.com/ClickHouse/clickhouse-rs/pull/170
 [#180]: https://github.com/ClickHouse/clickhouse-rs/pull/180
+[#182]: https://github.com/ClickHouse/clickhouse-rs/pull/182
 [#185]: https://github.com/ClickHouse/clickhouse-rs/pull/185
+[#188]: https://github.com/ClickHouse/clickhouse-rs/pull/188
 
 ## [0.13.1] - 2024-10-21
 ### Added
