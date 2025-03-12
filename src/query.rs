@@ -15,7 +15,7 @@ use crate::{
 
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
-pub use crate::cursor::RowCursor;
+pub use crate::cursors::{BytesCursor, RowCursor};
 
 #[must_use]
 #[derive(Clone)]
@@ -84,7 +84,7 @@ impl Query {
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
-        self.sql.append(" FORMAT RowBinary");
+        self.sql.set_output_format("RowBinary");
 
         let response = self.do_execute(true)?;
         Ok(RowCursor::new(response))
@@ -130,6 +130,16 @@ impl Query {
         }
 
         Ok(result)
+    }
+
+    /// Executes the query, returning a [`BytesCursor`] to obtain results as raw
+    /// bytes containing data in the [provided format].
+    ///
+    /// [provided format]: https://clickhouse.com/docs/en/interfaces/formats
+    pub fn fetch_bytes(mut self, format: impl Into<String>) -> Result<BytesCursor> {
+        self.sql.set_output_format(format);
+        let response = self.do_execute(true)?;
+        Ok(BytesCursor::new(response))
     }
 
     pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {

@@ -46,7 +46,7 @@ impl Ticks {
     }
 
     pub(crate) fn reached(&self) -> bool {
-        self.next_at.map_or(false, |n| Instant::now() >= n)
+        self.next_at.is_some_and(|n| Instant::now() >= n)
     }
 
     pub(crate) fn reschedule(&mut self) {
