@@ -61,6 +61,7 @@ mod cursor_stats;
 mod fetch_bytes;
 mod insert;
 mod inserter;
+mod int128;
 mod ip;
 mod mock;
 mod nested;
