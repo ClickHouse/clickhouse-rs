@@ -130,6 +130,9 @@ impl Client {
 
     /// Specifies a user.
     ///
+    /// # Panics
+    /// If called after [`Client::with_access_token`].
+    ///
     /// # Examples
     /// ```
     /// # use clickhouse::Client;
