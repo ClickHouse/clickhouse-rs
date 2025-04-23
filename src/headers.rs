@@ -1,5 +1,5 @@
-use crate::ProductInfo;
-use hyper::header::USER_AGENT;
+use crate::{Authentication, ProductInfo};
+use hyper::header::{AUTHORIZATION, USER_AGENT};
 use hyper::http::request::Builder;
 use std::collections::HashMap;
 use std::env::consts::OS;
@@ -22,6 +22,7 @@ fn get_user_agent(products_info: &[ProductInfo]) -> String {
     }
 }
 
+#[inline]
 pub(crate) fn with_request_headers(
     mut builder: Builder,
     headers: &HashMap<String, String>,
@@ -31,5 +32,24 @@ pub(crate) fn with_request_headers(
         builder = builder.header(name, value);
     }
     builder = builder.header(USER_AGENT.to_string(), get_user_agent(products_info));
+    builder
+}
+
+#[inline]
+pub(crate) fn with_authentication(mut builder: Builder, auth: &Authentication) -> Builder {
+    match auth {
+        Authentication::Jwt { access_token } => {
+            let bearer = format!("Bearer {access_token}");
+            builder = builder.header(AUTHORIZATION, bearer);
+        }
+        Authentication::Credentials { user, password } => {
+            if let Some(user) = &user {
+                builder = builder.header("X-ClickHouse-User", user);
+            }
+            if let Some(password) = &password {
+                builder = builder.header("X-ClickHouse-Key", password);
+            }
+        }
+    }
     builder
 }

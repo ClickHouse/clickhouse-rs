@@ -16,6 +16,7 @@ use crate::{
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
 pub use crate::cursors::{BytesCursor, RowCursor};
+use crate::headers::with_authentication;
 
 #[must_use]
 #[derive(Clone)]
@@ -178,19 +179,12 @@ impl Query {
 
         let mut builder = Request::builder().method(method).uri(url.as_str());
         builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
+        builder = with_authentication(builder, &self.client.authentication);
 
         if content_length == 0 {
             builder = builder.header(CONTENT_LENGTH, "0");
         } else {
             builder = builder.header(CONTENT_LENGTH, content_length.to_string());
-        }
-
-        if let Some(user) = &self.client.user {
-            builder = builder.header("X-ClickHouse-User", user);
-        }
-
-        if let Some(password) = &self.client.password {
-            builder = builder.header("X-ClickHouse-Key", password);
         }
 
         let request = builder
