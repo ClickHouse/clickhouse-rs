@@ -68,37 +68,6 @@ jobs:
       - run: cargo clippy --features rustls-tls-aws-lc,rustls-tls-webpki-roots
       - run: cargo clippy --features rustls-tls-aws-lc,rustls-tls-native-roots
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup show active-toolchain -v
-      - run: cargo test
-      - run: cargo test --no-default-features
-      - run: cargo test --features uuid,time
-      - run: cargo test --all-features
-
-    services:
-      clickhouse:
-        image: clickhouse/clickhouse-server:24.10-alpine
-        ports:
-          - 8123:8123
-
-  cloud-test:
-    runs-on: ubuntu-latest
-    needs: [ test ]
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup show active-toolchain -v
-      - name: Run tests
-        env:
-          CLICKHOUSE_TEST_ENVIRONMENT: cloud
-          CLICKHOUSE_CLOUD_HOST: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_HOST_SMT }}
-          CLICKHOUSE_CLOUD_PASSWORD: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_PASSWORD_SMT }}
-          CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_JWT_DESERT_VM_43 }}
-        run: |
-          cargo test cloud_ --features rustls-tls
-
   docs:
     needs: build
     runs-on: ubuntu-latest
@@ -110,3 +79,29 @@ jobs:
       - run: rustup override set nightly
       - run: rustup show active-toolchain -v
       - run: cargo doc --all-features
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start ClickHouse in Docker
+        uses: hoverkraft-tech/compose-action@v2.2.0
+        with:
+          compose-file: 'docker-compose.yml'
+          down-flags: '--volumes'
+
+      - run: rustup show active-toolchain -v
+      - run: cargo test
+      - run: cargo test --no-default-features
+      - run: cargo test --features uuid,time
+      - run: cargo test --all-features
+
+      # Temporary runs tests with `cloud_` prefix only until we validate that the rest of the tests are working
+      - name: Run tests with ClickHouse Cloud
+        env:
+          CLICKHOUSE_TEST_ENVIRONMENT: cloud
+          CLICKHOUSE_CLOUD_HOST: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_HOST_SMT }}
+          CLICKHOUSE_CLOUD_PASSWORD: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_PASSWORD_SMT }}
+          CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_JWT_DESERT_VM_43 }}
+        run: |
+          cargo test cloud_ --features rustls-tls
