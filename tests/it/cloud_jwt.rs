@@ -4,7 +4,7 @@ use clickhouse::Client;
 #[tokio::test]
 async fn test_jwt_auth() {
     check_cloud_test_env!();
-    let valid_token = require_env_var("CLICKHOUSE_CLOUD_JWT_TOKEN");
+    let valid_token = require_env_var("CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN");
     let client = Client::default()
         .with_url(get_cloud_url())
         .with_access_token(valid_token);
