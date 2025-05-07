@@ -1,0 +1,17 @@
+[package]
+name = "clickhouse-rowbinary"
+version = "0.0.1"
+description = "RowBinaryWithNamesAndTypes format utils"
+authors = ["ClickHouse"]
+repository = "https://github.com/ClickHouse/clickhouse-rs"
+homepage = "https://clickhouse.com"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+# update `Cargo.toml` and CI if changed
+rust-version = "1.73.0"
+
+[lib]
+#proc-macro = true
+
+[dependencies]
+thiserror = "1.0.16"
