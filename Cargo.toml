@@ -131,6 +131,7 @@ quanta = { version = "0.12", optional = true }
 replace_with = { version = "0.1.7" }
 
 [dev-dependencies]
+clickhouse-rowbinary = { version = "*", path = "./rowbinary" }
 criterion = "0.5.0"
 serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "1.0.1", features = ["full", "test-util"] }

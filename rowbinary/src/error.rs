@@ -1,19 +1,10 @@
 #[derive(Debug, thiserror::Error)]
-pub enum ColumnsParserError {
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
+pub enum ParserError {
+    #[error("Not enough data: {0}")]
+    NotEnoughData(String),
 
-    #[error("Expected LF at position {0}")]
-    ExpectedLF(usize),
-
-    #[error("Invalid integer encoding at position {0}")]
-    InvalidIntegerEncoding(usize),
-
-    #[error("Incomplete column data at position {0}")]
-    IncompleteColumnData(usize),
-
-    #[error("Invalid column spec at position {0}: {1}")]
-    InvalidColumnSpec(usize, String),
+    #[error("Header parsing error: {0}")]
+    HeaderParsingError(String),
 
     #[error("Type parsing error: {0}")]
     TypeParsingError(String),

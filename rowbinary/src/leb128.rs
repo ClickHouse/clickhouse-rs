@@ -1,63 +1,49 @@
-use std::io::{ErrorKind, Read};
+use crate::error::ParserError;
+use crate::error::ParserError::NotEnoughData;
+use bytes::{Buf, Bytes};
 
-use crate::error::ColumnsParserError;
-
-pub fn decode_leb128<R: Read>(pos: &mut usize, reader: &mut R) -> Result<u64, ColumnsParserError> {
-    let mut result: u64 = 0;
-    let mut shift: u32 = 0;
-    let mut buf = [0u8; 1];
-
+pub fn decode_leb128(buffer: &mut Bytes) -> Result<u64, ParserError> {
+    let mut value = 0u64;
+    let mut shift = 0;
     loop {
-        reader.read_exact(&mut buf).map_err(|e| {
-            if e.kind() == ErrorKind::UnexpectedEof {
-                ColumnsParserError::InvalidIntegerEncoding(*pos)
-            } else {
-                ColumnsParserError::IoError(e)
-            }
-        })?;
-
-        *pos += 1;
-
-        let byte = buf[0];
-        result |= ((byte & 0x7f) as u64) << shift;
-
+        if buffer.remaining() < 1 {
+            return Err(NotEnoughData(
+                "decoding LEB128, 0 bytes remaining".to_string(),
+            ));
+        }
+        let byte = buffer.get_u8();
+        value |= (byte as u64 & 0x7f) << shift;
         if byte & 0x80 == 0 {
             break;
         }
-
         shift += 7;
-
-        if shift > 63 {
-            return Err(ColumnsParserError::InvalidIntegerEncoding(*pos));
+        if shift > 57 {
+            return Err(NotEnoughData("decoding LEB128, invalid shift".to_string()));
         }
     }
-
-    Ok(result)
+    Ok(value)
 }
 
 pub fn encode_leb128(value: u64) -> Vec<u8> {
     let mut result = Vec::new();
     let mut val = value;
-
     loop {
         let mut byte = (val & 0x7f) as u8;
         val >>= 7;
-
         if val != 0 {
-            byte |= 0x80; // Set high bit to indicate more bytes follow
+            byte |= 0x80;
         }
-
         result.push(byte);
-
         if val == 0 {
             break;
         }
     }
-
     result
 }
 
 mod tests {
+    use bytes::Bytes;
+
     #[test]
     fn test_decode_leb128() {
         let test_cases = vec![
@@ -72,9 +58,8 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            let mut cursor = std::io::Cursor::new(input.clone());
-            let mut pos = 0;
-            let result = super::decode_leb128(&mut pos, &mut cursor).unwrap();
+            let mut input_bytes = Bytes::from(input.clone());
+            let result = super::decode_leb128(&mut input_bytes).unwrap();
             assert_eq!(result, expected, "Failed decoding {:?}", input);
         }
     }
@@ -97,9 +82,8 @@ mod tests {
 
         for value in test_values {
             let encoded = super::encode_leb128(value);
-            let mut cursor = std::io::Cursor::new(&encoded);
-            let mut pos = 0;
-            let decoded = super::decode_leb128(&mut pos, &mut cursor).unwrap();
+            let mut bytes = Bytes::from(encoded.clone());
+            let decoded = super::decode_leb128(&mut bytes).unwrap();
 
             assert_eq!(
                 decoded, value,
