@@ -95,12 +95,10 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
         serialize_i16(i16),
         serialize_i32(i32),
         serialize_i64(i64),
-        serialize_i128(i128),
         serialize_u8(u8),
         serialize_u16(u16),
         serialize_u32(u32),
         serialize_u64(u64),
-        serialize_u128(u128),
         serialize_f32(f32),
         serialize_f64(f64),
         serialize_bool(bool),
@@ -110,6 +108,18 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
     fn serialize_char(self, value: char) -> Result {
         let mut tmp = [0u8; 4];
         self.serialize_str(value.encode_utf8(&mut tmp))
+    }
+
+    #[inline]
+    fn serialize_i128(self, value: i128) -> Result {
+        write!(self.writer, "{}::Int128", value)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn serialize_u128(self, value: u128) -> Result {
+        write!(self.writer, "{}::UInt128", value)?;
+        Ok(())
     }
 
     #[inline]
@@ -452,7 +462,8 @@ mod tests {
     fn it_writes_numeric_primitives() {
         assert_eq!(check(42), "42");
         assert_eq!(check(42.5), "42.5");
-        assert_eq!(check(42u128), "42");
+        assert_eq!(check(42u128), "42::UInt128");
+        assert_eq!(check(42i128), "42::Int128");
     }
 
     #[test]
