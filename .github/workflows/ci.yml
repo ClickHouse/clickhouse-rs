@@ -32,6 +32,10 @@ jobs:
       - run: rustup toolchain install ${{ env.MSRV }} --profile minimal
       - run: rustup override set ${{ env.MSRV }}
       - run: rustup show active-toolchain -v
+      # URL 2.5.4 -> ICU4X 2.x require rustc 1.82
+      # See https://github.com/servo/rust-url?tab=readme-ov-file#alternative-unicode-back-ends
+      #     https://github.com/hsivonen/idna_adapter?tab=readme-ov-file#icu4x-as-the-default
+      - run: cargo update -p idna_adapter --precise 1.2.0
       - run: cargo update -p native-tls --precise 0.2.13 # 0.2.14 requires rustc 1.80
       - run: cargo update -p litemap --precise 0.7.4 # 0.7.5 requires rustc 1.81
       - run: cargo update -p zerofrom --precise 0.1.5 # 0.1.6 requires rustc 1.81
