@@ -1,3 +1,4 @@
+use crate::output_format::OutputFormat;
 use crate::{
     bytes_ext::BytesExt,
     cursors::RawCursor,
@@ -5,6 +6,8 @@ use crate::{
     response::Response,
     rowbinary,
 };
+use clickhouse_rowbinary::parse_columns_header;
+use clickhouse_rowbinary::types::Column;
 use serde::Deserialize;
 use std::marker::PhantomData;
 
@@ -13,15 +16,19 @@ use std::marker::PhantomData;
 pub struct RowCursor<T> {
     raw: RawCursor,
     bytes: BytesExt,
+    format: OutputFormat,
+    columns: Option<Vec<Column>>,
     _marker: PhantomData<T>,
 }
 
 impl<T> RowCursor<T> {
-    pub(crate) fn new(response: Response) -> Self {
+    pub(crate) fn new(response: Response, format: OutputFormat) -> Self {
         Self {
+            _marker: PhantomData,
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
-            _marker: PhantomData,
+            columns: None,
+            format,
         }
     }
 
@@ -37,15 +44,36 @@ impl<T> RowCursor<T> {
         T: Deserialize<'b>,
     {
         loop {
-            let mut slice = super::workaround_51132(self.bytes.slice());
-
-            match rowbinary::deserialize_from(&mut slice) {
-                Ok(value) => {
-                    self.bytes.set_remaining(slice.len());
-                    return Ok(Some(value));
+            if self.bytes.remaining() > 0 {
+                let mut slice = super::workaround_51132(self.bytes.slice());
+                match self.format {
+                    OutputFormat::RowBinary => match rowbinary::deserialize_from(&mut slice) {
+                        Ok(value) => {
+                            self.bytes.set_remaining(slice.len());
+                            return Ok(Some(value));
+                        }
+                        Err(Error::NotEnoughData) => {}
+                        Err(err) => return Err(err),
+                    },
+                    OutputFormat::RowBinaryWithNamesAndTypes => match self.columns.as_ref() {
+                        // FIXME: move this branch to new?
+                        None => {
+                            let columns = parse_columns_header(&mut slice)?;
+                            self.bytes.set_remaining(slice.len());
+                            self.columns = Some(columns);
+                        }
+                        Some(columns) => {
+                            match rowbinary::deserialize_from_rbwnat(&mut slice, columns) {
+                                Ok(value) => {
+                                    self.bytes.set_remaining(slice.len());
+                                    return Ok(Some(value));
+                                }
+                                Err(Error::NotEnoughData) => {}
+                                Err(err) => return Err(err),
+                            }
+                        }
+                    },
                 }
-                Err(Error::NotEnoughData) => {}
-                Err(err) => return Err(err),
             }
 
             match self.raw.next().await? {

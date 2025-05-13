@@ -1,8 +1,8 @@
 use crate::error::ParserError;
 use crate::error::ParserError::NotEnoughData;
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 
-pub fn decode_leb128(buffer: &mut Bytes) -> Result<u64, ParserError> {
+pub fn decode_leb128(buffer: &mut &[u8]) -> Result<u64, ParserError> {
     let mut value = 0u64;
     let mut shift = 0;
     loop {
@@ -42,8 +42,6 @@ pub fn encode_leb128(value: u64) -> Vec<u8> {
 }
 
 mod tests {
-    use bytes::Bytes;
-
     #[test]
     fn test_decode_leb128() {
         let test_cases = vec![
@@ -58,8 +56,7 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            let mut input_bytes = Bytes::from(input.clone());
-            let result = super::decode_leb128(&mut input_bytes).unwrap();
+            let result = super::decode_leb128(&mut input.as_slice()).unwrap();
             assert_eq!(result, expected, "Failed decoding {:?}", input);
         }
     }
@@ -82,8 +79,7 @@ mod tests {
 
         for value in test_values {
             let encoded = super::encode_leb128(value);
-            let mut bytes = Bytes::from(encoded.clone());
-            let decoded = super::decode_leb128(&mut bytes).unwrap();
+            let decoded = super::decode_leb128(&mut encoded.as_slice()).unwrap();
 
             assert_eq!(
                 decoded, value,

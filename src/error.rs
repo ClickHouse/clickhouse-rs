@@ -1,8 +1,8 @@
 //! Contains [`Error`] and corresponding [`Result`].
 
-use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
-
+use clickhouse_rowbinary::types::Column;
 use serde::{de, ser};
+use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
 
 /// A result with a specified [`Error`] type.
 pub type Result<T, E = Error> = result::Result<T, E>;
@@ -44,11 +44,34 @@ pub enum Error {
     TimedOut,
     #[error("unsupported: {0}")]
     Unsupported(String),
+    #[error("error while parsing data from the response: {0}")]
+    ParserError(BoxedError),
+    #[error("struct mismatches the database definition; field {field_name} has unexpected type {unexpected_type}; allowed types for {field_name}: {allowed_types}; database columns: {all_columns:?}")]
+    DataTypeMismatch {
+        field_name: String,
+        allowed_types: String,
+        unexpected_type: String,
+        all_columns: String,
+    },
+    #[error(
+        "too many struct fields: trying to read more columns than expected {0}. All columns: {1:?}"
+    )]
+    TooManyStructFields(usize, Vec<Column>),
+    #[error("deserialization error: {0}")]
+    DeserializationError(#[source] BoxedError),
+    #[error("deserialize is called for more fields than a struct has")]
+    DeserializeCallAfterEndOfStruct,
     #[error("{0}")]
     Other(BoxedError),
 }
 
 assert_impl_all!(Error: StdError, Send, Sync);
+
+impl From<clickhouse_rowbinary::error::ParserError> for Error {
+    fn from(err: clickhouse_rowbinary::error::ParserError) -> Self {
+        Self::ParserError(Box::new(err))
+    }
+}
 
 impl From<hyper::Error> for Error {
     fn from(error: hyper::Error) -> Self {

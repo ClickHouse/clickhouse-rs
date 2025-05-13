@@ -16,6 +16,7 @@ use crate::{
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
 pub use crate::cursors::{BytesCursor, RowCursor};
+use crate::output_format::OutputFormat;
 
 #[must_use]
 #[derive(Clone)]
@@ -43,7 +44,7 @@ impl Query {
     /// [`Identifier`], will be appropriately escaped.
     ///
     /// All possible errors will be returned as [`Error::InvalidParams`]
-    /// during query execution (`execute()`, `fetch()` etc).
+    /// during query execution (`execute()`, `fetch()`, etc.).
     ///
     /// WARNING: This means that the query must not have any extra `?`, even if
     /// they are in a string literal! Use `??` to have plain `?` in query.
@@ -83,11 +84,16 @@ impl Query {
     /// # Ok(()) }
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
+        let fetch_format = self.client.get_fetch_format();
+
         self.sql.bind_fields::<T>();
-        self.sql.set_output_format("RowBinary");
+        self.sql.set_output_format(match fetch_format {
+            OutputFormat::RowBinary => "RowBinary",
+            OutputFormat::RowBinaryWithNamesAndTypes => "RowBinaryWithNamesAndTypes",
+        });
 
         let response = self.do_execute(true)?;
-        Ok(RowCursor::new(response))
+        Ok(RowCursor::new(response, fetch_format))
     }
 
     /// Executes the query and returns just a single row.
