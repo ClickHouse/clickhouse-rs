@@ -11,9 +11,11 @@ pub(crate) fn deserialize_from_rbwnat<'data, 'cursor, T: Deserialize<'data>>(
     input: &mut &'data [u8],
     columns: &'cursor [Column],
 ) -> Result<T> {
-    println!("[RBWNAT] deserializing with names and types: {:?}", columns);
+    // println!("[RBWNAT] deserializing with names and types: {:?}, input size: {}", columns, input.len());
     let mut deserializer = RowBinaryWithNamesAndTypesDeserializer::new(input, columns)?;
-    T::deserialize(&mut deserializer)
+    let value = T::deserialize(&mut deserializer);
+    // println!("Remaining input size: {}", input.len());
+    value
 }
 
 /// Serde method that delegated the value deserialization to [`Deserializer::deserialize_any`].
@@ -107,16 +109,11 @@ enum DeserializerState<'cursor> {
         prev_state: Rc<DeserializerState<'cursor>>,
         inner_data_type: &'cursor DataTypeNode,
     },
-    /// Verifying struct fields usually does not make sense more than once.
-    VerifiedInnerType {
-        inner_data_type: &'cursor DataTypeNode,
-        prev_state: Rc<DeserializerState<'cursor>>,
-    },
     /// We are done with all columns and should not try to deserialize anything else.
     EndOfStruct,
 }
 
-struct RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
+pub(crate) struct RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
     row_binary: RowBinaryDeserializer<'cursor, 'data>,
     state: DeserializerState<'cursor>,
     columns: &'cursor [Column],
@@ -125,6 +122,7 @@ struct RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
     last_delegated_from: DelegatedFrom,
     // every deserialization begins from a struct with some name
     struct_name: Option<&'static str>,
+    struct_fields: Option<&'static [&'static str]>,
 }
 
 impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
@@ -138,11 +136,12 @@ impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
             panic!("Zero columns definitions in the response");
         }
         Ok(RowBinaryWithNamesAndTypesDeserializer {
-            row_binary: crate::rowbinary::de::RowBinaryDeserializer { input },
+            row_binary: RowBinaryDeserializer { input },
             state: DeserializerState::TopLevelColumn(&columns[0]),
             last_delegated_from: DelegatedFrom::default(),
             current_column_idx: 0,
             struct_name: None,
+            struct_fields: None,
             columns,
         })
     }
@@ -156,12 +155,23 @@ impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
 
     #[inline]
     fn set_struct_name(&mut self, name: &'static str) {
-        self.struct_name = Some(name);
+        // TODO: nested structs support?
+        if self.struct_name.is_none() {
+            self.struct_name = Some(name);
+        }
+    }
+
+    #[inline]
+    fn set_struct_fields(&mut self, fields: &'static [&'static str]) {
+        // TODO: nested structs support?
+        if self.struct_fields.is_none() {
+            self.struct_fields = Some(fields);
+        }
     }
 
     #[inline]
     fn advance_state(&mut self) -> Result<()> {
-        match self.state {
+        match &self.state {
             DeserializerState::TopLevelColumn { .. } => {
                 self.current_column_idx += 1;
                 if self.current_column_idx >= self.columns.len() {
@@ -170,14 +180,6 @@ impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
                     let current_col = self.get_current_column()?;
                     self.state = DeserializerState::TopLevelColumn(current_col);
                 }
-            }
-            DeserializerState::InnerDataType {
-                inner_data_type, ..
-            } => {
-                self.state = DeserializerState::VerifiedInnerType {
-                    prev_state: Rc::new(self.state.clone()),
-                    inner_data_type,
-                };
             }
             DeserializerState::EndOfStruct => {
                 panic!("trying to advance the current column index after full deserialization");
@@ -189,17 +191,16 @@ impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
     }
 
     #[inline]
-    fn set_inner_data_type_state(
-        &self,
-        inner_data_type: &'cursor DataTypeNode,
-    ) -> DeserializerState<'cursor> {
+    fn set_inner_data_type_state(&mut self, inner_data_type: &'cursor DataTypeNode) {
         match self.state {
             DeserializerState::TopLevelColumn(column, ..)
-            | DeserializerState::InnerDataType { column, .. } => DeserializerState::InnerDataType {
-                prev_state: Rc::new(self.state.clone()),
-                inner_data_type,
-                column,
-            },
+            | DeserializerState::InnerDataType { column, .. } => {
+                self.state = DeserializerState::InnerDataType {
+                    prev_state: Rc::new(self.state.clone()),
+                    inner_data_type,
+                    column,
+                }
+            }
             _ => {
                 panic!("to_inner called on invalid state");
             }
@@ -209,8 +210,7 @@ impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
     #[inline]
     fn set_previous_state(&mut self) {
         match &self.state {
-            DeserializerState::InnerDataType { prev_state, .. }
-            | DeserializerState::VerifiedInnerType { prev_state, .. } => {
+            DeserializerState::InnerDataType { prev_state, .. } => {
                 self.state = prev_state.deref().clone()
             }
             _ => panic!("to_prev_state called on invalid state"),
@@ -222,9 +222,6 @@ impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
         match self.state {
             DeserializerState::TopLevelColumn(col, ..) => Ok(&col.data_type),
             DeserializerState::InnerDataType {
-                inner_data_type, ..
-            } => Ok(inner_data_type),
-            DeserializerState::VerifiedInnerType {
                 inner_data_type, ..
             } => Ok(inner_data_type),
             DeserializerState::EndOfStruct => Err(Error::DeserializeCallAfterEndOfStruct),
@@ -242,6 +239,44 @@ impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
         let col = &self.columns[self.current_column_idx];
         Ok(col)
     }
+
+    #[inline]
+    fn check_data_type_is_allowed(&mut self, allowed: &[DelegatedFrom]) -> Result<()> {
+        if !allowed.contains(&self.last_delegated_from) {
+            let column = self.get_current_column()?;
+            let field_name = match self.struct_name {
+                Some(struct_name) => format!("{}.{}", struct_name, column.name),
+                None => column.name.to_string(),
+            };
+            let allowed_types = allowed
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<String>>()
+                .join(", ");
+            let all_columns = self
+                .columns
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<String>>()
+                .join(", ");
+            let unexpected_type = self.last_delegated_from.to_string();
+            Err(Error::DataTypeMismatch {
+                field_name,
+                allowed_types,
+                unexpected_type,
+                all_columns,
+            })
+        } else {
+            Ok(())
+        }
+    }
+}
+
+macro_rules! rbwnat_deserialize_any {
+    ($self:ident, $delegated_from:expr, $visitor:ident) => {{
+        $self.set_last_delegated_from($delegated_from);
+        $self.deserialize_any($visitor)
+    }};
 }
 
 impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<'_, 'data> {
@@ -254,31 +289,12 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     {
         macro_rules! rbwnat_de_simple_with_type_check {
             ($delegate:ident, $compatible:expr) => {{
-                if !$compatible.contains(&self.last_delegated_from) {
-                    let column = self.get_current_column()?;
-                    let field_name = match self.struct_name {
-                        Some(struct_name) => format!("{}.{}", struct_name, column.name),
-                        None => column.name.to_string(),
-                    };
-                    let allowed_types = $compatible.map(|x| x.to_string()).join(", ");
-                    let all_columns = self
-                        .columns
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ");
-                    let unexpected_type = self.last_delegated_from.to_string();
-                    return Err(Error::DataTypeMismatch {
-                        field_name,
-                        allowed_types,
-                        unexpected_type,
-                        all_columns,
-                    });
-                }
+                self.check_data_type_is_allowed(&$compatible)?;
                 self.row_binary.$delegate(visitor)
             }};
         }
 
+        println!("{} state: {:?}", self.last_delegated_from, self.state);
         let data_type = self.get_current_data_type()?;
         let result = match data_type {
             DataTypeNode::Bool => rbwnat_de_simple_with_type_check!(
@@ -327,7 +343,36 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
                     [DelegatedFrom::Str, DelegatedFrom::String]
                 )
             }
+            DataTypeNode::FixedString(len) => match self.last_delegated_from {
+                DelegatedFrom::Bytes => visitor.visit_bytes(self.row_binary.read_slice(*len)?),
+                DelegatedFrom::ByteBuf => visitor.visit_byte_buf(self.row_binary.read_vec(*len)?),
+                _ => unreachable!(),
+            },
+            DataTypeNode::UUID => {
+                rbwnat_de_simple_with_type_check!(
+                    deserialize_str,
+                    [DelegatedFrom::Str, DelegatedFrom::String]
+                )
+            }
+            DataTypeNode::Date => {
+                rbwnat_de_simple_with_type_check!(deserialize_u16, [DelegatedFrom::U16])
+            }
+            DataTypeNode::Date32 => {
+                rbwnat_de_simple_with_type_check!(deserialize_i32, [DelegatedFrom::I32])
+            }
+            DataTypeNode::DateTime { .. } => {
+                rbwnat_de_simple_with_type_check!(deserialize_u32, [DelegatedFrom::U32])
+            }
+            DataTypeNode::DateTime64 { .. } => {
+                rbwnat_de_simple_with_type_check!(deserialize_i64, [DelegatedFrom::I64])
+            }
+            DataTypeNode::IPv4 => {
+                rbwnat_de_simple_with_type_check!(deserialize_u32, [DelegatedFrom::U32])
+            }
+            DataTypeNode::IPv6 => self.row_binary.deserialize_tuple(16, visitor),
+
             DataTypeNode::Array(inner_type) => {
+                self.check_data_type_is_allowed(&[DelegatedFrom::Seq])?;
                 let len = self.row_binary.read_size()?;
                 self.set_inner_data_type_state(inner_type);
 
@@ -368,14 +413,17 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
                 self.set_previous_state();
                 result
             }
+            // DataTypeNode::Nullable(inner_type) => {
+            //     self.check_data_type_is_allowed(&[DelegatedFrom::Option])?;
+            //     self.set_inner_data_type_state(inner_type);
+            //     self.row_binary.deserialize_option(visitor)
+            // },
             _ => panic!("unsupported type for deserialize_any: {:?}", self.columns),
         };
-        result
-            .map_err(|e| Error::DeserializationError(Box::new(e)))
-            .and_then(|value| {
-                self.advance_state()?;
-                Ok(value)
-            })
+        result.and_then(|value| {
+            self.advance_state()?;
+            Ok(value)
+        })
     }
 
     #[inline]
@@ -383,8 +431,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Bool);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Bool, visitor)
     }
 
     #[inline]
@@ -392,8 +439,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::I8);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::I8, visitor)
     }
 
     #[inline]
@@ -401,8 +447,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::I16);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::I16, visitor)
     }
 
     #[inline]
@@ -410,8 +455,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::I32);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::I32, visitor)
     }
 
     #[inline]
@@ -419,8 +463,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::I64);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::I64, visitor)
     }
 
     #[inline]
@@ -428,8 +471,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::I128);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::I128, visitor)
     }
 
     #[inline]
@@ -437,8 +479,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::U8);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::U8, visitor)
     }
 
     #[inline]
@@ -446,8 +487,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::U16);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::U16, visitor)
     }
 
     #[inline]
@@ -455,8 +495,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::U32);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::U32, visitor)
     }
 
     #[inline]
@@ -464,8 +503,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::U64);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::U64, visitor)
     }
 
     #[inline]
@@ -473,8 +511,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::U128);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::U128, visitor)
     }
 
     #[inline]
@@ -482,8 +519,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::F32);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::F32, visitor)
     }
 
     #[inline]
@@ -491,8 +527,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::F64);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::F64, visitor)
     }
 
     #[inline]
@@ -500,8 +535,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Char);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Char, visitor)
     }
 
     #[inline]
@@ -509,8 +543,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Str);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Str, visitor)
     }
 
     #[inline]
@@ -518,8 +551,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::String);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::String, visitor)
     }
 
     #[inline]
@@ -527,8 +559,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Bytes);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Bytes, visitor)
     }
 
     #[inline]
@@ -536,8 +567,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::ByteBuf);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::ByteBuf, visitor)
     }
 
     #[inline]
@@ -545,8 +575,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Option);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Option, visitor)
     }
 
     #[inline]
@@ -554,8 +583,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Unit);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Unit, visitor)
     }
 
     #[inline]
@@ -567,8 +595,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::UnitStruct);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::UnitStruct, visitor)
     }
 
     #[inline]
@@ -580,8 +607,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::NewtypeStruct);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::NewtypeStruct, visitor)
     }
 
     #[inline]
@@ -589,8 +615,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Seq);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Seq, visitor)
     }
 
     #[inline]
@@ -602,8 +627,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Tuple);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Tuple, visitor)
     }
 
     #[inline]
@@ -616,8 +640,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::TupleStruct);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::TupleStruct, visitor)
     }
 
     #[inline]
@@ -625,8 +648,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Map);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Map, visitor)
     }
 
     #[inline]
@@ -666,7 +688,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
         }
 
         self.set_struct_name(name);
-        self.set_last_delegated_from(DelegatedFrom::Struct);
+        self.set_struct_fields(fields);
         visitor.visit_seq(StructAccess {
             deserializer: self,
             len: fields.len(),
@@ -683,8 +705,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Enum);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Enum, visitor)
     }
 
     #[inline]
@@ -692,8 +713,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::Identifier);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::Identifier, visitor)
     }
 
     #[inline]
@@ -701,8 +721,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        self.set_last_delegated_from(DelegatedFrom::IgnoredAny);
-        self.deserialize_any(visitor)
+        rbwnat_deserialize_any!(self, DelegatedFrom::IgnoredAny, visitor)
     }
 
     #[inline]

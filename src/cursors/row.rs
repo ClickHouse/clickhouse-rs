@@ -44,37 +44,38 @@ impl<T> RowCursor<T> {
         T: Deserialize<'b>,
     {
         loop {
-            if self.bytes.remaining() > 0 {
-                let mut slice = super::workaround_51132(self.bytes.slice());
-                match self.format {
-                    OutputFormat::RowBinary => match rowbinary::deserialize_from(&mut slice) {
-                        Ok(value) => {
-                            self.bytes.set_remaining(slice.len());
-                            return Ok(Some(value));
-                        }
-                        Err(Error::NotEnoughData) => {}
-                        Err(err) => return Err(err),
-                    },
-                    OutputFormat::RowBinaryWithNamesAndTypes => match self.columns.as_ref() {
-                        // FIXME: move this branch to new?
-                        None => {
+            let mut slice = super::workaround_51132(self.bytes.slice());
+            match self.format {
+                OutputFormat::RowBinary => match rowbinary::deserialize_from(&mut slice) {
+                    Ok(value) => {
+                        self.bytes.set_remaining(slice.len());
+                        return Ok(Some(value));
+                    }
+                    Err(Error::NotEnoughData) => {}
+                    Err(err) => return Err(err),
+                },
+                OutputFormat::RowBinaryWithNamesAndTypes => match self.columns.as_ref() {
+                    // FIXME: move this branch to new?
+                    None => {
+                        if slice.len() > 0 {
                             let columns = parse_columns_header(&mut slice)?;
                             self.bytes.set_remaining(slice.len());
                             self.columns = Some(columns);
                         }
-                        Some(columns) => {
-                            match rowbinary::deserialize_from_rbwnat(&mut slice, columns) {
-                                Ok(value) => {
-                                    self.bytes.set_remaining(slice.len());
-                                    return Ok(Some(value));
-                                }
-                                Err(Error::NotEnoughData) => {}
-                                Err(err) => return Err(err),
+                    }
+                    Some(columns) => {
+                        match rowbinary::deserialize_from_rbwnat(&mut slice, columns) {
+                            Ok(value) => {
+                                self.bytes.set_remaining(slice.len());
+                                return Ok(Some(value));
                             }
+                            Err(Error::NotEnoughData) => {}
+                            Err(err) => return Err(err),
                         }
-                    },
-                }
+                    }
+                },
             }
+            // }
 
             match self.raw.next().await? {
                 Some(chunk) => self.bytes.extend(chunk),

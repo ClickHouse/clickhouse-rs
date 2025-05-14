@@ -24,39 +24,47 @@ impl Display for Column {
 #[non_exhaustive]
 pub enum DataTypeNode {
     Bool,
+
     UInt8,
     UInt16,
     UInt32,
     UInt64,
     UInt128,
     UInt256,
+
     Int8,
     Int16,
     Int32,
     Int64,
     Int128,
     Int256,
+
     Float32,
     Float64,
     BFloat16,
+    Decimal(u8, u8, DecimalSize), // Scale, Precision, 32 | 64 | 128 | 256
+
     String,
+    FixedString(usize),
     UUID,
+
     Date,
     Date32,
     DateTime(Option<String>),                      // Optional timezone
     DateTime64(DateTimePrecision, Option<String>), // Precision and optional timezone
+
     IPv4,
     IPv6,
 
     Nullable(Box<DataTypeNode>),
+    LowCardinality(Box<DataTypeNode>),
+
     Array(Box<DataTypeNode>),
     Tuple(Vec<DataTypeNode>),
     Map(Box<DataTypeNode>, Box<DataTypeNode>),
-    LowCardinality(Box<DataTypeNode>),
-    Decimal(u8, u8, DecimalSize),
     Enum(EnumType, HashMap<i16, String>),
+
     AggregateFunction(String, Vec<DataTypeNode>),
-    FixedString(usize),
 
     Variant(Vec<DataTypeNode>),
     Dynamic,

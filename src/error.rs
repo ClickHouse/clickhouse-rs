@@ -57,8 +57,6 @@ pub enum Error {
         "too many struct fields: trying to read more columns than expected {0}. All columns: {1:?}"
     )]
     TooManyStructFields(usize, Vec<Column>),
-    #[error("deserialization error: {0}")]
-    DeserializationError(#[source] BoxedError),
     #[error("deserialize is called for more fields than a struct has")]
     DeserializeCallAfterEndOfStruct,
     #[error("{0}")]

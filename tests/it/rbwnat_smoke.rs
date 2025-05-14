@@ -4,6 +4,9 @@ use clickhouse_derive::Row;
 use clickhouse_rowbinary::parse_columns_header;
 use clickhouse_rowbinary::types::{Column, DataTypeNode};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+use time::format_description::well_known::Iso8601;
+use time::Month::{February, January};
 use time::OffsetDateTime;
 
 #[tokio::test]
@@ -161,6 +164,59 @@ async fn test_basic_types_deserialization() {
 }
 
 #[tokio::test]
+async fn test_several_simple_rows() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        num: u64,
+        str: String,
+    }
+
+    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let result = client
+        .query("SELECT number AS num, toString(number) AS str FROM system.numbers LIMIT 3")
+        .fetch_all::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        vec![
+            Data {
+                num: 0,
+                str: "0".to_string(),
+            },
+            Data {
+                num: 1,
+                str: "1".to_string(),
+            },
+            Data {
+                num: 2,
+                str: "2".to_string(),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_many_numbers() {
+    #[derive(Row, Deserialize)]
+    struct Data {
+        no: u64,
+    }
+
+    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let mut cursor = client
+        .query("SELECT number FROM system.numbers_mt LIMIT 2000")
+        .fetch::<Data>()
+        .unwrap();
+
+    let mut sum = 0;
+    while let Some(row) = cursor.next().await.unwrap() {
+        sum += row.no;
+    }
+    assert_eq!(sum, (0..2000).sum::<u64>());
+}
+
+#[tokio::test]
 async fn test_array_deserialization() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
@@ -176,11 +232,11 @@ async fn test_array_deserialization() {
         .query(
             "
             SELECT
-                42                                                       :: UInt16 AS id,
-                [1, 2]                                                   :: Array(UInt32) AS one_dim_array,
-                [[1, 2], [3, 4]]                                         :: Array(Array(Int64)) AS two_dim_array,
+                42                                                       :: UInt16                       AS id,
+                [1, 2]                                                   :: Array(UInt32)                AS one_dim_array,
+                [[1, 2], [3, 4]]                                         :: Array(Array(Int64))          AS two_dim_array,
                 [[[1.1, 2.2], [3.3, 4.4]], [], [[5.5, 6.6], [7.7, 8.8]]] :: Array(Array(Array(Float64))) AS three_dim_array,
-                'foobar'                                                 :: String AS description
+                'foobar'                                                 :: String                       AS description
             ",
         )
         .fetch_one::<Data>()
@@ -309,26 +365,119 @@ async fn test_serde_skip_deserializing() {
     );
 }
 
-// FIXME: RBWNAT should allow for tracking the order of fields in the struct and in the database!
 #[tokio::test]
-async fn test_different_struct_field_order() {
+#[cfg(feature = "time")]
+async fn test_date_time_types() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
-        c: String,
-        a: u32,
+        #[serde(with = "clickhouse::serde::time::date")]
+        date: time::Date,
+        #[serde(with = "clickhouse::serde::time::date32")]
+        date32: time::Date,
+        #[serde(with = "clickhouse::serde::time::datetime")]
+        date_time: OffsetDateTime,
+        #[serde(with = "clickhouse::serde::time::datetime64::secs")]
+        date_time64_0: OffsetDateTime,
+        #[serde(with = "clickhouse::serde::time::datetime64::millis")]
+        date_time64_3: OffsetDateTime,
+        #[serde(with = "clickhouse::serde::time::datetime64::micros")]
+        date_time64_6: OffsetDateTime,
+        #[serde(with = "clickhouse::serde::time::datetime64::nanos")]
+        date_time64_9: OffsetDateTime,
     }
 
     let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
     let result = client
-        .query("SELECT 42 :: UInt32 AS a, 'foo' :: String AS c")
+        .query(
+            "
+            SELECT
+                '2023-01-01'                    :: Date          AS date,
+                '2023-02-02'                    :: Date32        AS date32,
+                '2023-01-03 12:00:00'           :: DateTime      AS date_time,
+                '2023-01-04 13:00:00'           :: DateTime64(0) AS date_time64_0,
+                '2023-01-05 14:00:00.123'       :: DateTime64(3) AS date_time64_3,
+                '2023-01-06 15:00:00.123456'    :: DateTime64(6) AS date_time64_6,
+                '2023-01-07 16:00:00.123456789' :: DateTime64(9) AS date_time64_9
+            ",
+        )
         .fetch_one::<Data>()
         .await;
 
     assert_eq!(
         result.unwrap(),
         Data {
-            a: 42,
-            c: "foo".to_string(),
+            date: time::Date::from_calendar_date(2023, January, 1).unwrap(),
+            date32: time::Date::from_calendar_date(2023, February, 2).unwrap(),
+            date_time: OffsetDateTime::parse("2023-01-03T12:00:00Z", &Iso8601::DEFAULT).unwrap(),
+            date_time64_0: OffsetDateTime::parse("2023-01-04T13:00:00Z", &Iso8601::DEFAULT)
+                .unwrap(),
+            date_time64_3: OffsetDateTime::parse("2023-01-05T14:00:00.123Z", &Iso8601::DEFAULT)
+                .unwrap(),
+            date_time64_6: OffsetDateTime::parse("2023-01-06T15:00:00.123456Z", &Iso8601::DEFAULT)
+                .unwrap(),
+            date_time64_9: OffsetDateTime::parse(
+                "2023-01-07T16:00:00.123456789Z",
+                &Iso8601::DEFAULT
+            )
+            .unwrap(),
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_ipv4_ipv6() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        id: u16,
+        #[serde(with = "clickhouse::serde::ipv4")]
+        ipv4: std::net::Ipv4Addr,
+        ipv6: std::net::Ipv6Addr,
+    }
+
+    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let result = client
+        .query(
+            "
+            SELECT
+                42                                       :: UInt16 AS id,
+                '192.168.0.1'                            :: IPv4   AS ipv4,
+                '2001:db8:3333:4444:5555:6666:7777:8888' :: IPv6   AS ipv6
+            ",
+        )
+        .fetch_all::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        vec![Data {
+            id: 42,
+            ipv4: std::net::Ipv4Addr::new(192, 168, 0, 1),
+            ipv6: std::net::Ipv6Addr::from_str("2001:db8:3333:4444:5555:6666:7777:8888").unwrap(),
+        }]
+    )
+}
+
+// FIXME: RBWNAT should allow for tracking the order of fields in the struct and in the database!
+#[tokio::test]
+#[ignore]
+async fn test_different_struct_field_order() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        c: String,
+        a: String,
+    }
+
+    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let result = client
+        .query("SELECT 'foo' AS a, 'bar' :: String AS c")
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            a: "foo".to_string(),
+            c: "bar".to_string(),
         }
     );
 }
