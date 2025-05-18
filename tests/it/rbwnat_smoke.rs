@@ -1,8 +1,8 @@
 use clickhouse::error::Error;
-use clickhouse::output_format::OutputFormat;
+use clickhouse::validation_mode::StructValidationMode;
 use clickhouse_derive::Row;
-use clickhouse_rowbinary::parse_columns_header;
-use clickhouse_rowbinary::types::{Column, DataTypeNode};
+use clickhouse_rowbinary::parse_rbwnat_columns_header;
+use clickhouse_rowbinary::types::{Column, DataTypeHint, DataTypeNode};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use time::format_description::well_known::Iso8601;
@@ -45,57 +45,69 @@ async fn test_header_parsing() {
         .unwrap();
 
     let data = cursor.collect().await.unwrap();
-    let result = parse_columns_header(&mut &data[..]).unwrap();
+    let result = parse_rbwnat_columns_header(&mut &data[..]).unwrap();
     assert_eq!(
         result,
         vec![
             Column {
                 name: "CounterID".to_string(),
-                data_type: DataTypeNode::UInt32
+                data_type: DataTypeNode::UInt32,
+                type_hints: vec![DataTypeHint::UInt32]
             },
             Column {
                 name: "StartDate".to_string(),
-                data_type: DataTypeNode::Date
+                data_type: DataTypeNode::Date,
+                type_hints: vec![DataTypeHint::Date]
             },
             Column {
                 name: "Sign".to_string(),
-                data_type: DataTypeNode::Int8
+                data_type: DataTypeNode::Int8,
+                type_hints: vec![DataTypeHint::Int8]
             },
             Column {
                 name: "IsNew".to_string(),
-                data_type: DataTypeNode::UInt8
+                data_type: DataTypeNode::UInt8,
+                type_hints: vec![DataTypeHint::UInt8]
             },
             Column {
                 name: "VisitID".to_string(),
-                data_type: DataTypeNode::UInt64
+                data_type: DataTypeNode::UInt64,
+                type_hints: vec![DataTypeHint::UInt64]
             },
             Column {
                 name: "UserID".to_string(),
-                data_type: DataTypeNode::UInt64
+                data_type: DataTypeNode::UInt64,
+                type_hints: vec![DataTypeHint::UInt64]
             },
             Column {
                 name: "Goals.ID".to_string(),
-                data_type: DataTypeNode::Array(Box::new(DataTypeNode::UInt32))
+                data_type: DataTypeNode::Array(Box::new(DataTypeNode::UInt32)),
+                type_hints: vec![DataTypeHint::Array, DataTypeHint::UInt32]
             },
             Column {
                 name: "Goals.Serial".to_string(),
-                data_type: DataTypeNode::Array(Box::new(DataTypeNode::UInt32))
+                data_type: DataTypeNode::Array(Box::new(DataTypeNode::UInt32)),
+                type_hints: vec![DataTypeHint::Array, DataTypeHint::UInt32]
             },
             Column {
                 name: "Goals.EventTime".to_string(),
-                data_type: DataTypeNode::Array(Box::new(DataTypeNode::DateTime(None)))
+                data_type: DataTypeNode::Array(Box::new(DataTypeNode::DateTime(None))),
+                type_hints: vec![DataTypeHint::Array, DataTypeHint::DateTime]
             },
             Column {
                 name: "Goals.Price".to_string(),
-                data_type: DataTypeNode::Array(Box::new(DataTypeNode::Int64))
+                data_type: DataTypeNode::Array(Box::new(DataTypeNode::Int64)),
+                type_hints: vec![DataTypeHint::Array, DataTypeHint::Int64]
             },
             Column {
                 name: "Goals.OrderID".to_string(),
-                data_type: DataTypeNode::Array(Box::new(DataTypeNode::String))
+                data_type: DataTypeNode::Array(Box::new(DataTypeNode::String)),
+                type_hints: vec![DataTypeHint::Array, DataTypeHint::String]
             },
             Column {
                 name: "Goals.CurrencyID".to_string(),
-                data_type: DataTypeNode::Array(Box::new(DataTypeNode::UInt32))
+                data_type: DataTypeNode::Array(Box::new(DataTypeNode::UInt32)),
+                type_hints: vec![DataTypeHint::Array, DataTypeHint::UInt32]
             }
         ]
     );
@@ -120,7 +132,7 @@ async fn test_basic_types_deserialization() {
         string_val: String,
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query(
             "
@@ -171,7 +183,7 @@ async fn test_several_simple_rows() {
         str: String,
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query("SELECT number AS num, toString(number) AS str FROM system.numbers LIMIT 3")
         .fetch_all::<Data>()
@@ -203,7 +215,7 @@ async fn test_many_numbers() {
         no: u64,
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let mut cursor = client
         .query("SELECT number FROM system.numbers_mt LIMIT 2000")
         .fetch::<Data>()
@@ -227,7 +239,7 @@ async fn test_array_deserialization() {
         description: String,
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query(
             "
@@ -259,13 +271,46 @@ async fn test_array_deserialization() {
 }
 
 #[tokio::test]
+async fn test_multi_dimensional_array_deserialization() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        three_dim_array: Vec<Vec<Vec<f64>>>,
+        id: u16,
+    }
+
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let result = client
+        .query(
+            "
+            SELECT
+                [[[1.1, 2.2], [3.3, 4.4]], [], [[5.5, 6.6], [7.7, 8.8]]] :: Array(Array(Array(Float64))) AS three_dim_array,
+                42                                                       :: UInt16                       AS id
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            id: 42,
+            three_dim_array: vec![
+                vec![vec![1.1, 2.2], vec![3.3, 4.4]],
+                vec![],
+                vec![vec![5.5, 6.6], vec![7.7, 8.8]]
+            ],
+        }
+    );
+}
+
+#[tokio::test]
 async fn test_default_types_validation_nullable() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         n: Option<u32>,
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query("SELECT true AS b, 144 :: Int32 AS n2")
         .fetch_one::<Data>()
@@ -274,7 +319,7 @@ async fn test_default_types_validation_nullable() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        Error::DataTypeMismatch { .. }
+        Error::InvalidColumnDataType { .. }
     ));
 
     // FIXME: lack of derive PartialEq for Error prevents proper assertion
@@ -295,17 +340,16 @@ async fn test_default_types_validation_custom_serde() {
         n1: OffsetDateTime, // underlying is still Int64; should not compose it from two (U)Int32
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query("SELECT 42 :: UInt32 AS n1, 144 :: Int32 AS n2")
         .fetch_one::<Data>()
         .await;
 
     assert!(result.is_err());
-    println!("{:?}", result);
     assert!(matches!(
         result.unwrap_err(),
-        Error::DataTypeMismatch { .. }
+        Error::InvalidColumnDataType { .. }
     ));
 
     // FIXME: lack of derive PartialEq for Error prevents proper assertion
@@ -326,7 +370,7 @@ async fn test_too_many_struct_fields() {
         c: u32,
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query("SELECT 42 :: UInt32 AS a, 144 :: UInt32 AS b")
         .fetch_one::<Data>()
@@ -349,7 +393,7 @@ async fn test_serde_skip_deserializing() {
         c: u32,
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query("SELECT 42 :: UInt32 AS a, 144 :: UInt32 AS c")
         .fetch_one::<Data>()
@@ -386,7 +430,7 @@ async fn test_date_time_types() {
         date_time64_9: OffsetDateTime,
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query(
             "
@@ -434,7 +478,7 @@ async fn test_ipv4_ipv6() {
         ipv6: std::net::Ipv6Addr,
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query(
             "
@@ -467,7 +511,7 @@ async fn test_different_struct_field_order() {
         a: String,
     }
 
-    let client = prepare_database!().with_fetch_format(OutputFormat::RowBinaryWithNamesAndTypes);
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query("SELECT 'foo' AS a, 'bar' :: String AS c")
         .fetch_one::<Data>()

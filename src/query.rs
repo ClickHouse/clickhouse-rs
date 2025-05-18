@@ -16,7 +16,7 @@ use crate::{
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
 pub use crate::cursors::{BytesCursor, RowCursor};
-use crate::output_format::OutputFormat;
+use crate::validation_mode::StructValidationMode;
 
 #[must_use]
 #[derive(Clone)]
@@ -84,12 +84,14 @@ impl Query {
     /// # Ok(()) }
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
-        let fetch_format = self.client.get_fetch_format();
+        let fetch_format = self.client.struct_validation_mode.clone();
 
         self.sql.bind_fields::<T>();
         self.sql.set_output_format(match fetch_format {
-            OutputFormat::RowBinary => "RowBinary",
-            OutputFormat::RowBinaryWithNamesAndTypes => "RowBinaryWithNamesAndTypes",
+            StructValidationMode::FirstRow | StructValidationMode::EachRow => {
+                "RowBinaryWithNamesAndTypes"
+            }
+            StructValidationMode::Disabled => "RowBinary",
         });
 
         let response = self.do_execute(true)?;

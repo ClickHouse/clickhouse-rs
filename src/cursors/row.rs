@@ -1,4 +1,4 @@
-use crate::output_format::OutputFormat;
+use crate::validation_mode::StructValidationMode;
 use crate::{
     bytes_ext::BytesExt,
     cursors::RawCursor,
@@ -6,7 +6,7 @@ use crate::{
     response::Response,
     rowbinary,
 };
-use clickhouse_rowbinary::parse_columns_header;
+use clickhouse_rowbinary::parse_rbwnat_columns_header;
 use clickhouse_rowbinary::types::Column;
 use serde::Deserialize;
 use std::marker::PhantomData;
@@ -16,19 +16,21 @@ use std::marker::PhantomData;
 pub struct RowCursor<T> {
     raw: RawCursor,
     bytes: BytesExt,
-    format: OutputFormat,
+    validation_mode: StructValidationMode,
     columns: Option<Vec<Column>>,
+    rows_emitted: u64,
     _marker: PhantomData<T>,
 }
 
 impl<T> RowCursor<T> {
-    pub(crate) fn new(response: Response, format: OutputFormat) -> Self {
+    pub(crate) fn new(response: Response, format: StructValidationMode) -> Self {
         Self {
             _marker: PhantomData,
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
             columns: None,
-            format,
+            rows_emitted: 0,
+            validation_mode: format,
         }
     }
 
@@ -43,39 +45,42 @@ impl<T> RowCursor<T> {
     where
         T: Deserialize<'b>,
     {
+        let should_validate = match self.validation_mode {
+            StructValidationMode::Disabled => false,
+            StructValidationMode::EachRow => true,
+            StructValidationMode::FirstRow => self.rows_emitted == 0,
+        };
+
         loop {
-            let mut slice = super::workaround_51132(self.bytes.slice());
-            match self.format {
-                OutputFormat::RowBinary => match rowbinary::deserialize_from(&mut slice) {
+            if self.bytes.remaining() > 0 {
+                let mut slice = super::workaround_51132(self.bytes.slice());
+                let deserialize_result = if should_validate {
+                    match &self.columns {
+                        None => {
+                            let columns = parse_rbwnat_columns_header(&mut slice)?;
+                            self.bytes.set_remaining(slice.len());
+                            self.columns = Some(columns);
+                            let columns = self.columns.as_ref().unwrap();
+                            rowbinary::deserialize_from_and_validate(&mut slice, columns)
+                        }
+                        Some(columns) => {
+                            rowbinary::deserialize_from_and_validate(&mut slice, &columns)
+                        }
+                    }
+                } else {
+                    rowbinary::deserialize_from(&mut slice)
+                };
+
+                match deserialize_result {
                     Ok(value) => {
                         self.bytes.set_remaining(slice.len());
+                        self.rows_emitted += 1;
                         return Ok(Some(value));
                     }
                     Err(Error::NotEnoughData) => {}
                     Err(err) => return Err(err),
-                },
-                OutputFormat::RowBinaryWithNamesAndTypes => match self.columns.as_ref() {
-                    // FIXME: move this branch to new?
-                    None => {
-                        if slice.len() > 0 {
-                            let columns = parse_columns_header(&mut slice)?;
-                            self.bytes.set_remaining(slice.len());
-                            self.columns = Some(columns);
-                        }
-                    }
-                    Some(columns) => {
-                        match rowbinary::deserialize_from_rbwnat(&mut slice, columns) {
-                            Ok(value) => {
-                                self.bytes.set_remaining(slice.len());
-                                return Ok(Some(value));
-                            }
-                            Err(Error::NotEnoughData) => {}
-                            Err(err) => return Err(err),
-                        }
-                    }
-                },
+                }
             }
-            // }
 
             match self.raw.next().await? {
                 Some(chunk) => self.bytes.extend(chunk),
@@ -99,10 +104,15 @@ impl<T> RowCursor<T> {
         self.raw.received_bytes()
     }
 
-    /// Returns the total size in bytes decompressed since the cursor was
-    /// created.
+    /// Returns the total size in bytes decompressed since the cursor was created.
     #[inline]
     pub fn decoded_bytes(&self) -> u64 {
         self.raw.decoded_bytes()
+    }
+
+    /// Returns the number of rows emitted via [`Self::next`] since the cursor was created.
+    #[inline]
+    pub fn rows_emitted(&self) -> u64 {
+        self.rows_emitted
     }
 }

@@ -8,7 +8,7 @@ pub mod error;
 pub mod leb128;
 pub mod types;
 
-pub fn parse_columns_header(bytes: &mut &[u8]) -> Result<Vec<Column>, ParserError> {
+pub fn parse_rbwnat_columns_header(bytes: &mut &[u8]) -> Result<Vec<Column>, ParserError> {
     let num_columns = decode_leb128(bytes)?;
     if num_columns == 0 {
         return Err(ParserError::HeaderParsingError(
@@ -29,7 +29,7 @@ pub fn parse_columns_header(bytes: &mut &[u8]) -> Result<Vec<Column>, ParserErro
     let columns = columns_names
         .into_iter()
         .zip(column_data_types)
-        .map(|(name, data_type)| Column { name, data_type })
+        .map(|(name, data_type)| Column::new(name, data_type))
         .collect();
     Ok(columns)
 }

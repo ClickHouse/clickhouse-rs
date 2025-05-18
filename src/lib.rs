@@ -9,19 +9,19 @@ use self::{error::Result, http_client::HttpClient};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub use self::{compression::Compression, row::Row};
-use crate::output_format::OutputFormat;
+use crate::validation_mode::StructValidationMode;
 pub use clickhouse_derive::Row;
 
 pub mod error;
 pub mod insert;
 #[cfg(feature = "inserter")]
 pub mod inserter;
-pub mod output_format;
 pub mod query;
 pub mod serde;
 pub mod sql;
 #[cfg(feature = "test-util")]
 pub mod test;
+pub mod validation_mode;
 #[cfg(feature = "watch")]
 pub mod watch;
 
@@ -50,7 +50,7 @@ pub struct Client {
     options: HashMap<String, String>,
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
-    fetch_format: OutputFormat,
+    struct_validation_mode: StructValidationMode,
 }
 
 #[derive(Clone)]
@@ -86,7 +86,7 @@ impl Client {
             options: HashMap::new(),
             headers: HashMap::new(),
             products_info: Vec::default(),
-            fetch_format: OutputFormat::default(),
+            struct_validation_mode: StructValidationMode::default(),
         }
     }
 
@@ -226,13 +226,9 @@ impl Client {
         self
     }
 
-    pub fn with_fetch_format(mut self, format: OutputFormat) -> Self {
-        self.fetch_format = format;
+    pub fn with_struct_validation_mode(mut self, mode: StructValidationMode) -> Self {
+        self.struct_validation_mode = mode;
         self
-    }
-
-    pub fn get_fetch_format(&self) -> OutputFormat {
-        self.fetch_format.clone()
     }
 
     /// Starts a new INSERT statement.

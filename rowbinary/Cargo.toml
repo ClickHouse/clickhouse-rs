@@ -1,7 +1,7 @@
 [package]
 name = "clickhouse-rowbinary"
 version = "0.0.1"
-description = "RowBinaryWithNamesAndTypes format utils"
+description = "Native and RowBinary(WithNamesAndTypes) format utils"
 authors = ["ClickHouse"]
 repository = "https://github.com/ClickHouse/clickhouse-rs"
 homepage = "https://clickhouse.com"

@@ -1,100 +1,21 @@
 use crate::error::{Error, Result};
 use crate::rowbinary::de::RowBinaryDeserializer;
+use crate::rowbinary::SerdeType;
 use clickhouse_rowbinary::types::{Column, DataTypeNode};
 use serde::de::{DeserializeSeed, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use std::fmt::Display;
 use std::ops::Deref;
 use std::rc::Rc;
 
-pub(crate) fn deserialize_from_rbwnat<'data, 'cursor, T: Deserialize<'data>>(
+pub(crate) fn _deserialize_from_rbwnat<'data, 'cursor, T: Deserialize<'data>>(
     input: &mut &'data [u8],
     columns: &'cursor [Column],
 ) -> Result<T> {
     // println!("[RBWNAT] deserializing with names and types: {:?}, input size: {}", columns, input.len());
-    let mut deserializer = RowBinaryWithNamesAndTypesDeserializer::new(input, columns)?;
+    let mut deserializer = RowBinaryWithNamesAndTypesDeserializer::_new(input, columns)?;
     let value = T::deserialize(&mut deserializer);
     // println!("Remaining input size: {}", input.len());
     value
-}
-
-/// Serde method that delegated the value deserialization to [`Deserializer::deserialize_any`].
-#[derive(Clone, Debug, PartialEq)]
-enum DelegatedFrom {
-    Bool,
-    I8,
-    I16,
-    I32,
-    I64,
-    I128,
-    U8,
-    U16,
-    U32,
-    U64,
-    U128,
-    F32,
-    F64,
-    Char,
-    Str,
-    String,
-    Bytes,
-    ByteBuf,
-    Option,
-    Unit,
-    UnitStruct,
-    NewtypeStruct,
-    Seq,
-    Tuple,
-    TupleStruct,
-    Map,
-    Struct,
-    Enum,
-    Identifier,
-    IgnoredAny,
-}
-
-impl Default for DelegatedFrom {
-    fn default() -> Self {
-        DelegatedFrom::Struct
-    }
-}
-
-impl Display for DelegatedFrom {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let type_name = match self {
-            DelegatedFrom::Bool => "bool",
-            DelegatedFrom::I8 => "i8",
-            DelegatedFrom::I16 => "i16",
-            DelegatedFrom::I32 => "i32",
-            DelegatedFrom::I64 => "i64",
-            DelegatedFrom::I128 => "i128",
-            DelegatedFrom::U8 => "u8",
-            DelegatedFrom::U16 => "u16",
-            DelegatedFrom::U32 => "u32",
-            DelegatedFrom::U64 => "u64",
-            DelegatedFrom::U128 => "u128",
-            DelegatedFrom::F32 => "f32",
-            DelegatedFrom::F64 => "f64",
-            DelegatedFrom::Char => "char",
-            DelegatedFrom::Str => "&str",
-            DelegatedFrom::String => "String",
-            DelegatedFrom::Bytes => "&[u8]",
-            DelegatedFrom::ByteBuf => "Vec<u8>",
-            DelegatedFrom::Option => "Option<T>",
-            DelegatedFrom::Unit => "()",
-            DelegatedFrom::UnitStruct => "unit struct",
-            DelegatedFrom::NewtypeStruct => "newtype struct",
-            DelegatedFrom::Seq => "Vec<T>",
-            DelegatedFrom::Tuple => "tuple",
-            DelegatedFrom::TupleStruct => "tuple struct",
-            DelegatedFrom::Map => "map",
-            DelegatedFrom::Struct => "struct",
-            DelegatedFrom::Enum => "enum",
-            DelegatedFrom::Identifier => "identifier",
-            DelegatedFrom::IgnoredAny => "ignored any",
-        };
-        write!(f, "{}", type_name)
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -119,7 +40,7 @@ pub(crate) struct RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
     columns: &'cursor [Column],
     current_column_idx: usize,
     // main usage is to check if the struct field definition is compatible with the expected one
-    last_delegated_from: DelegatedFrom,
+    last_delegated_from: SerdeType,
     // every deserialization begins from a struct with some name
     struct_name: Option<&'static str>,
     struct_fields: Option<&'static [&'static str]>,
@@ -127,7 +48,7 @@ pub(crate) struct RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
 
 impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
     #[inline]
-    fn new(
+    fn _new(
         input: &'cursor mut &'data [u8],
         columns: &'cursor [Column],
     ) -> Result<RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data>> {
@@ -136,9 +57,12 @@ impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
             panic!("Zero columns definitions in the response");
         }
         Ok(RowBinaryWithNamesAndTypesDeserializer {
-            row_binary: RowBinaryDeserializer { input },
+            row_binary: RowBinaryDeserializer {
+                input,
+                columns_validator: (),
+            },
             state: DeserializerState::TopLevelColumn(&columns[0]),
-            last_delegated_from: DelegatedFrom::default(),
+            last_delegated_from: SerdeType::default(),
             current_column_idx: 0,
             struct_name: None,
             struct_fields: None,
@@ -147,7 +71,7 @@ impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
     }
 
     #[inline]
-    fn set_last_delegated_from(&mut self, from: DelegatedFrom) {
+    fn set_last_delegated_from(&mut self, from: SerdeType) {
         if self.last_delegated_from != from {
             self.last_delegated_from = from;
         }
@@ -241,7 +165,7 @@ impl<'cursor, 'data> RowBinaryWithNamesAndTypesDeserializer<'cursor, 'data> {
     }
 
     #[inline]
-    fn check_data_type_is_allowed(&mut self, allowed: &[DelegatedFrom]) -> Result<()> {
+    fn check_data_type_is_allowed(&mut self, allowed: &[SerdeType]) -> Result<()> {
         if !allowed.contains(&self.last_delegated_from) {
             let column = self.get_current_column()?;
             let field_name = match self.struct_name {
@@ -299,80 +223,80 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
         let result = match data_type {
             DataTypeNode::Bool => rbwnat_de_simple_with_type_check!(
                 deserialize_bool,
-                [DelegatedFrom::Bool, DelegatedFrom::U8, DelegatedFrom::I8]
+                [SerdeType::Bool, SerdeType::U8, SerdeType::I8]
             ),
             DataTypeNode::UInt8 => {
-                rbwnat_de_simple_with_type_check!(deserialize_u8, [DelegatedFrom::U8])
+                rbwnat_de_simple_with_type_check!(deserialize_u8, [SerdeType::U8])
             }
             DataTypeNode::Int8 => {
-                rbwnat_de_simple_with_type_check!(deserialize_i8, [DelegatedFrom::I8])
+                rbwnat_de_simple_with_type_check!(deserialize_i8, [SerdeType::I8])
             }
             DataTypeNode::Int16 => {
-                rbwnat_de_simple_with_type_check!(deserialize_i16, [DelegatedFrom::I16])
+                rbwnat_de_simple_with_type_check!(deserialize_i16, [SerdeType::I16])
             }
             DataTypeNode::Int32 => {
-                rbwnat_de_simple_with_type_check!(deserialize_i32, [DelegatedFrom::I32])
+                rbwnat_de_simple_with_type_check!(deserialize_i32, [SerdeType::I32])
             }
             DataTypeNode::Int64 => {
-                rbwnat_de_simple_with_type_check!(deserialize_i64, [DelegatedFrom::I64])
+                rbwnat_de_simple_with_type_check!(deserialize_i64, [SerdeType::I64])
             }
             DataTypeNode::Int128 => {
-                rbwnat_de_simple_with_type_check!(deserialize_i128, [DelegatedFrom::I128])
+                rbwnat_de_simple_with_type_check!(deserialize_i128, [SerdeType::I128])
             }
             DataTypeNode::UInt16 => {
-                rbwnat_de_simple_with_type_check!(deserialize_u16, [DelegatedFrom::U16])
+                rbwnat_de_simple_with_type_check!(deserialize_u16, [SerdeType::U16])
             }
             DataTypeNode::UInt32 => {
-                rbwnat_de_simple_with_type_check!(deserialize_u32, [DelegatedFrom::U32])
+                rbwnat_de_simple_with_type_check!(deserialize_u32, [SerdeType::U32])
             }
             DataTypeNode::UInt64 => {
-                rbwnat_de_simple_with_type_check!(deserialize_u64, [DelegatedFrom::U64])
+                rbwnat_de_simple_with_type_check!(deserialize_u64, [SerdeType::U64])
             }
             DataTypeNode::UInt128 => {
-                rbwnat_de_simple_with_type_check!(deserialize_u128, [DelegatedFrom::U128])
+                rbwnat_de_simple_with_type_check!(deserialize_u128, [SerdeType::U128])
             }
             DataTypeNode::Float32 => {
-                rbwnat_de_simple_with_type_check!(deserialize_f32, [DelegatedFrom::F32])
+                rbwnat_de_simple_with_type_check!(deserialize_f32, [SerdeType::F32])
             }
             DataTypeNode::Float64 => {
-                rbwnat_de_simple_with_type_check!(deserialize_f64, [DelegatedFrom::F64])
+                rbwnat_de_simple_with_type_check!(deserialize_f64, [SerdeType::F64])
             }
             DataTypeNode::String => {
                 rbwnat_de_simple_with_type_check!(
                     deserialize_str,
-                    [DelegatedFrom::Str, DelegatedFrom::String]
+                    [SerdeType::Str, SerdeType::String]
                 )
             }
             DataTypeNode::FixedString(len) => match self.last_delegated_from {
-                DelegatedFrom::Bytes => visitor.visit_bytes(self.row_binary.read_slice(*len)?),
-                DelegatedFrom::ByteBuf => visitor.visit_byte_buf(self.row_binary.read_vec(*len)?),
+                SerdeType::Bytes => visitor.visit_bytes(self.row_binary.read_slice(*len)?),
+                SerdeType::ByteBuf => visitor.visit_byte_buf(self.row_binary.read_vec(*len)?),
                 _ => unreachable!(),
             },
             DataTypeNode::UUID => {
                 rbwnat_de_simple_with_type_check!(
                     deserialize_str,
-                    [DelegatedFrom::Str, DelegatedFrom::String]
+                    [SerdeType::Str, SerdeType::String]
                 )
             }
             DataTypeNode::Date => {
-                rbwnat_de_simple_with_type_check!(deserialize_u16, [DelegatedFrom::U16])
+                rbwnat_de_simple_with_type_check!(deserialize_u16, [SerdeType::U16])
             }
             DataTypeNode::Date32 => {
-                rbwnat_de_simple_with_type_check!(deserialize_i32, [DelegatedFrom::I32])
+                rbwnat_de_simple_with_type_check!(deserialize_i32, [SerdeType::I32])
             }
             DataTypeNode::DateTime { .. } => {
-                rbwnat_de_simple_with_type_check!(deserialize_u32, [DelegatedFrom::U32])
+                rbwnat_de_simple_with_type_check!(deserialize_u32, [SerdeType::U32])
             }
             DataTypeNode::DateTime64 { .. } => {
-                rbwnat_de_simple_with_type_check!(deserialize_i64, [DelegatedFrom::I64])
+                rbwnat_de_simple_with_type_check!(deserialize_i64, [SerdeType::I64])
             }
             DataTypeNode::IPv4 => {
-                rbwnat_de_simple_with_type_check!(deserialize_u32, [DelegatedFrom::U32])
+                rbwnat_de_simple_with_type_check!(deserialize_u32, [SerdeType::U32])
             }
             DataTypeNode::IPv6 => self.row_binary.deserialize_tuple(16, visitor),
 
             DataTypeNode::Array(inner_type) => {
-                self.check_data_type_is_allowed(&[DelegatedFrom::Seq])?;
+                self.check_data_type_is_allowed(&[SerdeType::Seq])?;
                 let len = self.row_binary.read_size()?;
                 self.set_inner_data_type_state(inner_type);
 
@@ -431,7 +355,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Bool, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Bool, visitor)
     }
 
     #[inline]
@@ -439,7 +363,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::I8, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::I8, visitor)
     }
 
     #[inline]
@@ -447,7 +371,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::I16, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::I16, visitor)
     }
 
     #[inline]
@@ -455,7 +379,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::I32, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::I32, visitor)
     }
 
     #[inline]
@@ -463,7 +387,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::I64, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::I64, visitor)
     }
 
     #[inline]
@@ -471,7 +395,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::I128, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::I128, visitor)
     }
 
     #[inline]
@@ -479,7 +403,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::U8, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::U8, visitor)
     }
 
     #[inline]
@@ -487,7 +411,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::U16, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::U16, visitor)
     }
 
     #[inline]
@@ -495,7 +419,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::U32, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::U32, visitor)
     }
 
     #[inline]
@@ -503,7 +427,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::U64, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::U64, visitor)
     }
 
     #[inline]
@@ -511,7 +435,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::U128, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::U128, visitor)
     }
 
     #[inline]
@@ -519,7 +443,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::F32, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::F32, visitor)
     }
 
     #[inline]
@@ -527,7 +451,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::F64, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::F64, visitor)
     }
 
     #[inline]
@@ -535,7 +459,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Char, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Char, visitor)
     }
 
     #[inline]
@@ -543,7 +467,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Str, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Str, visitor)
     }
 
     #[inline]
@@ -551,7 +475,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::String, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::String, visitor)
     }
 
     #[inline]
@@ -559,7 +483,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Bytes, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Bytes, visitor)
     }
 
     #[inline]
@@ -567,7 +491,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::ByteBuf, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::ByteBuf, visitor)
     }
 
     #[inline]
@@ -575,7 +499,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Option, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Option, visitor)
     }
 
     #[inline]
@@ -583,7 +507,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Unit, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Unit, visitor)
     }
 
     #[inline]
@@ -595,7 +519,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::UnitStruct, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::UnitStruct, visitor)
     }
 
     #[inline]
@@ -607,7 +531,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::NewtypeStruct, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::NewtypeStruct, visitor)
     }
 
     #[inline]
@@ -615,7 +539,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Seq, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Seq, visitor)
     }
 
     #[inline]
@@ -627,7 +551,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Tuple, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Tuple, visitor)
     }
 
     #[inline]
@@ -640,7 +564,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::TupleStruct, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::TupleStruct, visitor)
     }
 
     #[inline]
@@ -648,7 +572,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Map, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Map, visitor)
     }
 
     #[inline]
@@ -705,7 +629,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Enum, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Enum, visitor)
     }
 
     #[inline]
@@ -713,7 +637,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::Identifier, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::Identifier, visitor)
     }
 
     #[inline]
@@ -721,7 +645,7 @@ impl<'data> Deserializer<'data> for &mut RowBinaryWithNamesAndTypesDeserializer<
     where
         V: Visitor<'data>,
     {
-        rbwnat_deserialize_any!(self, DelegatedFrom::IgnoredAny, visitor)
+        rbwnat_deserialize_any!(self, SerdeType::IgnoredAny, visitor)
     }
 
     #[inline]

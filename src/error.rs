@@ -53,6 +53,8 @@ pub enum Error {
         unexpected_type: String,
         all_columns: String,
     },
+    #[error("invalid column data type: {0}")]
+    InvalidColumnDataType(String),
     #[error(
         "too many struct fields: trying to read more columns than expected {0}. All columns: {1:?}"
     )]

@@ -6,11 +6,17 @@ use std::fmt::{Display, Formatter};
 pub struct Column {
     pub name: String,
     pub data_type: DataTypeNode,
+    pub type_hints: Vec<DataTypeHint>,
 }
 
 impl Column {
     pub fn new(name: String, data_type: DataTypeNode) -> Self {
-        Self { name, data_type }
+        let type_hints = data_type.get_type_hints();
+        Self {
+            name,
+            data_type,
+            type_hints,
+        }
     }
 }
 
@@ -70,6 +76,125 @@ pub enum DataTypeNode {
     Dynamic,
     JSON,
     // TODO: Geo
+}
+
+// TODO - should be the same top-levels as DataTypeNode;
+//  gen from DataTypeNode via macro maybe?
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum DataTypeHint {
+    Bool,
+
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt64,
+    UInt128,
+    UInt256,
+
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Int128,
+    Int256,
+
+    Float32,
+    Float64,
+    BFloat16,
+    Decimal(DecimalSize),
+
+    String,
+    FixedString(usize),
+    UUID,
+
+    Date,
+    Date32,
+    DateTime,
+    DateTime64,
+
+    IPv4,
+    IPv6,
+
+    Nullable,
+    LowCardinality,
+
+    Array,
+    Tuple,
+    Map,
+    Enum,
+
+    AggregateFunction,
+
+    Variant,
+    Dynamic,
+    JSON,
+    // TODO: Geo
+}
+
+impl Display for DataTypeHint {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataTypeHint::Bool => write!(f, "Bool"),
+            DataTypeHint::UInt8 => write!(f, "UInt8"),
+            DataTypeHint::UInt16 => write!(f, "UInt16"),
+            DataTypeHint::UInt32 => write!(f, "UInt32"),
+            DataTypeHint::UInt64 => write!(f, "UInt64"),
+            DataTypeHint::UInt128 => write!(f, "UInt128"),
+            DataTypeHint::UInt256 => write!(f, "UInt256"),
+            DataTypeHint::Int8 => write!(f, "Int8"),
+            DataTypeHint::Int16 => write!(f, "Int16"),
+            DataTypeHint::Int32 => write!(f, "Int32"),
+            DataTypeHint::Int64 => write!(f, "Int64"),
+            DataTypeHint::Int128 => write!(f, "Int128"),
+            DataTypeHint::Int256 => write!(f, "Int256"),
+            DataTypeHint::Float32 => write!(f, "Float32"),
+            DataTypeHint::Float64 => write!(f, "Float64"),
+            DataTypeHint::BFloat16 => write!(f, "BFloat16"),
+            DataTypeHint::Decimal(size) => write!(f, "Decimal{}", size),
+            DataTypeHint::String => write!(f, "String"),
+            DataTypeHint::FixedString(size) => write!(f, "FixedString({})", size),
+            DataTypeHint::UUID => write!(f, "UUID"),
+            DataTypeHint::Date => write!(f, "Date"),
+            DataTypeHint::Date32 => write!(f, "Date32"),
+            DataTypeHint::DateTime => write!(f, "DateTime"),
+            DataTypeHint::DateTime64 => write!(f, "DateTime64"),
+            DataTypeHint::IPv4 => write!(f, "IPv4"),
+            DataTypeHint::IPv6 => write!(f, "IPv6"),
+            DataTypeHint::Nullable => write!(f, "Nullable"),
+            DataTypeHint::LowCardinality => write!(f, "LowCardinality"),
+            DataTypeHint::Array => {
+                write!(f, "Array")
+            }
+            DataTypeHint::Tuple => {
+                write!(f, "Tuple")
+            }
+            DataTypeHint::Map => {
+                write!(f, "Map")
+            }
+            DataTypeHint::Enum => {
+                write!(f, "Enum")
+            }
+            DataTypeHint::AggregateFunction => {
+                write!(f, "AggregateFunction")
+            }
+            DataTypeHint::Variant => {
+                write!(f, "Variant")
+            }
+            DataTypeHint::Dynamic => {
+                write!(f, "Dynamic")
+            }
+            DataTypeHint::JSON => {
+                write!(f, "JSON")
+            }
+        }
+    }
+}
+
+impl Into<String> for DataTypeHint {
+    fn into(self) -> String {
+        self.to_string()
+    }
 }
 
 macro_rules! data_type_is {
@@ -138,6 +263,91 @@ impl DataTypeNode {
         }
     }
 
+    pub fn get_type_hints_internal(&self, hints: &mut Vec<DataTypeHint>) {
+        match self {
+            DataTypeNode::Bool => hints.push(DataTypeHint::Bool),
+            DataTypeNode::UInt8 => hints.push(DataTypeHint::UInt8),
+            DataTypeNode::UInt16 => hints.push(DataTypeHint::UInt16),
+            DataTypeNode::UInt32 => hints.push(DataTypeHint::UInt32),
+            DataTypeNode::UInt64 => hints.push(DataTypeHint::UInt64),
+            DataTypeNode::UInt128 => hints.push(DataTypeHint::UInt128),
+            DataTypeNode::UInt256 => hints.push(DataTypeHint::UInt256),
+            DataTypeNode::Int8 => hints.push(DataTypeHint::Int8),
+            DataTypeNode::Int16 => hints.push(DataTypeHint::Int16),
+            DataTypeNode::Int32 => hints.push(DataTypeHint::Int32),
+            DataTypeNode::Int64 => hints.push(DataTypeHint::Int64),
+            DataTypeNode::Int128 => hints.push(DataTypeHint::Int128),
+            DataTypeNode::Int256 => hints.push(DataTypeHint::Int256),
+            DataTypeNode::Float32 => hints.push(DataTypeHint::Float32),
+            DataTypeNode::Float64 => hints.push(DataTypeHint::Float64),
+            DataTypeNode::BFloat16 => hints.push(DataTypeHint::BFloat16),
+            DataTypeNode::Decimal(_, _, size) => {
+                hints.push(DataTypeHint::Decimal(size.clone()));
+            }
+            DataTypeNode::String => hints.push(DataTypeHint::String),
+            DataTypeNode::FixedString(size) => hints.push(DataTypeHint::FixedString(*size)),
+            DataTypeNode::UUID => hints.push(DataTypeHint::UUID),
+            DataTypeNode::Date => hints.push(DataTypeHint::Date),
+            DataTypeNode::Date32 => hints.push(DataTypeHint::Date32),
+            DataTypeNode::DateTime(_) => hints.push(DataTypeHint::DateTime),
+            DataTypeNode::DateTime64(_, _) => hints.push(DataTypeHint::DateTime64),
+            DataTypeNode::IPv4 => hints.push(DataTypeHint::IPv4),
+            DataTypeNode::IPv6 => hints.push(DataTypeHint::IPv6),
+            DataTypeNode::Nullable(inner) => {
+                hints.push(DataTypeHint::Nullable);
+                inner.get_type_hints_internal(hints);
+            }
+            DataTypeNode::LowCardinality(inner) => {
+                hints.push(DataTypeHint::LowCardinality);
+                inner.get_type_hints_internal(hints);
+            }
+            DataTypeNode::Array(inner) => {
+                hints.push(DataTypeHint::Array);
+                inner.get_type_hints_internal(hints);
+            }
+            DataTypeNode::Tuple(elements) => {
+                hints.push(DataTypeHint::Tuple);
+                for element in elements {
+                    element.get_type_hints_internal(hints);
+                }
+            }
+            DataTypeNode::Map(key, value) => {
+                hints.push(DataTypeHint::Map);
+                key.get_type_hints_internal(hints);
+                value.get_type_hints_internal(hints);
+            }
+            DataTypeNode::Enum(_, _) => hints.push(DataTypeHint::Enum),
+            DataTypeNode::AggregateFunction(_, args) => {
+                hints.push(DataTypeHint::AggregateFunction);
+                for arg in args {
+                    arg.get_type_hints_internal(hints);
+                }
+            }
+            DataTypeNode::Variant(types) => {
+                hints.push(DataTypeHint::Variant);
+                for ty in types {
+                    ty.get_type_hints_internal(hints);
+                }
+            }
+            DataTypeNode::Dynamic => hints.push(DataTypeHint::Dynamic),
+            DataTypeNode::JSON => hints.push(DataTypeHint::JSON),
+        }
+    }
+
+    pub fn get_type_hints(&self) -> Vec<DataTypeHint> {
+        let capacity = match self {
+            DataTypeNode::Tuple(elements) | DataTypeNode::Variant(elements) => elements.len() + 1,
+            DataTypeNode::Map(_, _) => 3,
+            DataTypeNode::Nullable(_)
+            | DataTypeNode::LowCardinality(_)
+            | DataTypeNode::Array(_) => 2,
+            _ => 1,
+        };
+        let mut vec = Vec::with_capacity(capacity);
+        self.get_type_hints_internal(&mut vec);
+        vec
+    }
+
     data_type_is!(is_bool, DataTypeNode::Bool);
     data_type_is!(is_uint8, DataTypeNode::UInt8);
     data_type_is!(is_uint16, DataTypeNode::UInt16);
@@ -201,6 +411,9 @@ impl Display for DataTypeNode {
             Float32 => "Float32".to_string(),
             Float64 => "Float64".to_string(),
             BFloat16 => "BFloat16".to_string(),
+            Decimal(precision, scale, _) => {
+                format!("Decimal({}, {})", precision, scale)
+            }
             String => "String".to_string(),
             UUID => "UUID".to_string(),
             Date => "Date".to_string(),
@@ -223,9 +436,6 @@ impl Display for DataTypeNode {
             }
             LowCardinality(inner) => {
                 format!("LowCardinality({})", inner.to_string())
-            }
-            Decimal(precision, scale, _) => {
-                format!("Decimal({}, {})", precision, scale)
             }
             Enum(enum_type, values) => {
                 let mut values_vec = values.iter().collect::<Vec<_>>();
@@ -313,6 +523,17 @@ pub enum DecimalSize {
     Int256,
 }
 
+impl Display for DecimalSize {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DecimalSize::Int32 => write!(f, "32"),
+            DecimalSize::Int64 => write!(f, "64"),
+            DecimalSize::Int128 => write!(f, "128"),
+            DecimalSize::Int256 => write!(f, "256"),
+        }
+    }
+}
+
 impl DecimalSize {
     pub(crate) fn new(precision: u8) -> Result<Self, ParserError> {
         if precision <= 9 {
@@ -361,11 +582,11 @@ fn parse_fixed_string(input: &str) -> Result<DataTypeNode, ParserError> {
     if input.len() >= 14 {
         let size_str = &input[12..input.len() - 1];
         let size = size_str.parse::<usize>().map_err(|err| {
-            ParserError::TypeParsingError(format!(
-                "Invalid FixedString size, expected a valid number. Underlying error: {}, input: {}, size_str: {}",
-                err, input, size_str
-            ))
-        })?;
+                ParserError::TypeParsingError(format!(
+                    "Invalid FixedString size, expected a valid number. Underlying error: {}, input: {}, size_str: {}",
+                    err, input, size_str
+                ))
+            })?;
         if size == 0 {
             return Err(ParserError::TypeParsingError(format!(
                 "Invalid FixedString size, expected a positive number, got zero. Input: {}",
@@ -728,10 +949,10 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, ParserErro
 
     if names.len() != indices.len() {
         return Err(ParserError::TypeParsingError(format!(
-            "Invalid Enum format - expected the same number of names and indices, got names: {}, indices: {}",
-            names.join(", "),
-            indices.iter().map(|index| index.to_string()).collect::<Vec<String>>().join(", "),
-        )));
+                "Invalid Enum format - expected the same number of names and indices, got names: {}, indices: {}",
+                names.join(", "),
+                indices.iter().map(|index| index.to_string()).collect::<Vec<String>>().join(", "),
+            )));
     }
 
     Ok(indices
