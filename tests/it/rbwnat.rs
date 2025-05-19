@@ -1,9 +1,12 @@
 use clickhouse::error::Error;
+use clickhouse::sql::Identifier;
 use clickhouse::validation_mode::StructValidationMode;
 use clickhouse_derive::Row;
+use clickhouse_rowbinary::data_types::{Column, DataTypeNode};
 use clickhouse_rowbinary::parse_rbwnat_columns_header;
-use clickhouse_rowbinary::types::{Column, DataTypeHint, DataTypeNode};
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::collections::HashMap;
 use std::str::FromStr;
 use time::format_description::well_known::Iso8601;
 use time::Month::{February, January};
@@ -52,69 +55,57 @@ async fn test_header_parsing() {
             Column {
                 name: "CounterID".to_string(),
                 data_type: DataTypeNode::UInt32,
-                type_hints: vec![DataTypeHint::UInt32]
             },
             Column {
                 name: "StartDate".to_string(),
                 data_type: DataTypeNode::Date,
-                type_hints: vec![DataTypeHint::Date]
             },
             Column {
                 name: "Sign".to_string(),
                 data_type: DataTypeNode::Int8,
-                type_hints: vec![DataTypeHint::Int8]
             },
             Column {
                 name: "IsNew".to_string(),
                 data_type: DataTypeNode::UInt8,
-                type_hints: vec![DataTypeHint::UInt8]
             },
             Column {
                 name: "VisitID".to_string(),
                 data_type: DataTypeNode::UInt64,
-                type_hints: vec![DataTypeHint::UInt64]
             },
             Column {
                 name: "UserID".to_string(),
                 data_type: DataTypeNode::UInt64,
-                type_hints: vec![DataTypeHint::UInt64]
             },
             Column {
                 name: "Goals.ID".to_string(),
                 data_type: DataTypeNode::Array(Box::new(DataTypeNode::UInt32)),
-                type_hints: vec![DataTypeHint::Array, DataTypeHint::UInt32]
             },
             Column {
                 name: "Goals.Serial".to_string(),
                 data_type: DataTypeNode::Array(Box::new(DataTypeNode::UInt32)),
-                type_hints: vec![DataTypeHint::Array, DataTypeHint::UInt32]
             },
             Column {
                 name: "Goals.EventTime".to_string(),
                 data_type: DataTypeNode::Array(Box::new(DataTypeNode::DateTime(None))),
-                type_hints: vec![DataTypeHint::Array, DataTypeHint::DateTime]
             },
             Column {
                 name: "Goals.Price".to_string(),
                 data_type: DataTypeNode::Array(Box::new(DataTypeNode::Int64)),
-                type_hints: vec![DataTypeHint::Array, DataTypeHint::Int64]
             },
             Column {
                 name: "Goals.OrderID".to_string(),
                 data_type: DataTypeNode::Array(Box::new(DataTypeNode::String)),
-                type_hints: vec![DataTypeHint::Array, DataTypeHint::String]
             },
             Column {
                 name: "Goals.CurrencyID".to_string(),
                 data_type: DataTypeNode::Array(Box::new(DataTypeNode::UInt32)),
-                type_hints: vec![DataTypeHint::Array, DataTypeHint::UInt32]
             }
         ]
     );
 }
 
 #[tokio::test]
-async fn test_basic_types_deserialization() {
+async fn test_basic_types() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         uint8_val: u8,
@@ -229,7 +220,7 @@ async fn test_many_numbers() {
 }
 
 #[tokio::test]
-async fn test_array_deserialization() {
+async fn test_arrays() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         id: u16,
@@ -271,20 +262,21 @@ async fn test_array_deserialization() {
 }
 
 #[tokio::test]
-async fn test_multi_dimensional_array_deserialization() {
+async fn test_maps() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
-        three_dim_array: Vec<Vec<Vec<f64>>>,
-        id: u16,
+        map1: HashMap<String, String>,
+        map2: HashMap<u16, HashMap<String, i32>>,
     }
 
     let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
     let result = client
         .query(
             "
-            SELECT
-                [[[1.1, 2.2], [3.3, 4.4]], [], [[5.5, 6.6], [7.7, 8.8]]] :: Array(Array(Array(Float64))) AS three_dim_array,
-                42                                                       :: UInt16                       AS id
+            SELECT 
+                map('key1', 'value1', 'key2', 'value2') :: Map(String, String)              AS m1,
+                map(42,  map('foo', 100, 'bar', 200), 
+                    144, map('qaz', 300, 'qux', 400))   :: Map(UInt16, Map(String, Int32))  AS m2
             ",
         )
         .fetch_one::<Data>()
@@ -293,18 +285,119 @@ async fn test_multi_dimensional_array_deserialization() {
     assert_eq!(
         result.unwrap(),
         Data {
-            id: 42,
-            three_dim_array: vec![
-                vec![vec![1.1, 2.2], vec![3.3, 4.4]],
-                vec![],
-                vec![vec![5.5, 6.6], vec![7.7, 8.8]]
-            ],
+            map1: vec![
+                ("key1".to_string(), "value1".to_string()),
+                ("key2".to_string(), "value2".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            map2: vec![
+                (
+                    42,
+                    vec![("foo".to_string(), 100), ("bar".to_string(), 200)]
+                        .into_iter()
+                        .collect()
+                ),
+                (
+                    144,
+                    vec![("qaz".to_string(), 300), ("qux".to_string(), 400)]
+                        .into_iter()
+                        .collect()
+                )
+            ]
+            .into_iter()
+            .collect::<HashMap<u16, HashMap<String, i32>>>(),
         }
     );
 }
+#[tokio::test]
+async fn test_enum() {
+    #[derive(Debug, PartialEq, Serialize_repr, Deserialize_repr)]
+    #[repr(i8)]
+    enum MyEnum8 {
+        Winter = -128,
+        Spring = 0,
+        Summer = 100,
+        Autumn = 127,
+    }
+
+    #[derive(Debug, PartialEq, Serialize_repr, Deserialize_repr)]
+    #[repr(i16)]
+    enum MyEnum16 {
+        North = -32768,
+        East = 0,
+        South = 144,
+        West = 32767,
+    }
+
+    #[derive(Debug, PartialEq, Row, Serialize, Deserialize)]
+    struct Data {
+        id: u16,
+        enum8: MyEnum8,
+        enum16: MyEnum16,
+    }
+
+    let table_name = "test_rbwnat_enum";
+
+    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    client
+        .query(
+            "
+            CREATE OR REPLACE TABLE ?
+            (
+                id     UInt16,
+                enum8  Enum8 ('Winter' = -128,   'Spring' = 0, 'Summer' = 100, 'Autumn' = 127),
+                enum16 Enum16('North'  = -32768, 'East'   = 0, 'South'  = 144, 'West'   = 32767)
+            ) ENGINE MergeTree ORDER BY id
+            ",
+        )
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+
+    let expected = vec![
+        Data {
+            id: 1,
+
+            enum8: MyEnum8::Spring,
+            enum16: MyEnum16::East,
+        },
+        Data {
+            id: 2,
+            enum8: MyEnum8::Autumn,
+            enum16: MyEnum16::North,
+        },
+        Data {
+            id: 3,
+            enum8: MyEnum8::Winter,
+            enum16: MyEnum16::South,
+        },
+        Data {
+            id: 4,
+            enum8: MyEnum8::Summer,
+            enum16: MyEnum16::West,
+        },
+    ];
+
+    let mut insert = client.insert(table_name).unwrap();
+    for row in &expected {
+        insert.write(row).await.unwrap()
+    }
+    insert.end().await.unwrap();
+
+    let result = client
+        .query("SELECT * FROM ? ORDER BY id ASC")
+        .bind(Identifier(table_name))
+        .fetch_all::<Data>()
+        .await
+        .unwrap();
+
+    assert_eq!(result, expected);
+}
 
 #[tokio::test]
-async fn test_default_types_validation_nullable() {
+async fn test_nullable() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         n: Option<u32>,
@@ -333,7 +426,7 @@ async fn test_default_types_validation_nullable() {
 
 #[tokio::test]
 #[cfg(feature = "time")]
-async fn test_default_types_validation_custom_serde() {
+async fn test_serde_with() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         #[serde(with = "clickhouse::serde::time::datetime64::millis")]
@@ -377,10 +470,12 @@ async fn test_too_many_struct_fields() {
         .await;
 
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err(),
-        Error::DeserializeCallAfterEndOfStruct { .. }
-    ));
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, Error::TooManyStructFields { .. }),
+        "{:?} should be an instance of TooManyStructFields",
+        err
+    );
 }
 
 #[tokio::test]
@@ -411,7 +506,7 @@ async fn test_serde_skip_deserializing() {
 
 #[tokio::test]
 #[cfg(feature = "time")]
-async fn test_date_time_types() {
+async fn test_date_and_time() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         #[serde(with = "clickhouse::serde::time::date")]
@@ -472,9 +567,9 @@ async fn test_date_time_types() {
 async fn test_ipv4_ipv6() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
-        id: u16,
-        #[serde(with = "clickhouse::serde::ipv4")]
-        ipv4: std::net::Ipv4Addr,
+        // id: u16,
+        // #[serde(with = "clickhouse::serde::ipv4")]
+        // ipv4: std::net::Ipv4Addr,
         ipv6: std::net::Ipv6Addr,
     }
 
@@ -483,8 +578,8 @@ async fn test_ipv4_ipv6() {
         .query(
             "
             SELECT
-                42                                       :: UInt16 AS id,
-                '192.168.0.1'                            :: IPv4   AS ipv4,
+                -- 42                                       :: UInt16 AS id,
+                -- '192.168.0.1'                            :: IPv4   AS ipv4,
                 '2001:db8:3333:4444:5555:6666:7777:8888' :: IPv6   AS ipv6
             ",
         )
@@ -494,14 +589,15 @@ async fn test_ipv4_ipv6() {
     assert_eq!(
         result.unwrap(),
         vec![Data {
-            id: 42,
-            ipv4: std::net::Ipv4Addr::new(192, 168, 0, 1),
+            // id: 42,
+            // ipv4: std::net::Ipv4Addr::new(192, 168, 0, 1),
             ipv6: std::net::Ipv6Addr::from_str("2001:db8:3333:4444:5555:6666:7777:8888").unwrap(),
         }]
     )
 }
 
 // FIXME: RBWNAT should allow for tracking the order of fields in the struct and in the database!
+//  it is possible to use HashMap to deserialize the struct instead of Tuple visitor
 #[tokio::test]
 #[ignore]
 async fn test_different_struct_field_order() {

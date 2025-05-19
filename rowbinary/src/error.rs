@@ -1,3 +1,4 @@
+// FIXME: better errors
 #[derive(Debug, thiserror::Error)]
 pub enum ParserError {
     #[error("Not enough data: {0}")]

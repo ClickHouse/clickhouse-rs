@@ -4,7 +4,6 @@ use bytes::Buf;
 
 #[inline]
 pub(crate) fn decode_string(buffer: &mut &[u8]) -> Result<String, ParserError> {
-    // println!("[decode_string] buffer: {:?}", buffer);
     let length = decode_leb128(buffer)? as usize;
     if length == 0 {
         return Ok("".to_string());

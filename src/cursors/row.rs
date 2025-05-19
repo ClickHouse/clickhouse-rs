@@ -6,8 +6,8 @@ use crate::{
     response::Response,
     rowbinary,
 };
+use clickhouse_rowbinary::data_types::Column;
 use clickhouse_rowbinary::parse_rbwnat_columns_header;
-use clickhouse_rowbinary::types::Column;
 use serde::Deserialize;
 use std::marker::PhantomData;
 
@@ -56,6 +56,7 @@ impl<T> RowCursor<T> {
                 let mut slice = super::workaround_51132(self.bytes.slice());
                 let deserialize_result = if should_validate {
                     match &self.columns {
+                        // TODO: can it be moved to `new` instead?
                         None => {
                             let columns = parse_rbwnat_columns_header(&mut slice)?;
                             self.bytes.set_remaining(slice.len());

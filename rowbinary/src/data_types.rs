@@ -6,17 +6,11 @@ use std::fmt::{Display, Formatter};
 pub struct Column {
     pub name: String,
     pub data_type: DataTypeNode,
-    pub type_hints: Vec<DataTypeHint>,
 }
 
 impl Column {
     pub fn new(name: String, data_type: DataTypeNode) -> Self {
-        let type_hints = data_type.get_type_hints();
-        Self {
-            name,
-            data_type,
-            type_hints,
-        }
+        Self { name, data_type }
     }
 }
 

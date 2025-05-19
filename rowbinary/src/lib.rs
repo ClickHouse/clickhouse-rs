@@ -1,12 +1,12 @@
+use crate::data_types::{Column, DataTypeNode};
 use crate::decoders::decode_string;
 use crate::error::ParserError;
 use crate::leb128::decode_leb128;
-use crate::types::{Column, DataTypeNode};
 
+pub mod data_types;
 pub mod decoders;
 pub mod error;
 pub mod leb128;
-pub mod types;
 
 pub fn parse_rbwnat_columns_header(bytes: &mut &[u8]) -> Result<Vec<Column>, ParserError> {
     let num_columns = decode_leb128(bytes)?;

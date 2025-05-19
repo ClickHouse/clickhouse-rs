@@ -1,8 +1,10 @@
 use crate::error::{Error, Result};
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
-use crate::rowbinary::SerdeType;
+use crate::rowbinary::validation::SerdeType;
+use crate::rowbinary::validation::{DataTypeValidator, ValidateDataType};
 use bytes::Buf;
-use clickhouse_rowbinary::types::{Column, DataTypeHint};
+use clickhouse_rowbinary::data_types::{Column, DataTypeHint};
+use serde::de::MapAccess;
 use serde::{
     de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
     Deserialize,
@@ -15,9 +17,11 @@ use std::{convert::TryFrom, mem, str};
 /// performant generated code than `(&[u8]) -> Result<(T, usize)>` and even
 /// `(&[u8], &mut Option<T>) -> Result<usize>`.
 pub(crate) fn deserialize_from<'data, T: Deserialize<'data>>(input: &mut &'data [u8]) -> Result<T> {
+    println!("deserialize_from call");
+
     let mut deserializer = RowBinaryDeserializer {
         input,
-        columns_validator: (),
+        validator: (),
     };
     T::deserialize(&mut deserializer)
 }
@@ -31,154 +35,27 @@ pub(crate) fn deserialize_from_and_validate<'data, 'cursor, T: Deserialize<'data
 ) -> Result<T> {
     let mut deserializer = RowBinaryDeserializer {
         input,
-        columns_validator: ColumnsValidator {
-            columns,
-            col_idx: 0,
-            type_hint_idx: 0,
-            nesting_level: 0,
-        },
+        validator: DataTypeValidator::new(columns),
     };
-    T::deserialize(&mut deserializer)
+    T::deserialize(&mut deserializer).inspect_err(|e| {
+        println!("deserialize_from_and_validate call failed: {:?}", e);
+    })
 }
 
-struct ColumnsValidator<'cursor> {
-    columns: &'cursor [Column],
-    col_idx: usize,
-    type_hint_idx: usize,
-    nesting_level: usize,
-}
-
-impl<'cursor> ColumnsValidator<'cursor> {
-    #[inline]
-    fn advance(&mut self) {
-        self.col_idx += 1;
-        self.type_hint_idx = 0;
-    }
-}
-
-pub(crate) trait ValidateDataType {
-    fn validate(
-        &mut self,
-        serde_type: &'static SerdeType,
-        allowed: &'static [DataTypeHint],
-        has_inner_type: bool,
-    ) -> Result<()>;
-    fn skip_next(&mut self) -> ();
-    fn increase_nesting(&mut self) -> ();
-    fn decrease_nesting(&mut self) -> ();
-}
-
-impl ValidateDataType for () {
-    #[inline]
-    fn validate(
-        &mut self,
-        _serde_type: &'static SerdeType,
-        _allowed: &'static [DataTypeHint],
-        _has_inner_type: bool,
-    ) -> Result<()> {
-        Ok(())
-    }
-    #[inline]
-    fn skip_next(&mut self) -> () {}
-    #[inline]
-    fn increase_nesting(&mut self) -> () {}
-    #[inline]
-    fn decrease_nesting(&mut self) -> () {}
-}
-
-impl<'cursor> ValidateDataType for ColumnsValidator<'cursor> {
-    #[inline]
-    fn validate(
-        &mut self,
-        serde_type: &'static SerdeType,
-        allowed: &'static [DataTypeHint],
-        has_inner_type: bool,
-    ) -> Result<()> {
-        println!(
-            "Validating column {}, type hint {}, serde type {}, allowed {:?}, nesting level {}",
-            self.col_idx, self.type_hint_idx, serde_type, allowed, self.nesting_level
-        );
-        if self.col_idx >= self.columns.len() {
-            return Err(Error::TooManyStructFields(
-                self.columns.len(),
-                self.columns.into(),
-            ));
-        }
-        if has_inner_type {
-            self.nesting_level += 1;
-            println!("Increased nesting level to {}", self.nesting_level);
-        }
-        let current_column = &self.columns[self.col_idx];
-        if self.type_hint_idx >= current_column.type_hints.len() {
-            // if self.nesting_level == 0 {
-            //     println!("Advancing #1");
-            //     self.advance();
-            // }
-            println!(
-                "Skipping check for column {}, type hint {}, nesting level {}",
-                current_column.name, self.type_hint_idx, self.nesting_level
-            );
-            return Ok(());
-        }
-        let db_type_hint = &current_column.type_hints[self.type_hint_idx];
-        if allowed.contains(db_type_hint) {
-            // self.type_hint_idx += 1;
-            if self.nesting_level == 0 {
-                println!("Advancing #2");
-                self.advance();
-            } else {
-                self.type_hint_idx += 1;
-            }
-            println!(
-                "Checked column {}, type hint {}, nesting level {}",
-                current_column.name, self.type_hint_idx, self.nesting_level
-            );
-            Ok(())
-        } else {
-            Err(Error::InvalidColumnDataType(
-                format!("column {} {} requires deserialization from {} as {}, but serde call allowed only for {:?}",
-                        current_column.name, current_column.data_type, db_type_hint, serde_type, allowed)))
-        }
-    }
-
-    #[inline]
-    fn skip_next(&mut self) {
-        self.type_hint_idx += 1;
-    }
-
-    #[inline]
-    fn increase_nesting(&mut self) {
-        self.nesting_level += 1;
-    }
-
-    #[inline]
-    fn decrease_nesting(&mut self) {
-        println!("Decreasing nesting level from {}", self.nesting_level);
-        if self.nesting_level == 1 {
-            self.advance();
-        } else if self.nesting_level > 0 {
-            self.nesting_level -= 1;
-        } else {
-            panic!("decrease_nesting called when nesting level is already 0, current column index {}, type hint index {}, all columns: {:?}",
-                   self.col_idx, self.type_hint_idx, self.columns);
-        }
-    }
-}
-
-/// A deserializer for the RowBinary format.
+/// A deserializer for the RowBinary(WithNamesAndTypes) format.
 ///
 /// See https://clickhouse.com/docs/en/interfaces/formats#rowbinary for details.
-pub(crate) struct RowBinaryDeserializer<'cursor, 'data, Columns = ()>
+pub(crate) struct RowBinaryDeserializer<'cursor, 'data, Validator = ()>
 where
-    Columns: ValidateDataType,
+    Validator: ValidateDataType,
 {
-    pub(crate) columns_validator: Columns,
+    pub(crate) validator: Validator,
     pub(crate) input: &'cursor mut &'data [u8],
 }
 
-impl<'data, Columns> RowBinaryDeserializer<'_, 'data, Columns>
+impl<'data, Validator> RowBinaryDeserializer<'_, 'data, Validator>
 where
-    Columns: ValidateDataType,
+    Validator: ValidateDataType,
 {
     pub(crate) fn read_vec(&mut self, size: usize) -> Result<Vec<u8>> {
         Ok(self.read_slice(size)?.to_vec())
@@ -202,8 +79,7 @@ macro_rules! impl_num {
     ($ty:ty, $deser_method:ident, $visitor_method:ident, $reader_method:ident, $serde_type:expr, $type_hints:expr) => {
         #[inline]
         fn $deser_method<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-            self.columns_validator
-                .validate($serde_type, $type_hints, false)?;
+            self.validator.validate($serde_type, $type_hints)?;
             ensure_size(&mut self.input, mem::size_of::<$ty>())?;
             let value = self.input.$reader_method();
             visitor.$visitor_method(value)
@@ -211,9 +87,9 @@ macro_rules! impl_num {
     };
 }
 
-impl<'data, Columns> Deserializer<'data> for &mut RowBinaryDeserializer<'_, 'data, Columns>
+impl<'data, Validator> Deserializer<'data> for &mut RowBinaryDeserializer<'_, 'data, Validator>
 where
-    Columns: ValidateDataType,
+    Validator: ValidateDataType,
 {
     type Error = Error;
 
@@ -318,27 +194,34 @@ where
 
     #[inline]
     fn deserialize_any<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
+        println!("deserialize_any call");
+
         Err(Error::DeserializeAnyNotSupported)
     }
 
     #[inline]
     fn deserialize_unit<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        println!("deserialize_unit call");
+
         // TODO: revise this.
         visitor.visit_unit()
     }
 
     #[inline]
     fn deserialize_char<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
+        println!("deserialize_char call");
+
         panic!("character types are unsupported: `char`");
     }
 
     #[inline]
     fn deserialize_bool<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.columns_validator.validate(
+        println!("deserialize_bool call");
+
+        self.validator.validate(
             &SerdeType::Bool,
             // TODO: shall we allow deserialization from integers?
             &[DataTypeHint::Bool, DataTypeHint::Int8, DataTypeHint::UInt8],
-            false,
         )?;
         ensure_size(&mut self.input, 1)?;
         match self.input.get_u8() {
@@ -350,9 +233,11 @@ where
 
     #[inline]
     fn deserialize_str<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        println!("deserialize_str call");
+
         // TODO - which types to allow?
-        self.columns_validator
-            .validate(&SerdeType::String, &[DataTypeHint::String], false)?;
+        self.validator
+            .validate(&SerdeType::String, &[DataTypeHint::String])?;
         let size = self.read_size()?;
         let slice = self.read_slice(size)?;
         let str = str::from_utf8(slice).map_err(Error::from)?;
@@ -361,9 +246,11 @@ where
 
     #[inline]
     fn deserialize_string<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        println!("deserialize_string call");
+
         // TODO - which types to allow?
-        self.columns_validator
-            .validate(&SerdeType::String, &[DataTypeHint::String], false)?;
+        self.validator
+            .validate(&SerdeType::String, &[DataTypeHint::String])?;
         let size = self.read_size()?;
         let vec = self.read_vec(size)?;
         let string = String::from_utf8(vec).map_err(|err| Error::from(err.utf8_error()))?;
@@ -372,6 +259,8 @@ where
 
     #[inline]
     fn deserialize_bytes<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        println!("deserialize_bytes call");
+
         // TODO - which types to allow?
         let size = self.read_size()?;
         let slice = self.read_slice(size)?;
@@ -380,6 +269,8 @@ where
 
     #[inline]
     fn deserialize_byte_buf<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        println!("deserialize_byte_buf call");
+
         // TODO - which types to allow?
         let size = self.read_size()?;
         visitor.visit_byte_buf(self.read_vec(size)?)
@@ -387,6 +278,8 @@ where
 
     #[inline]
     fn deserialize_identifier<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        println!("deserialize_identifier call");
+
         // TODO - which types to allow?
         self.deserialize_u8(visitor)
     }
@@ -398,21 +291,25 @@ where
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        struct Access<'de, 'cursor, 'data, Columns>
+        println!("deserialize_enum call");
+
+        struct RowBinaryEnumAccess<'de, 'cursor, 'data, Validator>
         where
-            Columns: ValidateDataType,
+            Validator: ValidateDataType,
         {
-            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Columns>,
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
         }
-        struct VariantDeserializer<'de, 'cursor, 'data, Columns>
+
+        struct VariantDeserializer<'de, 'cursor, 'data, Validator>
         where
-            Columns: ValidateDataType,
+            Validator: ValidateDataType,
         {
-            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Columns>,
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
         }
-        impl<'data, Columns> VariantAccess<'data> for VariantDeserializer<'_, '_, 'data, Columns>
+
+        impl<'data, Validator> VariantAccess<'data> for VariantDeserializer<'_, '_, 'data, Validator>
         where
-            Columns: ValidateDataType,
+            Validator: ValidateDataType,
         {
             type Error = Error;
 
@@ -446,12 +343,13 @@ where
             }
         }
 
-        impl<'de, 'cursor, 'data, Columns> EnumAccess<'data> for Access<'de, 'cursor, 'data, Columns>
+        impl<'de, 'cursor, 'data, Validator> EnumAccess<'data>
+            for RowBinaryEnumAccess<'de, 'cursor, 'data, Validator>
         where
-            Columns: ValidateDataType,
+            Validator: ValidateDataType,
         {
             type Error = Error;
-            type Variant = VariantDeserializer<'de, 'cursor, 'data, Columns>;
+            type Variant = VariantDeserializer<'de, 'cursor, 'data, Validator>;
 
             fn variant_seed<T>(self, seed: T) -> Result<(T::Value, Self::Variant), Self::Error>
             where
@@ -464,24 +362,28 @@ where
                 Ok((value, deserializer))
             }
         }
-        self.columns_validator
-            .validate(&SerdeType::Enum, &[DataTypeHint::Enum], false)?;
-        visitor.visit_enum(Access { deserializer: self })
+
+        // FIXME
+        self.validator
+            .validate(&SerdeType::Enum, &[DataTypeHint::Enum])?;
+        visitor.visit_enum(RowBinaryEnumAccess { deserializer: self })
     }
 
     #[inline]
     fn deserialize_tuple<V: Visitor<'data>>(self, len: usize, visitor: V) -> Result<V::Value> {
-        struct Access<'de, 'cursor, 'data, Columns>
+        println!("deserialize_tuple call, len {}", len);
+
+        struct RowBinaryTupleAccess<'de, 'cursor, 'data, Validator>
         where
-            Columns: ValidateDataType,
+            Validator: ValidateDataType,
         {
-            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Columns>,
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
             len: usize,
         }
 
-        impl<'data, Columns> SeqAccess<'data> for Access<'_, '_, 'data, Columns>
+        impl<'data, Validator> SeqAccess<'data> for RowBinaryTupleAccess<'_, '_, 'data, Validator>
         where
-            Columns: ValidateDataType,
+            Validator: ValidateDataType,
         {
             type Error = Error;
 
@@ -503,59 +405,202 @@ where
             }
         }
 
-        visitor.visit_seq(Access {
-            deserializer: self,
+        let len = self.read_size()?;
+        let inner_data_type_validator = self
+            .validator
+            .validate(&SerdeType::Seq, &[DataTypeHint::Array, DataTypeHint::IPv6])?;
+        visitor.visit_seq(RowBinaryTupleAccess {
+            deserializer: &mut RowBinaryDeserializer {
+                input: self.input,
+                validator: inner_data_type_validator,
+            },
             len,
         })
     }
 
     #[inline]
     fn deserialize_option<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.columns_validator
-            .validate(&SerdeType::Option, &[DataTypeHint::Nullable], true)?;
+        println!("deserialize_option call");
+
         ensure_size(&mut self.input, 1)?;
+        let inner_data_type_validator = self
+            .validator
+            .validate(&SerdeType::Option, &[DataTypeHint::Nullable])?;
         match self.input.get_u8() {
-            0 => visitor.visit_some(&mut *self),
-            1 => {
-                self.columns_validator.skip_next();
-                self.columns_validator.decrease_nesting();
-                visitor.visit_none()
-            }
+            0 => visitor.visit_some(&mut RowBinaryDeserializer {
+                input: self.input,
+                validator: inner_data_type_validator,
+            }),
+            1 => visitor.visit_none(),
             v => Err(Error::InvalidTagEncoding(v as usize)),
         }
     }
 
     #[inline]
     fn deserialize_seq<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.columns_validator
-            .validate(&SerdeType::Seq, &[DataTypeHint::Array], true)?;
+        println!("deserialize_seq call");
+
+        struct RowBinarySeqAccess<'de, 'cursor, 'data, Validator>
+        where
+            Validator: ValidateDataType,
+        {
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+            len: usize,
+        }
+
+        impl<'data, Validator> SeqAccess<'data> for RowBinarySeqAccess<'_, '_, 'data, Validator>
+        where
+            Validator: ValidateDataType,
+        {
+            type Error = Error;
+
+            fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
+            where
+                T: DeserializeSeed<'data>,
+            {
+                if self.len > 0 {
+                    self.len -= 1;
+                    let value = DeserializeSeed::deserialize(seed, &mut *self.deserializer)?;
+                    Ok(Some(value))
+                } else {
+                    Ok(None)
+                }
+            }
+
+            fn size_hint(&self) -> Option<usize> {
+                Some(self.len)
+            }
+        }
+
         let len = self.read_size()?;
-        let result = self.deserialize_tuple(len, visitor);
-        self.columns_validator.decrease_nesting();
-        result
+        let inner_data_type_validator = self
+            .validator
+            .validate(&SerdeType::Seq, &[DataTypeHint::Array])?;
+        visitor.visit_seq(RowBinarySeqAccess {
+            deserializer: &mut RowBinaryDeserializer {
+                input: self.input,
+                validator: inner_data_type_validator,
+            },
+            len,
+        })
     }
 
     #[inline]
-    fn deserialize_map<V: Visitor<'data>>(self, _visitor: V) -> Result<V::Value> {
-        panic!("maps are unsupported, use `Vec<(A, B)>` instead");
+    fn deserialize_map<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        println!("deserialize_map call");
+
+        struct RowBinaryMapAccess<'de, 'cursor, 'data, Validator>
+        where
+            Validator: ValidateDataType,
+        {
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+            entries_visited: usize,
+            len: usize,
+        }
+
+        impl<'data, Validator> MapAccess<'data> for RowBinaryMapAccess<'_, '_, 'data, Validator>
+        where
+            Validator: ValidateDataType,
+        {
+            type Error = Error;
+
+            fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+            where
+                K: DeserializeSeed<'data>,
+            {
+                if self.entries_visited >= self.len {
+                    return Ok(None);
+                }
+                self.entries_visited += 1;
+                seed.deserialize(&mut *self.deserializer).map(Some)
+            }
+
+            fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
+            where
+                V: DeserializeSeed<'data>,
+            {
+                seed.deserialize(&mut *self.deserializer)
+            }
+
+            fn size_hint(&self) -> Option<usize> {
+                Some(self.len)
+            }
+        }
+
+        let len = self.read_size()?;
+        let inner_data_type_validator = self
+            .validator
+            .validate(&SerdeType::Map, &[DataTypeHint::Map])?;
+        visitor.visit_map(RowBinaryMapAccess {
+            deserializer: &mut RowBinaryDeserializer {
+                input: self.input,
+                validator: inner_data_type_validator,
+            },
+            entries_visited: 0,
+            len,
+        })
     }
 
     #[inline]
     fn deserialize_struct<V: Visitor<'data>>(
         self,
-        _name: &str,
+        name: &str,
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        self.deserialize_tuple(fields.len(), visitor)
+        println!("deserialize_struct call - {}", name);
+
+        // FIXME use &'_ str, fix lifetimes
+        self.validator.set_struct_name(name.to_string());
+
+        // TODO: it should also support using HashMap to deserialize
+        //  currently just copy-pasted to prevent former `deserialize_tuple` delegation
+        struct RowBinaryStructAccess<'de, 'cursor, 'data, Validator>
+        where
+            Validator: ValidateDataType,
+        {
+            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+            len: usize,
+        }
+
+        impl<'data, Validator> SeqAccess<'data> for RowBinaryStructAccess<'_, '_, 'data, Validator>
+        where
+            Validator: ValidateDataType,
+        {
+            type Error = Error;
+
+            fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
+            where
+                T: DeserializeSeed<'data>,
+            {
+                if self.len > 0 {
+                    self.len -= 1;
+                    let value = DeserializeSeed::deserialize(seed, &mut *self.deserializer)?;
+                    Ok(Some(value))
+                } else {
+                    Ok(None)
+                }
+            }
+
+            fn size_hint(&self) -> Option<usize> {
+                Some(self.len)
+            }
+        }
+
+        visitor.visit_seq(RowBinaryStructAccess {
+            deserializer: self,
+            len: fields.len(),
+        })
     }
 
     #[inline]
     fn deserialize_newtype_struct<V: Visitor<'data>>(
         self,
-        _name: &str,
+        name: &str,
         visitor: V,
     ) -> Result<V::Value> {
+        println!("deserialize_newtype_struct call - {}", name);
+
         // TODO - skip validation?
         visitor.visit_newtype_struct(self)
     }
@@ -566,6 +611,8 @@ where
         name: &'static str,
         _visitor: V,
     ) -> Result<V::Value> {
+        println!("deserialize_unit_struct call");
+
         panic!("unit types are unsupported: `{name}`");
     }
 
@@ -576,11 +623,15 @@ where
         _len: usize,
         _visitor: V,
     ) -> Result<V::Value> {
+        println!("deserialize_tuple_struct call");
+
         panic!("tuple struct types are unsupported: `{name}`");
     }
 
     #[inline]
     fn deserialize_ignored_any<V: Visitor<'data>>(self, _visitor: V) -> Result<V::Value> {
+        println!("deserialize_ignored_any call");
+
         panic!("ignored types are unsupported");
     }
 

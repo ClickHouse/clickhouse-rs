@@ -24,6 +24,7 @@ pub fn decode_leb128(buffer: &mut &[u8]) -> Result<u64, ParserError> {
     Ok(value)
 }
 
+// FIXME: do not use Vec<u8>
 pub fn encode_leb128(value: u64) -> Vec<u8> {
     let mut result = Vec::new();
     let mut val = value;
