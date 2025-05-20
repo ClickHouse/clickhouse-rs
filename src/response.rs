@@ -291,10 +291,24 @@ fn extract_exception(chunk: &[u8]) -> Option<Error> {
 fn extract_exception_slow(chunk: &[u8]) -> Option<Error> {
     let index = chunk.rfind(b"Code:")?;
 
-    if !chunk[index..].contains_str(b"DB::Exception:") {
+    if !(chunk[index..].contains_str(b"DB::") && chunk[index..].contains_str(b"Exception:")) {
         return None;
     }
 
     let exception = String::from_utf8_lossy(&chunk[index..chunk.len() - 1]);
     Some(Error::BadResponse(exception.into()))
+}
+
+#[test]
+fn it_extracts_exception() {
+    let errors = [
+        "Code: 159. DB::Exception: Timeout exceeded: elapsed 1.2 seconds, maximum: 0.1. (TIMEOUT_EXCEEDED) (version 24.10.1.2812 (official build))",
+        "Code: 210. DB::NetException: I/O error: Broken pipe, while writing to socket (127.0.0.1:9000 -> 127.0.0.1:54646). (NETWORK_ERROR) (version 23.8.8.20 (official build))",
+    ];
+
+    for error in errors {
+        let chunk = format!("{error}\n");
+        let err = extract_exception(chunk.as_bytes()).expect("failed to extract exception");
+        assert_eq!(err.to_string(), format!("bad response: {error}"));
+    }
 }

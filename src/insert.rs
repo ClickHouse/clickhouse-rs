@@ -10,7 +10,7 @@ use tokio::{
 };
 use url::Url;
 
-use crate::headers::with_request_headers;
+use crate::headers::{with_authentication, with_request_headers};
 use crate::{
     error::{Error, Result},
     request_body::{ChunkSender, RequestBody},
@@ -353,14 +353,7 @@ impl<T> Insert<T> {
 
         let mut builder = Request::post(url.as_str());
         builder = with_request_headers(builder, &client.headers, &client.products_info);
-
-        if let Some(user) = &client.user {
-            builder = builder.header("X-ClickHouse-User", user);
-        }
-
-        if let Some(password) = &client.password {
-            builder = builder.header("X-ClickHouse-Key", password);
-        }
+        builder = with_authentication(builder, &client.authentication);
 
         let (sender, body) = RequestBody::chunked();
 

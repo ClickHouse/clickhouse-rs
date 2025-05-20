@@ -102,7 +102,7 @@ impl Watch<Rows> {
     }
 
     /// # Panics
-    /// Panics if `T` are rows without specified names.
+    /// If `T` are rows without specified names.
     /// Only structs are supported in this API.
     #[track_caller]
     pub fn fetch<T: Row>(self) -> Result<RowCursor<T>> {

@@ -17,72 +17,60 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - run: rustup show active-toolchain -v
-    - run: cargo build --all-targets
-    - run: cargo build --all-targets --no-default-features
-    - run: cargo build --all-targets --all-features
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain -v
+      - run: cargo build --all-targets
+      - run: cargo build --all-targets --no-default-features
+      - run: cargo build --all-targets --all-features
 
   msrv:
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "" # remove -Dwarnings
     steps:
-    - uses: actions/checkout@v4
-    - run: rustup toolchain install ${{ env.MSRV }} --profile minimal
-    - run: rustup override set ${{ env.MSRV }}
-    - run: rustup show active-toolchain -v
-    - run: cargo update -p native-tls --precise 0.2.13 # 0.2.14 requires rustc 1.80
-    - run: cargo update -p litemap --precise 0.7.4 # 0.7.5 requires rustc 1.81
-    - run: cargo update -p zerofrom --precise 0.1.5 # 0.1.6 requires rustc 1.81
-    - run: cargo build
-    - run: cargo build --no-default-features
-    - run: cargo build --features uuid,time,chrono
-    - run: cargo build --all-features
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install ${{ env.MSRV }} --profile minimal
+      - run: rustup override set ${{ env.MSRV }}
+      - run: rustup show active-toolchain -v
+      # URL 2.5.4 -> ICU4X 2.x require rustc 1.82
+      # See https://github.com/servo/rust-url?tab=readme-ov-file#alternative-unicode-back-ends
+      #     https://github.com/hsivonen/idna_adapter?tab=readme-ov-file#icu4x-as-the-default
+      - run: cargo update -p idna_adapter --precise 1.2.0
+      - run: cargo update -p native-tls --precise 0.2.13 # 0.2.14 requires rustc 1.80
+      - run: cargo update -p litemap --precise 0.7.4 # 0.7.5 requires rustc 1.81
+      - run: cargo update -p zerofrom --precise 0.1.5 # 0.1.6 requires rustc 1.81
+      - run: cargo build
+      - run: cargo build --no-default-features
+      - run: cargo build --features uuid,time,chrono
+      - run: cargo build --all-features
 
   rustfmt:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - run: rustup show active-toolchain -v
-    - run: rustup component add rustfmt
-    - run: cargo fmt --version
-    - run: cargo fmt -- --check
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain -v
+      - run: rustup component add rustfmt
+      - run: cargo fmt --version
+      - run: cargo fmt -- --check
 
   clippy:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - run: rustup show active-toolchain -v
-    - run: rustup component add clippy
-    - run: cargo clippy --version
-    - run: cargo clippy
-    - run: cargo clippy --all-targets --no-default-features
-    - run: cargo clippy --all-targets --all-features
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain -v
+      - run: rustup component add clippy
+      - run: cargo clippy --version
+      - run: cargo clippy
+      - run: cargo clippy --all-targets --no-default-features
+      - run: cargo clippy --all-targets --all-features
 
-    # TLS
-    - run: cargo clippy --features native-tls
-    - run: cargo clippy --features rustls-tls
-    - run: cargo clippy --features rustls-tls-ring,rustls-tls-webpki-roots
-    - run: cargo clippy --features rustls-tls-ring,rustls-tls-native-roots
-    - run: cargo clippy --features rustls-tls-aws-lc,rustls-tls-webpki-roots
-    - run: cargo clippy --features rustls-tls-aws-lc,rustls-tls-native-roots
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - run: rustup show active-toolchain -v
-    - run: cargo test
-    - run: cargo test --no-default-features
-    - run: cargo test --features uuid,time
-    - run: cargo test --all-features
-
-    services:
-      clickhouse:
-        image: clickhouse/clickhouse-server:24.10-alpine
-        ports:
-          - 8123:8123
+      # TLS
+      - run: cargo clippy --features native-tls
+      - run: cargo clippy --features rustls-tls
+      - run: cargo clippy --features rustls-tls-ring,rustls-tls-webpki-roots
+      - run: cargo clippy --features rustls-tls-ring,rustls-tls-native-roots
+      - run: cargo clippy --features rustls-tls-aws-lc,rustls-tls-webpki-roots
+      - run: cargo clippy --features rustls-tls-aws-lc,rustls-tls-native-roots
 
   docs:
     needs: build
@@ -90,8 +78,34 @@ jobs:
     env:
       RUSTDOCFLAGS: -Dwarnings --cfg docsrs
     steps:
-    - uses: actions/checkout@v4
-    - run: rustup toolchain install nightly
-    - run: rustup override set nightly
-    - run: rustup show active-toolchain -v
-    - run: cargo doc --all-features
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly
+      - run: rustup override set nightly
+      - run: rustup show active-toolchain -v
+      - run: cargo doc --all-features
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start ClickHouse in Docker
+        uses: hoverkraft-tech/compose-action@v2.2.0
+        with:
+          compose-file: 'docker-compose.yml'
+          down-flags: '--volumes'
+
+      - run: rustup show active-toolchain -v
+      - run: cargo test
+      - run: cargo test --no-default-features
+      - run: cargo test --features uuid,time
+      - run: cargo test --all-features
+
+      # Temporary runs tests with `cloud_` prefix only until we validate that the rest of the tests are working
+      - name: Run tests with ClickHouse Cloud
+        env:
+          CLICKHOUSE_TEST_ENVIRONMENT: cloud
+          CLICKHOUSE_CLOUD_HOST: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_HOST_SMT }}
+          CLICKHOUSE_CLOUD_PASSWORD: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_PASSWORD_SMT }}
+          CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_JWT_DESERT_VM_43 }}
+        run: |
+          cargo test cloud_ --features rustls-tls -- --nocapture
