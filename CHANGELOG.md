@@ -10,7 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - client: added `Client::with_access_token` to support JWT authentication ClickHouse Cloud feature ([#215]).
 
+### Fixed
+- query/cursor: detect more deferred errors ([#220]).
+
 [#215]: https://github.com/ClickHouse/clickhouse-rs/pull/215
+[#220]: https://github.com/ClickHouse/clickhouse-rs/pull/220
 
 ## [0.13.2] - 2025-03-12
 ### Added
