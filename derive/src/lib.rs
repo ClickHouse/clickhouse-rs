@@ -1,3 +1,5 @@
+mod attributes;
+
 use proc_macro2::TokenStream;
 use quote::quote;
 use serde_derive_internals::{
@@ -5,6 +7,24 @@ use serde_derive_internals::{
     Ctxt,
 };
 use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields};
+
+struct Attributes {
+    row: attributes::Row,
+}
+
+impl From<&[syn::Attribute]> for Attributes {
+    fn from(attrs: &[syn::Attribute]) -> Self {
+        let mut row = None;
+        for attr in attrs {
+            if let Ok(r) = attributes::Row::try_from(attr) {
+                row = Some(r);
+            }
+        }
+        Self {
+            row: row.unwrap_or_default(),
+        }
+    }
+}
 
 fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> TokenStream {
     match &data.fields {
@@ -35,12 +55,14 @@ fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> TokenStr
 
 // TODO: support wrappers `Wrapper(Inner)` and `Wrapper<T>(T)`.
 // TODO: support the `nested` attribute.
-// TODO: support the `crate` attribute.
-#[proc_macro_derive(Row)]
+#[proc_macro_derive(Row, attributes(row))]
 pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     let cx = Ctxt::new();
+    let Attributes {
+        row: attributes::Row { crate_path },
+    } = Attributes::from(input.attrs.as_slice());
     let container = Container::from_ast(&cx, &input);
     let name = input.ident;
 
@@ -54,10 +76,9 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    // TODO: replace `clickhouse` with `::clickhouse` here.
     let expanded = quote! {
         #[automatically_derived]
-        impl #impl_generics clickhouse::Row for #name #ty_generics #where_clause {
+        impl #impl_generics #crate_path::Row for #name #ty_generics #where_clause {
             const COLUMN_NAMES: &'static [&'static str] = #column_names;
         }
     };
