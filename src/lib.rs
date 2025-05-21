@@ -5,11 +5,10 @@
 #[macro_use]
 extern crate static_assertions;
 
-use self::{error::Result, http_client::HttpClient};
+use self::{error::Result, http_client::HttpClient, validation_mode::ValidationMode};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub use self::{compression::Compression, row::Row};
-use crate::validation_mode::StructValidationMode;
 pub use clickhouse_derive::Row;
 
 pub mod error;
@@ -49,7 +48,7 @@ pub struct Client {
     options: HashMap<String, String>,
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
-    struct_validation_mode: StructValidationMode,
+    validation_mode: ValidationMode,
 }
 
 #[derive(Clone)]
@@ -104,7 +103,7 @@ impl Client {
             options: HashMap::new(),
             headers: HashMap::new(),
             products_info: Vec::default(),
-            struct_validation_mode: StructValidationMode::default(),
+            validation_mode: ValidationMode::default(),
         }
     }
 
@@ -298,8 +297,12 @@ impl Client {
         self
     }
 
-    pub fn with_struct_validation_mode(mut self, mode: StructValidationMode) -> Self {
-        self.struct_validation_mode = mode;
+    /// Specifies the struct validation mode that will be used when calling
+    /// [`Query::fetch`], [`Query::fetch_one`], [`Query::fetch_all`],
+    /// and [`Query::fetch_optional`] methods.
+    /// See [`ValidationMode`] for more details.
+    pub fn with_validation_mode(mut self, mode: ValidationMode) -> Self {
+        self.validation_mode = mode;
         self
     }
 
@@ -350,6 +353,7 @@ pub mod _priv {
 
 #[cfg(test)]
 mod client_tests {
+    use crate::validation_mode::ValidationMode;
     use crate::{Authentication, Client};
 
     #[test]
@@ -466,5 +470,17 @@ mod client_tests {
         let _ = Client::default()
             .with_access_token("my_jwt")
             .with_password("secret");
+    }
+
+    #[test]
+    fn it_sets_validation_mode() {
+        let client = Client::default();
+        assert_eq!(client.validation_mode, ValidationMode::First(1));
+        let client = client.with_validation_mode(ValidationMode::Each);
+        assert_eq!(client.validation_mode, ValidationMode::Each);
+        let client = client.with_validation_mode(ValidationMode::Disabled);
+        assert_eq!(client.validation_mode, ValidationMode::Disabled);
+        let client = client.with_validation_mode(ValidationMode::First(10));
+        assert_eq!(client.validation_mode, ValidationMode::First(10));
     }
 }

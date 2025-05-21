@@ -1,4 +1,4 @@
-use crate::validation_mode::StructValidationMode;
+use crate::validation_mode::ValidationMode;
 use crate::{
     bytes_ext::BytesExt,
     cursors::RawCursor,
@@ -16,21 +16,21 @@ use std::marker::PhantomData;
 pub struct RowCursor<T> {
     raw: RawCursor,
     bytes: BytesExt,
-    validation_mode: StructValidationMode,
+    validation_mode: ValidationMode,
     columns: Option<Vec<Column>>,
     rows_emitted: u64,
     _marker: PhantomData<T>,
 }
 
 impl<T> RowCursor<T> {
-    pub(crate) fn new(response: Response, format: StructValidationMode) -> Self {
+    pub(crate) fn new(response: Response, validation_mode: ValidationMode) -> Self {
         Self {
             _marker: PhantomData,
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
             columns: None,
             rows_emitted: 0,
-            validation_mode: format,
+            validation_mode,
         }
     }
 
@@ -46,9 +46,9 @@ impl<T> RowCursor<T> {
         T: Deserialize<'b>,
     {
         let should_validate = match self.validation_mode {
-            StructValidationMode::Disabled => false,
-            StructValidationMode::EachRow => true,
-            StructValidationMode::FirstRow => self.rows_emitted == 0,
+            ValidationMode::Disabled => false,
+            ValidationMode::Each => true,
+            ValidationMode::First(n) => self.rows_emitted < (n as u64),
         };
 
         loop {
@@ -62,10 +62,15 @@ impl<T> RowCursor<T> {
                             self.bytes.set_remaining(slice.len());
                             self.columns = Some(columns);
                             let columns = self.columns.as_ref().unwrap();
-                            rowbinary::deserialize_from_and_validate(&mut slice, columns)
+                            // usually, the header arrives as a separate first chunk
+                            if self.bytes.remaining() > 0 {
+                                rowbinary::deserialize_from_and_validate(&mut slice, columns)
+                            } else {
+                                Err(Error::NotEnoughData)
+                            }
                         }
                         Some(columns) => {
-                            rowbinary::deserialize_from_and_validate(&mut slice, &columns)
+                            rowbinary::deserialize_from_and_validate(&mut slice, columns)
                         }
                     }
                 } else {

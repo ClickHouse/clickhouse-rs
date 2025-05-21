@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use crate::error::Result;
 use clickhouse_rowbinary::data_types::{Column, DataTypeHint, DataTypeNode, DecimalSize, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -8,10 +8,14 @@ pub(crate) trait ValidateDataType: Sized {
         &mut self,
         serde_type: &'static SerdeType,
         compatible_db_types: &'static [DataTypeHint],
+        // TODO: currently used only for FixedString validation.
+        //  Is there a better way, avoiding passing it?
+        seq_len: usize,
     ) -> Result<Option<InnerDataTypeValidator<'_>>>;
-    fn set_struct_name(&mut self, name: String) -> ();
+    fn set_struct_name(&mut self, name: String);
 }
 
+#[derive(Default)]
 pub(crate) struct DataTypeValidator<'cursor> {
     columns: &'cursor [Column],
     struct_name: Option<String>,
@@ -21,15 +25,6 @@ impl<'cursor> DataTypeValidator<'cursor> {
     pub(crate) fn new(columns: &'cursor [Column]) -> Self {
         Self {
             columns,
-            struct_name: None,
-        }
-    }
-}
-
-impl<'cursor> Default for DataTypeValidator<'cursor> {
-    fn default() -> Self {
-        Self {
-            columns: &[],
             struct_name: None,
         }
     }
@@ -65,31 +60,33 @@ impl ValidateDataType for () {
         &mut self,
         _serde_type: &'static SerdeType,
         _compatible_db_types: &'static [DataTypeHint],
+        _len: usize,
     ) -> Result<Option<InnerDataTypeValidator<'_>>> {
         Ok(None)
     }
     #[inline]
-    fn set_struct_name(&mut self, _name: String) {
-        ()
-    }
+    fn set_struct_name(&mut self, _name: String) {}
 }
 
 impl<'cursor> ValidateDataType for Option<InnerDataTypeValidator<'cursor>> {
+    #[inline]
     fn validate(
         &mut self,
         serde_type: &'static SerdeType,
         compatible_db_types: &'static [DataTypeHint],
+        seq_len: usize,
     ) -> Result<Option<InnerDataTypeValidator<'cursor>>> {
         match self {
             None => Ok(None),
             Some(InnerDataTypeValidator::Map(key_type, value_type, state)) => match state {
                 MapValidatorState::Key => {
-                    let result = validate_impl(key_type, serde_type, compatible_db_types);
+                    let result = validate_impl(key_type, serde_type, compatible_db_types, seq_len);
                     *state = MapValidatorState::Value;
                     result
                 }
                 MapValidatorState::Value => {
-                    let result = validate_impl(value_type, serde_type, compatible_db_types);
+                    let result =
+                        validate_impl(value_type, serde_type, compatible_db_types, seq_len);
                     *state = MapValidatorState::Validated;
                     result
                 }
@@ -97,11 +94,8 @@ impl<'cursor> ValidateDataType for Option<InnerDataTypeValidator<'cursor>> {
             },
             Some(InnerDataTypeValidator::Array(inner_type, state)) => match state {
                 ArrayValidatorState::Pending => {
-                    println!(
-                        "ArrayValidatorState::Pending; serde_type: {}; compatible_db_types: {:?}",
-                        serde_type, compatible_db_types,
-                    );
-                    let result = validate_impl(inner_type, serde_type, compatible_db_types);
+                    let result =
+                        validate_impl(inner_type, serde_type, compatible_db_types, seq_len);
                     *state = ArrayValidatorState::Validated;
                     result
                 }
@@ -110,30 +104,45 @@ impl<'cursor> ValidateDataType for Option<InnerDataTypeValidator<'cursor>> {
                 ArrayValidatorState::Validated => Ok(None),
             },
             Some(InnerDataTypeValidator::Nullable(inner_type)) => {
-                validate_impl(inner_type, serde_type, compatible_db_types)
+                validate_impl(inner_type, serde_type, compatible_db_types, 0)
             }
             Some(InnerDataTypeValidator::Tuple(elements_types)) => {
                 match elements_types.split_first() {
-                    None => Ok(None),
                     Some((first, rest)) => {
-                        let result = validate_impl(first, serde_type, compatible_db_types);
                         *elements_types = rest;
-                        result
+                        validate_impl(first, serde_type, compatible_db_types, 0)
                     }
+                    None => panic!(
+                        "Struct tries to deserialize {} as a tuple element, but there are no more allowed elements in the database schema",
+                        serde_type,
+                    )
                 }
             }
             Some(InnerDataTypeValidator::Variant(_possible_types)) => {
-                Ok(None) // TODO - check type index in the parsed types vec
+                todo!() // TODO - check type index in the parsed types vec
             }
             Some(InnerDataTypeValidator::Enum(_values_map)) => {
-                Ok(None) // TODO - check value correctness in the hashmap
+                todo!() // TODO - check value correctness in the hashmap
             }
         }
     }
 
     #[inline]
     fn set_struct_name(&mut self, _name: String) {
-        unreachable!("it should never be called for inner validators")
+        unreachable!("`set_struct_name` should never be called for inner validators")
+    }
+}
+
+impl Drop for InnerDataTypeValidator<'_> {
+    fn drop(&mut self) {
+        if let InnerDataTypeValidator::Tuple(elements_types) = self {
+            if !elements_types.is_empty() {
+                panic!(
+                    "Tuple was not fully deserialized, remaining elements: {:?}",
+                    elements_types
+                );
+            }
+        }
     }
 }
 
@@ -142,11 +151,12 @@ fn validate_impl<'cursor>(
     data_type: &'cursor DataTypeNode,
     serde_type: &'static SerdeType,
     compatible_db_types: &'static [DataTypeHint],
+    seq_len: usize,
 ) -> Result<Option<InnerDataTypeValidator<'cursor>>> {
-    println!(
-        "validate_impl call from Serde {}; compatible types: {:?}, db type: {:?}",
-        serde_type, compatible_db_types, data_type,
-    );
+    // println!(
+    //     "Validating data type: {:?} against serde type: {} with compatible db types: {:?}",
+    //     data_type, serde_type, compatible_db_types
+    // );
     // FIXME: multiple branches with similar patterns
     match data_type {
         DataTypeNode::Bool if compatible_db_types.contains(&DataTypeHint::Bool) => Ok(None),
@@ -198,17 +208,28 @@ fn validate_impl<'cursor>(
         }
 
         DataTypeNode::FixedString(n)
-            if compatible_db_types.contains(&DataTypeHint::FixedString(*n)) =>
+            if compatible_db_types.contains(&DataTypeHint::FixedString) && *n == seq_len =>
         {
             Ok(None)
         }
 
-        // Deserialized as a sequence of 16 bytes
+        // FIXME: IPv4 from ClickHouse ends up reversed.
+        //  Ideally, requires a ReversedSeqAccess implementation. Perhaps memoize IPv4 col index?
+        // IPv4 = [u8; 4]
+        // DataTypeNode::IPv4 if compatible_db_types.contains(&DataTypeHint::IPv4) => Ok(Some(
+        //     InnerDataTypeValidator::Array(&DataTypeNode::UInt8, ArrayValidatorState::Pending(4)),
+        // )),
+
+        // IPv6 = [u8; 16]
         DataTypeNode::IPv6 if compatible_db_types.contains(&DataTypeHint::Array) => Ok(Some(
             InnerDataTypeValidator::Array(&DataTypeNode::UInt8, ArrayValidatorState::Pending),
         )),
 
-        DataTypeNode::UUID => todo!(),
+        // UUID = [u64; 2]
+        DataTypeNode::UUID => Ok(Some(InnerDataTypeValidator::Tuple(&[
+            DataTypeNode::UInt64,
+            DataTypeNode::UInt64,
+        ]))),
 
         DataTypeNode::Array(inner_type) if compatible_db_types.contains(&DataTypeHint::Array) => {
             Ok(Some(InnerDataTypeValidator::Array(
@@ -239,7 +260,7 @@ fn validate_impl<'cursor>(
 
         // LowCardinality is completely transparent on the client side
         DataTypeNode::LowCardinality(inner_type) => {
-            validate_impl(inner_type, serde_type, compatible_db_types)
+            validate_impl(inner_type, serde_type, compatible_db_types, seq_len)
         }
 
         DataTypeNode::Enum(EnumType::Enum8, values_map)
@@ -263,11 +284,10 @@ fn validate_impl<'cursor>(
         DataTypeNode::BFloat16 => panic!("BFloat16 is not supported yet"),
         DataTypeNode::Dynamic => panic!("Dynamic is not supported yet"),
 
-        _ => Err(Error::InvalidColumnDataType(
-            data_type.clone(),
-            serde_type,
-            compatible_db_types,
-        )),
+        _ => panic!(
+            "Database type is {}, but struct field is deserialized as {}, which is compatible only with {:?}",
+            data_type, serde_type, compatible_db_types
+        ),
     }
 }
 
@@ -277,17 +297,14 @@ impl<'cursor> ValidateDataType for DataTypeValidator<'cursor> {
         &mut self,
         serde_type: &'static SerdeType,
         compatible_db_types: &'static [DataTypeHint],
+        len: usize,
     ) -> Result<Option<InnerDataTypeValidator<'cursor>>> {
-        println!(
-            "validate call {}; compatible: {:?}, db types: {:?}",
-            serde_type, compatible_db_types, self.columns,
-        );
         match self.columns.split_first() {
-            None => Err(Error::TooManyStructFields),
             Some((first, rest)) => {
                 self.columns = rest;
-                validate_impl(&first.data_type, serde_type, compatible_db_types)
+                validate_impl(&first.data_type, serde_type, compatible_db_types, len)
             }
+            None => panic!("Struct has more fields than columns in the database schema"),
         }
     }
 
@@ -301,8 +318,8 @@ impl<'cursor> ValidateDataType for DataTypeValidator<'cursor> {
 /// Which Serde data type (De)serializer used for the given type.
 /// Displays into Rust types for convenience in errors reporting.
 #[derive(Clone, Debug, PartialEq)]
-#[non_exhaustive]
-pub enum SerdeType {
+#[allow(dead_code)]
+pub(crate) enum SerdeType {
     Bool,
     I8,
     I16,
@@ -333,12 +350,6 @@ pub enum SerdeType {
     Enum,
     Identifier,
     IgnoredAny,
-}
-
-impl Default for SerdeType {
-    fn default() -> Self {
-        SerdeType::Struct
-    }
 }
 
 impl Display for SerdeType {

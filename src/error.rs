@@ -1,9 +1,6 @@
 //! Contains [`Error`] and corresponding [`Result`].
 
-use crate::rowbinary::SerdeType;
-use clickhouse_rowbinary::data_types::{DataTypeHint, DataTypeNode};
 use serde::{de, ser};
-use std::fmt::Display;
 use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
 
 /// A result with a specified [`Error`] type.
@@ -55,19 +52,8 @@ pub enum Error {
         unexpected_type: String,
         all_columns: String,
     },
-    #[error("deserializing field: {0}; serde type: {1} expected to be deserialized as: {}", join_seq(.2))]
-    InvalidColumnDataType(DataTypeNode, &'static SerdeType, &'static [DataTypeHint]),
-    #[error("too many struct fields: trying to read more columns than expected")]
-    TooManyStructFields,
     #[error("{0}")]
     Other(BoxedError),
-}
-
-fn join_seq<T: Display>(vec: &[T]) -> String {
-    vec.iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<String>>()
-        .join(", ")
 }
 
 assert_impl_all!(Error: StdError, Send, Sync);

@@ -1,7 +1,8 @@
+name: clickhouse-rs
 services:
   clickhouse:
     image: 'clickhouse/clickhouse-server:${CLICKHOUSE_VERSION-24.10-alpine}'
-    container_name: 'clickhouse-rs-clickhouse-server'
+    container_name: clickhouse-rs-clickhouse-server
     ports:
       - '8123:8123'
       - '9000:9000'

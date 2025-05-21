@@ -16,8 +16,8 @@ use crate::{
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
 pub use crate::cursors::{BytesCursor, RowCursor};
-use crate::validation_mode::StructValidationMode;
 use crate::headers::with_authentication;
+use crate::validation_mode::ValidationMode;
 
 #[must_use]
 #[derive(Clone)]
@@ -85,18 +85,16 @@ impl Query {
     /// # Ok(()) }
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
-        let fetch_format = self.client.struct_validation_mode.clone();
+        let validation_mode = self.client.validation_mode;
 
         self.sql.bind_fields::<T>();
-        self.sql.set_output_format(match fetch_format {
-            StructValidationMode::FirstRow | StructValidationMode::EachRow => {
-                "RowBinaryWithNamesAndTypes"
-            }
-            StructValidationMode::Disabled => "RowBinary",
+        self.sql.set_output_format(match validation_mode {
+            ValidationMode::First(_) | ValidationMode::Each => "RowBinaryWithNamesAndTypes",
+            ValidationMode::Disabled => "RowBinary",
         });
 
         let response = self.do_execute(true)?;
-        Ok(RowCursor::new(response, fetch_format))
+        Ok(RowCursor::new(response, validation_mode))
     }
 
     /// Executes the query and returns just a single row.

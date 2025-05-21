@@ -17,7 +17,7 @@ use std::{convert::TryFrom, mem, str};
 /// performant generated code than `(&[u8]) -> Result<(T, usize)>` and even
 /// `(&[u8], &mut Option<T>) -> Result<usize>`.
 pub(crate) fn deserialize_from<'data, T: Deserialize<'data>>(input: &mut &'data [u8]) -> Result<T> {
-    println!("deserialize_from call");
+    // println!("deserialize_from call");
 
     let mut deserializer = RowBinaryDeserializer {
         input,
@@ -37,9 +37,7 @@ pub(crate) fn deserialize_from_and_validate<'data, 'cursor, T: Deserialize<'data
         input,
         validator: DataTypeValidator::new(columns),
     };
-    T::deserialize(&mut deserializer).inspect_err(|e| {
-        println!("deserialize_from_and_validate call failed: {:?}", e);
-    })
+    T::deserialize(&mut deserializer)
 }
 
 /// A deserializer for the RowBinary(WithNamesAndTypes) format.
@@ -79,7 +77,7 @@ macro_rules! impl_num {
     ($ty:ty, $deser_method:ident, $visitor_method:ident, $reader_method:ident, $serde_type:expr, $type_hints:expr) => {
         #[inline]
         fn $deser_method<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-            self.validator.validate($serde_type, $type_hints)?;
+            self.validator.validate($serde_type, $type_hints, 0)?;
             ensure_size(&mut self.input, mem::size_of::<$ty>())?;
             let value = self.input.$reader_method();
             visitor.$visitor_method(value)
@@ -194,34 +192,30 @@ where
 
     #[inline]
     fn deserialize_any<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
-        println!("deserialize_any call");
-
         Err(Error::DeserializeAnyNotSupported)
     }
 
     #[inline]
     fn deserialize_unit<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        println!("deserialize_unit call");
-
         // TODO: revise this.
         visitor.visit_unit()
     }
 
     #[inline]
     fn deserialize_char<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
-        println!("deserialize_char call");
-
         panic!("character types are unsupported: `char`");
     }
 
     #[inline]
     fn deserialize_bool<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        println!("deserialize_bool call");
-
         self.validator.validate(
             &SerdeType::Bool,
-            // TODO: shall we allow deserialization from integers?
-            &[DataTypeHint::Bool, DataTypeHint::Int8, DataTypeHint::UInt8],
+            &[
+                DataTypeHint::Bool,
+                // it is possible to deserialize from UInt8 0 or 1 as Boolean
+                DataTypeHint::UInt8,
+            ],
+            0,
         )?;
         ensure_size(&mut self.input, 1)?;
         match self.input.get_u8() {
@@ -233,11 +227,11 @@ where
 
     #[inline]
     fn deserialize_str<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        println!("deserialize_str call");
+        // println!("deserialize_str call");
 
         // TODO - which types to allow?
         self.validator
-            .validate(&SerdeType::String, &[DataTypeHint::String])?;
+            .validate(&SerdeType::String, &[DataTypeHint::String], 0)?;
         let size = self.read_size()?;
         let slice = self.read_slice(size)?;
         let str = str::from_utf8(slice).map_err(Error::from)?;
@@ -246,11 +240,11 @@ where
 
     #[inline]
     fn deserialize_string<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        println!("deserialize_string call");
+        // println!("deserialize_string call");
 
         // TODO - which types to allow?
         self.validator
-            .validate(&SerdeType::String, &[DataTypeHint::String])?;
+            .validate(&SerdeType::String, &[DataTypeHint::String], 0)?;
         let size = self.read_size()?;
         let vec = self.read_vec(size)?;
         let string = String::from_utf8(vec).map_err(|err| Error::from(err.utf8_error()))?;
@@ -259,7 +253,7 @@ where
 
     #[inline]
     fn deserialize_bytes<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        println!("deserialize_bytes call");
+        // println!("deserialize_bytes call");
 
         // TODO - which types to allow?
         let size = self.read_size()?;
@@ -269,7 +263,7 @@ where
 
     #[inline]
     fn deserialize_byte_buf<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        println!("deserialize_byte_buf call");
+        // println!("deserialize_byte_buf call");
 
         // TODO - which types to allow?
         let size = self.read_size()?;
@@ -278,7 +272,7 @@ where
 
     #[inline]
     fn deserialize_identifier<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        println!("deserialize_identifier call");
+        // println!("deserialize_identifier call");
 
         // TODO - which types to allow?
         self.deserialize_u8(visitor)
@@ -291,7 +285,7 @@ where
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        println!("deserialize_enum call");
+        // println!("deserialize_enum call");
 
         struct RowBinaryEnumAccess<'de, 'cursor, 'data, Validator>
         where
@@ -365,13 +359,13 @@ where
 
         // FIXME
         self.validator
-            .validate(&SerdeType::Enum, &[DataTypeHint::Enum])?;
+            .validate(&SerdeType::Enum, &[DataTypeHint::Enum], 0)?;
         visitor.visit_enum(RowBinaryEnumAccess { deserializer: self })
     }
 
     #[inline]
     fn deserialize_tuple<V: Visitor<'data>>(self, len: usize, visitor: V) -> Result<V::Value> {
-        println!("deserialize_tuple call, len {}", len);
+        // println!("deserialize_tuple call, len {}", len);
 
         struct RowBinaryTupleAccess<'de, 'cursor, 'data, Validator>
         where
@@ -391,6 +385,7 @@ where
             where
                 T: DeserializeSeed<'data>,
             {
+                // println!("Processing value, len: {}", self.len);
                 if self.len > 0 {
                     self.len -= 1;
                     let value = DeserializeSeed::deserialize(seed, &mut *self.deserializer)?;
@@ -405,27 +400,37 @@ where
             }
         }
 
-        let len = self.read_size()?;
-        let inner_data_type_validator = self
-            .validator
-            .validate(&SerdeType::Seq, &[DataTypeHint::Array, DataTypeHint::IPv6])?;
-        visitor.visit_seq(RowBinaryTupleAccess {
-            deserializer: &mut RowBinaryDeserializer {
-                input: self.input,
-                validator: inner_data_type_validator,
-            },
+        let inner_data_type_validator = self.validator.validate(
+            &SerdeType::Tuple,
+            &[
+                DataTypeHint::Tuple,
+                DataTypeHint::Array,
+                DataTypeHint::FixedString,
+                // FIXME: uncomment when there is a way to implement ReverseSeqAccess
+                // DataTypeHint::IPv4,
+                DataTypeHint::IPv6,
+            ],
             len,
-        })
+        )?;
+        let mut new_self = RowBinaryDeserializer {
+            input: self.input,
+            validator: inner_data_type_validator,
+        };
+        let access = RowBinaryTupleAccess {
+            deserializer: &mut new_self,
+            len,
+        };
+        visitor.visit_seq(access)
     }
 
     #[inline]
     fn deserialize_option<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        println!("deserialize_option call");
+        // println!("deserialize_option call");
 
         ensure_size(&mut self.input, 1)?;
-        let inner_data_type_validator = self
-            .validator
-            .validate(&SerdeType::Option, &[DataTypeHint::Nullable])?;
+        let inner_data_type_validator =
+            self.validator
+                .validate(&SerdeType::Option, &[DataTypeHint::Nullable], 0)?;
         match self.input.get_u8() {
             0 => visitor.visit_some(&mut RowBinaryDeserializer {
                 input: self.input,
@@ -438,7 +443,7 @@ where
 
     #[inline]
     fn deserialize_seq<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        println!("deserialize_seq call");
+        // println!("deserialize_seq call");
 
         struct RowBinarySeqAccess<'de, 'cursor, 'data, Validator>
         where
@@ -473,9 +478,9 @@ where
         }
 
         let len = self.read_size()?;
-        let inner_data_type_validator = self
-            .validator
-            .validate(&SerdeType::Seq, &[DataTypeHint::Array])?;
+        let inner_data_type_validator =
+            self.validator
+                .validate(&SerdeType::Seq, &[DataTypeHint::Array], len)?;
         visitor.visit_seq(RowBinarySeqAccess {
             deserializer: &mut RowBinaryDeserializer {
                 input: self.input,
@@ -487,7 +492,9 @@ where
 
     #[inline]
     fn deserialize_map<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        println!("deserialize_map call");
+        // println!(
+        //     "deserialize_map call",
+        // );
 
         struct RowBinaryMapAccess<'de, 'cursor, 'data, Validator>
         where
@@ -528,9 +535,9 @@ where
         }
 
         let len = self.read_size()?;
-        let inner_data_type_validator = self
-            .validator
-            .validate(&SerdeType::Map, &[DataTypeHint::Map])?;
+        let inner_data_type_validator =
+            self.validator
+                .validate(&SerdeType::Map, &[DataTypeHint::Map], len)?;
         visitor.visit_map(RowBinaryMapAccess {
             deserializer: &mut RowBinaryDeserializer {
                 input: self.input,
@@ -548,7 +555,7 @@ where
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        println!("deserialize_struct call - {}", name);
+        // println!("deserialize_struct: {} (fields: {:?})", name, fields,);
 
         // FIXME use &'_ str, fix lifetimes
         self.validator.set_struct_name(name.to_string());
@@ -596,11 +603,9 @@ where
     #[inline]
     fn deserialize_newtype_struct<V: Visitor<'data>>(
         self,
-        name: &str,
+        _name: &str,
         visitor: V,
     ) -> Result<V::Value> {
-        println!("deserialize_newtype_struct call - {}", name);
-
         // TODO - skip validation?
         visitor.visit_newtype_struct(self)
     }
@@ -611,8 +616,6 @@ where
         name: &'static str,
         _visitor: V,
     ) -> Result<V::Value> {
-        println!("deserialize_unit_struct call");
-
         panic!("unit types are unsupported: `{name}`");
     }
 
@@ -623,15 +626,11 @@ where
         _len: usize,
         _visitor: V,
     ) -> Result<V::Value> {
-        println!("deserialize_tuple_struct call");
-
         panic!("tuple struct types are unsupported: `{name}`");
     }
 
     #[inline]
     fn deserialize_ignored_any<V: Visitor<'data>>(self, _visitor: V) -> Result<V::Value> {
-        println!("deserialize_ignored_any call");
-
         panic!("ignored types are unsupported");
     }
 

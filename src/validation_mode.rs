@@ -1,23 +1,49 @@
 #[non_exhaustive]
-#[derive(Clone)]
-pub enum StructValidationMode {
-    FirstRow,
-    EachRow,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The preferred mode of validation for struct (de)serialization.
+/// It also affects which format is used by the client when sending queries.
+///
+/// - [`ValidationMode::First`] enables validation _only for the first `N` rows_
+///   emitted by a cursor. For the following rows, validation is skipped.
+///   Format: `RowBinaryWithNamesAndTypes`.
+/// - [`ValidationMode::Each`] enables validation _for all rows_ emitted by a cursor.
+///   This is the slowest mode. Format: `RowBinaryWithNamesAndTypes`.
+/// - [`ValidationMode::Disabled`] means that no validation will be performed.
+///   At the same time, this is the fastest mode. Format: `RowBinary`.
+///
+/// # Default
+///
+/// By default, [`ValidationMode::First`] with value `1` is used,
+/// meaning that only the first row will be validated against the database schema,
+/// which is extracted from the `RowBinaryWithNamesAndTypes` format header.
+/// It is done to minimize the performance impact of the validation,
+/// while still providing reasonable safety guarantees by default.
+///
+/// # Safety
+///
+/// While it is expected that the default validation mode is sufficient for most use cases,
+/// in certain corner case scenarios there still can be schema mismatches after the first rows,
+/// e.g., when a field is `Nullable(T)`, and the first value is `NULL`. In that case,
+/// consider increasing the number of rows in [`ValidationMode::First`],
+/// or even using [`ValidationMode::Each`] instead.
+pub enum ValidationMode {
+    First(usize),
+    Each,
     Disabled,
 }
 
-impl Default for StructValidationMode {
+impl Default for ValidationMode {
     fn default() -> Self {
-        Self::FirstRow
+        Self::First(1)
     }
 }
 
-impl std::fmt::Display for StructValidationMode {
+impl std::fmt::Display for ValidationMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::FirstRow => write!(f, "FirstRow"),
-            Self::EachRow => write!(f, "EachRow"),
-            Self::Disabled => write!(f, "Disabled"),
+            Self::First(n) => f.pad(&format!("FirstN({})", n)),
+            Self::Each => f.pad("Each"),
+            Self::Disabled => f.pad("Disabled"),
         }
     }
 }

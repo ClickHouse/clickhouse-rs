@@ -99,7 +99,7 @@ pub enum DataTypeHint {
     Decimal(DecimalSize),
 
     String,
-    FixedString(usize),
+    FixedString,
     UUID,
 
     Date,
@@ -147,7 +147,7 @@ impl Display for DataTypeHint {
             DataTypeHint::BFloat16 => write!(f, "BFloat16"),
             DataTypeHint::Decimal(size) => write!(f, "Decimal{}", size),
             DataTypeHint::String => write!(f, "String"),
-            DataTypeHint::FixedString(size) => write!(f, "FixedString({})", size),
+            DataTypeHint::FixedString => write!(f, "FixedString"),
             DataTypeHint::UUID => write!(f, "UUID"),
             DataTypeHint::Date => write!(f, "Date"),
             DataTypeHint::Date32 => write!(f, "Date32"),
@@ -279,7 +279,7 @@ impl DataTypeNode {
                 hints.push(DataTypeHint::Decimal(size.clone()));
             }
             DataTypeNode::String => hints.push(DataTypeHint::String),
-            DataTypeNode::FixedString(size) => hints.push(DataTypeHint::FixedString(*size)),
+            DataTypeNode::FixedString(_) => hints.push(DataTypeHint::FixedString),
             DataTypeNode::UUID => hints.push(DataTypeHint::UUID),
             DataTypeNode::Date => hints.push(DataTypeHint::Date),
             DataTypeNode::Date32 => hints.push(DataTypeHint::Date32),

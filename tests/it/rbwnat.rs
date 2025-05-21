@@ -1,6 +1,6 @@
-use clickhouse::error::Error;
+use crate::get_client;
 use clickhouse::sql::Identifier;
-use clickhouse::validation_mode::StructValidationMode;
+use clickhouse::validation_mode::ValidationMode;
 use clickhouse_derive::Row;
 use clickhouse_rowbinary::data_types::{Column, DataTypeNode};
 use clickhouse_rowbinary::parse_rbwnat_columns_header;
@@ -8,9 +8,6 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
 use std::str::FromStr;
-use time::format_description::well_known::Iso8601;
-use time::Month::{February, January};
-use time::OffsetDateTime;
 
 #[tokio::test]
 async fn test_header_parsing() {
@@ -123,7 +120,7 @@ async fn test_basic_types() {
         string_val: String,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let client = get_client().with_validation_mode(ValidationMode::Each);
     let result = client
         .query(
             "
@@ -174,7 +171,7 @@ async fn test_several_simple_rows() {
         str: String,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let client = get_client().with_validation_mode(ValidationMode::Each);
     let result = client
         .query("SELECT number AS num, toString(number) AS str FROM system.numbers LIMIT 3")
         .fetch_all::<Data>()
@@ -206,7 +203,7 @@ async fn test_many_numbers() {
         no: u64,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let client = get_client().with_validation_mode(ValidationMode::Each);
     let mut cursor = client
         .query("SELECT number FROM system.numbers_mt LIMIT 2000")
         .fetch::<Data>()
@@ -230,7 +227,7 @@ async fn test_arrays() {
         description: String,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let client = get_client().with_validation_mode(ValidationMode::Each);
     let result = client
         .query(
             "
@@ -269,7 +266,7 @@ async fn test_maps() {
         map2: HashMap<u16, HashMap<String, i32>>,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let client = get_client().with_validation_mode(ValidationMode::Each);
     let result = client
         .query(
             "
@@ -339,7 +336,7 @@ async fn test_enum() {
 
     let table_name = "test_rbwnat_enum";
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
     client
         .query(
             "
@@ -397,53 +394,35 @@ async fn test_enum() {
 }
 
 #[tokio::test]
+#[should_panic]
 async fn test_nullable() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         n: Option<u32>,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
-    let result = client
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let _ = client
         .query("SELECT true AS b, 144 :: Int32 AS n2")
         .fetch_one::<Data>()
         .await;
-
-    assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err(),
-        Error::InvalidColumnDataType { .. }
-    ));
-
-    // FIXME: lack of derive PartialEq for Error prevents proper assertion
-    // assert_eq!(result, Error::DataTypeMismatch {
-    //     column_name: "n".to_string(),
-    //     expected_type: "Nullable".to_string(),
-    //     actual_type: "Bool".to_string(),
-    //     columns: vec![...],
-    // });
 }
 
 #[tokio::test]
+#[should_panic]
 #[cfg(feature = "time")]
 async fn test_serde_with() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         #[serde(with = "clickhouse::serde::time::datetime64::millis")]
-        n1: OffsetDateTime, // underlying is still Int64; should not compose it from two (U)Int32
+        n1: time::OffsetDateTime, // underlying is still Int64; should not compose it from two (U)Int32
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
-    let result = client
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let _ = client
         .query("SELECT 42 :: UInt32 AS n1, 144 :: Int32 AS n2")
         .fetch_one::<Data>()
         .await;
-
-    assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err(),
-        Error::InvalidColumnDataType { .. }
-    ));
 
     // FIXME: lack of derive PartialEq for Error prevents proper assertion
     // assert_eq!(result, Error::DataTypeMismatch {
@@ -455,6 +434,7 @@ async fn test_serde_with() {
 }
 
 #[tokio::test]
+#[should_panic]
 async fn test_too_many_struct_fields() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
@@ -463,19 +443,11 @@ async fn test_too_many_struct_fields() {
         c: u32,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
-    let result = client
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let _ = client
         .query("SELECT 42 :: UInt32 AS a, 144 :: UInt32 AS b")
         .fetch_one::<Data>()
         .await;
-
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        matches!(err, Error::TooManyStructFields { .. }),
-        "{:?} should be an instance of TooManyStructFields",
-        err
-    );
 }
 
 #[tokio::test]
@@ -488,7 +460,7 @@ async fn test_serde_skip_deserializing() {
         c: u32,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let client = get_client().with_validation_mode(ValidationMode::Each);
     let result = client
         .query("SELECT 42 :: UInt32 AS a, 144 :: UInt32 AS c")
         .fetch_one::<Data>()
@@ -507,6 +479,10 @@ async fn test_serde_skip_deserializing() {
 #[tokio::test]
 #[cfg(feature = "time")]
 async fn test_date_and_time() {
+    use time::format_description::well_known::Iso8601;
+    use time::Month::{February, January};
+    use time::OffsetDateTime;
+
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         #[serde(with = "clickhouse::serde::time::date")]
@@ -525,7 +501,7 @@ async fn test_date_and_time() {
         date_time64_9: OffsetDateTime,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let client = get_client().with_validation_mode(ValidationMode::Each);
     let result = client
         .query(
             "
@@ -564,22 +540,53 @@ async fn test_date_and_time() {
 }
 
 #[tokio::test]
-async fn test_ipv4_ipv6() {
+#[cfg(feature = "uuid")]
+async fn test_uuid() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
-        // id: u16,
-        // #[serde(with = "clickhouse::serde::ipv4")]
-        // ipv4: std::net::Ipv4Addr,
-        ipv6: std::net::Ipv6Addr,
+        id: u16,
+        #[serde(with = "clickhouse::serde::uuid")]
+        uuid: uuid::Uuid,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let client = get_client().with_validation_mode(ValidationMode::Each);
     let result = client
         .query(
             "
             SELECT
-                -- 42                                       :: UInt16 AS id,
-                -- '192.168.0.1'                            :: IPv4   AS ipv4,
+                42                                     :: UInt16 AS id,
+                '550e8400-e29b-41d4-a716-446655440000' :: UUID   AS uuid
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            id: 42,
+            uuid: uuid::Uuid::from_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_ipv4_ipv6() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        id: u16,
+        #[serde(with = "clickhouse::serde::ipv4")]
+        ipv4: std::net::Ipv4Addr,
+        ipv6: std::net::Ipv6Addr,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query(
+            "
+            SELECT
+                42                                       :: UInt16 AS id,
+                '192.168.0.1'                            :: IPv4   AS ipv4,
                 '2001:db8:3333:4444:5555:6666:7777:8888' :: IPv6   AS ipv6
             ",
         )
@@ -589,11 +596,147 @@ async fn test_ipv4_ipv6() {
     assert_eq!(
         result.unwrap(),
         vec![Data {
-            // id: 42,
-            // ipv4: std::net::Ipv4Addr::new(192, 168, 0, 1),
+            id: 42,
+            ipv4: std::net::Ipv4Addr::new(192, 168, 0, 1),
             ipv6: std::net::Ipv6Addr::from_str("2001:db8:3333:4444:5555:6666:7777:8888").unwrap(),
         }]
     )
+}
+
+#[tokio::test]
+async fn test_fixed_str() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: [u8; 4],
+        b: [u8; 3],
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query("SELECT '1234' :: FixedString(4) AS a, '777' :: FixedString(3) AS b")
+        .fetch_one::<Data>()
+        .await;
+
+    let data = result.unwrap();
+    assert_eq!(String::from_utf8_lossy(&data.a), "1234",);
+    assert_eq!(String::from_utf8_lossy(&data.b), "777",);
+}
+
+#[tokio::test]
+#[should_panic]
+async fn test_fixed_str_too_long() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: [u8; 4],
+        b: [u8; 3],
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let _ = client
+        .query("SELECT '12345' :: FixedString(5) AS a, '777' :: FixedString(3) AS b")
+        .fetch_one::<Data>()
+        .await;
+}
+
+#[tokio::test]
+async fn test_tuple() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: (u32, String),
+        b: (i128, HashMap<u16, String>),
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query(
+            "
+            SELECT
+                (42, 'foo')            :: Tuple(UInt32, String)              AS a,
+                (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt16, String)) AS b
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            a: (42, "foo".to_string()),
+            b: (144, vec![(255, "bar".to_string())].into_iter().collect()),
+        }
+    );
+}
+
+#[tokio::test]
+#[should_panic]
+async fn test_tuple_invalid_definition() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: (u32, String),
+        b: (i128, HashMap<u16, String>),
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+
+    // Map key is UInt64 instead of UInt16 requested in the struct
+    let _ = client
+        .query(
+            "
+            SELECT
+                (42, 'foo')            :: Tuple(UInt32, String)              AS a,
+                (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt64, String)) AS b
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+}
+
+#[tokio::test]
+#[should_panic]
+async fn test_tuple_too_many_elements_in_the_schema() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: (u32, String),
+        b: (i128, HashMap<u16, String>),
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+
+    // too many elements in the db type definition
+    let _ = client
+        .query(
+            "
+            SELECT
+                (42, 'foo', true)      :: Tuple(UInt32, String, Bool)        AS a,
+                (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt16, String)) AS b
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+}
+
+#[tokio::test]
+#[should_panic]
+async fn test_tuple_too_many_elements_in_the_struct() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: (u32, String, bool),
+        b: (i128, HashMap<u16, String>),
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+
+    // too many elements in the struct enum
+    let _ = client
+        .query(
+            "
+            SELECT
+                (42, 'foo')            :: Tuple(UInt32, String)              AS a,
+                (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt16, String)) AS b
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
 }
 
 // FIXME: RBWNAT should allow for tracking the order of fields in the struct and in the database!
@@ -607,7 +750,7 @@ async fn test_different_struct_field_order() {
         a: String,
     }
 
-    let client = prepare_database!().with_struct_validation_mode(StructValidationMode::EachRow);
+    let client = get_client().with_validation_mode(ValidationMode::Each);
     let result = client
         .query("SELECT 'foo' AS a, 'bar' :: String AS c")
         .fetch_one::<Data>()
