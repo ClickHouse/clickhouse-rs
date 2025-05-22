@@ -16,9 +16,8 @@ use std::marker::PhantomData;
 pub struct RowCursor<T> {
     raw: RawCursor,
     bytes: BytesExt,
-    validation_mode: ValidationMode,
+    rows_to_check: u64,
     columns: Option<Vec<Column>>,
-    rows_emitted: u64,
     _marker: PhantomData<T>,
 }
 
@@ -28,9 +27,11 @@ impl<T> RowCursor<T> {
             _marker: PhantomData,
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
+            rows_to_check: match validation_mode {
+                ValidationMode::First(n) => n as u64,
+                ValidationMode::Each => u64::MAX,
+            },
             columns: None,
-            rows_emitted: 0,
-            validation_mode,
         }
     }
 
@@ -45,42 +46,26 @@ impl<T> RowCursor<T> {
     where
         T: Deserialize<'b>,
     {
-        let should_validate = match self.validation_mode {
-            ValidationMode::Disabled => false,
-            ValidationMode::Each => true,
-            ValidationMode::First(n) => self.rows_emitted < (n as u64),
-        };
-
         loop {
             if self.bytes.remaining() > 0 {
                 let mut slice = super::workaround_51132(self.bytes.slice());
-                let deserialize_result = if should_validate {
-                    match &self.columns {
-                        // TODO: can it be moved to `new` instead?
-                        None => {
-                            let columns = parse_rbwnat_columns_header(&mut slice)?;
-                            self.bytes.set_remaining(slice.len());
-                            self.columns = Some(columns);
-                            let columns = self.columns.as_ref().unwrap();
-                            // usually, the header arrives as a separate first chunk
-                            if self.bytes.remaining() > 0 {
-                                rowbinary::deserialize_from_and_validate(&mut slice, columns)
-                            } else {
-                                Err(Error::NotEnoughData)
-                            }
-                        }
-                        Some(columns) => {
-                            rowbinary::deserialize_from_and_validate(&mut slice, columns)
-                        }
+                let deserialize_result = match &self.columns {
+                    None => self.extract_columns_and_deserialize_from(slice),
+                    Some(columns) if self.rows_to_check > 0 => {
+                        rowbinary::deserialize_from_and_validate(&mut slice, columns)
                     }
-                } else {
-                    rowbinary::deserialize_from(&mut slice)
+                    Some(_) => {
+                        // Schema is validated already, skipping for better performance
+                        rowbinary::deserialize_from(&mut slice)
+                    }
                 };
 
                 match deserialize_result {
                     Ok(value) => {
                         self.bytes.set_remaining(slice.len());
-                        self.rows_emitted += 1;
+                        if self.rows_to_check > 0 {
+                            self.rows_to_check -= 1;
+                        }
                         return Ok(Some(value));
                     }
                     Err(Error::NotEnoughData) => {}
@@ -116,9 +101,24 @@ impl<T> RowCursor<T> {
         self.raw.decoded_bytes()
     }
 
-    /// Returns the number of rows emitted via [`Self::next`] since the cursor was created.
-    #[inline]
-    pub fn rows_emitted(&self) -> u64 {
-        self.rows_emitted
+    #[cold]
+    #[inline(never)]
+    fn extract_columns_and_deserialize_from<'a, 'b: 'a>(
+        &'a mut self,
+        mut slice: &'b [u8],
+    ) -> Result<T>
+    where
+        T: Deserialize<'b>,
+    {
+        let columns = parse_rbwnat_columns_header(&mut slice)?;
+        self.bytes.set_remaining(slice.len());
+        self.columns = Some(columns);
+        let columns = self.columns.as_ref().unwrap();
+        // usually, the header arrives as a separate first chunk
+        if self.bytes.remaining() > 0 {
+            rowbinary::deserialize_from_and_validate(&mut slice, columns)
+        } else {
+            Err(Error::NotEnoughData)
+        }
     }
 }

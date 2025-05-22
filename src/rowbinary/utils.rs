@@ -10,6 +10,7 @@ pub(crate) fn ensure_size(buffer: impl Buf, size: usize) -> crate::error::Result
     }
 }
 
+#[inline]
 pub(crate) fn get_unsigned_leb128(mut buffer: impl Buf) -> crate::error::Result<u64> {
     let mut value = 0u64;
     let mut shift = 0;

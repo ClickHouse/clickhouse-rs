@@ -8,8 +8,6 @@
 ///   Format: `RowBinaryWithNamesAndTypes`.
 /// - [`ValidationMode::Each`] enables validation _for all rows_ emitted by a cursor.
 ///   This is the slowest mode. Format: `RowBinaryWithNamesAndTypes`.
-/// - [`ValidationMode::Disabled`] means that no validation will be performed.
-///   At the same time, this is the fastest mode. Format: `RowBinary`.
 ///
 /// # Default
 ///
@@ -29,7 +27,6 @@
 pub enum ValidationMode {
     First(usize),
     Each,
-    Disabled,
 }
 
 impl Default for ValidationMode {
@@ -43,7 +40,6 @@ impl std::fmt::Display for ValidationMode {
         match self {
             Self::First(n) => f.pad(&format!("FirstN({})", n)),
             Self::Each => f.pad("Each"),
-            Self::Disabled => f.pad("Disabled"),
         }
     }
 }

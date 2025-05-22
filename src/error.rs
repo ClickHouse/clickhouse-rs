@@ -43,15 +43,10 @@ pub enum Error {
     TimedOut,
     #[error("unsupported: {0}")]
     Unsupported(String),
+    #[error("error while deserializing data: {0}")]
+    DeserializationError(String),
     #[error("error while parsing data from the response: {0}")]
-    ParserError(BoxedError),
-    #[error("struct mismatches the database definition; field {field_name} has unexpected type {unexpected_type}; allowed types for {field_name}: {allowed_types}; database columns: {all_columns:?}")]
-    DataTypeMismatch {
-        field_name: String,
-        allowed_types: String,
-        unexpected_type: String,
-        all_columns: String,
-    },
+    ParserError(#[source] BoxedError),
     #[error("{0}")]
     Other(BoxedError),
 }

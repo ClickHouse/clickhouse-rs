@@ -356,7 +356,6 @@ async fn test_enum() {
     let expected = vec![
         Data {
             id: 1,
-
             enum8: MyEnum8::Spring,
             enum16: MyEnum16::East,
         },
@@ -737,6 +736,97 @@ async fn test_tuple_too_many_elements_in_the_struct() {
         )
         .fetch_one::<Data>()
         .await;
+}
+
+#[tokio::test]
+async fn test_variant() {
+    #[derive(Debug, Deserialize, PartialEq)]
+    enum MyVariant {
+        Str(String),
+        U16(u16),
+    }
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct Data {
+        id: u8,
+        var: MyVariant,
+    }
+
+    let client = get_client()
+        .with_validation_mode(ValidationMode::Each)
+        .with_option("allow_experimental_variant_type", "1");
+    let result = client
+        .query(
+            "
+            SELECT * FROM (
+                SELECT 0 :: UInt8 AS id, 'foo' :: Variant(String, UInt16) AS var
+                UNION ALL
+                SELECT 1 :: UInt8 AS id, 144   :: Variant(String, UInt16) AS var
+            ) ORDER BY id ASC
+            ",
+        )
+        .fetch_all::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        vec![
+            Data {
+                id: 0,
+                var: MyVariant::Str("foo".to_string())
+            },
+            Data {
+                id: 1,
+                var: MyVariant::U16(144)
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+#[ignore] // this is currently disabled, see validation todo
+async fn test_variant_wrong_definition() {
+    #[derive(Debug, Deserialize, PartialEq)]
+    enum MyVariant {
+        Str(String),
+        U32(u32),
+    }
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct Data {
+        id: u8,
+        var: MyVariant,
+    }
+
+    let client = get_client()
+        .with_validation_mode(ValidationMode::Each)
+        .with_option("allow_experimental_variant_type", "1");
+    let result = client
+        .query(
+            "
+            SELECT * FROM (
+                SELECT 0 :: UInt8 AS id, 'foo' :: Variant(String, UInt16) AS var
+                UNION ALL
+                SELECT 1 :: UInt8 AS id, 144   :: Variant(String, UInt16) AS var
+            ) ORDER BY id ASC
+            ",
+        )
+        .fetch_all::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        vec![
+            Data {
+                id: 0,
+                var: MyVariant::Str("foo".to_string())
+            },
+            Data {
+                id: 1,
+                var: MyVariant::U32(144)
+            },
+        ]
+    );
 }
 
 // FIXME: RBWNAT should allow for tracking the order of fields in the struct and in the database!

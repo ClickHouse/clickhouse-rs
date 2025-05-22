@@ -478,8 +478,6 @@ mod client_tests {
         assert_eq!(client.validation_mode, ValidationMode::First(1));
         let client = client.with_validation_mode(ValidationMode::Each);
         assert_eq!(client.validation_mode, ValidationMode::Each);
-        let client = client.with_validation_mode(ValidationMode::Disabled);
-        assert_eq!(client.validation_mode, ValidationMode::Disabled);
         let client = client.with_validation_mode(ValidationMode::First(10));
         assert_eq!(client.validation_mode, ValidationMode::First(10));
     }

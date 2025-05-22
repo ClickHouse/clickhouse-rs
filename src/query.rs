@@ -17,7 +17,6 @@ const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
 pub use crate::cursors::{BytesCursor, RowCursor};
 use crate::headers::with_authentication;
-use crate::validation_mode::ValidationMode;
 
 #[must_use]
 #[derive(Clone)]
@@ -88,10 +87,7 @@ impl Query {
         let validation_mode = self.client.validation_mode;
 
         self.sql.bind_fields::<T>();
-        self.sql.set_output_format(match validation_mode {
-            ValidationMode::First(_) | ValidationMode::Each => "RowBinaryWithNamesAndTypes",
-            ValidationMode::Disabled => "RowBinary",
-        });
+        self.sql.set_output_format("RowBinaryWithNamesAndTypes");
 
         let response = self.do_execute(true)?;
         Ok(RowCursor::new(response, validation_mode))
