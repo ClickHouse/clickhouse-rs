@@ -23,6 +23,24 @@
 use clickhouse::{sql::Identifier, Client, Row};
 use serde::{Deserialize, Serialize};
 
+macro_rules! assert_panic_on_fetch {
+    ($msg_parts:expr, $query:expr) => {
+        use futures::FutureExt;
+        let client = get_client().with_validation_mode(ValidationMode::Each);
+        let async_panic =
+            std::panic::AssertUnwindSafe(async { client.query($query).fetch_one::<Data>().await });
+        let result = async_panic.catch_unwind().await;
+        assert!(result.is_err());
+        let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
+        for &msg in $msg_parts {
+            assert!(
+                panic_msg.contains(msg),
+                "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
+            );
+        }
+    };
+}
+
 macro_rules! prepare_database {
     () => {
         crate::_priv::prepare_database({

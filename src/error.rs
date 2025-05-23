@@ -41,12 +41,8 @@ pub enum Error {
     BadResponse(String),
     #[error("timeout expired")]
     TimedOut,
-    #[error("unsupported: {0}")]
-    Unsupported(String),
-    #[error("error while deserializing data: {0}")]
-    DeserializationError(String),
-    #[error("error while parsing data from the response: {0}")]
-    ParserError(#[source] BoxedError),
+    #[error("error while parsing columns header from the response: {0}")]
+    ColumnsHeaderParserError(#[source] BoxedError),
     #[error("{0}")]
     Other(BoxedError),
 }
@@ -55,7 +51,7 @@ assert_impl_all!(Error: StdError, Send, Sync);
 
 impl From<clickhouse_rowbinary::error::ParserError> for Error {
     fn from(err: clickhouse_rowbinary::error::ParserError) -> Self {
-        Self::ParserError(Box::new(err))
+        Self::ColumnsHeaderParserError(Box::new(err))
     }
 }
 

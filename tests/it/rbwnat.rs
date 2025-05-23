@@ -393,22 +393,18 @@ async fn test_enum() {
 }
 
 #[tokio::test]
-#[should_panic]
 async fn test_nullable() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         n: Option<u32>,
     }
-
-    let client = get_client().with_validation_mode(ValidationMode::Each);
-    let _ = client
-        .query("SELECT true AS b, 144 :: Int32 AS n2")
-        .fetch_one::<Data>()
-        .await;
+    assert_panic_on_fetch!(
+        &["Data.b", "Bool", "Option<T>"],
+        "SELECT true AS b, 144 :: Int32 AS n2"
+    );
 }
 
 #[tokio::test]
-#[should_panic]
 #[cfg(feature = "time")]
 async fn test_serde_with() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
@@ -416,24 +412,13 @@ async fn test_serde_with() {
         #[serde(with = "clickhouse::serde::time::datetime64::millis")]
         n1: time::OffsetDateTime, // underlying is still Int64; should not compose it from two (U)Int32
     }
-
-    let client = get_client().with_validation_mode(ValidationMode::Each);
-    let _ = client
-        .query("SELECT 42 :: UInt32 AS n1, 144 :: Int32 AS n2")
-        .fetch_one::<Data>()
-        .await;
-
-    // FIXME: lack of derive PartialEq for Error prevents proper assertion
-    // assert_eq!(result, Error::DataTypeMismatch {
-    //     column_name: "n1".to_string(),
-    //     expected_type: "Int64".to_string(),
-    //     actual_type: "Int32".to_string(),
-    //     columns: vec![...],
-    // });
+    assert_panic_on_fetch!(
+        &["Data.n1", "UInt32", "i64"],
+        "SELECT 42 :: UInt32 AS n1, 144 :: Int32 AS n2"
+    );
 }
 
 #[tokio::test]
-#[should_panic]
 async fn test_too_many_struct_fields() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
@@ -441,12 +426,10 @@ async fn test_too_many_struct_fields() {
         b: u32,
         c: u32,
     }
-
-    let client = get_client().with_validation_mode(ValidationMode::Each);
-    let _ = client
-        .query("SELECT 42 :: UInt32 AS a, 144 :: UInt32 AS b")
-        .fetch_one::<Data>()
-        .await;
+    assert_panic_on_fetch!(
+        &["Struct Data has more fields than columns in the database schema"],
+        "SELECT 42 :: UInt32 AS a, 144 :: UInt32 AS b"
+    );
 }
 
 #[tokio::test]
@@ -617,24 +600,21 @@ async fn test_fixed_str() {
         .await;
 
     let data = result.unwrap();
-    assert_eq!(String::from_utf8_lossy(&data.a), "1234",);
-    assert_eq!(String::from_utf8_lossy(&data.b), "777",);
+    assert_eq!(String::from_utf8_lossy(&data.a), "1234");
+    assert_eq!(String::from_utf8_lossy(&data.b), "777");
 }
 
 #[tokio::test]
-#[should_panic]
 async fn test_fixed_str_too_long() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: [u8; 4],
         b: [u8; 3],
     }
-
-    let client = get_client().with_validation_mode(ValidationMode::Each);
-    let _ = client
-        .query("SELECT '12345' :: FixedString(5) AS a, '777' :: FixedString(3) AS b")
-        .fetch_one::<Data>()
-        .await;
+    assert_panic_on_fetch!(
+        &["Data.a", "FixedString(5)", "with length 4"],
+        "SELECT '12345' :: FixedString(5) AS a, '777' :: FixedString(3) AS b"
+    );
 }
 
 #[tokio::test]
@@ -667,78 +647,87 @@ async fn test_tuple() {
 }
 
 #[tokio::test]
-#[should_panic]
 async fn test_tuple_invalid_definition() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: (u32, String),
         b: (i128, HashMap<u16, String>),
     }
-
-    let client = get_client().with_validation_mode(ValidationMode::Each);
-
     // Map key is UInt64 instead of UInt16 requested in the struct
-    let _ = client
-        .query(
-            "
-            SELECT
-                (42, 'foo')            :: Tuple(UInt32, String)              AS a,
-                (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt64, String)) AS b
-            ",
-        )
-        .fetch_one::<Data>()
-        .await;
+    assert_panic_on_fetch!(
+        &[
+            "Data.b",
+            "Tuple(Int128, Map(UInt64, String))",
+            "UInt64 as u16"
+        ],
+        "
+        SELECT
+            (42, 'foo')            :: Tuple(UInt32, String)              AS a,
+            (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt64, String)) AS b
+        "
+    );
 }
 
 #[tokio::test]
-#[should_panic]
 async fn test_tuple_too_many_elements_in_the_schema() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: (u32, String),
         b: (i128, HashMap<u16, String>),
     }
-
-    let client = get_client().with_validation_mode(ValidationMode::Each);
-
     // too many elements in the db type definition
-    let _ = client
-        .query(
-            "
-            SELECT
-                (42, 'foo', true)      :: Tuple(UInt32, String, Bool)        AS a,
-                (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt16, String)) AS b
-            ",
-        )
-        .fetch_one::<Data>()
-        .await;
+    assert_panic_on_fetch!(
+        &[
+            "Data.a",
+            "Tuple(UInt32, String, Bool)",
+            "remaining elements: Bool"
+        ],
+        "
+        SELECT
+            (42, 'foo', true)      :: Tuple(UInt32, String, Bool)        AS a,
+            (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt16, String)) AS b
+        "
+    );
 }
 
 #[tokio::test]
-#[should_panic]
 async fn test_tuple_too_many_elements_in_the_struct() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: (u32, String, bool),
         b: (i128, HashMap<u16, String>),
     }
-
-    let client = get_client().with_validation_mode(ValidationMode::Each);
-
     // too many elements in the struct enum
-    let _ = client
-        .query(
-            "
-            SELECT
-                (42, 'foo')            :: Tuple(UInt32, String)              AS a,
-                (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt16, String)) AS b
-            ",
-        )
-        .fetch_one::<Data>()
-        .await;
+    assert_panic_on_fetch!(
+        &["Data.a", "Tuple(UInt32, String)", "deserialize bool"],
+        "
+        SELECT
+            (42, 'foo')            :: Tuple(UInt32, String)              AS a,
+            (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt16, String)) AS b
+        "
+    );
 }
 
 #[tokio::test]
+async fn test_deeply_nested_validation_incorrect_fixed_string() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        id: u32,
+        col: Vec<Vec<HashMap<u32, Vec<[u8; 2]>>>>,
+    }
+    // Struct has FixedString(2) instead of FixedString(1)
+    assert_panic_on_fetch!(
+        &["Data.col", "FixedString(1)", "with length 2"],
+        "
+        SELECT
+            42                                     :: UInt32                                           AS id,
+            array(array(map(42, array('1', '2')))) :: Array(Array(Map(UInt32, Array(FixedString(1))))) AS col
+        "
+    );
+}
+
+#[tokio::test]
+#[ignore]
 async fn test_variant() {
     #[derive(Debug, Deserialize, PartialEq)]
     enum MyVariant {
