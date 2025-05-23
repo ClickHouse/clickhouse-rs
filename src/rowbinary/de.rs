@@ -4,6 +4,7 @@ use crate::rowbinary::validation::SerdeType;
 use crate::rowbinary::validation::{DataTypeValidator, ValidateDataType};
 use bytes::Buf;
 use clickhouse_rowbinary::data_types::Column;
+use core::mem::size_of;
 use serde::de::MapAccess;
 use serde::{
     de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
