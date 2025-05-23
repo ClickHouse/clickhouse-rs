@@ -148,9 +148,7 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
         // Max number of types in the Variant data type is 255
         // See also: https://github.com/ClickHouse/ClickHouse/issues/54864
         if variant_index > 255 {
-            return Err(Error::VariantDiscriminatorIsOutOfBound(
-                variant_index as usize,
-            ));
+            panic!("max number of types in the Variant data type is 255, got {variant_index}")
         }
         self.buffer.put_u8(variant_index as u8);
         value.serialize(self)
