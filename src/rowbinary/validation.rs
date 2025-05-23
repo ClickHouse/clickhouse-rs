@@ -294,7 +294,7 @@ fn validate_impl<'de, 'cursor>(
                 root,
                 kind: InnerDataTypeValidatorKind::Enum(values_map),
             })),
-            _ => root.panic_on_schema_mismatch(data_type, &serde_type, is_inner),
+            _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::I16 => match data_type {
             DataTypeNode::Int16 => Ok(None),
@@ -302,7 +302,7 @@ fn validate_impl<'de, 'cursor>(
                 root,
                 kind: InnerDataTypeValidatorKind::Enum(values_map),
             })),
-            _ => root.panic_on_schema_mismatch(data_type, &serde_type, is_inner),
+            _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::I32
             if data_type == &DataTypeNode::Int32
@@ -365,7 +365,7 @@ fn validate_impl<'de, 'cursor>(
                     kind: InnerDataTypeValidatorKind::Nullable(inner_type),
                 }))
             } else {
-                root.panic_on_schema_mismatch(data_type, &serde_type, is_inner)
+                root.panic_on_schema_mismatch(data_type, serde_type, is_inner)
             }
         }
         SerdeType::Seq(_) => {
@@ -378,7 +378,7 @@ fn validate_impl<'de, 'cursor>(
                     ),
                 }))
             } else {
-                root.panic_on_schema_mismatch(data_type, &serde_type, is_inner)
+                root.panic_on_schema_mismatch(data_type, serde_type, is_inner)
             }
         }
         SerdeType::Tuple(len) => match data_type {
@@ -419,7 +419,7 @@ fn validate_impl<'de, 'cursor>(
                     DataTypeNode::UInt64,
                 ]),
             })),
-            _ => root.panic_on_schema_mismatch(data_type, &serde_type, is_inner),
+            _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::Map(_) => {
             if let DataTypeNode::Map(key_type, value_type) = data_type {
@@ -442,7 +442,7 @@ fn validate_impl<'de, 'cursor>(
             todo!("variant data type validation")
         }
 
-        _ => root.panic_on_schema_mismatch(data_type, &serde_type, is_inner),
+        _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
     }
 }
 

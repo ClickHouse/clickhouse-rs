@@ -9,7 +9,7 @@ use serde::{
     de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
     Deserialize,
 };
-use std::{convert::TryFrom, mem, str};
+use std::{convert::TryFrom, str};
 
 /// Deserializes a value from `input` with a row encoded in `RowBinary`.
 ///
@@ -80,7 +80,7 @@ macro_rules! impl_num {
         #[inline(always)]
         fn $deser_method<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
             self.validator.validate($serde_type)?;
-            ensure_size(&mut self.input, mem::size_of::<$ty>())?;
+            ensure_size(&mut self.input, core::mem::size_of::<$ty>())?;
             let value = self.input.$reader_method();
             visitor.$visitor_method(value)
         }
