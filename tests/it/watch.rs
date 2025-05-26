@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use clickhouse::{Client, Row};
 
-mod common;
-
 #[derive(Debug, PartialEq, Row, Serialize, Deserialize)]
 struct MyRow {
     num: u32,
@@ -33,10 +31,9 @@ async fn insert_into_table(client: &Client, rows: &[MyRow]) {
     insert.end().await.unwrap();
 }
 
-#[common::named]
 #[tokio::test]
 async fn changes() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     create_table(&client).await;
 
@@ -71,10 +68,9 @@ async fn changes() {
     assert_eq!(cursor2.next().await.unwrap(), Some((3, MyRow { num: 21 })));
 }
 
-#[common::named]
 #[tokio::test]
 async fn events() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     create_table(&client).await;
 

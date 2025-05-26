@@ -1,47 +1,44 @@
 use std::fmt;
 
+// Trust clickhouse-connect https://github.com/ClickHouse/clickhouse-connect/blob/5d85563410f3ec378cb199ec51d75e033211392c/clickhouse_connect/driver/binding.py#L15
+
 // See https://clickhouse.tech/docs/en/sql-reference/syntax/#syntax-string-literal
-pub(crate) fn string(src: &str, dst: impl fmt::Write) -> fmt::Result {
-    escape(src, dst, '\'')
+pub(crate) fn string(src: &str, dst: &mut impl fmt::Write) -> fmt::Result {
+    dst.write_char('\'')?;
+    escape(src, dst)?;
+    dst.write_char('\'')
 }
 
 // See https://clickhouse.tech/docs/en/sql-reference/syntax/#syntax-identifiers
-pub(crate) fn identifier(src: &str, dst: impl fmt::Write) -> fmt::Result {
-    escape(src, dst, '`')
+pub(crate) fn identifier(src: &str, dst: &mut impl fmt::Write) -> fmt::Result {
+    dst.write_char('`')?;
+    escape(src, dst)?;
+    dst.write_char('`')
 }
 
-fn escape(src: &str, mut dst: impl fmt::Write, ch: char) -> fmt::Result {
-    dst.write_char(ch)?;
-
-    // TODO: escape newlines?
-    for (idx, part) in src.split(ch).enumerate() {
-        if idx > 0 {
-            dst.write_char('\\')?;
-            dst.write_char(ch)?;
-        }
-
-        for (idx, part) in part.split('\\').enumerate() {
-            if idx > 0 {
-                dst.write_str("\\\\")?;
-            }
-
-            dst.write_str(part)?;
-        }
+pub(crate) fn escape(src: &str, dst: &mut impl fmt::Write) -> fmt::Result {
+    const REPLACE: &[char] = &['\\', '\'', '`', '\t', '\n'];
+    let mut rest = src;
+    while let Some(nextidx) = rest.find(REPLACE) {
+        let (before, after) = rest.split_at(nextidx);
+        rest = &after[1..];
+        dst.write_str(before)?;
+        dst.write_char('\\')?;
+        dst.write_str(&after[..1])?;
     }
-
-    dst.write_char(ch)
+    dst.write_str(rest)
 }
 
 #[test]
 fn it_escapes_string() {
     let mut actual = String::new();
-    string(r#"f\o'o '' b\'ar'"#, &mut actual).unwrap();
-    assert_eq!(actual, r#"'f\\o\'o \'\' b\\\'ar\''"#);
+    string(r"f\o'o '' b\'ar'", &mut actual).unwrap();
+    assert_eq!(actual, r"'f\\o\'o \'\' b\\\'ar\''");
 }
 
 #[test]
 fn it_escapes_identifier() {
     let mut actual = String::new();
-    identifier(r#"f\o`o `` b\`ar`"#, &mut actual).unwrap();
-    assert_eq!(actual, r#"`f\\o\`o \`\` b\\\`ar\``"#);
+    identifier(r"f\o`o `` b\`ar`", &mut actual).unwrap();
+    assert_eq!(actual, r"`f\\o\`o \`\` b\\\`ar\``");
 }

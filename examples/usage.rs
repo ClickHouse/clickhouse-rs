@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use serde::{Deserialize, Serialize};
 
 use clickhouse::{error::Result, sql, Client, Row};
@@ -39,18 +37,17 @@ async fn insert(client: &Client) -> Result<()> {
     insert.end().await
 }
 
+// This is a very basic example of using the `inserter` feature.
+// See `inserter.rs` for real-world patterns.
+#[cfg(feature = "inserter")]
 async fn inserter(client: &Client) -> Result<()> {
     let mut inserter = client
         .inserter("some")?
-        .with_max_entries(100_000)
-        .with_period(Some(Duration::from_secs(15)));
+        .with_max_rows(100_000)
+        .with_period(Some(std::time::Duration::from_secs(15)));
 
     for i in 0..1000 {
-        if i == 500 {
-            inserter.set_max_entries(300);
-        }
-
-        inserter.write(&MyRow { no: i, name: "foo" }).await?;
+        inserter.write(&MyRow { no: i, name: "foo" })?;
         inserter.commit().await?;
     }
 
@@ -149,13 +146,13 @@ async fn main() -> Result<()> {
 
     ddl(&client).await?;
     insert(&client).await?;
+    #[cfg(feature = "inserter")]
     inserter(&client).await?;
     select_count(&client).await?;
     fetch(&client).await?;
     fetch_all(&client).await?;
     delete(&client).await?;
     select_count(&client).await?;
-
     #[cfg(feature = "watch")]
     watch(&client).await?;
 

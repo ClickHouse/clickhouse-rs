@@ -1,6 +1,17 @@
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 
 const PERIOD_THRESHOLD: Duration = Duration::from_secs(365 * 24 * 3600);
+
+// === Instant ===
+
+// More efficient `Instant` based on TSC.
+#[cfg(not(feature = "test-util"))]
+type Instant = quanta::Instant;
+
+#[cfg(feature = "test-util")]
+type Instant = tokio::time::Instant;
+
+// === Ticks ===
 
 pub(crate) struct Ticks {
     period: Duration,
@@ -29,8 +40,13 @@ impl Ticks {
         self.max_bias = max_bias.clamp(0., 1.);
     }
 
-    pub(crate) fn next_at(&self) -> Option<Instant> {
+    pub(crate) fn time_left(&self) -> Option<Duration> {
         self.next_at
+            .map(|n| n.saturating_duration_since(Instant::now()))
+    }
+
+    pub(crate) fn reached(&self) -> bool {
+        self.next_at.is_some_and(|n| Instant::now() >= n)
     }
 
     pub(crate) fn reschedule(&mut self) {
@@ -62,91 +78,113 @@ impl Ticks {
     }
 }
 
-#[tokio::test]
-async fn it_works() {
-    tokio::time::pause();
-    let origin = Instant::now();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // No bias.
-    let mut ticks = Ticks::default();
-    ticks.set_period(Some(Duration::from_secs(10)));
-    ticks.reschedule();
+    #[cfg(feature = "test-util")] // only with `tokio::time::Instant`
+    #[tokio::test(start_paused = true)]
+    async fn smoke() {
+        // No bias.
+        let mut ticks = Ticks::default();
+        ticks.set_period(Some(Duration::from_secs(10)));
+        ticks.reschedule();
 
-    assert_eq!(ticks.next_at().unwrap() - origin, Duration::from_secs(10));
-    tokio::time::advance(Duration::from_secs(3)).await;
-    ticks.reschedule();
-    assert_eq!(ticks.next_at().unwrap() - origin, Duration::from_secs(10));
-    tokio::time::advance(Duration::from_secs(7)).await;
-    ticks.reschedule();
-    assert_eq!(ticks.next_at().unwrap() - origin, Duration::from_secs(20));
+        assert_eq!(ticks.time_left(), Some(Duration::from_secs(10)));
+        assert!(!ticks.reached());
+        tokio::time::advance(Duration::from_secs(3)).await;
+        ticks.reschedule();
+        assert_eq!(ticks.time_left(), Some(Duration::from_secs(7)));
+        assert!(!ticks.reached());
+        tokio::time::advance(Duration::from_secs(7)).await;
+        assert!(ticks.reached());
+        ticks.reschedule();
+        assert_eq!(ticks.time_left(), Some(Duration::from_secs(10)));
+        assert!(!ticks.reached());
 
-    // Up to 10% bias.
-    ticks.set_period_bias(0.1);
-    ticks.reschedule();
-    assert_eq!(ticks.next_at().unwrap() - origin, Duration::from_secs(19));
-    tokio::time::advance(Duration::from_secs(12)).await;
-    ticks.reschedule();
-    assert_eq!(ticks.next_at().unwrap() - origin, Duration::from_secs(29));
+        // Up to 10% bias.
+        ticks.set_period_bias(0.1);
+        ticks.reschedule();
+        assert_eq!(ticks.time_left(), Some(Duration::from_secs(9)));
+        assert!(!ticks.reached());
+        tokio::time::advance(Duration::from_secs(12)).await;
+        assert!(ticks.reached());
+        ticks.reschedule();
+        assert_eq!(ticks.time_left(), Some(Duration::from_secs(7)));
+        assert!(!ticks.reached());
 
-    // Try other seeds.
-    tokio::time::advance(Duration::from_nanos(32768)).await;
-    ticks.reschedule();
-    assert_eq!(
-        (ticks.next_at().unwrap() - origin).as_secs_f64().round(),
-        30.
-    );
+        // Try other seeds.
+        tokio::time::advance(Duration::from_nanos(32768)).await;
+        ticks.reschedule();
+        assert_eq!(
+            ticks.time_left(),
+            Some(Duration::from_secs_f64(7.999982492))
+        );
 
-    tokio::time::advance(Duration::from_nanos(32767)).await;
-    ticks.reschedule();
-    assert_eq!(ticks.next_at().unwrap() - origin, Duration::from_secs(31));
-}
+        tokio::time::advance(Duration::from_nanos(32767)).await;
+        ticks.reschedule();
+        assert_eq!(
+            ticks.time_left(),
+            Some(Duration::from_secs_f64(8.999934465))
+        );
+    }
 
-#[tokio::test]
-async fn it_skips_extra_ticks() {
-    tokio::time::pause();
-    let origin = Instant::now();
+    #[cfg(feature = "test-util")] // only with `tokio::time::Instant`
+    #[tokio::test(start_paused = true)]
+    async fn skip_extra_ticks() {
+        let mut ticks = Ticks::default();
+        ticks.set_period(Some(Duration::from_secs(10)));
+        ticks.set_period_bias(0.1);
+        ticks.reschedule();
 
-    let mut ticks = Ticks::default();
-    ticks.set_period(Some(Duration::from_secs(10)));
-    ticks.set_period_bias(0.1);
-    ticks.reschedule();
+        // Trivial case, just skip several ticks.
+        assert_eq!(ticks.time_left(), Some(Duration::from_secs(9)));
+        assert!(!ticks.reached());
+        tokio::time::advance(Duration::from_secs(30)).await;
+        assert!(ticks.reached());
+        ticks.reschedule();
+        assert_eq!(ticks.time_left(), Some(Duration::from_secs(9)));
+        assert!(!ticks.reached());
 
-    // Trivial case, just skip several ticks.
-    assert_eq!(ticks.next_at().unwrap() - origin, Duration::from_secs(9));
-    tokio::time::advance(Duration::from_secs(30)).await;
-    ticks.reschedule();
-    assert_eq!(ticks.next_at().unwrap() - origin, Duration::from_secs(39));
+        // Hit biased zone.
+        tokio::time::advance(Duration::from_secs(19)).await;
+        assert!(ticks.reached());
+        ticks.reschedule();
+        assert_eq!(ticks.time_left(), Some(Duration::from_secs(10)));
+        assert!(!ticks.reached());
+    }
 
-    // Hit biased zone.
-    tokio::time::advance(Duration::from_secs(19)).await;
-    ticks.reschedule();
-    assert_eq!(ticks.next_at().unwrap() - origin, Duration::from_secs(59));
-}
+    #[tokio::test]
+    async fn disabled() {
+        let mut ticks = Ticks::default();
+        assert_eq!(ticks.time_left(), None);
+        assert!(!ticks.reached());
+        ticks.reschedule();
+        assert_eq!(ticks.time_left(), None);
+        assert!(!ticks.reached());
 
-#[tokio::test]
-async fn it_is_disabled() {
-    let mut ticks = Ticks::default();
-    assert!(ticks.next_at().is_none());
-    ticks.reschedule();
-    assert!(ticks.next_at().is_none());
+        // Not disabled.
+        ticks.set_period(Some(Duration::from_secs(10)));
+        ticks.reschedule();
+        assert!(ticks.time_left().unwrap() < Duration::from_secs(10));
+        assert!(!ticks.reached());
 
-    // Not disabled.
-    ticks.set_period(Some(Duration::from_secs(10)));
-    ticks.reschedule();
-    assert!(ticks.next_at().is_some());
+        // Explicitly.
+        ticks.set_period(None);
+        ticks.reschedule();
+        assert_eq!(ticks.time_left(), None);
+        assert!(!ticks.reached());
 
-    // Explicitly.
-    ticks.set_period(None);
-    ticks.reschedule();
-    assert!(ticks.next_at().is_none());
+        // Zero duration.
+        ticks.set_period(Some(Duration::from_secs(0)));
+        ticks.reschedule();
+        assert_eq!(ticks.time_left(), None);
+        assert!(!ticks.reached());
 
-    // Zero duration.
-    ticks.set_period(Some(Duration::from_secs(0)));
-    ticks.reschedule();
-    assert!(ticks.next_at().is_none());
-
-    // Too big duration.
-    ticks.set_period(Some(PERIOD_THRESHOLD));
-    ticks.reschedule();
-    assert!(ticks.next_at().is_none());
+        // Too big duration.
+        ticks.set_period(Some(PERIOD_THRESHOLD));
+        ticks.reschedule();
+        assert_eq!(ticks.time_left(), None);
+        assert!(!ticks.reached());
+    }
 }

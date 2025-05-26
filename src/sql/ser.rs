@@ -8,23 +8,23 @@ use thiserror::Error;
 
 use super::escape;
 
-// === SqlSerializerError ===
+// === SerializerError ===
 
 #[derive(Debug, Error)]
-enum SqlSerializerError {
+enum SerializerError {
     #[error("{0} is unsupported")]
     Unsupported(&'static str),
     #[error("{0}")]
     Custom(String),
 }
 
-impl ser::Error for SqlSerializerError {
+impl ser::Error for SerializerError {
     fn custom<T: fmt::Display>(msg: T) -> Self {
         Self::Custom(msg.to_string())
     }
 }
 
-impl From<fmt::Error> for SqlSerializerError {
+impl From<fmt::Error> for SerializerError {
     fn from(err: fmt::Error) -> Self {
         Self::Custom(err.to_string())
     }
@@ -32,8 +32,8 @@ impl From<fmt::Error> for SqlSerializerError {
 
 // === SqlSerializer ===
 
-type Result<T = (), E = SqlSerializerError> = std::result::Result<T, E>;
-type Impossible = ser::Impossible<(), SqlSerializerError>;
+type Result<T = (), E = SerializerError> = std::result::Result<T, E>;
+type Impossible = ser::Impossible<(), SerializerError>;
 
 struct SqlSerializer<'a, W> {
     writer: &'a mut W,
@@ -43,7 +43,7 @@ macro_rules! unsupported {
     ($ser_method:ident($ty:ty) -> $ret:ty, $($other:tt)*) => {
         #[inline]
         fn $ser_method(self, _v: $ty) -> $ret {
-            Err(SqlSerializerError::Unsupported(stringify!($ser_method)))
+            Err(SerializerError::Unsupported(stringify!($ser_method)))
         }
         unsupported!($($other)*);
     };
@@ -53,7 +53,7 @@ macro_rules! unsupported {
     ($ser_method:ident, $($other:tt)*) => {
         #[inline]
         fn $ser_method(self) -> Result {
-            Err(SqlSerializerError::Unsupported(stringify!($ser_method)))
+            Err(SerializerError::Unsupported(stringify!($ser_method)))
         }
         unsupported!($($other)*);
     };
@@ -73,15 +73,230 @@ macro_rules! forward_to_display {
 }
 
 impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
+    type Error = SerializerError;
     type Ok = ();
-    type Error = SqlSerializerError;
+    type SerializeMap = Impossible;
     type SerializeSeq = SqlListSerializer<'a, W>;
+    type SerializeStruct = Impossible;
+    type SerializeStructVariant = Impossible;
     type SerializeTuple = SqlListSerializer<'a, W>;
     type SerializeTupleStruct = Impossible;
     type SerializeTupleVariant = Impossible;
+
+    unsupported!(
+        serialize_map(Option<usize>) -> Result<Impossible>,
+        serialize_bytes(&[u8]),
+        serialize_unit,
+        serialize_unit_struct(&'static str),
+    );
+
+    forward_to_display!(
+        serialize_i8(i8),
+        serialize_i16(i16),
+        serialize_i32(i32),
+        serialize_i64(i64),
+        serialize_u8(u8),
+        serialize_u16(u16),
+        serialize_u32(u32),
+        serialize_u64(u64),
+        serialize_f32(f32),
+        serialize_f64(f64),
+        serialize_bool(bool),
+    );
+
+    #[inline]
+    fn serialize_char(self, value: char) -> Result {
+        let mut tmp = [0u8; 4];
+        self.serialize_str(value.encode_utf8(&mut tmp))
+    }
+
+    #[inline]
+    fn serialize_i128(self, value: i128) -> Result {
+        write!(self.writer, "{}::Int128", value)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn serialize_u128(self, value: u128) -> Result {
+        write!(self.writer, "{}::UInt128", value)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn serialize_str(self, value: &str) -> Result {
+        escape::string(value, self.writer)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn serialize_seq(self, _len: Option<usize>) -> Result<SqlListSerializer<'a, W>> {
+        self.writer.write_char('[')?;
+        Ok(SqlListSerializer {
+            writer: self.writer,
+            has_items: false,
+            closing_char: ']',
+        })
+    }
+
+    #[inline]
+    fn serialize_tuple(self, _len: usize) -> Result<SqlListSerializer<'a, W>> {
+        self.writer.write_char('(')?;
+        Ok(SqlListSerializer {
+            writer: self.writer,
+            has_items: false,
+            closing_char: ')',
+        })
+    }
+
+    #[inline]
+    fn serialize_some<T: Serialize + ?Sized>(self, _value: &T) -> Result {
+        _value.serialize(self)
+    }
+
+    #[inline]
+    fn serialize_none(self) -> std::result::Result<Self::Ok, Self::Error> {
+        self.writer.write_str("NULL")?;
+        Ok(())
+    }
+
+    #[inline]
+    fn serialize_unit_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+    ) -> Result {
+        escape::string(variant, self.writer)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn serialize_newtype_struct<T: Serialize + ?Sized>(
+        self,
+        _name: &'static str,
+        value: &T,
+    ) -> Result {
+        value.serialize(self)
+    }
+
+    #[inline]
+    fn serialize_newtype_variant<T: Serialize + ?Sized>(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _value: &T,
+    ) -> Result {
+        Err(SerializerError::Unsupported("serialize_newtype_variant"))
+    }
+
+    #[inline]
+    fn serialize_tuple_struct(self, _name: &'static str, _len: usize) -> Result<Impossible> {
+        Err(SerializerError::Unsupported("serialize_tuple_struct"))
+    }
+
+    #[inline]
+    fn serialize_tuple_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> Result<Impossible> {
+        Err(SerializerError::Unsupported("serialize_tuple_variant"))
+    }
+
+    #[inline]
+    fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
+        Err(SerializerError::Unsupported("serialize_struct"))
+    }
+
+    #[inline]
+    fn serialize_struct_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeStructVariant> {
+        Err(SerializerError::Unsupported("serialize_struct_variant"))
+    }
+
+    #[inline]
+    fn is_human_readable(&self) -> bool {
+        true
+    }
+}
+
+// === SqlListSerializer ===
+
+struct SqlListSerializer<'a, W> {
+    writer: &'a mut W,
+    has_items: bool,
+    closing_char: char,
+}
+
+impl<W: Write> SerializeSeq for SqlListSerializer<'_, W> {
+    type Error = SerializerError;
+    type Ok = ();
+
+    #[inline]
+    fn serialize_element<T>(&mut self, value: &T) -> Result
+    where
+        T: Serialize + ?Sized,
+    {
+        if self.has_items {
+            self.writer.write_char(',')?;
+        }
+
+        self.has_items = true;
+
+        value.serialize(SqlSerializer {
+            writer: self.writer,
+        })
+    }
+
+    #[inline]
+    fn end(self) -> Result {
+        self.writer.write_char(self.closing_char)?;
+        Ok(())
+    }
+}
+
+impl<W: Write> SerializeTuple for SqlListSerializer<'_, W> {
+    type Error = SerializerError;
+    type Ok = ();
+
+    #[inline]
+    fn serialize_element<T>(&mut self, value: &T) -> Result
+    where
+        T: Serialize + ?Sized,
+    {
+        SerializeSeq::serialize_element(self, value)
+    }
+
+    #[inline]
+    fn end(self) -> Result {
+        SerializeSeq::end(self)
+    }
+}
+
+// === ParamSerializer ===
+
+struct ParamSerializer<'a, W> {
+    writer: &'a mut W,
+}
+
+impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
+    type Error = SerializerError;
+    type Ok = ();
     type SerializeMap = Impossible;
+    type SerializeSeq = SqlListSerializer<'a, W>;
     type SerializeStruct = Impossible;
     type SerializeStructVariant = Impossible;
+    type SerializeTuple = SqlListSerializer<'a, W>;
+    type SerializeTupleStruct = Impossible;
+    type SerializeTupleVariant = Impossible;
 
     unsupported!(
         serialize_map(Option<usize>) -> Result<Impossible>,
@@ -114,8 +329,9 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     #[inline]
     fn serialize_str(self, value: &str) -> Result {
-        escape::string(value, self.writer)?;
-        Ok(())
+        // ClickHouse expects strings in params to be unquoted until inside a nested
+        // type nested types go through serialize_seq which'll quote strings
+        Ok(escape::escape(value, self.writer)?)
     }
 
     #[inline]
@@ -140,12 +356,12 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     #[inline]
     fn serialize_some<T: Serialize + ?Sized>(self, _value: &T) -> Result {
-        Err(SqlSerializerError::Unsupported("serialize_some"))
+        _value.serialize(self)
     }
 
     #[inline]
-    fn serialize_none(self) -> Result<()> {
-        self.writer.write_fmt(format_args!("null"))?;
+    fn serialize_none(self) -> std::result::Result<Self::Ok, Self::Error> {
+        self.writer.write_str("NULL")?;
         Ok(())
     }
 
@@ -177,12 +393,12 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
         _variant: &'static str,
         _value: &T,
     ) -> Result {
-        Err(SqlSerializerError::Unsupported("serialize_newtype_variant"))
+        Err(SerializerError::Unsupported("serialize_newtype_variant"))
     }
 
     #[inline]
     fn serialize_tuple_struct(self, _name: &'static str, _len: usize) -> Result<Impossible> {
-        Err(SqlSerializerError::Unsupported("serialize_tuple_struct"))
+        Err(SerializerError::Unsupported("serialize_tuple_struct"))
     }
 
     #[inline]
@@ -193,12 +409,12 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
         _variant: &'static str,
         _len: usize,
     ) -> Result<Impossible> {
-        Err(SqlSerializerError::Unsupported("serialize_tuple_variant"))
+        Err(SerializerError::Unsupported("serialize_tuple_variant"))
     }
 
     #[inline]
     fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
-        Err(SqlSerializerError::Unsupported("serialize_struct"))
+        Err(SerializerError::Unsupported("serialize_struct"))
     }
 
     #[inline]
@@ -209,7 +425,7 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
         _variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        Err(SqlSerializerError::Unsupported("serialize_struct_variant"))
+        Err(SerializerError::Unsupported("serialize_struct_variant"))
     }
 
     #[inline]
@@ -218,64 +434,17 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
     }
 }
 
-// === SqlListSerializer ===
-
-struct SqlListSerializer<'a, W> {
-    writer: &'a mut W,
-    has_items: bool,
-    closing_char: char,
-}
-
-impl<'a, W: Write> SerializeSeq for SqlListSerializer<'a, W> {
-    type Ok = ();
-    type Error = SqlSerializerError;
-
-    #[inline]
-    fn serialize_element<T>(&mut self, value: &T) -> Result
-    where
-        T: Serialize + ?Sized,
-    {
-        if self.has_items {
-            self.writer.write_char(',')?;
-        }
-
-        self.has_items = true;
-
-        value.serialize(SqlSerializer {
-            writer: self.writer,
-        })
-    }
-
-    #[inline]
-    fn end(self) -> Result {
-        self.writer.write_char(self.closing_char)?;
-        Ok(())
-    }
-}
-
-impl<'a, W: Write> SerializeTuple for SqlListSerializer<'a, W> {
-    type Ok = ();
-    type Error = SqlSerializerError;
-
-    #[inline]
-    fn serialize_element<T>(&mut self, value: &T) -> Result
-    where
-        T: Serialize + ?Sized,
-    {
-        SerializeSeq::serialize_element(self, value)
-    }
-
-    #[inline]
-    fn end(self) -> Result {
-        SerializeSeq::end(self)
-    }
-}
-
 // === Public API ===
 
 pub(crate) fn write_arg(writer: &mut impl Write, value: &impl Serialize) -> Result<(), String> {
     value
         .serialize(SqlSerializer { writer })
+        .map_err(|err| err.to_string())
+}
+
+pub(crate) fn write_param(writer: &mut impl Write, value: &impl Serialize) -> Result<(), String> {
+    value
+        .serialize(ParamSerializer { writer })
         .map_err(|err| err.to_string())
 }
 
@@ -293,7 +462,8 @@ mod tests {
     fn it_writes_numeric_primitives() {
         assert_eq!(check(42), "42");
         assert_eq!(check(42.5), "42.5");
-        assert_eq!(check(42u128), "42");
+        assert_eq!(check(42u128), "42::UInt128");
+        assert_eq!(check(42i128), "42::Int128");
     }
 
     #[test]
@@ -342,10 +512,16 @@ mod tests {
     }
 
     #[test]
+    fn it_writes_options() {
+        assert_eq!(check(None::<i32>), "NULL");
+        assert_eq!(check(Some(32)), "32");
+        assert_eq!(check(Some(vec![42, 43])), "[42,43]");
+    }
+
+    #[test]
     fn it_fails_on_unsupported() {
         let mut out = String::new();
         assert!(write_arg(&mut out, &std::collections::HashMap::<u32, u32>::new()).is_err());
-        assert!(write_arg(&mut out, &Some(42)).is_err());
         assert!(write_arg(&mut out, &()).is_err());
 
         #[derive(Serialize)]

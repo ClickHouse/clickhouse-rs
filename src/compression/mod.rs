@@ -15,7 +15,12 @@ pub enum Compression {
     /// High compression levels are useful in networks with low bandwidth.
     /// Affects only `INSERT`s, because others are compressed by the server.
     /// Possible levels: `[1, 12]`. Recommended level range: `[4, 9]`.
+    ///
+    /// Deprecated: `lz4_flex` doesn't support HC mode yet: [lz4_flex#165].
+    ///
+    /// [lz4_flex#165]: https://github.com/PSeitz/lz4_flex/issues/165
     #[cfg(feature = "lz4")]
+    #[deprecated(note = "use `Compression::Lz4` instead")]
     Lz4Hc(i32),
 }
 

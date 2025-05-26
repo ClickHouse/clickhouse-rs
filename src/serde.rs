@@ -73,9 +73,8 @@ pub mod ipv4 {
 /// Ser/de [`::uuid::Uuid`] to/from `UUID`.
 #[cfg(feature = "uuid")]
 pub mod uuid {
-    use std::mem;
-
     use ::uuid::Uuid;
+    use serde::de::Error;
 
     use super::*;
 
@@ -85,27 +84,267 @@ pub mod uuid {
     where
         S: Serializer,
     {
-        let mut bytes = uuid.into_bytes();
-        transform(&mut bytes);
-        bytes.serialize(serializer)
+        if serializer.is_human_readable() {
+            uuid.to_string().serialize(serializer)
+        } else {
+            let bytes = uuid.as_u64_pair();
+            bytes.serialize(serializer)
+        }
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Uuid, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let mut bytes: [u8; 16] = Deserialize::deserialize(deserializer)?;
-        transform(&mut bytes);
-        Ok(Uuid::from_bytes(bytes))
+        if deserializer.is_human_readable() {
+            let uuid_str: &str = Deserialize::deserialize(deserializer)?;
+            Uuid::parse_str(uuid_str).map_err(D::Error::custom)
+        } else {
+            let bytes: (u64, u64) = Deserialize::deserialize(deserializer)?;
+            Ok(Uuid::from_u64_pair(bytes.0, bytes.1))
+        }
+    }
+}
+
+#[cfg(feature = "chrono")]
+pub mod chrono {
+    use super::*;
+    use ::chrono::{DateTime, Utc};
+    use serde::{de::Error as _, ser::Error as _};
+
+    pub mod datetime {
+        use super::*;
+
+        type DateTimeUtc = DateTime<Utc>;
+
+        option!(
+            DateTimeUtc,
+            "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime)`."
+        );
+
+        pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let ts = dt.timestamp();
+
+            u32::try_from(ts)
+                .map_err(|_| S::Error::custom(format!("{dt} cannot be represented as DateTime")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let ts: u32 = Deserialize::deserialize(deserializer)?;
+            DateTime::<Utc>::from_timestamp(i64::from(ts), 0).ok_or_else(|| {
+                D::Error::custom(format!("{ts} cannot be converted to DateTime<Utc>"))
+            })
+        }
     }
 
-    /// Swaps bytes inside both 8-byte words of UUID.
-    /// * Input:   0 1 2 3 4 5 6 7   8 9 10 a b c  d e f
-    /// * Output:  7 6 5 4 3 2 1 0   f e  d c b a 10 9 8
-    fn transform(bytes: &mut [u8; 16]) {
-        let words = unsafe { mem::transmute::<&mut [u8; 16], &mut [u64; 2]>(bytes) };
-        words[0] = words[0].swap_bytes();
-        words[1] = words[1].swap_bytes();
+    /// Contains modules to ser/de `DateTime<Utc>` to/from `DateTime64(_)`.
+    pub mod datetime64 {
+        use super::*;
+        type DateTimeUtc = DateTime<Utc>;
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(0)` (seconds).
+        pub mod secs {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(0))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                DateTime::<Utc>::from_timestamp(ts, 0).ok_or_else(|| {
+                    D::Error::custom(format!("Can't create DateTime<Utc> from {ts}"))
+                })
+            }
+        }
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(3)` (milliseconds).
+        pub mod millis {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(3))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp_millis();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                DateTime::<Utc>::from_timestamp_millis(ts).ok_or_else(|| {
+                    D::Error::custom(format!("Can't create DateTime<Utc> from {ts}"))
+                })
+            }
+        }
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(6)` (microseconds).
+        pub mod micros {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(6))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp_micros();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                DateTime::<Utc>::from_timestamp_micros(ts).ok_or_else(|| {
+                    D::Error::custom(format!("Can't create DateTime<Utc> from {ts}"))
+                })
+            }
+        }
+
+        /// Ser/de `DateTime<Utc>` to/from `DateTime64(9)` (nanoseconds).
+        pub mod nanos {
+            use super::*;
+
+            option!(
+                DateTimeUtc,
+                "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(9))`."
+            );
+
+            pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.timestamp_nanos_opt().ok_or_else(|| {
+                    S::Error::custom(format!("{dt} cannot be represented as DateTime64"))
+                })?;
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(DateTime::<Utc>::from_timestamp_nanos(ts))
+            }
+        }
+    }
+
+    /// Ser/de `time::Date` to/from `Date`.
+    pub mod date {
+        use super::*;
+        use ::chrono::{Duration, NaiveDate};
+
+        option!(
+            NaiveDate,
+            "Ser/de `Option<NaiveDate>` to/from `Nullable(Date)`."
+        );
+
+        const ORIGIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1970, 1);
+
+        pub fn serialize<S>(date: &NaiveDate, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let origin = ORIGIN.unwrap();
+            if *date < origin {
+                let msg = format!("{date} cannot be represented as Date");
+                return Err(S::Error::custom(msg));
+            }
+
+            let elapsed = *date - origin; // cannot underflow: checked above
+            let days = elapsed.num_days();
+
+            u16::try_from(days)
+                .map_err(|_| S::Error::custom(format!("{date} cannot be represented as Date")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveDate, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let days: u16 = Deserialize::deserialize(deserializer)?;
+            Ok(ORIGIN.unwrap() + Duration::days(i64::from(days))) // cannot overflow: always < `Date::MAX`
+        }
+    }
+
+    /// Ser/de `time::Date` to/from `Date32`.
+    pub mod date32 {
+        use ::chrono::{Duration, NaiveDate};
+
+        use super::*;
+
+        option!(
+            NaiveDate,
+            "Ser/de `Option<NaiveDate>` to/from `Nullable(Date32)`."
+        );
+
+        const ORIGIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1970, 1);
+
+        // NOTE: actually, it's 1925 and 2283 with a tail for versions before 22.8-lts.
+        const MIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1900, 1);
+        const MAX: Option<NaiveDate> = NaiveDate::from_yo_opt(2299, 365);
+
+        pub fn serialize<S>(date: &NaiveDate, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            if *date < MIN.unwrap() || *date > MAX.unwrap() {
+                let msg = format!("{date} cannot be represented as Date");
+                return Err(S::Error::custom(msg));
+            }
+
+            let elapsed = *date - ORIGIN.unwrap(); // cannot underflow: checked above
+            let days = elapsed.num_days();
+
+            i32::try_from(days)
+                .map_err(|_| S::Error::custom(format!("{date} cannot be represented as Date32")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveDate, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let days: i32 = Deserialize::deserialize(deserializer)?;
+
+            // It shouldn't overflow, because clamped by CH and < `Date::MAX`.
+            // TODO: ensure CH clamps when an invalid value is inserted in binary format.
+            Ok(ORIGIN.unwrap() + Duration::days(i64::from(days)))
+        }
     }
 }
 
@@ -346,7 +585,7 @@ pub mod time {
             let days: i32 = Deserialize::deserialize(deserializer)?;
 
             // It shouldn't overflow, because clamped by CH and < `Date::MAX`.
-            // TODO: check that CH clamps when an invalid value is inserted in binary format.
+            // TODO: ensure CH clamps when an invalid value is inserted in binary format.
             Ok(ORIGIN.unwrap() + Duration::days(i64::from(days)))
         }
     }

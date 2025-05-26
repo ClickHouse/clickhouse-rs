@@ -2,12 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use clickhouse::{error::Error, Row};
 
-mod common;
-
-#[common::named]
 #[tokio::test]
 async fn smoke() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow<'a> {
@@ -54,10 +51,9 @@ async fn smoke() {
     }
 }
 
-#[common::named]
 #[tokio::test]
 async fn fetch_one_and_optional() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     client
         .query("CREATE TABLE test(n String) ENGINE = MergeTree ORDER BY n")
@@ -89,11 +85,48 @@ async fn fetch_one_and_optional() {
     assert_eq!(got_string, "bar");
 }
 
+#[tokio::test]
+async fn server_side_param() {
+    let client = prepare_database!();
+
+    let result = client
+        .query("SELECT plus({val1: Int32}, {val2: Int32}) AS result")
+        .param("val1", 42)
+        .param("val2", 144)
+        .fetch_one::<u64>()
+        .await
+        .expect("failed to fetch u64");
+    assert_eq!(result, 186);
+
+    let result = client
+        .query("SELECT {val1: String} AS result")
+        .param("val1", "string")
+        .fetch_one::<String>()
+        .await
+        .expect("failed to fetch string");
+    assert_eq!(result, "string");
+
+    let result = client
+        .query("SELECT {val1: String} AS result")
+        .param("val1", "\x01\x02\x03\\ \"\'")
+        .fetch_one::<String>()
+        .await
+        .expect("failed to fetch string");
+    assert_eq!(result, "\x01\x02\x03\\ \"\'");
+
+    let result = client
+        .query("SELECT {val1: Array(String)} AS result")
+        .param("val1", vec!["a", "bc"])
+        .fetch_one::<Vec<String>>()
+        .await
+        .expect("failed to fetch string");
+    assert_eq!(result, &["a", "bc"]);
+}
+
 // See #19.
-#[common::named]
 #[tokio::test]
 async fn long_query() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     client
         .query("CREATE TABLE test(n String) ENGINE = MergeTree ORDER BY n")
@@ -114,10 +147,9 @@ async fn long_query() {
 }
 
 // See #22.
-#[common::named]
 #[tokio::test]
 async fn big_borrowed_str() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, Row, Serialize, Deserialize)]
     struct MyRow<'a> {
@@ -153,10 +185,9 @@ async fn big_borrowed_str() {
 }
 
 // See #31.
-#[common::named]
 #[tokio::test]
 async fn all_floats() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     client
         .query("CREATE TABLE test(no UInt32, f Float64) ENGINE = MergeTree ORDER BY no")
@@ -182,4 +213,53 @@ async fn all_floats() {
         .unwrap();
 
     assert_eq!(vec, &[42.5, 43.5]);
+}
+
+#[tokio::test]
+async fn keeps_client_options() {
+    let (client_setting_name, client_setting_value) = ("max_block_size", "1000");
+    let (query_setting_name, query_setting_value) = ("date_time_input_format", "basic");
+
+    let client = prepare_database!().with_option(client_setting_name, client_setting_value);
+
+    let value = client
+        .query("SELECT value FROM system.settings WHERE name = ? OR name = ? ORDER BY name")
+        .bind(query_setting_name)
+        .bind(client_setting_name)
+        .with_option(query_setting_name, query_setting_value)
+        .fetch_all::<String>()
+        .await
+        .unwrap();
+
+    // should keep the client options
+    assert_eq!(value, vec!(query_setting_value, client_setting_value));
+}
+
+#[tokio::test]
+async fn overrides_client_options() {
+    let (setting_name, setting_value, override_value) = ("max_block_size", "1000", "2000");
+
+    let client = prepare_database!().with_option(setting_name, setting_value);
+
+    let value = client
+        .query("SELECT value FROM system.settings WHERE name = ?")
+        .bind(setting_name)
+        .with_option(setting_name, override_value)
+        .fetch_one::<String>()
+        .await
+        .unwrap();
+
+    // should override the client options
+    assert_eq!(value, override_value);
+}
+
+#[tokio::test]
+async fn prints_query() {
+    let client = prepare_database!();
+
+    let q = client.query("SELECT ?fields FROM test WHERE a = ? AND b < ?");
+    assert_eq!(
+        format!("{}", q.sql_display()),
+        "SELECT ?fields FROM test WHERE a = ? AND b < ?"
+    );
 }

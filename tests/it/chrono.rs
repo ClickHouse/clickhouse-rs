@@ -1,42 +1,42 @@
-#![cfg(feature = "time")]
+#![cfg(feature = "chrono")]
 
 use std::ops::RangeBounds;
 
-use rand::{distributions::Standard, Rng};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use rand::{
+    distributions::{Distribution, Standard},
+    Rng,
+};
 use serde::{Deserialize, Serialize};
-use time::{macros::datetime, Date, OffsetDateTime};
 
 use clickhouse::Row;
 
-mod common;
-
-#[common::named]
 #[tokio::test]
 async fn datetime() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct MyRow {
-        #[serde(with = "clickhouse::serde::time::datetime")]
-        dt: OffsetDateTime,
-        #[serde(with = "clickhouse::serde::time::datetime::option")]
-        dt_opt: Option<OffsetDateTime>,
-        #[serde(with = "clickhouse::serde::time::datetime64::secs")]
-        dt64s: OffsetDateTime,
-        #[serde(with = "clickhouse::serde::time::datetime64::secs::option")]
-        dt64s_opt: Option<OffsetDateTime>,
-        #[serde(with = "clickhouse::serde::time::datetime64::millis")]
-        dt64ms: OffsetDateTime,
-        #[serde(with = "clickhouse::serde::time::datetime64::millis::option")]
-        dt64ms_opt: Option<OffsetDateTime>,
-        #[serde(with = "clickhouse::serde::time::datetime64::micros")]
-        dt64us: OffsetDateTime,
-        #[serde(with = "clickhouse::serde::time::datetime64::micros::option")]
-        dt64us_opt: Option<OffsetDateTime>,
-        #[serde(with = "clickhouse::serde::time::datetime64::nanos")]
-        dt64ns: OffsetDateTime,
-        #[serde(with = "clickhouse::serde::time::datetime64::nanos::option")]
-        dt64ns_opt: Option<OffsetDateTime>,
+        #[serde(with = "clickhouse::serde::chrono::datetime")]
+        dt: DateTime<Utc>,
+        #[serde(with = "clickhouse::serde::chrono::datetime::option")]
+        dt_opt: Option<DateTime<Utc>>,
+        #[serde(with = "clickhouse::serde::chrono::datetime64::secs")]
+        dt64s: DateTime<Utc>,
+        #[serde(with = "clickhouse::serde::chrono::datetime64::secs::option")]
+        dt64s_opt: Option<DateTime<Utc>>,
+        #[serde(with = "clickhouse::serde::chrono::datetime64::millis")]
+        dt64ms: DateTime<Utc>,
+        #[serde(with = "clickhouse::serde::chrono::datetime64::millis::option")]
+        dt64ms_opt: Option<DateTime<Utc>>,
+        #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+        dt64us: DateTime<Utc>,
+        #[serde(with = "clickhouse::serde::chrono::datetime64::micros::option")]
+        dt64us_opt: Option<DateTime<Utc>>,
+        #[serde(with = "clickhouse::serde::chrono::datetime64::nanos")]
+        dt64ns: DateTime<Utc>,
+        #[serde(with = "clickhouse::serde::chrono::datetime64::nanos::option")]
+        dt64ns_opt: Option<DateTime<Utc>>,
     }
 
     #[derive(Debug, Deserialize, Row)]
@@ -69,18 +69,23 @@ async fn datetime() {
         .execute()
         .await
         .unwrap();
+    let d = NaiveDate::from_ymd_opt(2022, 11, 13).unwrap();
+    let dt_s = d.and_hms_opt(15, 27, 42).unwrap().and_utc();
+    let dt_ms = d.and_hms_milli_opt(15, 27, 42, 123).unwrap().and_utc();
+    let dt_us = d.and_hms_micro_opt(15, 27, 42, 123456).unwrap().and_utc();
+    let dt_ns = d.and_hms_nano_opt(15, 27, 42, 123456789).unwrap().and_utc();
 
     let original_row = MyRow {
-        dt: datetime!(2022-11-13 15:27:42 UTC),
-        dt_opt: Some(datetime!(2022-11-13 15:27:42 UTC)),
-        dt64s: datetime!(2022-11-13 15:27:42 UTC),
-        dt64s_opt: Some(datetime!(2022-11-13 15:27:42 UTC)),
-        dt64ms: datetime!(2022-11-13 15:27:42.123 UTC),
-        dt64ms_opt: Some(datetime!(2022-11-13 15:27:42.123 UTC)),
-        dt64us: datetime!(2022-11-13 15:27:42.123456 UTC),
-        dt64us_opt: Some(datetime!(2022-11-13 15:27:42.123456 UTC)),
-        dt64ns: datetime!(2022-11-13 15:27:42.123456789 UTC),
-        dt64ns_opt: Some(datetime!(2022-11-13 15:27:42.123456789 UTC)),
+        dt: dt_s,
+        dt_opt: Some(dt_s),
+        dt64s: dt_s,
+        dt64s_opt: Some(dt_s),
+        dt64ms: dt_ms,
+        dt64ms_opt: Some(dt_ms),
+        dt64us: dt_us,
+        dt64us_opt: Some(dt_us),
+        dt64ns: dt_ns,
+        dt64ns_opt: Some(dt_ns),
     };
 
     let mut insert = client.insert("test").unwrap();
@@ -116,17 +121,16 @@ async fn datetime() {
     assert_eq!(row_str.dt64ns, &original_row.dt64ns.to_string()[..29]);
 }
 
-#[common::named]
 #[tokio::test]
 async fn date() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct MyRow {
-        #[serde(with = "clickhouse::serde::time::date")]
-        date: Date,
-        #[serde(with = "clickhouse::serde::time::date::option")]
-        date_opt: Option<Date>,
+        #[serde(with = "clickhouse::serde::chrono::date")]
+        date: NaiveDate,
+        #[serde(with = "clickhouse::serde::chrono::date::option")]
+        date_opt: Option<NaiveDate>,
     }
 
     client
@@ -170,17 +174,16 @@ async fn date() {
     }
 }
 
-#[common::named]
 #[tokio::test]
 async fn date32() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
 
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct MyRow {
-        #[serde(with = "clickhouse::serde::time::date32")]
-        date: Date,
-        #[serde(with = "clickhouse::serde::time::date32::option")]
-        date_opt: Option<Date>,
+        #[serde(with = "clickhouse::serde::chrono::date32")]
+        date: NaiveDate,
+        #[serde(with = "clickhouse::serde::chrono::date32::option")]
+        date_opt: Option<NaiveDate>,
     }
 
     client
@@ -224,11 +227,33 @@ async fn date32() {
     }
 }
 
-fn generate_dates(years: impl RangeBounds<i32>, count: usize) -> Vec<Date> {
+// Distribution isn't implemented for `chrono` types, but we can lift the implementation from the `time` crate: https://docs.rs/time/latest/src/time/rand.rs.html#14-20
+struct NaiveDateWrapper(NaiveDate);
+
+impl Distribution<NaiveDateWrapper> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NaiveDateWrapper {
+        NaiveDateWrapper(
+            NaiveDate::from_num_days_from_ce_opt(
+                rng.gen_range(
+                    NaiveDate::MIN.num_days_from_ce()..=NaiveDate::MAX.num_days_from_ce(),
+                ),
+            )
+            .unwrap(),
+        )
+    }
+}
+
+fn generate_dates(years: impl RangeBounds<i32>, count: usize) -> Vec<NaiveDate> {
     let mut rng = rand::thread_rng();
     let mut dates: Vec<_> = (&mut rng)
         .sample_iter(Standard)
-        .filter(|date: &Date| years.contains(&date.year()))
+        .filter_map(|date: NaiveDateWrapper| {
+            if years.contains(&date.0.year()) {
+                Some(date.0)
+            } else {
+                None
+            }
+        })
         .take(count)
         .collect();
 
