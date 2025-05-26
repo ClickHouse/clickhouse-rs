@@ -1,4 +1,5 @@
-use hyper::{Body, Request, Response, StatusCode};
+use bytes::Bytes;
+use hyper::{Request, Response, StatusCode};
 use sealed::sealed;
 
 pub use self::mock::Mock;
@@ -11,10 +12,10 @@ pub trait Handler {
     type Control;
 
     #[doc(hidden)]
-    fn make(&mut self) -> (HandlerFn, Self::Control);
+    fn make(self) -> (HandlerFn, Self::Control);
 }
 
-type HandlerFn = Box<dyn FnOnce(Request<Body>) -> Response<Body> + Send>;
+type HandlerFn = Box<dyn FnOnce(Request<Bytes>) -> Response<Bytes> + Send>;
 
 // List: https://github.com/ClickHouse/ClickHouse/blob/495c6e03aa9437dac3cd7a44ab3923390bef9982/src/Server/HTTPHandler.cpp#L132
 pub mod status {

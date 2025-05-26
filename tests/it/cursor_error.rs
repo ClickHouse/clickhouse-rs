@@ -1,18 +1,16 @@
-use clickhouse::{Client, Compression};
+use serde::Deserialize;
 
-mod common;
+use clickhouse::{error::Error, Client, Compression, Row};
 
-#[common::named]
 #[tokio::test]
 async fn deferred() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
     max_execution_time(client, false).await;
 }
 
-#[common::named]
 #[tokio::test]
 async fn wait_end_of_query() {
-    let client = common::prepare_database!();
+    let client = prepare_database!();
     max_execution_time(client, true).await;
 }
 
@@ -48,10 +46,9 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
 }
 
 #[cfg(feature = "lz4")]
-#[common::named]
 #[tokio::test]
 async fn deferred_lz4() {
-    let client = common::prepare_database!().with_compression(Compression::Lz4);
+    let client = prepare_database!().with_compression(Compression::Lz4);
 
     client
         .query("CREATE TABLE test(no UInt32) ENGINE = MergeTree ORDER BY no")
@@ -100,4 +97,41 @@ async fn deferred_lz4() {
 
     assert_ne!(i, 0); // we're interested only in errors during processing
     assert!(err.to_string().contains("TIMEOUT_EXCEEDED"));
+}
+
+// See #185.
+#[tokio::test]
+async fn invalid_schema() {
+    #[derive(Debug, Row, Deserialize)]
+    #[allow(dead_code)]
+    struct MyRow {
+        no: u32,
+        dec: Option<String>, // valid schema: u64-based types
+    }
+
+    let client = prepare_database!();
+
+    client
+        .query(
+            "CREATE TABLE test(no UInt32, dec Nullable(Decimal64(4)))
+             ENGINE = MergeTree
+             ORDER BY no",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query("INSERT INTO test VALUES (1, 1.1), (2, 2.2), (3, 3.3)")
+        .execute()
+        .await
+        .unwrap();
+
+    let err = client
+        .query("SELECT ?fields FROM test")
+        .fetch_all::<MyRow>()
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, Error::NotEnoughData));
 }

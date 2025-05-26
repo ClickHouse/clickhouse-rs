@@ -4,6 +4,7 @@ pub trait Row {
     const COLUMN_NAMES: &'static [&'static str];
 
     // TODO: count
+    // TODO: different list for SELECT/INSERT (de/ser)
 }
 
 // Actually, it's not public now.
@@ -139,7 +140,23 @@ mod tests {
     }
 
     #[test]
+    fn it_skips_deserializing() {
+        use serde::Deserialize;
+
+        #[derive(Row, Deserialize)]
+        #[allow(dead_code)]
+        struct TopLevel {
+            one: u32,
+            #[serde(skip_deserializing)]
+            two: u32,
+        }
+
+        assert_eq!(join_column_names::<TopLevel>().unwrap(), "`one`");
+    }
+
+    #[test]
     fn it_rejects_other() {
+        #[allow(dead_code)]
         #[derive(Row)]
         struct NamedTuple(u32, u32);
 

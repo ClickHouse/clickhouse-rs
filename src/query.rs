@@ -1,17 +1,22 @@
-use hyper::{header::CONTENT_LENGTH, Body, Method, Request};
-use serde::Deserialize;
+use hyper::{header::CONTENT_LENGTH, Method, Request};
+use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use url::Url;
 
 use crate::{
-    cursor::RowBinaryCursor,
     error::{Error, Result},
+    headers::with_request_headers,
+    request_body::RequestBody,
     response::Response,
     row::Row,
-    sql::{Bind, SqlBuilder},
+    sql::{ser, Bind, SqlBuilder},
     Client,
 };
 
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
+
+pub use crate::cursors::{BytesCursor, RowCursor};
+use crate::headers::with_authentication;
 
 #[must_use]
 #[derive(Clone)]
@@ -28,13 +33,25 @@ impl Query {
         }
     }
 
+    /// Display SQL query as string.
+    pub fn sql_display(&self) -> &impl Display {
+        &self.sql
+    }
+
     /// Binds `value` to the next `?` in the query.
     ///
-    /// The `value`, which must either implement [`Serialize`](serde::Serialize)
-    /// or be an [`Identifier`], will be appropriately escaped.
+    /// The `value`, which must either implement [`Serialize`] or be an
+    /// [`Identifier`], will be appropriately escaped.
+    ///
+    /// All possible errors will be returned as [`Error::InvalidParams`]
+    /// during query execution (`execute()`, `fetch()` etc).
     ///
     /// WARNING: This means that the query must not have any extra `?`, even if
-    /// they are in a string literal!
+    /// they are in a string literal! Use `??` to have plain `?` in query.
+    ///
+    /// [`Serialize`]: serde::Serialize
+    /// [`Identifier`]: crate::sql::Identifier
+    #[track_caller]
     pub fn bind(mut self, value: impl Bind) -> Self {
         self.sql.bind_arg(value);
         self
@@ -72,10 +89,10 @@ impl Query {
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
-        self.sql.append(" FORMAT RowBinary");
+        self.sql.set_output_format("RowBinary");
 
         let response = self.do_execute(true)?;
-        Ok(RowCursor(RowBinaryCursor::new(response)))
+        Ok(RowCursor::new(response))
     }
 
     /// Executes the query and returns just a single row.
@@ -102,7 +119,8 @@ impl Query {
         self.fetch()?.next().await
     }
 
-    /// Executes the query and returns all the generated results, collected into a Vec.
+    /// Executes the query and returns all the generated results,
+    /// collected into a Vec.
     ///
     /// Note that `T` must be owned.
     pub async fn fetch_all<T>(self) -> Result<Vec<T>>
@@ -119,6 +137,16 @@ impl Query {
         Ok(result)
     }
 
+    /// Executes the query, returning a [`BytesCursor`] to obtain results as raw
+    /// bytes containing data in the [provided format].
+    ///
+    /// [provided format]: https://clickhouse.com/docs/en/interfaces/formats
+    pub fn fetch_bytes(mut self, format: impl Into<String>) -> Result<BytesCursor> {
+        self.sql.set_output_format(format);
+        let response = self.do_execute(true)?;
+        Ok(BytesCursor::new(response))
+    }
+
     pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {
         let query = self.sql.finish()?;
 
@@ -132,17 +160,16 @@ impl Query {
         }
 
         let use_post = !read_only || query.len() > MAX_QUERY_LEN_TO_USE_GET;
-        let method = if use_post { Method::POST } else { Method::GET };
 
-        let (body, content_length) = if use_post {
+        let (method, body, content_length) = if use_post {
             if read_only {
                 pairs.append_pair("readonly", "1");
             }
             let len = query.len();
-            (Body::from(query), len)
+            (Method::POST, RequestBody::full(query), len)
         } else {
             pairs.append_pair("query", &query);
-            (Body::empty(), 0)
+            (Method::GET, RequestBody::empty(), 0)
         };
 
         if self.client.compression.is_lz4() {
@@ -155,6 +182,8 @@ impl Query {
         drop(pairs);
 
         let mut builder = Request::builder().method(method).uri(url.as_str());
+        builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
+        builder = with_authentication(builder, &self.client.authentication);
 
         if content_length == 0 {
             builder = builder.header(CONTENT_LENGTH, "0");
@@ -162,32 +191,30 @@ impl Query {
             builder = builder.header(CONTENT_LENGTH, content_length.to_string());
         }
 
-        if let Some(user) = &self.client.user {
-            builder = builder.header("X-ClickHouse-User", user);
-        }
-
-        if let Some(password) = &self.client.password {
-            builder = builder.header("X-ClickHouse-Key", password);
-        }
-
         let request = builder
             .body(body)
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
-        let future = self.client.client._request(request);
+        let future = self.client.http.request(request);
         Ok(Response::new(future, self.client.compression))
     }
-}
 
-/// A cursor that emits rows.
-pub struct RowCursor<T>(RowBinaryCursor<T>);
+    /// Similar to [`Client::with_option`], but for this particular query only.
+    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.client.add_option(name, value);
+        self
+    }
 
-impl<T> RowCursor<T> {
-    /// Emits the next row.
-    pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
-    where
-        T: Deserialize<'b>,
-    {
-        self.0.next().await
+    /// Specify server side parameter for query.
+    ///
+    /// In queries you can reference params as {name: type} e.g. {val: Int32}.
+    pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
+        let mut param = String::from("");
+        if let Err(err) = ser::write_param(&mut param, &value) {
+            self.sql = SqlBuilder::Failed(format!("invalid param: {err}"));
+            self
+        } else {
+            self.with_option(format!("param_{name}"), param)
+        }
     }
 }
