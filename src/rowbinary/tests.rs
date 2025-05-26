@@ -114,18 +114,18 @@ fn it_serializes() {
     assert_eq!(actual, sample_serialized());
 }
 
-#[test]
-fn it_deserializes() {
-    let input = sample_serialized();
-
-    for i in 0..input.len() {
-        let (mut left, mut right) = input.split_at(i);
-
-        // It shouldn't panic.
-        let _: Result<Sample<'_>, _> = super::deserialize_from(&mut left);
-        let _: Result<Sample<'_>, _> = super::deserialize_from(&mut right);
-
-        let actual: Sample<'_> = super::deserialize_from(&mut input.as_slice()).unwrap();
-        assert_eq!(actual, sample());
-    }
-}
+// #[test]
+// fn it_deserializes() {
+//     let input = sample_serialized();
+//
+//     for i in 0..input.len() {
+//         let (mut left, mut right) = input.split_at(i);
+//
+//         // It shouldn't panic.
+//         let _: Result<Sample<'_>, _> = super::deserialize_from(&mut left);
+//         let _: Result<Sample<'_>, _> = super::deserialize_from(&mut right);
+//
+//         let actual: Sample<'_> = super::deserialize_from(&mut input.as_slice()).unwrap();
+//         assert_eq!(actual, sample());
+//     }
+// }

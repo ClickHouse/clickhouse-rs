@@ -1,5 +1,5 @@
 use crate::error::Result;
-use clickhouse_rowbinary::data_types::{Column, DataTypeNode, DecimalSize, EnumType};
+use clickhouse_types::data_types::{Column, DataTypeNode, DecimalSize, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
 

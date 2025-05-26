@@ -6,8 +6,8 @@ use crate::{
     response::Response,
     rowbinary,
 };
-use clickhouse_rowbinary::data_types::Column;
-use clickhouse_rowbinary::parse_rbwnat_columns_header;
+use clickhouse_types::data_types::Column;
+use clickhouse_types::parse_rbwnat_columns_header;
 use serde::Deserialize;
 use std::marker::PhantomData;
 
@@ -16,8 +16,8 @@ use std::marker::PhantomData;
 pub struct RowCursor<T> {
     raw: RawCursor,
     bytes: BytesExt,
-    rows_to_check: u64,
-    columns: Option<Vec<Column>>,
+    columns: Vec<Column>,
+    rows_to_validate: u64,
     _marker: PhantomData<T>,
 }
 
@@ -27,12 +27,35 @@ impl<T> RowCursor<T> {
             _marker: PhantomData,
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
-            rows_to_check: match validation_mode {
+            columns: Vec::new(),
+            rows_to_validate: match validation_mode {
                 ValidationMode::First(n) => n as u64,
                 ValidationMode::Each => u64::MAX,
             },
-            columns: None,
         }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn read_columns(&mut self, mut slice: &[u8]) -> Result<()> {
+        let columns = parse_rbwnat_columns_header(&mut slice)?;
+        debug_assert!(!columns.is_empty());
+        self.bytes.set_remaining(slice.len());
+        self.columns = columns;
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn deserialize_with_validation<'cursor, 'data: 'cursor>(
+        &'cursor mut self,
+        slice: &mut &'data [u8],
+    ) -> (Result<T>, bool)
+    where
+        T: Deserialize<'data>,
+    {
+        let result = rowbinary::deserialize_from_and_validate::<T>(slice, &self.columns);
+        self.rows_to_validate -= 1;
+        result
     }
 
     /// Emits the next row.
@@ -42,34 +65,36 @@ impl<T> RowCursor<T> {
     /// # Cancel safety
     ///
     /// This method is cancellation safe.
-    pub async fn next<'a, 'b: 'a>(&'a mut self) -> Result<Option<T>>
+    pub async fn next<'cursor, 'data: 'cursor>(&'cursor mut self) -> Result<Option<T>>
     where
-        T: Deserialize<'b>,
+        T: Deserialize<'data>,
     {
         loop {
             if self.bytes.remaining() > 0 {
                 let mut slice = super::workaround_51132(self.bytes.slice());
-                let deserialize_result = match &self.columns {
-                    None => self.extract_columns_and_deserialize_from(slice),
-                    Some(columns) if self.rows_to_check > 0 => {
-                        rowbinary::deserialize_from_and_validate(&mut slice, columns)
-                    }
-                    Some(_) => {
-                        // Schema is validated already, skipping for better performance
-                        rowbinary::deserialize_from(&mut slice)
-                    }
-                };
-
-                match deserialize_result {
-                    Ok(value) => {
-                        self.bytes.set_remaining(slice.len());
-                        if self.rows_to_check > 0 {
-                            self.rows_to_check -= 1;
+                if self.columns.is_empty() {
+                    self.read_columns(slice)?;
+                } else {
+                    debug_assert!(!self.columns.is_empty());
+                    let (result, not_enough_data) = match self.rows_to_validate {
+                        0 => rowbinary::deserialize_from_and_validate::<T>(&mut slice, &[]),
+                        u64::MAX => {
+                            rowbinary::deserialize_from_and_validate::<T>(&mut slice, &self.columns)
                         }
-                        return Ok(Some(value));
+                        _ => {
+                            // extracting to a separate method boosts performance for Each ~10%
+                            self.deserialize_with_validation(&mut slice)
+                        }
+                    };
+                    if !not_enough_data {
+                        return match result {
+                            Ok(value) => {
+                                self.bytes.set_remaining(slice.len());
+                                Ok(Some(value))
+                            }
+                            Err(err) => Err(err),
+                        };
                     }
-                    Err(Error::NotEnoughData) => {}
-                    Err(err) => return Err(err),
                 }
             }
 
@@ -99,26 +124,5 @@ impl<T> RowCursor<T> {
     #[inline]
     pub fn decoded_bytes(&self) -> u64 {
         self.raw.decoded_bytes()
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn extract_columns_and_deserialize_from<'a, 'b: 'a>(
-        &'a mut self,
-        mut slice: &'b [u8],
-    ) -> Result<T>
-    where
-        T: Deserialize<'b>,
-    {
-        let columns = parse_rbwnat_columns_header(&mut slice)?;
-        self.bytes.set_remaining(slice.len());
-        self.columns = Some(columns);
-        let columns = self.columns.as_ref().unwrap();
-        // usually, the header arrives as a separate first chunk
-        if self.bytes.remaining() > 0 {
-            rowbinary::deserialize_from_and_validate(&mut slice, columns)
-        } else {
-            Err(Error::NotEnoughData)
-        }
     }
 }

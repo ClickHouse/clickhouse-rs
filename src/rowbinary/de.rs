@@ -3,7 +3,7 @@ use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::SerdeType;
 use crate::rowbinary::validation::{DataTypeValidator, ValidateDataType};
 use bytes::Buf;
-use clickhouse_rowbinary::data_types::Column;
+use clickhouse_types::data_types::Column;
 use core::mem::size_of;
 use serde::de::MapAccess;
 use serde::{
@@ -30,9 +30,21 @@ pub(crate) fn deserialize_from<'data, T: Deserialize<'data>>(input: &mut &'data 
 pub(crate) fn deserialize_from_and_validate<'data, 'cursor, T: Deserialize<'data>>(
     input: &mut &'data [u8],
     columns: &'cursor [Column],
-) -> Result<T> {
-    let mut deserializer = RowBinaryDeserializer::new(input, DataTypeValidator::new(columns));
-    T::deserialize(&mut deserializer)
+) -> (Result<T>, bool) {
+    let result = if columns.is_empty() {
+        let mut deserializer = RowBinaryDeserializer::new(input, ());
+        T::deserialize(&mut deserializer)
+    } else {
+        let validator = DataTypeValidator::new(columns);
+        let mut deserializer = RowBinaryDeserializer::new(input, validator);
+        T::deserialize(&mut deserializer)
+    };
+    // an explicit hint about NotEnoughData error boosts RowCursor performance ~20%
+    match result {
+        Ok(value) => (Ok(value), false),
+        Err(Error::NotEnoughData) => (Err(Error::NotEnoughData), true),
+        Err(e) => (Err(e), false),
+    }
 }
 
 /// A deserializer for the RowBinary(WithNamesAndTypes) format.
@@ -50,17 +62,14 @@ impl<'cursor, 'data, Validator> RowBinaryDeserializer<'cursor, 'data, Validator>
 where
     Validator: ValidateDataType,
 {
-    #[inline]
     fn new(input: &'cursor mut &'data [u8], validator: Validator) -> Self {
         Self { input, validator }
     }
 
-    #[inline]
     fn read_vec(&mut self, size: usize) -> Result<Vec<u8>> {
         Ok(self.read_slice(size)?.to_vec())
     }
 
-    #[inline]
     fn read_slice(&mut self, size: usize) -> Result<&'data [u8]> {
         ensure_size(&mut self.input, size)?;
         let slice = &self.input[..size];
@@ -68,7 +77,6 @@ where
         Ok(slice)
     }
 
-    #[inline]
     fn read_size(&mut self) -> Result<usize> {
         let size = get_unsigned_leb128(&mut self.input)?;
         // TODO: what about another error?

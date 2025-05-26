@@ -98,7 +98,7 @@ rustls-tls-native-roots = [
 
 [dependencies]
 clickhouse-derive = { version = "0.2.0", path = "derive" }
-clickhouse-rowbinary = { version = "*", path = "rowbinary" }
+clickhouse-types = { version = "*", path = "types" }
 thiserror = "1.0.16"
 serde = "1.0.106"
 bytes = "1.5.0"
@@ -131,7 +131,6 @@ quanta = { version = "0.12", optional = true }
 replace_with = { version = "0.1.7" }
 
 [dev-dependencies]
-clickhouse-rowbinary = { version = "*", path = "./rowbinary" }
 criterion = "0.5.0"
 serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "1.0.1", features = ["full", "test-util"] }

@@ -49,8 +49,8 @@ pub enum Error {
 
 assert_impl_all!(Error: StdError, Send, Sync);
 
-impl From<clickhouse_rowbinary::error::ParserError> for Error {
-    fn from(err: clickhouse_rowbinary::error::ParserError) -> Self {
+impl From<clickhouse_types::error::ParserError> for Error {
+    fn from(err: clickhouse_types::error::ParserError) -> Self {
         Self::ColumnsHeaderParserError(Box::new(err))
     }
 }
