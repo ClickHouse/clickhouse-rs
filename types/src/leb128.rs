@@ -24,24 +24,6 @@ pub fn decode_leb128(buffer: &mut &[u8]) -> Result<u64, ParserError> {
     Ok(value)
 }
 
-// FIXME: do not use Vec<u8>
-pub fn encode_leb128(value: u64) -> Vec<u8> {
-    let mut result = Vec::new();
-    let mut val = value;
-    loop {
-        let mut byte = (val & 0x7f) as u8;
-        val >>= 7;
-        if val != 0 {
-            byte |= 0x80;
-        }
-        result.push(byte);
-        if val == 0 {
-            break;
-        }
-    }
-    result
-}
-
 mod tests {
     #[test]
     fn test_decode_leb128() {
@@ -64,6 +46,23 @@ mod tests {
 
     #[test]
     fn test_encode_decode_leb128() {
+        fn encode_leb128<'a>(value: u64) -> Vec<u8> {
+            let mut result = Vec::new();
+            let mut val = value;
+            loop {
+                let mut byte = (val & 0x7f) as u8;
+                val >>= 7;
+                if val != 0 {
+                    byte |= 0x80;
+                }
+                result.push(byte);
+                if val == 0 {
+                    break;
+                }
+            }
+            result
+        }
+
         let test_values = vec![
             0u64,
             1,
@@ -79,7 +78,7 @@ mod tests {
         ];
 
         for value in test_values {
-            let encoded = super::encode_leb128(value);
+            let encoded = encode_leb128(value);
             let decoded = super::decode_leb128(&mut encoded.as_slice()).unwrap();
 
             assert_eq!(

@@ -75,7 +75,6 @@ impl<T> RowCursor<T> {
                 if self.columns.is_empty() {
                     self.read_columns(slice)?;
                 } else {
-                    debug_assert!(!self.columns.is_empty());
                     let (result, not_enough_data) = match self.rows_to_validate {
                         0 => rowbinary::deserialize_from_and_validate::<T>(&mut slice, &[]),
                         u64::MAX => {

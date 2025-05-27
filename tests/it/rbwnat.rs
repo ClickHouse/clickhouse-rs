@@ -773,6 +773,216 @@ async fn test_variant() {
 }
 
 #[tokio::test]
+async fn test_geo() {
+    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Row, serde::Serialize, serde::Deserialize)]
+    struct Data {
+        id: u32,
+        point: Point,
+        ring: Ring,
+        polygon: Polygon,
+        multi_polygon: MultiPolygon,
+        line_string: LineString,
+        multi_line_string: MultiLineString,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query(
+            "
+            SELECT
+                42                                               :: UInt32          AS id,
+                (1.0, 2.0)                                       :: Point           AS point,
+                [(3.0, 4.0), (5.0, 6.0)]                         :: Ring            AS ring,
+                [[(7.0, 8.0), (9.0, 10.0)], [(11.0, 12.0)]]      :: Polygon         AS polygon,
+                [[[(13.0, 14.0), (15.0, 16.0)], [(17.0, 18.0)]]] :: MultiPolygon    AS multi_polygon,
+                [(19.0, 20.0), (21.0, 22.0)]                     :: LineString      AS line_string,
+                [[(23.0, 24.0), (25.0, 26.0)], [(27.0, 28.0)]]   :: MultiLineString AS multi_line_string
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            id: 42,
+            point: (1.0, 2.0),
+            ring: vec![(3.0, 4.0), (5.0, 6.0)],
+            polygon: vec![vec![(7.0, 8.0), (9.0, 10.0)], vec![(11.0, 12.0)]],
+            multi_polygon: vec![vec![vec![(13.0, 14.0), (15.0, 16.0)], vec![(17.0, 18.0)]]],
+            line_string: vec![(19.0, 20.0), (21.0, 22.0)],
+            multi_line_string: vec![vec![(23.0, 24.0), (25.0, 26.0)], vec![(27.0, 28.0)]],
+        }
+    );
+}
+
+// TODO: there are two panics; one about schema mismatch,
+//  another about not all Tuple elements being deserialized
+//  not easy to assert, same applies to the other Geo types
+#[ignore]
+#[tokio::test]
+async fn test_geo_invalid_point() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        id: u32,
+        pt: (i32, i32),
+    }
+    assert_panic_on_fetch!(
+        &["Data.pt", "Point", "Float64 as i32"],
+        "
+            SELECT
+                42         :: UInt32 AS id,
+                (1.0, 2.0) :: Point  AS pt
+        "
+    );
+}
+
+// TODO: unignore after insert implementation uses RBWNAT, too
+#[ignore]
+#[tokio::test]
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/109#issuecomment-2243197221
+async fn test_issue_109_1() {
+    #[derive(Debug, Serialize, Deserialize, Row)]
+    struct Data {
+        #[serde(skip_deserializing)]
+        en_id: String,
+        journey: u32,
+        drone_id: String,
+        call_sign: String,
+    }
+    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
+    let statements = vec![
+        "
+        CREATE TABLE issue_109 (
+            drone_id  String,
+            call_sign String,
+            journey   UInt32,
+            en_id     String,
+        )
+        ENGINE = MergeTree
+        ORDER BY (drone_id)
+        ",
+        "
+        INSERT INTO issue_109 VALUES
+            ('drone_1', 'call_sign_1', 1, 'en_id_1'),
+            ('drone_2', 'call_sign_2', 2, 'en_id_2'),
+            ('drone_3', 'call_sign_3', 3, 'en_id_3')
+        ",
+    ];
+    for stmt in statements {
+        client
+            .query(stmt)
+            .execute()
+            .await
+            .expect(&format!("Failed to execute query: {}", stmt));
+    }
+    let data = client
+        .query("SELECT journey, drone_id, call_sign FROM issue_109")
+        .fetch_all::<Data>()
+        .await
+        .unwrap();
+    let mut insert = client.insert("issue_109").unwrap();
+    for (id, elem) in data.iter().enumerate() {
+        let elem = Data {
+            en_id: format!("ABC-{}", id),
+            journey: elem.journey,
+            drone_id: elem.drone_id.clone(),
+            call_sign: elem.call_sign.clone(),
+        };
+        insert.write(&elem).await.unwrap();
+    }
+    insert.end().await.unwrap();
+}
+
+#[tokio::test]
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/113
+async fn test_issue_113() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: u64,
+        b: f64,
+        c: f64,
+    }
+    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
+    let statements = vec![
+        "
+        CREATE TABLE issue_113_1(
+            id UInt32
+        )
+        ENGINE MergeTree
+        ORDER BY id
+        ",
+        "
+        CREATE TABLE issue_113_2(
+            id  UInt32,
+            pos Float64
+        )
+        ENGINE MergeTree
+        ORDER BY id
+        ",
+        "INSERT INTO issue_113_1 VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)",
+        "INSERT INTO issue_113_2 VALUES (1, 100.5), (2, 200.2), (3, 300.3), (4, 444.4), (5, 555.5)",
+    ];
+    for stmt in statements {
+        client
+            .query(stmt)
+            .execute()
+            .await
+            .expect(&format!("Failed to execute query: {}", stmt));
+    }
+
+    // Struct should have had Option<f64> instead of f64
+    assert_panic_on_fetch_with_client!(
+        client,
+        &["Data.b", "Nullable(Float64)", "f64"],
+        "
+        SELECT
+            COUNT(*)                                                 AS a,
+            (COUNT(*) / (SELECT COUNT(*) FROM issue_113_1)) * 100.0  AS b,
+            AVG(pos)                                                 AS c
+        FROM issue_113_2
+        "
+    );
+}
+
+#[tokio::test]
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/185
+async fn test_issue_185() {
+    #[derive(Row, Deserialize, Debug, PartialEq)]
+    struct Data {
+        pk: u32,
+        decimal_col: Option<String>,
+    }
+
+    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
+    client
+        .query(
+            "
+            CREATE TABLE issue_185(
+                pk UInt32,
+                decimal_col Nullable(Decimal(10, 4)))
+            ENGINE MergeTree
+            ORDER BY pk
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+    client
+        .query("INSERT INTO issue_185 VALUES (1, 1.1), (2, 2.2), (3, 3.3)")
+        .execute()
+        .await
+        .unwrap();
+
+    assert_panic_on_fetch_with_client!(
+        client,
+        &["Data.decimal_col", "Decimal(10, 4)", "String"],
+        "SELECT ?fields FROM issue_185"
+    );
+}
+
+#[tokio::test]
 #[ignore] // this is currently disabled, see validation todo
 async fn test_variant_wrong_definition() {
     #[derive(Debug, Deserialize, PartialEq)]
@@ -823,7 +1033,7 @@ async fn test_variant_wrong_definition() {
 #[tokio::test]
 #[ignore]
 async fn test_different_struct_field_order() {
-    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    #[derive(Debug, Row, Deserialize, PartialEq)]
     struct Data {
         c: String,
         a: String,
@@ -843,3 +1053,11 @@ async fn test_different_struct_field_order() {
         }
     );
 }
+
+// See https://clickhouse.com/docs/en/sql-reference/data-types/geo
+type Point = (f64, f64);
+type Ring = Vec<Point>;
+type Polygon = Vec<Ring>;
+type MultiPolygon = Vec<Polygon>;
+type LineString = Vec<Point>;
+type MultiLineString = Vec<LineString>;

@@ -1,5 +1,5 @@
 use crate::error::Result;
-use clickhouse_types::data_types::{Column, DataTypeNode, DecimalSize, EnumType};
+use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
 
@@ -277,10 +277,10 @@ fn validate_impl<'de, 'cursor>(
     serde_type: &SerdeType,
     is_inner: bool,
 ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
-    // println!(
-    //     "Validating data type: {:?} against serde type: {} with compatible db types: {:?}",
-    //     data_type, serde_type, compatible_db_types
-    // );
+    println!(
+        "Validating data type: {} against serde type: {} with compatible db types",
+        data_type, serde_type,
+    );
     // TODO: eliminate multiple branches with similar patterns?
     match serde_type {
         SerdeType::Bool
@@ -307,20 +307,29 @@ fn validate_impl<'de, 'cursor>(
         SerdeType::I32
             if data_type == &DataTypeNode::Int32
                 || data_type == &DataTypeNode::Date32
-                || matches!(data_type, DataTypeNode::Decimal(_, _, DecimalSize::Int32)) =>
+                || matches!(
+                    data_type,
+                    DataTypeNode::Decimal(_, _, DecimalType::Decimal32)
+                ) =>
         {
             Ok(None)
         }
         SerdeType::I64
             if data_type == &DataTypeNode::Int64
                 || matches!(data_type, DataTypeNode::DateTime64(_, _))
-                || matches!(data_type, DataTypeNode::Decimal(_, _, DecimalSize::Int64)) =>
+                || matches!(
+                    data_type,
+                    DataTypeNode::Decimal(_, _, DecimalType::Decimal64)
+                ) =>
         {
             Ok(None)
         }
         SerdeType::I128
             if data_type == &DataTypeNode::Int128
-                || matches!(data_type, DataTypeNode::Decimal(_, _, DecimalSize::Int128)) =>
+                || matches!(
+                    data_type,
+                    DataTypeNode::Decimal(_, _, DecimalType::Decimal128)
+                ) =>
         {
             Ok(None)
         }
@@ -368,19 +377,48 @@ fn validate_impl<'de, 'cursor>(
                 root.panic_on_schema_mismatch(data_type, serde_type, is_inner)
             }
         }
-        SerdeType::Seq(_) => {
-            if let DataTypeNode::Array(inner_type) = data_type {
-                Ok(Some(InnerDataTypeValidator {
-                    root,
-                    kind: InnerDataTypeValidatorKind::Array(
-                        inner_type,
-                        ArrayValidatorState::Pending,
-                    ),
-                }))
-            } else {
-                root.panic_on_schema_mismatch(data_type, serde_type, is_inner)
-            }
-        }
+        SerdeType::Seq(_) => match data_type {
+            DataTypeNode::Array(inner_type) => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Array(inner_type, ArrayValidatorState::Pending),
+            })),
+            DataTypeNode::Ring => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Array(
+                    &DataTypeNode::Point,
+                    ArrayValidatorState::Pending,
+                ),
+            })),
+            DataTypeNode::Polygon => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Array(
+                    &DataTypeNode::Ring,
+                    ArrayValidatorState::Pending,
+                ),
+            })),
+            DataTypeNode::MultiPolygon => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Array(
+                    &DataTypeNode::Polygon,
+                    ArrayValidatorState::Pending,
+                ),
+            })),
+            DataTypeNode::LineString => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Array(
+                    &DataTypeNode::Point,
+                    ArrayValidatorState::Pending,
+                ),
+            })),
+            DataTypeNode::MultiLineString => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Array(
+                    &DataTypeNode::LineString,
+                    ArrayValidatorState::Pending,
+                ),
+            })),
+            _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
+        },
         SerdeType::Tuple(len) => match data_type {
             DataTypeNode::FixedString(n) => {
                 if n == len {
@@ -417,6 +455,13 @@ fn validate_impl<'de, 'cursor>(
                 kind: InnerDataTypeValidatorKind::Tuple(&[
                     DataTypeNode::UInt64,
                     DataTypeNode::UInt64,
+                ]),
+            })),
+            DataTypeNode::Point => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Tuple(&[
+                    DataTypeNode::Float64,
+                    DataTypeNode::Float64,
                 ]),
             })),
             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
