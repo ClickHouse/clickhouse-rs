@@ -298,8 +298,8 @@ impl Client {
     }
 
     /// Specifies the struct validation mode that will be used when calling
-    /// [`Query::fetch`], [`Query::fetch_one`], [`Query::fetch_all`],
-    /// and [`Query::fetch_optional`] methods.
+    /// [`query::Query::fetch`], [`query::Query::fetch_one`], [`query::Query::fetch_all`],
+    /// and [`query::Query::fetch_optional`] methods.
     /// See [`ValidationMode`] for more details.
     pub fn with_validation_mode(mut self, mode: ValidationMode) -> Self {
         self.validation_mode = mode;

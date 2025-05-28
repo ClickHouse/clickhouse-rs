@@ -659,29 +659,29 @@ pub(crate) enum SerdeType {
 
 impl Display for SerdeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let type_name = match self {
-            SerdeType::Bool => "bool",
-            SerdeType::I8 => "i8",
-            SerdeType::I16 => "i16",
-            SerdeType::I32 => "i32",
-            SerdeType::I64 => "i64",
-            SerdeType::I128 => "i128",
-            SerdeType::U8 => "u8",
-            SerdeType::U16 => "u16",
-            SerdeType::U32 => "u32",
-            SerdeType::U64 => "u64",
-            SerdeType::U128 => "u128",
-            SerdeType::F32 => "f32",
-            SerdeType::F64 => "f64",
-            SerdeType::Str => "&str",
-            SerdeType::String => "String",
-            SerdeType::Bytes(len) => &format!("&[u8; {len}]"),
-            SerdeType::ByteBuf(_len) => "Vec<u8>",
-            SerdeType::Option => "Option<T>",
-            SerdeType::Enum => "enum",
-            SerdeType::Seq(_len) => "Vec<T>",
-            SerdeType::Tuple(len) => &format!("a tuple or sequence with length {len}"),
-            SerdeType::Map(_len) => "map",
+        match self {
+            SerdeType::Bool => write!(f, "bool"),
+            SerdeType::I8 => write!(f, "i8"),
+            SerdeType::I16 => write!(f, "i16"),
+            SerdeType::I32 => write!(f, "i32"),
+            SerdeType::I64 => write!(f, "i64"),
+            SerdeType::I128 => write!(f, "i128"),
+            SerdeType::U8 => write!(f, "u8"),
+            SerdeType::U16 => write!(f, "u16"),
+            SerdeType::U32 => write!(f, "u32"),
+            SerdeType::U64 => write!(f, "u64"),
+            SerdeType::U128 => write!(f, "u128"),
+            SerdeType::F32 => write!(f, "f32"),
+            SerdeType::F64 => write!(f, "f64"),
+            SerdeType::Str => write!(f, "&str"),
+            SerdeType::String => write!(f, "String"),
+            SerdeType::Bytes(len) => write!(f, "&[u8; {len}]"),
+            SerdeType::ByteBuf(_len) => write!(f, "Vec<u8>"),
+            SerdeType::Option => write!(f, "Option<T>"),
+            SerdeType::Enum => write!(f, "enum"),
+            SerdeType::Seq(_len) => write!(f, "Vec<T>"),
+            SerdeType::Tuple(len) => write!(f, "a tuple or sequence with length {len}"),
+            SerdeType::Map(_len) => write!(f, "Map<K, V>"),
             // SerdeType::Identifier => "identifier",
             // SerdeType::Char => "char",
             // SerdeType::Unit => "()",
@@ -690,7 +690,6 @@ impl Display for SerdeType {
             // SerdeType::TupleStruct => "tuple struct",
             // SerdeType::UnitStruct => "unit struct",
             // SerdeType::IgnoredAny => "ignored any",
-        };
-        write!(f, "{}", type_name)
+        }
     }
 }
