@@ -73,19 +73,6 @@ impl<T> RowCursor<T> {
         }
     }
 
-    #[inline(always)]
-    fn deserialize_with_validation<'cursor, 'data: 'cursor>(
-        &'cursor mut self,
-        slice: &mut &'data [u8],
-    ) -> (Result<T>, bool)
-    where
-        T: Deserialize<'data>,
-    {
-        let result = rowbinary::deserialize_from_and_validate::<T>(slice, &self.columns);
-        self.rows_to_validate -= 1;
-        result
-    }
-
     /// Emits the next row.
     ///
     /// The result is unspecified if it's called after `Err` is returned.
@@ -101,6 +88,9 @@ impl<T> RowCursor<T> {
             if self.bytes.remaining() > 0 {
                 if self.columns.is_empty() {
                     self.read_columns().await?;
+                    if self.bytes.remaining() == 0 {
+                        continue;
+                    }
                 }
                 let mut slice = super::workaround_51132(self.bytes.slice());
                 let (result, not_enough_data) = match self.rows_to_validate {
@@ -109,8 +99,12 @@ impl<T> RowCursor<T> {
                         rowbinary::deserialize_from_and_validate::<T>(&mut slice, &self.columns)
                     }
                     _ => {
-                        // extracting to a separate method boosts performance for Each ~10%
-                        self.deserialize_with_validation(&mut slice)
+                        let result = rowbinary::deserialize_from_and_validate::<T>(
+                            &mut slice,
+                            &self.columns,
+                        );
+                        self.rows_to_validate -= 1;
+                        result
                     }
                 };
                 if !not_enough_data {

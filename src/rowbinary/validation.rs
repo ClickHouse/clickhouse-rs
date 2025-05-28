@@ -8,8 +8,9 @@ pub(crate) trait ValidateDataType: Sized {
         &'_ mut self,
         serde_type: SerdeType,
     ) -> Result<Option<InnerDataTypeValidator<'_, '_>>>;
-    fn validate_enum8(&mut self, value: i8);
-    fn validate_enum16(&mut self, value: i16);
+    fn set_next_variant_value(&mut self, value: u8);
+    fn validate_enum8_value(&mut self, value: i8);
+    fn validate_enum16_value(&mut self, value: i16);
     fn set_struct_name(&mut self, name: &'static str);
 }
 
@@ -91,19 +92,30 @@ impl ValidateDataType for DataTypeValidator<'_> {
             // this allows validating and deserializing tuples from fetch calls
             Ok(Some(InnerDataTypeValidator {
                 root: self,
-                kind: InnerDataTypeValidatorKind::RootTuple(self.columns, 0),
+                kind: if matches!(serde_type, SerdeType::Seq(_)) && self.columns.len() == 1 {
+                    let data_type = &self.columns[0].data_type;
+                    match data_type {
+                        DataTypeNode::Array(inner_type) => {
+                            InnerDataTypeValidatorKind::RootArray(inner_type)
+                        }
+                        _ => panic!(
+                            "Expected Array type when validating root level sequence, but got {}",
+                            self.columns[0].data_type
+                        ),
+                    }
+                } else {
+                    InnerDataTypeValidatorKind::RootTuple(self.columns, 0)
+                },
             }))
+        } else if self.current_column_idx < self.columns.len() {
+            let current_column = &self.columns[self.current_column_idx];
+            self.current_column_idx += 1;
+            validate_impl(self, &current_column.data_type, &serde_type, false)
         } else {
-            if self.current_column_idx < self.columns.len() {
-                let current_column = &self.columns[self.current_column_idx];
-                self.current_column_idx += 1;
-                validate_impl(self, &current_column.data_type, &serde_type, false)
-            } else {
-                panic!(
-                    "Struct {} has more fields than columns in the database schema",
-                    self.get_struct_name()
-                )
-            }
+            panic!(
+                "Struct {} has more fields than columns in the database schema",
+                self.get_struct_name()
+            )
         }
     }
 
@@ -116,13 +128,19 @@ impl ValidateDataType for DataTypeValidator<'_> {
 
     #[cold]
     #[inline(never)]
-    fn validate_enum8(&mut self, _value: i8) {
+    fn validate_enum8_value(&mut self, _value: i8) {
         unreachable!()
     }
 
     #[cold]
     #[inline(never)]
-    fn validate_enum16(&mut self, _value: i16) {
+    fn validate_enum16_value(&mut self, _value: i16) {
+        unreachable!()
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn set_next_variant_value(&mut self, _value: u8) {
         unreachable!()
     }
 }
@@ -155,11 +173,18 @@ pub(crate) enum InnerDataTypeValidatorKind<'cursor> {
         MapValidatorState,
     ),
     Tuple(&'cursor [DataTypeNode]),
-    /// This is a hack to support deserializing tuples (and not structs) from fetch calls
+    /// This is a hack to support deserializing tuples/vectors (and not structs) from fetch calls
     RootTuple(&'cursor [Column], usize),
+    RootArray(&'cursor DataTypeNode),
     Enum(&'cursor HashMap<i16, String>),
-    // Variant(&'cursor [DataTypeNode]),
+    Variant(&'cursor [DataTypeNode], VariantValidationState),
     Nullable(&'cursor DataTypeNode),
+}
+
+#[derive(Debug)]
+pub(crate) enum VariantValidationState {
+    Pending,
+    Identifier(u8),
 }
 
 impl<'de, 'cursor> ValidateDataType for Option<InnerDataTypeValidator<'de, 'cursor>> {
@@ -168,6 +193,7 @@ impl<'de, 'cursor> ValidateDataType for Option<InnerDataTypeValidator<'de, 'curs
         &mut self,
         serde_type: SerdeType,
     ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
+        // println!("[validate] Validating serde type: {}", serde_type);
         match self {
             None => Ok(None),
             Some(inner) => match &mut inner.kind {
@@ -218,14 +244,10 @@ impl<'de, 'cursor> ValidateDataType for Option<InnerDataTypeValidator<'de, 'curs
                     Ok(None) // actually unreachable
                 }
                 InnerDataTypeValidatorKind::RootTuple(columns, current_index) => {
-                    if *current_index < columns.len() - 1 {
+                    if *current_index < columns.len() {
+                        let data_type = &columns[*current_index].data_type;
                         *current_index += 1;
-                        validate_impl(
-                            inner.root,
-                            &columns[*current_index].data_type,
-                            &serde_type,
-                            true,
-                        )
+                        validate_impl(inner.root, data_type, &serde_type, true)
                     } else {
                         let (full_name, full_data_type) =
                             inner.root.get_current_column_name_and_type();
@@ -236,9 +258,28 @@ impl<'de, 'cursor> ValidateDataType for Option<InnerDataTypeValidator<'de, 'curs
                         )
                     }
                 }
-                // InnerDataTypeValidatorKind::Variant(_possible_types) => {
-                //     Ok(None) // FIXME: requires comparing DataTypeNode vs TypeHint or SerdeType
-                // }
+                InnerDataTypeValidatorKind::RootArray(inner_data_type) => {
+                    validate_impl(inner.root, inner_data_type, &serde_type, true)
+                }
+                InnerDataTypeValidatorKind::Variant(possible_types, state) => match state {
+                    VariantValidationState::Pending => {
+                        unreachable!()
+                    }
+                    VariantValidationState::Identifier(value) => {
+                        // println!("Validating variant identifier: {}", value);
+                        if *value as usize >= possible_types.len() {
+                            let (full_name, full_data_type) =
+                                inner.root.get_current_column_name_and_type();
+                            panic!(
+                                    "While processing column {full_name} defined as {full_data_type}: \
+                                     Variant identifier {value} is out of bounds, max allowed index is {}",
+                                    possible_types.len() - 1
+                                );
+                        }
+                        let data_type = &possible_types[*value as usize];
+                        validate_impl(inner.root, data_type, &serde_type, true)
+                    }
+                },
                 InnerDataTypeValidatorKind::Enum(_values_map) => {
                     todo!() // TODO - check value correctness in the hashmap
                 }
@@ -247,22 +288,48 @@ impl<'de, 'cursor> ValidateDataType for Option<InnerDataTypeValidator<'de, 'curs
     }
 
     #[inline(always)]
-    fn validate_enum8(&mut self, value: i8) {
+    fn validate_enum8_value(&mut self, value: i8) {
         if let Some(inner) = self {
             if let InnerDataTypeValidatorKind::Enum(values_map) = &inner.kind {
                 if !values_map.contains_key(&(value as i16)) {
-                    panic!("Enum8 value `{value}` is not present in the database schema");
+                    let (full_name, full_data_type) = inner.root.get_current_column_name_and_type();
+                    panic!(
+                        "While processing column {full_name} defined as {full_data_type}: \
+                         Enum8 value {value} is not present in the database schema"
+                    );
                 }
             }
         }
     }
 
     #[inline(always)]
-    fn validate_enum16(&mut self, value: i16) {
+    fn validate_enum16_value(&mut self, value: i16) {
         if let Some(inner) = self {
             if let InnerDataTypeValidatorKind::Enum(values_map) = &inner.kind {
                 if !values_map.contains_key(&value) {
-                    panic!("Enum16 value `{value}` is not present in the database schema");
+                    let (full_name, full_data_type) = inner.root.get_current_column_name_and_type();
+                    panic!(
+                        "While processing column {full_name} defined as {full_data_type}: \
+                         Enum16 value {value} is not present in the database schema"
+                    );
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn set_next_variant_value(&mut self, value: u8) {
+        if let Some(inner) = self {
+            if let InnerDataTypeValidatorKind::Variant(possible_types, state) = &mut inner.kind {
+                if (value as usize) < possible_types.len() {
+                    *state = VariantValidationState::Identifier(value);
+                } else {
+                    let (full_name, full_data_type) = inner.root.get_current_column_name_and_type();
+                    panic!(
+                        "While processing column {full_name} defined as {full_data_type}: \
+                         Variant identifier {value} is out of bounds, max allowed index is {}",
+                        possible_types.len() - 1
+                    );
                 }
             }
         }
@@ -296,14 +363,15 @@ impl Drop for InnerDataTypeValidator<'_, '_> {
 #[inline]
 fn validate_impl<'de, 'cursor>(
     root: &'de DataTypeValidator<'cursor>,
-    data_type: &'cursor DataTypeNode,
+    column_data_type: &'cursor DataTypeNode,
     serde_type: &SerdeType,
     is_inner: bool,
 ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
-    println!(
-        "Validating data type: {} against serde type: {}",
-        data_type, serde_type,
-    );
+    // println!(
+    //     "Validating data type: {} against serde type: {}",
+    //     column_data_type, serde_type,
+    // );
+    let data_type = column_data_type.remove_low_cardinality();
     // TODO: eliminate multiple branches with similar patterns?
     match serde_type {
         SerdeType::Bool
@@ -356,8 +424,7 @@ fn validate_impl<'de, 'cursor>(
         {
             Ok(None)
         }
-        // TODO: what should be allowed type for SerdeType::Identifier?
-        SerdeType::Identifier | SerdeType::U8 if data_type == &DataTypeNode::UInt8 => Ok(None),
+        SerdeType::U8 if data_type == &DataTypeNode::UInt8 => Ok(None),
         SerdeType::U16
             if data_type == &DataTypeNode::UInt16 || data_type == &DataTypeNode::Date =>
         {
@@ -507,10 +574,27 @@ fn validate_impl<'de, 'cursor>(
             }
         }
         SerdeType::Enum => {
-            todo!("variant data type validation")
+            if let DataTypeNode::Variant(possible_types) = data_type {
+                Ok(Some(InnerDataTypeValidator {
+                    root,
+                    kind: InnerDataTypeValidatorKind::Variant(
+                        possible_types,
+                        VariantValidationState::Pending,
+                    ),
+                }))
+            } else {
+                panic!(
+                    "Expected Variant for {} call, but got {}",
+                    serde_type, data_type
+                )
+            }
         }
 
-        _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
+        _ => root.panic_on_schema_mismatch(
+            data_type,
+            serde_type,
+            is_inner || matches!(column_data_type, DataTypeNode::LowCardinality { .. }),
+        ),
     }
 }
 
@@ -524,10 +608,13 @@ impl ValidateDataType for () {
     }
 
     #[inline(always)]
-    fn validate_enum8(&mut self, _enum_value: i8) {}
+    fn validate_enum8_value(&mut self, _value: i8) {}
 
     #[inline(always)]
-    fn validate_enum16(&mut self, _enum_value: i16) {}
+    fn validate_enum16_value(&mut self, _value: i16) {}
+
+    #[inline(always)]
+    fn set_next_variant_value(&mut self, _value: u8) {}
 
     #[inline(always)]
     fn set_struct_name(&mut self, _name: &'static str) {}
@@ -555,12 +642,12 @@ pub(crate) enum SerdeType {
     String,
     Option,
     Enum,
-    Identifier,
     Bytes(usize),
     ByteBuf(usize),
     Tuple(usize),
     Seq(usize),
     Map(usize),
+    // Identifier,
     // Char,
     // Unit,
     // Struct,
@@ -595,7 +682,7 @@ impl Display for SerdeType {
             SerdeType::Seq(_len) => "Vec<T>",
             SerdeType::Tuple(len) => &format!("a tuple or sequence with length {len}"),
             SerdeType::Map(_len) => "map",
-            SerdeType::Identifier => "identifier",
+            // SerdeType::Identifier => "identifier",
             // SerdeType::Char => "char",
             // SerdeType::Unit => "()",
             // SerdeType::Struct => "struct",

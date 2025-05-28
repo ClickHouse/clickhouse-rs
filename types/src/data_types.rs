@@ -133,6 +133,13 @@ impl DataTypeNode {
             ))),
         }
     }
+
+    pub fn remove_low_cardinality(&self) -> &DataTypeNode {
+        match self {
+            DataTypeNode::LowCardinality(inner) => inner,
+            _ => self,
+        }
+    }
 }
 
 impl Into<String> for DataTypeNode {

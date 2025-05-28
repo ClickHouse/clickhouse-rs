@@ -396,6 +396,41 @@ async fn test_enum() {
 async fn test_nullable() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
+        a: u32,
+        b: Option<i64>,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query(
+            "
+            SELECT * FROM (
+                SELECT 1 :: UInt32 AS a, 2    :: Nullable(Int64) AS b
+                UNION ALL
+                SELECT 3 :: UInt32 AS a, NULL :: Nullable(Int64) AS b
+                UNION ALL
+                SELECT 4 :: UInt32 AS a, 5    :: Nullable(Int64) AS b
+            )
+            ORDER BY a ASC
+            ",
+        )
+        .fetch_all::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        vec![
+            Data { a: 1, b: Some(2) },
+            Data { a: 3, b: None },
+            Data { a: 4, b: Some(5) },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_invalid_nullable() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
         n: Option<u32>,
     }
     assert_panic_on_fetch!(
@@ -405,8 +440,76 @@ async fn test_nullable() {
 }
 
 #[tokio::test]
+async fn test_low_cardinality() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: u32,
+        b: Option<i64>,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query(
+            "
+            SELECT * FROM (
+                SELECT 1 :: LowCardinality(UInt32) AS a, 2    :: LowCardinality(Nullable(Int64)) AS b
+                UNION ALL
+                SELECT 3 :: LowCardinality(UInt32) AS a, NULL :: LowCardinality(Nullable(Int64)) AS b
+                UNION ALL
+                SELECT 4 :: LowCardinality(UInt32) AS a, 5    :: LowCardinality(Nullable(Int64)) AS b
+            )
+            ORDER BY a ASC
+            ",
+        )
+        .with_option("allow_suspicious_low_cardinality_types", "1")
+        .fetch_all::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        vec![
+            Data { a: 1, b: Some(2) },
+            Data { a: 3, b: None },
+            Data { a: 4, b: Some(5) },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_invalid_low_cardinality() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: u32,
+    }
+    let client = get_client()
+        .with_validation_mode(ValidationMode::Each)
+        .with_option("allow_suspicious_low_cardinality_types", "1");
+    assert_panic_on_fetch_with_client!(
+        client,
+        &["Data.a", "LowCardinality(Int32)", "u32"],
+        "SELECT 144 :: LowCardinality(Int32) AS a"
+    );
+}
+
+#[tokio::test]
+async fn test_invalid_nullable_low_cardinality() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: Option<u32>,
+    }
+    let client = get_client()
+        .with_validation_mode(ValidationMode::Each)
+        .with_option("allow_suspicious_low_cardinality_types", "1");
+    assert_panic_on_fetch_with_client!(
+        client,
+        &["Data.a", "LowCardinality(Nullable(Int32))", "u32"],
+        "SELECT 144 :: LowCardinality(Nullable(Int32)) AS a"
+    );
+}
+
+#[tokio::test]
 #[cfg(feature = "time")]
-async fn test_serde_with() {
+async fn test_invalid_serde_with() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         #[serde(with = "clickhouse::serde::time::datetime64::millis")]
@@ -727,52 +830,6 @@ async fn test_deeply_nested_validation_incorrect_fixed_string() {
 }
 
 #[tokio::test]
-#[ignore]
-async fn test_variant() {
-    #[derive(Debug, Deserialize, PartialEq)]
-    enum MyVariant {
-        Str(String),
-        U16(u16),
-    }
-
-    #[derive(Debug, Row, Deserialize, PartialEq)]
-    struct Data {
-        id: u8,
-        var: MyVariant,
-    }
-
-    let client = get_client()
-        .with_validation_mode(ValidationMode::Each)
-        .with_option("allow_experimental_variant_type", "1");
-    let result = client
-        .query(
-            "
-            SELECT * FROM (
-                SELECT 0 :: UInt8 AS id, 'foo' :: Variant(String, UInt16) AS var
-                UNION ALL
-                SELECT 1 :: UInt8 AS id, 144   :: Variant(String, UInt16) AS var
-            ) ORDER BY id ASC
-            ",
-        )
-        .fetch_all::<Data>()
-        .await;
-
-    assert_eq!(
-        result.unwrap(),
-        vec![
-            Data {
-                id: 0,
-                var: MyVariant::Str("foo".to_string())
-            },
-            Data {
-                id: 1,
-                var: MyVariant::U16(144)
-            },
-        ]
-    );
-}
-
-#[tokio::test]
 async fn test_geo() {
     #[derive(Clone, Debug, PartialEq)]
     #[derive(Row, serde::Serialize, serde::Deserialize)]
@@ -875,7 +932,7 @@ async fn test_issue_109_1() {
             .query(stmt)
             .execute()
             .await
-            .expect(&format!("Failed to execute query: {}", stmt));
+            .unwrap_or_else(|e| panic!("Failed to execute query {stmt}, cause: {}", e));
     }
     let data = client
         .query("SELECT journey, drone_id, call_sign FROM issue_109")
@@ -929,7 +986,7 @@ async fn test_issue_113() {
             .query(stmt)
             .execute()
             .await
-            .expect(&format!("Failed to execute query: {}", stmt));
+            .unwrap_or_else(|e| panic!("Failed to execute query {stmt}, cause: {}", e));
     }
 
     // Struct should have had Option<f64> instead of f64
@@ -983,7 +1040,6 @@ async fn test_issue_185() {
 }
 
 #[tokio::test]
-#[ignore] // this is currently disabled, see validation todo
 async fn test_variant_wrong_definition() {
     #[derive(Debug, Deserialize, PartialEq)]
     enum MyVariant {
@@ -1000,31 +1056,17 @@ async fn test_variant_wrong_definition() {
     let client = get_client()
         .with_validation_mode(ValidationMode::Each)
         .with_option("allow_experimental_variant_type", "1");
-    let result = client
-        .query(
-            "
-            SELECT * FROM (
-                SELECT 0 :: UInt8 AS id, 'foo' :: Variant(String, UInt16) AS var
-                UNION ALL
-                SELECT 1 :: UInt8 AS id, 144   :: Variant(String, UInt16) AS var
-            ) ORDER BY id ASC
-            ",
-        )
-        .fetch_all::<Data>()
-        .await;
 
-    assert_eq!(
-        result.unwrap(),
-        vec![
-            Data {
-                id: 0,
-                var: MyVariant::Str("foo".to_string())
-            },
-            Data {
-                id: 1,
-                var: MyVariant::U32(144)
-            },
-        ]
+    assert_panic_on_fetch_with_client!(
+        client,
+        &["Data.var", "Variant(String, UInt16)", "u32"],
+        "
+        SELECT * FROM (
+            SELECT 0 :: UInt8 AS id, 'foo' :: Variant(String, UInt16) AS var
+            UNION ALL
+            SELECT 1 :: UInt8 AS id, 144   :: Variant(String, UInt16) AS var
+        ) ORDER BY id ASC
+        "
     );
 }
 

@@ -1,5 +1,5 @@
 pub use crate::data_types::{Column, DataTypeNode};
-use crate::decoders::decode_string;
+use crate::decoders::{ensure_size, read_string};
 use crate::error::TypesError;
 pub use crate::leb128::put_leb128;
 pub use crate::leb128::read_leb128;
@@ -10,13 +10,9 @@ pub mod decoders;
 pub mod error;
 pub mod leb128;
 
-pub fn parse_rbwnat_columns_header(bytes: &mut &[u8]) -> Result<Vec<Column>, TypesError> {
-    if bytes.len() < 1 {
-        return Err(TypesError::NotEnoughData(
-            "decoding columns header, expected at least one byte to start".to_string(),
-        ));
-    }
-    let num_columns = read_leb128(bytes)?;
+pub fn parse_rbwnat_columns_header(buffer: &mut &[u8]) -> Result<Vec<Column>, TypesError> {
+    ensure_size(buffer, 1)?;
+    let num_columns = read_leb128(buffer)?;
     if num_columns == 0 {
         return Err(TypesError::HeaderParsingError(
             "Expected at least one column in the header".to_string(),
@@ -24,12 +20,12 @@ pub fn parse_rbwnat_columns_header(bytes: &mut &[u8]) -> Result<Vec<Column>, Typ
     }
     let mut columns_names: Vec<String> = Vec::with_capacity(num_columns as usize);
     for _ in 0..num_columns {
-        let column_name = decode_string(bytes)?;
+        let column_name = read_string(buffer)?;
         columns_names.push(column_name);
     }
     let mut column_data_types: Vec<DataTypeNode> = Vec::with_capacity(num_columns as usize);
     for _ in 0..num_columns {
-        let column_type = decode_string(bytes)?;
+        let column_type = read_string(buffer)?;
         let data_type = DataTypeNode::new(&column_type)?;
         column_data_types.push(data_type);
     }

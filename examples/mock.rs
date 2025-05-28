@@ -58,7 +58,7 @@ async fn main() {
 
     // How to test SELECT.
     mock.add(test::handlers::provide(
-        &vec![Column::new("no".to_string(), UInt32)],
+        &[Column::new("no".to_string(), UInt32)],
         list.clone(),
     ));
     let rows = make_select(&client).await.unwrap();

@@ -41,7 +41,7 @@ pub fn failure(status: StatusCode) -> impl Handler {
 // === provide ===
 
 #[track_caller]
-pub fn provide<'a, T>(schema: &[Column], rows: impl IntoIterator<Item = T>) -> impl Handler
+pub fn provide<T>(schema: &[Column], rows: impl IntoIterator<Item = T>) -> impl Handler
 where
     T: Serialize,
 {
