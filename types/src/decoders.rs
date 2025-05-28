@@ -1,15 +1,15 @@
-use crate::error::ParserError;
-use crate::leb128::decode_leb128;
+use crate::error::TypesError;
+use crate::leb128::read_leb128;
 use bytes::Buf;
 
 #[inline]
-pub(crate) fn decode_string(buffer: &mut &[u8]) -> Result<String, ParserError> {
-    let length = decode_leb128(buffer)? as usize;
+pub(crate) fn decode_string(buffer: &mut &[u8]) -> Result<String, TypesError> {
+    let length = read_leb128(buffer)? as usize;
     if length == 0 {
         return Ok("".to_string());
     }
     if buffer.remaining() < length {
-        return Err(ParserError::NotEnoughData(format!(
+        return Err(TypesError::NotEnoughData(format!(
             "decoding string, {} bytes remaining, {} bytes required",
             buffer.remaining(),
             length,

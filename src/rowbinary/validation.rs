@@ -13,7 +13,6 @@ pub(crate) trait ValidateDataType: Sized {
     fn set_struct_name(&mut self, name: &'static str);
 }
 
-#[derive(Default)]
 pub(crate) struct DataTypeValidator<'cursor> {
     struct_name: Option<&'static str>,
     current_column_idx: usize,
@@ -88,15 +87,23 @@ impl ValidateDataType for DataTypeValidator<'_> {
         &'_ mut self,
         serde_type: SerdeType,
     ) -> Result<Option<InnerDataTypeValidator<'_, '_>>> {
-        if self.current_column_idx < self.columns.len() {
-            let current_column = &self.columns[self.current_column_idx];
-            self.current_column_idx += 1;
-            validate_impl(self, &current_column.data_type, &serde_type, false)
+        if self.current_column_idx == 0 && self.struct_name.is_none() {
+            // this allows validating and deserializing tuples from fetch calls
+            Ok(Some(InnerDataTypeValidator {
+                root: self,
+                kind: InnerDataTypeValidatorKind::RootTuple(self.columns, 0),
+            }))
         } else {
-            panic!(
-                "Struct {} has more fields than columns in the database schema",
-                self.get_struct_name()
-            )
+            if self.current_column_idx < self.columns.len() {
+                let current_column = &self.columns[self.current_column_idx];
+                self.current_column_idx += 1;
+                validate_impl(self, &current_column.data_type, &serde_type, false)
+            } else {
+                panic!(
+                    "Struct {} has more fields than columns in the database schema",
+                    self.get_struct_name()
+                )
+            }
         }
     }
 
@@ -148,6 +155,8 @@ pub(crate) enum InnerDataTypeValidatorKind<'cursor> {
         MapValidatorState,
     ),
     Tuple(&'cursor [DataTypeNode]),
+    /// This is a hack to support deserializing tuples (and not structs) from fetch calls
+    RootTuple(&'cursor [Column], usize),
     Enum(&'cursor HashMap<i16, String>),
     // Variant(&'cursor [DataTypeNode]),
     Nullable(&'cursor DataTypeNode),
@@ -159,8 +168,6 @@ impl<'de, 'cursor> ValidateDataType for Option<InnerDataTypeValidator<'de, 'curs
         &mut self,
         serde_type: SerdeType,
     ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
-        // println!("Validating inner data type: {:?} against serde type: {} with compatible db types: {:?}",
-        //          self, serde_type, compatible_db_types);
         match self {
             None => Ok(None),
             Some(inner) => match &mut inner.kind {
@@ -210,6 +217,25 @@ impl<'de, 'cursor> ValidateDataType for Option<InnerDataTypeValidator<'de, 'curs
                 InnerDataTypeValidatorKind::FixedString(_len) => {
                     Ok(None) // actually unreachable
                 }
+                InnerDataTypeValidatorKind::RootTuple(columns, current_index) => {
+                    if *current_index < columns.len() - 1 {
+                        *current_index += 1;
+                        validate_impl(
+                            inner.root,
+                            &columns[*current_index].data_type,
+                            &serde_type,
+                            true,
+                        )
+                    } else {
+                        let (full_name, full_data_type) =
+                            inner.root.get_current_column_name_and_type();
+                        panic!(
+                            "While processing root tuple element {} defined as {}: \
+                             attempting to deserialize {} while no more elements are allowed",
+                            full_name, full_data_type, serde_type
+                        )
+                    }
+                }
                 // InnerDataTypeValidatorKind::Variant(_possible_types) => {
                 //     Ok(None) // FIXME: requires comparing DataTypeNode vs TypeHint or SerdeType
                 // }
@@ -242,11 +268,8 @@ impl<'de, 'cursor> ValidateDataType for Option<InnerDataTypeValidator<'de, 'curs
         }
     }
 
-    #[cold]
-    #[inline(never)]
-    fn set_struct_name(&mut self, _name: &'static str) {
-        panic!("Struct name should not be set in the inner deserializer");
-    }
+    #[inline(always)]
+    fn set_struct_name(&mut self, _name: &'static str) {}
 }
 
 impl Drop for InnerDataTypeValidator<'_, '_> {
@@ -278,7 +301,7 @@ fn validate_impl<'de, 'cursor>(
     is_inner: bool,
 ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
     println!(
-        "Validating data type: {} against serde type: {} with compatible db types",
+        "Validating data type: {} against serde type: {}",
         data_type, serde_type,
     );
     // TODO: eliminate multiple branches with similar patterns?

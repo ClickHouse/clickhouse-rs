@@ -1,4 +1,4 @@
-use crate::error::ParserError;
+use crate::error::TypesError;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
@@ -79,7 +79,7 @@ pub enum DataTypeNode {
 }
 
 impl DataTypeNode {
-    pub fn new(name: &str) -> Result<Self, ParserError> {
+    pub fn new(name: &str) -> Result<Self, TypesError> {
         match name {
             "UInt8" => Ok(Self::UInt8),
             "UInt16" => Ok(Self::UInt16),
@@ -127,7 +127,7 @@ impl DataTypeNode {
             str if str.starts_with("Variant") => parse_variant(str),
 
             // ...
-            str => Err(ParserError::TypeParsingError(format!(
+            str => Err(TypesError::TypeParsingError(format!(
                 "Unknown data type: {}",
                 str
             ))),
@@ -250,7 +250,7 @@ pub enum DateTimePrecision {
 }
 
 impl DateTimePrecision {
-    pub(crate) fn new(char: char) -> Result<DateTimePrecision, ParserError> {
+    pub(crate) fn new(char: char) -> Result<DateTimePrecision, TypesError> {
         match char {
             '0' => Ok(DateTimePrecision::Precision0),
             '1' => Ok(DateTimePrecision::Precision1),
@@ -262,7 +262,7 @@ impl DateTimePrecision {
             '7' => Ok(DateTimePrecision::Precision7),
             '8' => Ok(DateTimePrecision::Precision8),
             '9' => Ok(DateTimePrecision::Precision9),
-            _ => Err(ParserError::TypeParsingError(format!(
+            _ => Err(TypesError::TypeParsingError(format!(
                 "Invalid DateTime64 precision, expected to be within [0, 9] interval, got {}",
                 char
             ))),
@@ -290,7 +290,7 @@ impl Display for DecimalType {
 }
 
 impl DecimalType {
-    pub(crate) fn new(precision: u8) -> Result<Self, ParserError> {
+    pub(crate) fn new(precision: u8) -> Result<Self, TypesError> {
         if precision <= 9 {
             Ok(DecimalType::Decimal32)
         } else if precision <= 18 {
@@ -300,7 +300,7 @@ impl DecimalType {
         } else if precision <= 76 {
             Ok(DecimalType::Decimal256)
         } else {
-            return Err(ParserError::TypeParsingError(format!(
+            return Err(TypesError::TypeParsingError(format!(
                 "Invalid Decimal precision: {}",
                 precision
             )));
@@ -333,49 +333,49 @@ fn data_types_to_string(elements: &[DataTypeNode]) -> String {
         .join(", ")
 }
 
-fn parse_fixed_string(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_fixed_string(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 14 {
         let size_str = &input[12..input.len() - 1];
         let size = size_str.parse::<usize>().map_err(|err| {
-            ParserError::TypeParsingError(format!(
+            TypesError::TypeParsingError(format!(
                 "Invalid FixedString size, expected a valid number. Underlying error: {}, input: {}, size_str: {}",
                 err, input, size_str
             ))
         })?;
         if size == 0 {
-            return Err(ParserError::TypeParsingError(format!(
+            return Err(TypesError::TypeParsingError(format!(
                 "Invalid FixedString size, expected a positive number, got zero. Input: {}",
                 input
             )));
         }
         return Ok(DataTypeNode::FixedString(size));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid FixedString format, expected FixedString(N), got {}",
         input
     )))
 }
 
-fn parse_array(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_array(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 8 {
         let inner_type_str = &input[6..input.len() - 1];
         let inner_type = DataTypeNode::new(inner_type_str)?;
         return Ok(DataTypeNode::Array(Box::new(inner_type)));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid Array format, expected Array(InnerType), got {}",
         input
     )))
 }
 
-fn parse_enum(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_enum(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 9 {
         let (enum_type, prefix_len) = if input.starts_with("Enum8") {
             (EnumType::Enum8, 6)
         } else if input.starts_with("Enum16") {
             (EnumType::Enum16, 7)
         } else {
-            return Err(ParserError::TypeParsingError(format!(
+            return Err(TypesError::TypeParsingError(format!(
                 "Invalid Enum type, expected Enum8 or Enum16, got {}",
                 input
             )));
@@ -384,13 +384,13 @@ fn parse_enum(input: &str) -> Result<DataTypeNode, ParserError> {
         let enum_values_map = parse_enum_values_map(enum_values_map_str)?;
         return Ok(DataTypeNode::Enum(enum_type, enum_values_map));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid Enum format, expected Enum8('name' = value), got {}",
         input
     )))
 }
 
-fn parse_datetime(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_datetime(input: &str) -> Result<DataTypeNode, TypesError> {
     if input == "DateTime" {
         return Ok(DataTypeNode::DateTime(None));
     }
@@ -398,17 +398,17 @@ fn parse_datetime(input: &str) -> Result<DataTypeNode, ParserError> {
         let timezone = (&input[10..input.len() - 2]).to_string();
         return Ok(DataTypeNode::DateTime(Some(timezone)));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid DateTime format, expected DateTime('timezone'), got {}",
         input
     )))
 }
 
-fn parse_decimal(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_decimal(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 10 {
         let precision_and_scale_str = (&input[8..input.len() - 1]).split(", ").collect::<Vec<_>>();
         if precision_and_scale_str.len() != 2 {
-            return Err(ParserError::TypeParsingError(format!(
+            return Err(TypesError::TypeParsingError(format!(
                 "Invalid Decimal format, expected Decimal(P, S), got {}",
                 input
             )));
@@ -418,7 +418,7 @@ fn parse_decimal(input: &str) -> Result<DataTypeNode, ParserError> {
             .map(|s| s.parse::<u8>())
             .collect::<Result<Vec<_>, _>>()
             .map_err(|err| {
-                ParserError::TypeParsingError(format!(
+                TypesError::TypeParsingError(format!(
                     "Invalid Decimal format, expected Decimal(P, S), got {}. Underlying error: {}",
                     input, err
                 ))
@@ -426,13 +426,13 @@ fn parse_decimal(input: &str) -> Result<DataTypeNode, ParserError> {
         let precision = parsed[0];
         let scale = parsed[1];
         if scale < 1 || precision < 1 {
-            return Err(ParserError::TypeParsingError(format!(
+            return Err(TypesError::TypeParsingError(format!(
                 "Invalid Decimal format, expected Decimal(P, S) with P > 0 and S > 0, got {}",
                 input
             )));
         }
         if precision < scale {
-            return Err(ParserError::TypeParsingError(format!(
+            return Err(TypesError::TypeParsingError(format!(
                 "Invalid Decimal format, expected Decimal(P, S) with P >= S, got {}",
                 input
             )));
@@ -440,16 +440,16 @@ fn parse_decimal(input: &str) -> Result<DataTypeNode, ParserError> {
         let size = DecimalType::new(parsed[0])?;
         return Ok(DataTypeNode::Decimal(precision, scale, size));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid Decimal format, expected Decimal(P), got {}",
         input
     )))
 }
 
-fn parse_datetime64(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_datetime64(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 13 {
         let mut chars = (&input[11..input.len() - 1]).chars();
-        let precision_char = chars.next().ok_or(ParserError::TypeParsingError(format!(
+        let precision_char = chars.next().ok_or(TypesError::TypeParsingError(format!(
             "Invalid DateTime64 precision, expected a positive number. Input: {}",
             input
         )))?;
@@ -460,42 +460,42 @@ fn parse_datetime64(input: &str) -> Result<DataTypeNode, ParserError> {
         };
         return Ok(DataTypeNode::DateTime64(precision, maybe_tz));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid DateTime format, expected DateTime('timezone'), got {}",
         input
     )))
 }
 
-fn parse_low_cardinality(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_low_cardinality(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 16 {
         let inner_type_str = &input[15..input.len() - 1];
         let inner_type = DataTypeNode::new(inner_type_str)?;
         return Ok(DataTypeNode::LowCardinality(Box::new(inner_type)));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid LowCardinality format, expected LowCardinality(InnerType), got {}",
         input
     )))
 }
 
-fn parse_nullable(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_nullable(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 10 {
         let inner_type_str = &input[9..input.len() - 1];
         let inner_type = DataTypeNode::new(inner_type_str)?;
         return Ok(DataTypeNode::Nullable(Box::new(inner_type)));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid Nullable format, expected Nullable(InnerType), got {}",
         input
     )))
 }
 
-fn parse_map(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_map(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 5 {
         let inner_types_str = &input[4..input.len() - 1];
         let inner_types = parse_inner_types(inner_types_str)?;
         if inner_types.len() != 2 {
-            return Err(ParserError::TypeParsingError(format!(
+            return Err(TypesError::TypeParsingError(format!(
                 "Expected two inner elements in a Map from input {}",
                 input
             )));
@@ -505,37 +505,37 @@ fn parse_map(input: &str) -> Result<DataTypeNode, ParserError> {
             Box::new(inner_types[1].clone()),
         ));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid Map format, expected Map(KeyType, ValueType), got {}",
         input
     )))
 }
 
-fn parse_tuple(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_tuple(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() > 7 {
         let inner_types_str = &input[6..input.len() - 1];
         let inner_types = parse_inner_types(inner_types_str)?;
         if inner_types.is_empty() {
-            return Err(ParserError::TypeParsingError(format!(
+            return Err(TypesError::TypeParsingError(format!(
                 "Expected at least one inner element in a Tuple from input {}",
                 input
             )));
         }
         return Ok(DataTypeNode::Tuple(inner_types));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid Tuple format, expected Tuple(Type1, Type2, ...), got {}",
         input
     )))
 }
 
-fn parse_variant(input: &str) -> Result<DataTypeNode, ParserError> {
+fn parse_variant(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 9 {
         let inner_types_str = &input[8..input.len() - 1];
         let inner_types = parse_inner_types(inner_types_str)?;
         return Ok(DataTypeNode::Variant(inner_types));
     }
-    Err(ParserError::TypeParsingError(format!(
+    Err(TypesError::TypeParsingError(format!(
         "Invalid Variant format, expected Variant(Type1, Type2, ...), got {}",
         input
     )))
@@ -547,7 +547,7 @@ fn parse_variant(input: &str) -> Result<DataTypeNode, ParserError> {
 ///  let input1 = "Tuple(Enum8('f\'()' = 1))`";  // the result is  `f\'()`
 ///  let input2 = "Tuple(Enum8('(' = 1))";       // the result is  `(`
 /// ```
-fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, ParserError> {
+fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, TypesError> {
     let mut inner_types: Vec<DataTypeNode> = Vec::new();
 
     let input_bytes = input.as_bytes();
@@ -576,7 +576,7 @@ fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, ParserError> {
                         let data_type_str =
                             String::from_utf8(input_bytes[last_element_index..i].to_vec())
                                 .map_err(|_| {
-                                    ParserError::TypeParsingError(format!(
+                                    TypesError::TypeParsingError(format!(
                                 "Invalid UTF-8 sequence in input for the inner data type: {}",
                                 &input[last_element_index..]
                             ))
@@ -602,7 +602,7 @@ fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, ParserError> {
     if open_parens == 0 && last_element_index < input_bytes.len() {
         let data_type_str =
             String::from_utf8(input_bytes[last_element_index..].to_vec()).map_err(|_| {
-                ParserError::TypeParsingError(format!(
+                TypesError::TypeParsingError(format!(
                     "Invalid UTF-8 sequence in input for the inner data type: {}",
                     &input[last_element_index..]
                 ))
@@ -615,24 +615,24 @@ fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, ParserError> {
 }
 
 #[inline]
-fn parse_enum_index(input_bytes: &[u8], input: &str) -> Result<i16, ParserError> {
+fn parse_enum_index(input_bytes: &[u8], input: &str) -> Result<i16, TypesError> {
     String::from_utf8(input_bytes.to_vec())
         .map_err(|_| {
-            ParserError::TypeParsingError(format!(
+            TypesError::TypeParsingError(format!(
                 "Invalid UTF-8 sequence in input for the enum index: {}",
                 &input
             ))
         })?
         .parse::<i16>()
         .map_err(|_| {
-            ParserError::TypeParsingError(format!(
+            TypesError::TypeParsingError(format!(
                 "Invalid Enum index, expected a valid number. Input: {}",
                 input
             ))
         })
 }
 
-fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, ParserError> {
+fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError> {
     let mut names: Vec<String> = Vec::new();
     let mut indices: Vec<i16> = Vec::new();
     let mut parsing_name = true; // false when parsing the index
@@ -652,7 +652,7 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, ParserErro
                     // non-escaped closing tick - push the name
                     let name_bytes = &input_bytes[start_index..i];
                     let name = String::from_utf8(name_bytes.to_vec()).map_err(|_| {
-                        ParserError::TypeParsingError(format!(
+                        TypesError::TypeParsingError(format!(
                             "Invalid UTF-8 sequence in input for the enum name: {}",
                             &input[start_index..i]
                         ))
@@ -661,7 +661,7 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, ParserErro
 
                     // Skip ` = ` and the first digit, as it will always have at least one
                     if i + 4 >= input_bytes.len() {
-                        return Err(ParserError::TypeParsingError(format!(
+                        return Err(TypesError::TypeParsingError(format!(
                             "Invalid Enum format - expected ` = ` after name, input: {}",
                             input,
                         )));
@@ -695,7 +695,7 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, ParserErro
     indices.push(index);
 
     if names.len() != indices.len() {
-        return Err(ParserError::TypeParsingError(format!(
+        return Err(TypesError::TypeParsingError(format!(
             "Invalid Enum format - expected the same number of names and indices, got names: {}, indices: {}",
             names.join(", "),
             indices.iter().map(|index| index.to_string()).collect::<Vec<String>>().join(", "),

@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use bytes::Bytes;
+use clickhouse_types::{put_rbwnat_columns_header, Column};
 use futures::channel::oneshot;
 use hyper::{Request, Response, StatusCode};
 use sealed::sealed;
@@ -40,11 +41,12 @@ pub fn failure(status: StatusCode) -> impl Handler {
 // === provide ===
 
 #[track_caller]
-pub fn provide<T>(rows: impl IntoIterator<Item = T>) -> impl Handler
+pub fn provide<'a, T>(schema: &[Column], rows: impl IntoIterator<Item = T>) -> impl Handler
 where
     T: Serialize,
 {
     let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
+    put_rbwnat_columns_header(schema, &mut buffer).expect("failed to write columns header");
     for row in rows {
         rowbinary::serialize_into(&mut buffer, &row).expect("failed to serialize");
     }

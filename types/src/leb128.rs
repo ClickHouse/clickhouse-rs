@@ -1,8 +1,9 @@
-use crate::error::ParserError;
-use crate::error::ParserError::NotEnoughData;
-use bytes::Buf;
+use crate::error::TypesError;
+use crate::error::TypesError::NotEnoughData;
+use bytes::{Buf, BufMut};
 
-pub fn decode_leb128(buffer: &mut &[u8]) -> Result<u64, ParserError> {
+#[inline]
+pub fn read_leb128(buffer: &mut &[u8]) -> Result<u64, TypesError> {
     let mut value = 0u64;
     let mut shift = 0;
     loop {
@@ -24,9 +25,25 @@ pub fn decode_leb128(buffer: &mut &[u8]) -> Result<u64, ParserError> {
     Ok(value)
 }
 
+#[inline]
+pub fn put_leb128(mut buffer: impl BufMut, mut value: u64) {
+    while {
+        let mut byte = value as u8 & 0x7f;
+        value >>= 7;
+
+        if value != 0 {
+            byte |= 0x80;
+        }
+
+        buffer.put_u8(byte);
+
+        value != 0
+    } {}
+}
+
 mod tests {
     #[test]
-    fn test_decode_leb128() {
+    fn test_read_leb128() {
         let test_cases = vec![
             // (input bytes, expected value)
             (vec![0], 0),
@@ -39,48 +56,39 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            let result = super::decode_leb128(&mut input.as_slice()).unwrap();
+            let result = super::read_leb128(&mut input.as_slice()).unwrap();
             assert_eq!(result, expected, "Failed decoding {:?}", input);
         }
     }
 
     #[test]
-    fn test_encode_decode_leb128() {
-        fn encode_leb128<'a>(value: u64) -> Vec<u8> {
-            let mut result = Vec::new();
-            let mut val = value;
-            loop {
-                let mut byte = (val & 0x7f) as u8;
-                val >>= 7;
-                if val != 0 {
-                    byte |= 0x80;
-                }
-                result.push(byte);
-                if val == 0 {
-                    break;
-                }
-            }
-            result
-        }
-
-        let test_values = vec![
-            0u64,
-            1,
-            127,
-            128,
-            255,
-            624773,
-            624485,
-            300_000,
-            10_000_000,
-            u32::MAX as u64,
-            (u32::MAX as u64) + 1,
+    fn test_put_and_read_leb128() {
+        let test_cases: Vec<(u64, Vec<u8>)> = vec![
+            // (value, expected encoding)
+            (0u64, vec![0x00]),
+            (1, vec![0x01]),
+            (127, vec![0x7F]),
+            (128, vec![0x80, 0x01]),
+            (255, vec![0xFF, 0x01]),
+            (300_000, vec![0xE0, 0xA7, 0x12]),
+            (624_773, vec![0x85, 0x91, 0x26]),
+            (624_485, vec![0xE5, 0x8E, 0x26]),
+            (10_000_000, vec![0x80, 0xAD, 0xE2, 0x04]),
+            (u32::MAX as u64, vec![0xFF, 0xFF, 0xFF, 0xFF, 0x0F]),
         ];
 
-        for value in test_values {
-            let encoded = encode_leb128(value);
-            let decoded = super::decode_leb128(&mut encoded.as_slice()).unwrap();
+        for (value, expected_encoding) in test_cases {
+            // Test encoding
+            let mut encoded = Vec::new();
+            super::put_leb128(&mut encoded, value);
+            assert_eq!(
+                encoded, expected_encoding,
+                "Incorrect encoding for {}",
+                value
+            );
 
+            // Test round-trip
+            let decoded = super::read_leb128(&mut encoded.as_slice()).unwrap();
             assert_eq!(
                 decoded, value,
                 "Failed round trip for {}: encoded as {:?}, decoded as {}",

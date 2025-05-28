@@ -1,6 +1,6 @@
 // FIXME: better errors
 #[derive(Debug, thiserror::Error)]
-pub enum ParserError {
+pub enum TypesError {
     #[error("Not enough data: {0}")]
     NotEnoughData(String),
 
@@ -9,4 +9,7 @@ pub enum ParserError {
 
     #[error("Type parsing error: {0}")]
     TypeParsingError(String),
+
+    #[error("Unexpected empty list of columns")]
+    EmptyColumns,
 }

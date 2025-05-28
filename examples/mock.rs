@@ -1,4 +1,6 @@
 use clickhouse::{error::Result, test, Client, Row};
+use clickhouse_types::Column;
+use clickhouse_types::DataTypeNode::UInt32;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,7 +57,10 @@ async fn main() {
     assert!(recording.query().await.contains("CREATE TABLE"));
 
     // How to test SELECT.
-    mock.add(test::handlers::provide(list.clone()));
+    mock.add(test::handlers::provide(
+        &vec![Column::new("no".to_string(), UInt32)],
+        list.clone(),
+    ));
     let rows = make_select(&client).await.unwrap();
     assert_eq!(rows, list);
 

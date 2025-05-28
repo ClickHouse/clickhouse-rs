@@ -7,6 +7,7 @@ use crate::{
     rowbinary,
 };
 use clickhouse_types::data_types::Column;
+use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
 use serde::Deserialize;
 use std::marker::PhantomData;
@@ -37,12 +38,39 @@ impl<T> RowCursor<T> {
 
     #[cold]
     #[inline(never)]
-    fn read_columns(&mut self, mut slice: &[u8]) -> Result<()> {
-        let columns = parse_rbwnat_columns_header(&mut slice)?;
-        debug_assert!(!columns.is_empty());
-        self.bytes.set_remaining(slice.len());
-        self.columns = columns;
-        Ok(())
+    async fn read_columns(&mut self) -> Result<()> {
+        loop {
+            if self.bytes.remaining() > 0 {
+                let mut slice = self.bytes.slice();
+                match parse_rbwnat_columns_header(&mut slice) {
+                    Ok(columns) if !columns.is_empty() => {
+                        self.bytes.set_remaining(slice.len());
+                        self.columns = columns;
+                        return Ok(());
+                    }
+                    Ok(_) => {
+                        // or panic instead?
+                        return Err(Error::BadResponse(
+                            "Expected at least one column in the header".to_string(),
+                        ));
+                    }
+                    Err(TypesError::NotEnoughData(_)) => {}
+                    Err(err) => {
+                        return Err(Error::ColumnsHeaderParserError(err.into()));
+                    }
+                }
+            }
+            match self.raw.next().await? {
+                Some(chunk) => self.bytes.extend(chunk),
+                None if self.columns.is_empty() => {
+                    return Err(Error::BadResponse(
+                        "Could not read columns header".to_string(),
+                    ));
+                }
+                // if the result set is empty, there is only the columns header
+                None => return Ok(()),
+            }
+        }
     }
 
     #[inline(always)]
@@ -71,29 +99,28 @@ impl<T> RowCursor<T> {
     {
         loop {
             if self.bytes.remaining() > 0 {
-                let mut slice = super::workaround_51132(self.bytes.slice());
                 if self.columns.is_empty() {
-                    self.read_columns(slice)?;
-                } else {
-                    let (result, not_enough_data) = match self.rows_to_validate {
-                        0 => rowbinary::deserialize_from_and_validate::<T>(&mut slice, &[]),
-                        u64::MAX => {
-                            rowbinary::deserialize_from_and_validate::<T>(&mut slice, &self.columns)
-                        }
-                        _ => {
-                            // extracting to a separate method boosts performance for Each ~10%
-                            self.deserialize_with_validation(&mut slice)
-                        }
-                    };
-                    if !not_enough_data {
-                        return match result {
-                            Ok(value) => {
-                                self.bytes.set_remaining(slice.len());
-                                Ok(Some(value))
-                            }
-                            Err(err) => Err(err),
-                        };
+                    self.read_columns().await?;
+                }
+                let mut slice = super::workaround_51132(self.bytes.slice());
+                let (result, not_enough_data) = match self.rows_to_validate {
+                    0 => rowbinary::deserialize_from_and_validate::<T>(&mut slice, &[]),
+                    u64::MAX => {
+                        rowbinary::deserialize_from_and_validate::<T>(&mut slice, &self.columns)
                     }
+                    _ => {
+                        // extracting to a separate method boosts performance for Each ~10%
+                        self.deserialize_with_validation(&mut slice)
+                    }
+                };
+                if !not_enough_data {
+                    return match result {
+                        Ok(value) => {
+                            self.bytes.set_remaining(slice.len());
+                            Ok(Some(value))
+                        }
+                        Err(err) => Err(err),
+                    };
                 }
             }
 
