@@ -12,26 +12,22 @@ use serde::{
 };
 use std::{convert::TryFrom, str};
 
-/// Deserializes a value from `input` with a row encoded in `RowBinary`.
+/// Deserializes a value from `input` with a row encoded in `RowBinary(WithNamesAndTypes)`.
 ///
 /// It accepts _a reference to_ a byte slice because it somehow leads to a more
 /// performant generated code than `(&[u8]) -> Result<(T, usize)>` and even
 /// `(&[u8], &mut Option<T>) -> Result<usize>`.
-pub(crate) fn deserialize_from<'data, T: Deserialize<'data>>(input: &mut &'data [u8]) -> Result<T> {
-    // println!("deserialize_from call");
-
-    let mut deserializer = RowBinaryDeserializer::new(input, ());
-    T::deserialize(&mut deserializer)
-}
-
-/// Similar to [`deserialize_from`], but expects a slice of [`Column`] objects
-/// parsed from the beginning of `RowBinaryWithNamesAndTypes` data stream.
+///
+/// Additionally, having a single function speeds up [`crate::cursors::RowCursor::next`] x2.
+/// A hint about the [`Error::NotEnoughData`] gives another 20% performance boost.
+///
+/// It expects a slice of [`Column`] objects parsed
+/// from the beginning of `RowBinaryWithNamesAndTypes` data stream.
 /// After the header, the rows format is the same as `RowBinary`.
-pub(crate) fn deserialize_from_and_validate<'data, 'cursor, T: Deserialize<'data>>(
+pub(crate) fn deserialize_from<'data, 'cursor, T: Deserialize<'data>>(
     input: &mut &'data [u8],
     columns: &'cursor [Column],
 ) -> (Result<T>, bool) {
-    // println!("deserialize_from_and_validate call");
     let result = if columns.is_empty() {
         let mut deserializer = RowBinaryDeserializer::new(input, ());
         T::deserialize(&mut deserializer)
@@ -48,7 +44,7 @@ pub(crate) fn deserialize_from_and_validate<'data, 'cursor, T: Deserialize<'data
     }
 }
 
-/// A deserializer for the RowBinary(WithNamesAndTypes) format.
+/// A deserializer for the `RowBinary(WithNamesAndTypes)` format.
 ///
 /// See https://clickhouse.com/docs/en/interfaces/formats#rowbinary for details.
 struct RowBinaryDeserializer<'cursor, 'data, Validator = ()>

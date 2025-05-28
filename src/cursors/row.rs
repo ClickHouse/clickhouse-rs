@@ -49,7 +49,7 @@ impl<T> RowCursor<T> {
                         return Ok(());
                     }
                     Ok(_) => {
-                        // or panic instead?
+                        // TODO: or panic instead?
                         return Err(Error::BadResponse(
                             "Expected at least one column in the header".to_string(),
                         ));
@@ -94,15 +94,10 @@ impl<T> RowCursor<T> {
                 }
                 let mut slice = super::workaround_51132(self.bytes.slice());
                 let (result, not_enough_data) = match self.rows_to_validate {
-                    0 => rowbinary::deserialize_from_and_validate::<T>(&mut slice, &[]),
-                    u64::MAX => {
-                        rowbinary::deserialize_from_and_validate::<T>(&mut slice, &self.columns)
-                    }
+                    0 => rowbinary::deserialize_from::<T>(&mut slice, &[]),
+                    u64::MAX => rowbinary::deserialize_from::<T>(&mut slice, &self.columns),
                     _ => {
-                        let result = rowbinary::deserialize_from_and_validate::<T>(
-                            &mut slice,
-                            &self.columns,
-                        );
+                        let result = rowbinary::deserialize_from::<T>(&mut slice, &self.columns);
                         self.rows_to_validate -= 1;
                         result
                     }
