@@ -78,5 +78,7 @@ async fn do_bench(compression: Compression, validation_mode: ValidationMode) -> 
 async fn main() {
     println!("compress  validation  elapsed  throughput  received");
     bench("none", Compression::None, ValidationMode::First(1)).await;
+    bench("lz4", Compression::Lz4, ValidationMode::First(1)).await;
     bench("none", Compression::None, ValidationMode::Each).await;
+    bench("lz4", Compression::Lz4, ValidationMode::Each).await;
 }
