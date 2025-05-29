@@ -5,7 +5,7 @@
 #[macro_use]
 extern crate static_assertions;
 
-use self::{error::Result, http_client::HttpClient};
+use self::{error::Result, http_client::HttpClient, validation_mode::ValidationMode};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub use self::{compression::Compression, row::Row};
@@ -20,6 +20,7 @@ pub mod serde;
 pub mod sql;
 #[cfg(feature = "test-util")]
 pub mod test;
+pub mod validation_mode;
 #[cfg(feature = "watch")]
 pub mod watch;
 
@@ -47,6 +48,7 @@ pub struct Client {
     options: HashMap<String, String>,
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
+    validation_mode: ValidationMode,
 }
 
 #[derive(Clone)]
@@ -101,6 +103,7 @@ impl Client {
             options: HashMap::new(),
             headers: HashMap::new(),
             products_info: Vec::default(),
+            validation_mode: ValidationMode::default(),
         }
     }
 
@@ -294,6 +297,15 @@ impl Client {
         self
     }
 
+    /// Specifies the struct validation mode that will be used when calling
+    /// [`query::Query::fetch`], [`query::Query::fetch_one`], [`query::Query::fetch_all`],
+    /// and [`query::Query::fetch_optional`] methods.
+    /// See [`ValidationMode`] for more details.
+    pub fn with_validation_mode(mut self, mode: ValidationMode) -> Self {
+        self.validation_mode = mode;
+        self
+    }
+
     /// Starts a new INSERT statement.
     ///
     /// # Panics
@@ -341,6 +353,7 @@ pub mod _priv {
 
 #[cfg(test)]
 mod client_tests {
+    use crate::validation_mode::ValidationMode;
     use crate::{Authentication, Client};
 
     #[test]
@@ -457,5 +470,15 @@ mod client_tests {
         let _ = Client::default()
             .with_access_token("my_jwt")
             .with_password("secret");
+    }
+
+    #[test]
+    fn it_sets_validation_mode() {
+        let client = Client::default();
+        assert_eq!(client.validation_mode, ValidationMode::First(1));
+        let client = client.with_validation_mode(ValidationMode::Each);
+        assert_eq!(client.validation_mode, ValidationMode::Each);
+        let client = client.with_validation_mode(ValidationMode::First(10));
+        assert_eq!(client.validation_mode, ValidationMode::First(10));
     }
 }

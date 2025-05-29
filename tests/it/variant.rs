@@ -3,13 +3,13 @@
 use serde::{Deserialize, Serialize};
 use time::Month::January;
 
+use clickhouse::validation_mode::ValidationMode::Each;
 use clickhouse::Row;
-
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types/variant
 
 #[tokio::test]
 async fn variant_data_type() {
-    let client = prepare_database!();
+    let client = prepare_database!().with_validation_mode(Each);
 
     // NB: Inner Variant types are _always_ sorted alphabetically,
     // and should be defined in _exactly_ the same order in the enum.
@@ -30,10 +30,10 @@ async fn variant_data_type() {
         Int8(i8),
         String(String),
         UInt128(u128),
-        UInt16(i16),
+        UInt16(u16),
         UInt32(u32),
         UInt64(u64),
-        UInt8(i8),
+        UInt8(u8),
     }
 
     #[derive(Debug, PartialEq, Row, Serialize, Deserialize)]
@@ -42,14 +42,14 @@ async fn variant_data_type() {
     }
 
     // No matter the order of the definition on the Variant types, it will always be sorted as follows:
-    // Variant(Array(UInt16), Bool, FixedString(6), Float32, Float64, Int128, Int16, Int32, Int64, Int8, String, UInt128, UInt16, UInt32, UInt64, UInt8)
+    // Variant(Array(Int16), Bool, FixedString(6), Float32, Float64, Int128, Int16, Int32, Int64, Int8, String, UInt128, UInt16, UInt32, UInt64, UInt8)
     client
         .query(
             "
             CREATE OR REPLACE TABLE test_var
             (
                 `var` Variant(
-                    Array(UInt16),
+                    Array(Int16),
                     Bool,
                     Date,
                     FixedString(6),

@@ -1,25 +1,6 @@
 use crate::{create_simple_table, fetch_rows, flush_query_log, SimpleRow};
-use clickhouse::{sql::Identifier, Client, Row};
+use clickhouse::{sql::Identifier, Row};
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-struct RenameRow {
-    #[serde(rename = "fix_id")]
-    pub(crate) fix_id: i64,
-    #[serde(rename = "extComplexId")]
-    pub(crate) complex_id: String,
-    pub(crate) ext_float: f64,
-}
-
-async fn create_rename_table(client: &Client, table_name: &str) {
-    client
-        .query("CREATE TABLE ?(fixId UInt64, extComplexId String, extFloat Float64) ENGINE = MergeTree ORDER BY fixId")
-        .bind(Identifier(table_name))
-        .execute()
-        .await
-        .unwrap();
-}
 
 #[tokio::test]
 async fn keeps_client_options() {
@@ -144,11 +125,36 @@ async fn empty_insert() {
 
 #[tokio::test]
 async fn rename_insert() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    struct RenameRow {
+        #[serde(rename = "fix_id")]
+        pub(crate) fix_id: u64,
+        #[serde(rename = "extComplexId")]
+        pub(crate) complex_id: String,
+        pub(crate) ext_float: f64,
+    }
+
     let table_name = "insert_rename";
     let query_id = uuid::Uuid::new_v4().to_string();
 
     let client = prepare_database!();
-    create_rename_table(&client, table_name).await;
+    client
+        .query(
+            "
+            CREATE TABLE ?(
+              fixId UInt64,
+              extComplexId String,
+              extFloat Float64
+            )
+            ENGINE = MergeTree
+            ORDER BY fixId
+            ",
+        )
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
 
     let row = RenameRow {
         fix_id: 42,
