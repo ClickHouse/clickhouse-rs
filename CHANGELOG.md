@@ -9,12 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - ReleaseDate
 ### Added
 - client: added `Client::with_access_token` to support JWT authentication ClickHouse Cloud feature ([#215]).
+- Identifier: added `Copy` and `Clone` derive ([#224]).
 
 ### Fixed
 - query/cursor: detect more deferred errors ([#220]).
+- query/bind: fixed `i128`/`u128` SQL serialization ([#209]).
 
+[#209]: https://github.com/ClickHouse/clickhouse-rs/pull/209
 [#215]: https://github.com/ClickHouse/clickhouse-rs/pull/215
 [#220]: https://github.com/ClickHouse/clickhouse-rs/pull/220
+[#224]: https://github.com/ClickHouse/clickhouse-rs/pull/224
 
 ## [0.13.2] - 2025-03-12
 ### Added
