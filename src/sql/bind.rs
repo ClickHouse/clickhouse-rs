@@ -21,6 +21,7 @@ impl<S: Serialize> Bind for S {
 
 /// Bound the provided string as an identifier.
 /// It can be used for table names, for instance.
+#[derive(Copy, Clone)]
 pub struct Identifier<'a>(pub &'a str);
 
 #[sealed]
