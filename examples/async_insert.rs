@@ -2,11 +2,10 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client, Row};
+use clickhouse::{error::Result, sql::Identifier, Client, Row};
 
-// This example demonstrates how to use asynchronous inserts, avoiding client side batching of the incoming data.
-// Suitable for ClickHouse Cloud, too. See https://clickhouse.com/docs/en/optimize/asynchronous-inserts
+// This example demonstrates how to use asynchronous inserts, avoiding client
+// side batching of the incoming data. Suitable for ClickHouse Cloud, too. See https://clickhouse.com/docs/en/optimize/asynchronous-inserts
 
 #[derive(Debug, Serialize, Deserialize, Row)]
 struct Event {
@@ -60,9 +59,10 @@ async fn main() -> Result<()> {
             println!("{events:?}");
             break;
         }
-        // If you change the `wait_for_async_insert` setting to 1, this line will never be printed;
-        // however, without waiting, you will see it in the console output several times,
-        // as the data will remain in the server buffer for a bit before the flush happens
+        // If you change the `wait_for_async_insert` setting to 1, this line will never
+        // be printed; however, without waiting, you will see it in the console
+        // output several times, as the data will remain in the server buffer
+        // for a bit before the flush happens
         println!("Waiting for async insert flush...");
         tokio::time::sleep(Duration::from_millis(10)).await
     }

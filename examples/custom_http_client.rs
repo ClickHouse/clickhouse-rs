@@ -1,8 +1,9 @@
 use std::time::Duration;
 
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::client::legacy::Client as HyperClient;
-use hyper_util::rt::TokioExecutor;
+use hyper_util::{
+    client::legacy::{connect::HttpConnector, Client as HyperClient},
+    rt::TokioExecutor,
+};
 
 use clickhouse::{error::Result, Client};
 

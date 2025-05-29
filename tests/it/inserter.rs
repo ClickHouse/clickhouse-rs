@@ -240,7 +240,8 @@ async fn keeps_client_options() {
     assert_eq!(rows, vec!(row))
 }
 
-/// Similar to [`crate::insert::overrides_client_options`] with minor differences.
+/// Similar to [`crate::insert::overrides_client_options`] with minor
+/// differences.
 #[tokio::test]
 async fn overrides_client_options() {
     let table_name = "inserter_overrides_client_options";

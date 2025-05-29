@@ -41,8 +41,10 @@ async fn variant_data_type() {
         var: MyRowVariant,
     }
 
-    // No matter the order of the definition on the Variant types, it will always be sorted as follows:
-    // Variant(Array(UInt16), Bool, FixedString(6), Float32, Float64, Int128, Int16, Int32, Int64, Int8, String, UInt128, UInt16, UInt32, UInt64, UInt8)
+    // No matter the order of the definition on the Variant types, it will always be
+    // sorted as follows: Variant(Array(UInt16), Bool, FixedString(6), Float32,
+    // Float64, Int128, Int16, Int32, Int64, Int8, String, UInt128, UInt16, UInt32,
+    // UInt64, UInt8)
     client
         .query(
             "

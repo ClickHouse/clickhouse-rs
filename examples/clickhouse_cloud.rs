@@ -1,10 +1,10 @@
-use clickhouse::sql::Identifier;
-use clickhouse::Client;
+use clickhouse::{sql::Identifier, Client};
 use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 use std::env;
 
-// This example requires three environment variables with your instance credentials to be set
+// This example requires three environment variables with your instance
+// credentials to be set
 //
 // - CLICKHOUSE_URL (e.g., https://myservice.clickhouse.cloud:8443)
 // - CLICKHOUSE_USER
@@ -21,8 +21,8 @@ async fn main() -> clickhouse::error::Result<()> {
         .with_user(read_env_var("CLICKHOUSE_USER"))
         .with_password(read_env_var("CLICKHOUSE_PASSWORD"));
 
-    // `wait_end_of_query` is required in this case, as we want these DDLs to be executed
-    // on the entire Cloud cluster before we receive the response.
+    // `wait_end_of_query` is required in this case, as we want these DDLs to be
+    // executed on the entire Cloud cluster before we receive the response.
     // See https://clickhouse.com/docs/en/interfaces/http/#response-buffering
     client
         .query("DROP TABLE IF EXISTS ?")
@@ -31,8 +31,8 @@ async fn main() -> clickhouse::error::Result<()> {
         .execute()
         .await?;
 
-    // Note that you could just use MergeTree with CH Cloud, and omit the `ON CLUSTER` clause.
-    // The same applies to other engines as well;
+    // Note that you could just use MergeTree with CH Cloud, and omit the `ON
+    // CLUSTER` clause. The same applies to other engines as well;
     // e.g., ReplacingMergeTree will become SharedReplacingMergeTree and so on.
     // See https://clickhouse.com/docs/en/cloud/reference/shared-merge-tree#enabling-sharedmergetree
     client

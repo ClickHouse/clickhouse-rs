@@ -180,7 +180,8 @@ impl Client {
 
     /// A JWT access token to authenticate with ClickHouse.
     /// JWT token authentication is supported in ClickHouse Cloud only.
-    /// Should not be called after [`Client::with_user`] or [`Client::with_password`].
+    /// Should not be called after [`Client::with_user`] or
+    /// [`Client::with_password`].
     ///
     /// # Panics
     /// If called after [`Client::with_user`] or [`Client::with_password`].
@@ -300,6 +301,14 @@ impl Client {
     /// If `T` has unnamed fields, e.g. tuples.
     pub fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
         insert::Insert::new(self, table)
+    }
+
+    pub fn insert_with_fields_name<T: Row>(
+        &self,
+        table: &str,
+        fields_names: Vec<String>,
+    ) -> Result<insert::Insert<T>> {
+        insert::Insert::new_with_field_names(self, table, fields_names)
     }
 
     /// Creates an inserter to perform multiple INSERTs.

@@ -10,9 +10,9 @@ use tokio::{
 };
 use url::Url;
 
-use crate::headers::{with_authentication, with_request_headers};
 use crate::{
     error::{Error, Result},
+    headers::{with_authentication, with_request_headers},
     request_body::{ChunkSender, RequestBody},
     response::Response,
     row::{self, Row},
@@ -119,18 +119,27 @@ macro_rules! timeout {
 }
 
 impl<T> Insert<T> {
-    // TODO: remove Result
+    pub(crate) fn new_with_field_names(
+        client: &Client,
+        table: &str,
+        fields_names: Vec<String>,
+    ) -> Result<Self> {
+        Insert::new_inner(client, table, fields_names.join(","))
+    }
+
     pub(crate) fn new(client: &Client, table: &str) -> Result<Self>
     where
         T: Row,
     {
-        let fields = row::join_column_names::<T>()
+        let fields_names = row::join_column_names::<T>()
             .expect("the row type must be a struct or a wrapper around it");
+        Insert::new_inner(client, table, fields_names)
+    }
 
+    pub(crate) fn new_inner(client: &Client, table: &str, fields_names: String) -> Result<Self> {
         // TODO: what about escaping a table name?
         // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
-        let sql = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields);
-
+        let sql = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields_names);
         Ok(Self {
             state: InsertState::NotStarted {
                 client: Box::new(client.clone()),

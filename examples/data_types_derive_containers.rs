@@ -1,8 +1,6 @@
-use rand::distributions::Alphanumeric;
-use rand::Rng;
+use rand::{distributions::Alphanumeric, Rng};
 
-use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client};
+use clickhouse::{error::Result, sql::Identifier, Client};
 
 // This example covers derivation of container-like ClickHouse data types.
 // See also:

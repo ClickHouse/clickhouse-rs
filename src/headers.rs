@@ -1,8 +1,9 @@
 use crate::{Authentication, ProductInfo};
-use hyper::header::{AUTHORIZATION, USER_AGENT};
-use hyper::http::request::Builder;
-use std::collections::HashMap;
-use std::env::consts::OS;
+use hyper::{
+    header::{AUTHORIZATION, USER_AGENT},
+    http::request::Builder,
+};
+use std::{collections::HashMap, env::consts::OS};
 
 fn get_user_agent(products_info: &[ProductInfo]) -> String {
     // See https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates

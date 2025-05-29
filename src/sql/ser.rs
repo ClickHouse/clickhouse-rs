@@ -329,8 +329,8 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
 
     #[inline]
     fn serialize_str(self, value: &str) -> Result {
-        // ClickHouse expects strings in params to be unquoted until inside a nested type
-        // nested types go through serialize_seq which'll quote strings
+        // ClickHouse expects strings in params to be unquoted until inside a nested
+        // type nested types go through serialize_seq which'll quote strings
         Ok(escape::escape(value, self.writer)?)
     }
 

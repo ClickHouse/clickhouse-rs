@@ -140,9 +140,11 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
         value: &T,
     ) -> Result<()> {
         // TODO:
-        //  - Now this code implicitly allows using enums at the top level.
-        //    However, instead of a more descriptive panic, it ends with a "not enough data." error.
-        //  - Also, it produces an unclear message for a forgotten `serde_repr` (Enum8 and Enum16).
+        //  - Now this code implicitly allows using enums at the top level. However,
+        //    instead of a more descriptive panic, it ends with a "not enough data."
+        //    error.
+        //  - Also, it produces an unclear message for a forgotten `serde_repr` (Enum8
+        //    and Enum16).
         //  See https://github.com/ClickHouse/clickhouse-rs/pull/170#discussion_r1848549636
 
         // Max number of types in the Variant data type is 255

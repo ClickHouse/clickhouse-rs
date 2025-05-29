@@ -1,11 +1,11 @@
 use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 
-use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client};
+use clickhouse::{error::Result, sql::Identifier, Client};
 
-// Requires ClickHouse 24.10+, as the `input_format_binary_read_json_as_string` and `output_format_binary_write_json_as_string` settings were added in that version.
-// Inserting and selecting a row with a JSON column as a string.
+// Requires ClickHouse 24.10+, as the `input_format_binary_read_json_as_string`
+// and `output_format_binary_write_json_as_string` settings were added in that
+// version. Inserting and selecting a row with a JSON column as a string.
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types/newjson
 
 #[tokio::main]
@@ -13,8 +13,8 @@ async fn main() -> Result<()> {
     let table_name = "chrs_data_types_new_json";
     let client = Client::default()
         .with_url("http://localhost:8123")
-        // All these settings can instead be applied on the query or insert level with the same `with_option` method.
-        // Enable new JSON type usage
+        // All these settings can instead be applied on the query or insert level with the same
+        // `with_option` method. Enable new JSON type usage
         .with_option("allow_experimental_json_type", "1")
         // Enable inserting JSON columns as a string
         .with_option("input_format_binary_read_json_as_string", "1")

@@ -1,6 +1,7 @@
 use clickhouse::{error::Result, Client};
 
-/// Besides [`Client::query`], it works similarly with [`Client::insert`] and [`Client::inserter`].
+/// Besides [`Client::query`], it works similarly with [`Client::insert`] and
+/// [`Client::inserter`].
 #[tokio::main]
 async fn main() -> Result<()> {
     let client = Client::default()
@@ -16,7 +17,8 @@ async fn main() -> Result<()> {
         .fetch_all::<u64>()
         .await?;
 
-    // note that it prints the first 3 numbers only (because of the setting override)
+    // note that it prints the first 3 numbers only (because of the setting
+    // override)
     println!("{numbers:?}");
 
     Ok(())

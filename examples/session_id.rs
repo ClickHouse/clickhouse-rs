@@ -2,20 +2,20 @@ use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client};
+use clickhouse::{error::Result, sql::Identifier, Client};
 
 /// Besides [`Client::with_option`], which will be applied for all requests,
-/// `session_id` (and other settings) can be set separately for a particular `query`, `insert`,
-/// or when using the `inserter` feature.
+/// `session_id` (and other settings) can be set separately for a particular
+/// `query`, `insert`, or when using the `inserter` feature.
 ///
-/// This example uses temporary tables feature to demonstrate the `session_id` usage.
+/// This example uses temporary tables feature to demonstrate the `session_id`
+/// usage.
 ///
 /// # Important
-/// With clustered deployments, due to lack of "sticky sessions", you need to be connected
-/// to a _particular cluster node_ in order to properly utilize this feature, cause, for example,
-/// a round-robin load-balancer will not guarantee that the consequent requests will be processed
-/// by the same ClickHouse node.
+/// With clustered deployments, due to lack of "sticky sessions", you need to be
+/// connected to a _particular cluster node_ in order to properly utilize this
+/// feature, cause, for example, a round-robin load-balancer will not guarantee
+/// that the consequent requests will be processed by the same ClickHouse node.
 ///
 /// See also:
 /// - https://clickhouse.com/docs/en/sql-reference/statements/create/table#temporary-tables

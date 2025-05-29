@@ -1,7 +1,8 @@
 use clickhouse::{error::Result, Client};
 use uuid::Uuid;
 
-/// Besides [`Client::query`], it works similarly with [`Client::insert`] and [`Client::inserter`].
+/// Besides [`Client::query`], it works similarly with [`Client::insert`] and
+/// [`Client::inserter`].
 #[tokio::main]
 async fn main() -> Result<()> {
     let client = Client::default().with_url("http://localhost:8123");
@@ -15,8 +16,9 @@ async fn main() -> Result<()> {
         .await?;
     println!("Numbers: {numbers:?}");
 
-    // For the sake of this example, force flush the records into the system.query_log table,
-    // so we can immediately fetch the query information using the query_id
+    // For the sake of this example, force flush the records into the
+    // system.query_log table, so we can immediately fetch the query information
+    // using the query_id
     client.query("SYSTEM FLUSH LOGS").execute().await?;
 
     let logged_query = client
