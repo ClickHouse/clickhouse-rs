@@ -27,6 +27,11 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [[bench]]
+name = "select_nyc_taxi_data"
+harness = false
+required-features = ["time"]
+
+[[bench]]
 name = "select_numbers"
 harness = false
 
@@ -132,6 +137,7 @@ replace_with = { version = "0.1.7" }
 
 [dev-dependencies]
 criterion = "0.5.0"
+tracy-client = { version = "0.18.0", features = ["enable"]}
 serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "1.0.1", features = ["full", "test-util"] }
 hyper = { version = "1.1", features = ["server"] }
