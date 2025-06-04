@@ -73,6 +73,18 @@ impl StructMetadata {
             StructMetadataState::WithSeqAccess => false,
             StructMetadataState::WithMapAccess(_) => true,
             StructMetadataState::Pending => {
+                if self.columns.len() != fields.len() {
+                    panic!(
+                        "While processing struct {}: database schema has {} columns, \
+                        but the struct definition has {} fields.\
+                        \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
+                        name,
+                        self.columns.len(),
+                        fields.len(),
+                        join_panic_schema_hint(fields),
+                        join_panic_schema_hint(&self.columns),
+                    );
+                }
                 let mut mapping = Vec::with_capacity(fields.len());
                 let mut expected_index = 0;
                 let mut should_use_map = false;
@@ -203,12 +215,6 @@ impl SchemaValidator for DataTypeValidator<'_> {
         &'_ mut self,
         serde_type: SerdeType,
     ) -> Result<Option<InnerDataTypeValidator<'_, '_>>> {
-        // println!(
-        //     "[validate] Validating serde type: {} for column {}",
-        //     serde_type,
-        //     self.get_current_column()
-        //         .map_or("None".to_string(), |c| c.name.clone())
-        // );
         if self.current_column_idx == 0 && self.metadata.struct_name.is_none() {
             // this allows validating and deserializing tuples from fetch calls
             Ok(Some(InnerDataTypeValidator {

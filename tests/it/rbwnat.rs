@@ -529,7 +529,7 @@ async fn test_too_many_struct_fields() {
         c: u32,
     }
     assert_panic_on_fetch!(
-        &["Struct Data has more fields than columns in the database schema"],
+        &["2 columns", "3 fields"],
         "SELECT 42 :: UInt32 AS a, 144 :: UInt32 AS b"
     );
 }
@@ -894,6 +894,43 @@ async fn test_geo_invalid_point() {
     );
 }
 
+#[tokio::test]
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/100
+async fn test_issue_100() {
+    {
+        #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+        struct Data {
+            n: i8,
+        }
+        assert_panic_on_fetch!(
+            &["Data.n", "Nullable(Bool)", "i8"],
+            "SELECT NULL :: Nullable(Bool) AS n"
+        );
+    }
+
+    {
+        #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+        struct Data {
+            n: u8,
+        }
+        assert_panic_on_fetch!(
+            &["Data.n", "Nullable(Bool)", "u8"],
+            "SELECT NULL :: Nullable(Bool) AS n"
+        );
+    }
+
+    {
+        #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+        struct Data {
+            n: bool,
+        }
+        assert_panic_on_fetch!(
+            &["Data.n", "Nullable(Bool)", "bool"],
+            "SELECT NULL :: Nullable(Bool) AS n"
+        );
+    }
+}
+
 // TODO: unignore after insert implementation uses RBWNAT, too
 #[ignore]
 #[tokio::test]
@@ -952,6 +989,20 @@ async fn test_issue_109_1() {
 }
 
 #[tokio::test]
+async fn test_issue_112() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: bool,
+        b: bool,
+    }
+
+    assert_panic_on_fetch!(
+        &["Data.a", "Nullable(Bool)", "bool"],
+        "WITH (SELECT true) AS a, (SELECT true) AS b SELECT ?fields"
+    );
+}
+
+#[tokio::test]
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/113
 async fn test_issue_113() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
@@ -999,6 +1050,84 @@ async fn test_issue_113() {
             AVG(pos)                                                 AS c
         FROM issue_113_2
         "
+    );
+}
+
+#[tokio::test]
+#[cfg(feature = "time")]
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/114
+async fn test_issue_114() {
+    #[derive(Row, Deserialize, Debug, PartialEq)]
+    struct Data {
+        #[serde(with = "clickhouse::serde::time::date")]
+        date: time::Date,
+        arr: Vec<HashMap<String, String>>,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query(
+            "
+            SELECT
+                '2023-05-01'                           :: Date                       AS date,
+                array(map('k1', 'v1'), map('k2', 'v2')) :: Array(Map(String, String)) AS arr
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            date: time::Date::from_calendar_date(2023, time::Month::May, 1).unwrap(),
+            arr: vec![
+                HashMap::from([("k1".to_owned(), "v1".to_owned())]),
+                HashMap::from([("k2".to_owned(), "v2".to_owned())]),
+            ],
+        }
+    );
+}
+
+#[tokio::test]
+#[cfg(feature = "time")]
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/173
+async fn test_issue_173() {
+    #[derive(Debug, Serialize, Deserialize, Row)]
+    struct Data {
+        log_id: String,
+        #[serde(with = "clickhouse::serde::time::datetime")]
+        ts: time::OffsetDateTime,
+    }
+
+    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
+    let statements = vec![
+        "
+        CREATE OR REPLACE TABLE logs (
+          log_id      String,
+          timestamp   DateTime('Europe/Berlin')
+        )
+        ENGINE = MergeTree()
+        PRIMARY KEY (log_id, timestamp)
+        ",
+        "INSERT INTO logs VALUES ('56cde52f-5f34-45e0-9f08-79d6f582e913', '2024-11-05T11:52:52+01:00')",
+        "INSERT INTO logs VALUES ('0e967129-6271-44f2-967b-0c8d11a60fdc', '2024-11-05T11:59:21+01:00')",
+      ];
+
+    for stmt in statements {
+        client
+            .query(stmt)
+            .with_option("date_time_input_format", "best_effort")
+            .execute()
+            .await
+            .unwrap_or_else(|e| panic!("Failed to execute query {stmt}, cause: {}", e));
+    }
+
+    // panics as we fetch `ts` two times: one from `?fields` macro, and the second time explicitly
+    // the resulting dataset will, in fact, contain 3 columns instead of 2:
+    assert_panic_on_fetch_with_client!(
+        client,
+        &["3 columns", "2 fields"],
+        "SELECT ?fields, toUnixTimestamp(timestamp) AS ts FROM logs ORDER by ts DESC"
     );
 }
 
