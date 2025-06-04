@@ -551,7 +551,7 @@ fn parse_variant(input: &str) -> Result<DataTypeNode, TypesError> {
 /// Considers the element type parsed once we reach a comma outside of parens AND after an unescaped tick.
 /// The most complicated cases are values names in the self-defined Enum types:
 /// ```
-///  let input1 = "Tuple(Enum8('f\'()' = 1))`";  // the result is  `f\'()`
+///  let input1 = "Tuple(Enum8('f\'()' = 1))";  // the result is  `f\'()`
 ///  let input2 = "Tuple(Enum8('(' = 1))";       // the result is  `(`
 /// ```
 fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, TypesError> {

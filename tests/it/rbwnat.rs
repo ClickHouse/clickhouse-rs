@@ -4,6 +4,8 @@ use clickhouse::validation_mode::ValidationMode;
 use clickhouse_derive::Row;
 use clickhouse_types::data_types::{Column, DataTypeNode};
 use clickhouse_types::parse_rbwnat_columns_header;
+use fixnum::typenum::{U12, U4, U8};
+use fixnum::FixedPoint;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
@@ -1070,6 +1072,78 @@ async fn test_variant_wrong_definition() {
     );
 }
 
+#[tokio::test]
+async fn test_decimals() {
+    #[derive(Row, Deserialize, Debug, PartialEq)]
+    struct Data {
+        decimal32_9_4: Decimal32,
+        decimal64_18_8: Decimal64,
+        decimal128_38_12: Decimal128,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query(
+            "
+            SELECT
+                42.1234 :: Decimal32(4) AS decimal32_9_4,
+                144.56789012 :: Decimal64(8) AS decimal64_18_8,
+                -17014118346046923173168730.37158841057 :: Decimal128(12) AS decimal128_38_12
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            decimal32_9_4: Decimal32::from_str("42.1234").unwrap(),
+            decimal64_18_8: Decimal64::from_str("144.56789012").unwrap(),
+            decimal128_38_12: Decimal128::from_str("-17014118346046923173168730.37158841057")
+                .unwrap(),
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_decimal32_wrong_size() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        decimal32: i16,
+    }
+
+    assert_panic_on_fetch!(
+        &["Data.decimal32", "Decimal(9, 4)", "i16"],
+        "SELECT 42 :: Decimal32(4) AS decimal32"
+    );
+}
+
+#[tokio::test]
+async fn test_decimal64_wrong_size() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        decimal64: i32,
+    }
+
+    assert_panic_on_fetch!(
+        &["Data.decimal64", "Decimal(18, 8)", "i32"],
+        "SELECT 144 :: Decimal64(8) AS decimal64"
+    );
+}
+
+#[tokio::test]
+async fn test_decimal128_wrong_size() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        decimal128: i64,
+    }
+
+    assert_panic_on_fetch!(
+        &["Data.decimal128", "Decimal(38, 12)", "i64"],
+        "SELECT -17014118346046923173168730.37158841057 :: Decimal128(12) AS decimal128"
+    );
+}
+
 // FIXME: RBWNAT should allow for tracking the order of fields in the struct and in the database!
 //  it is possible to use HashMap to deserialize the struct instead of Tuple visitor
 #[tokio::test]
@@ -1103,3 +1177,8 @@ type Polygon = Vec<Ring>;
 type MultiPolygon = Vec<Polygon>;
 type LineString = Vec<Point>;
 type MultiLineString = Vec<LineString>;
+
+// See ClickHouse decimal sizes: https://clickhouse.com/docs/en/sql-reference/data-types/decimal
+type Decimal32 = FixedPoint<i32, U4>; // Decimal(9, 4) = Decimal32(4)
+type Decimal64 = FixedPoint<i64, U8>; // Decimal(18, 8) = Decimal64(8)
+type Decimal128 = FixedPoint<i128, U12>; // Decimal(38, 12) = Decimal128(12)
