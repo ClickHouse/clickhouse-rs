@@ -1,3 +1,4 @@
+use crate::rowbinary::StructMetadata;
 use crate::validation_mode::ValidationMode;
 use crate::{
     bytes_ext::BytesExt,
@@ -6,7 +7,6 @@ use crate::{
     response::Response,
     rowbinary,
 };
-use clickhouse_types::data_types::Column;
 use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
 use serde::Deserialize;
@@ -17,7 +17,9 @@ use std::marker::PhantomData;
 pub struct RowCursor<T> {
     raw: RawCursor,
     bytes: BytesExt,
-    columns: Vec<Column>,
+    /// [`None`] until the first call to [`RowCursor::next()`],
+    /// as [`RowCursor::new`] is not `async`, so it loads lazily.
+    struct_mapping: Option<StructMetadata>,
     rows_to_validate: u64,
     _marker: PhantomData<T>,
 }
@@ -28,7 +30,7 @@ impl<T> RowCursor<T> {
             _marker: PhantomData,
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
-            columns: Vec::new(),
+            struct_mapping: None,
             rows_to_validate: match validation_mode {
                 ValidationMode::First(n) => n as u64,
                 ValidationMode::Each => u64::MAX,
@@ -45,7 +47,7 @@ impl<T> RowCursor<T> {
                 match parse_rbwnat_columns_header(&mut slice) {
                     Ok(columns) if !columns.is_empty() => {
                         self.bytes.set_remaining(slice.len());
-                        self.columns = columns;
+                        self.struct_mapping = Some(StructMetadata::new(columns));
                         return Ok(());
                     }
                     Ok(_) => {
@@ -62,7 +64,7 @@ impl<T> RowCursor<T> {
             }
             match self.raw.next().await? {
                 Some(chunk) => self.bytes.extend(chunk),
-                None if self.columns.is_empty() => {
+                None if self.struct_mapping.is_none() => {
                     return Err(Error::BadResponse(
                         "Could not read columns header".to_string(),
                     ));
@@ -86,7 +88,7 @@ impl<T> RowCursor<T> {
     {
         loop {
             if self.bytes.remaining() > 0 {
-                if self.columns.is_empty() {
+                if self.struct_mapping.is_none() {
                     self.read_columns().await?;
                     if self.bytes.remaining() == 0 {
                         continue;
@@ -94,10 +96,15 @@ impl<T> RowCursor<T> {
                 }
                 let mut slice = super::workaround_51132(self.bytes.slice());
                 let (result, not_enough_data) = match self.rows_to_validate {
-                    0 => rowbinary::deserialize_from::<T>(&mut slice, &[]),
-                    u64::MAX => rowbinary::deserialize_from::<T>(&mut slice, &self.columns),
+                    0 => rowbinary::deserialize_from::<T>(&mut slice, None),
+                    u64::MAX => {
+                        rowbinary::deserialize_from::<T>(&mut slice, self.struct_mapping.as_mut())
+                    }
                     _ => {
-                        let result = rowbinary::deserialize_from::<T>(&mut slice, &self.columns);
+                        let result = rowbinary::deserialize_from::<T>(
+                            &mut slice,
+                            self.struct_mapping.as_mut(),
+                        );
                         self.rows_to_validate -= 1;
                         result
                     }

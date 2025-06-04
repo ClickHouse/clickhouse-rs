@@ -1,9 +1,9 @@
 use crate::error::{Error, Result};
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::SerdeType;
-use crate::rowbinary::validation::{DataTypeValidator, ValidateDataType};
+use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator};
+use crate::rowbinary::StructMetadata;
 use bytes::Buf;
-use clickhouse_types::data_types::Column;
 use core::mem::size_of;
 use serde::de::MapAccess;
 use serde::{
@@ -26,13 +26,13 @@ use std::{convert::TryFrom, str};
 /// After the header, the rows format is the same as `RowBinary`.
 pub(crate) fn deserialize_from<'data, 'cursor, T: Deserialize<'data>>(
     input: &mut &'data [u8],
-    columns: &'cursor [Column],
+    mapping: Option<&'cursor mut StructMetadata>,
 ) -> (Result<T>, bool) {
-    let result = if columns.is_empty() {
+    let result = if mapping.is_none() {
         let mut deserializer = RowBinaryDeserializer::new(input, ());
         T::deserialize(&mut deserializer)
     } else {
-        let validator = DataTypeValidator::new(columns);
+        let validator = DataTypeValidator::new(mapping.unwrap());
         let mut deserializer = RowBinaryDeserializer::new(input, validator);
         T::deserialize(&mut deserializer)
     };
@@ -49,7 +49,7 @@ pub(crate) fn deserialize_from<'data, 'cursor, T: Deserialize<'data>>(
 /// See https://clickhouse.com/docs/en/interfaces/formats#rowbinary for details.
 struct RowBinaryDeserializer<'cursor, 'data, Validator = ()>
 where
-    Validator: ValidateDataType,
+    Validator: SchemaValidator,
 {
     validator: Validator,
     input: &'cursor mut &'data [u8],
@@ -57,7 +57,7 @@ where
 
 impl<'cursor, 'data, Validator> RowBinaryDeserializer<'cursor, 'data, Validator>
 where
-    Validator: ValidateDataType,
+    Validator: SchemaValidator,
 {
     fn new(input: &'cursor mut &'data [u8], validator: Validator) -> Self {
         Self { input, validator }
@@ -95,7 +95,7 @@ macro_rules! impl_num {
 
 impl<'data, Validator> Deserializer<'data> for &mut RowBinaryDeserializer<'_, 'data, Validator>
 where
-    Validator: ValidateDataType,
+    Validator: SchemaValidator,
 {
     type Error = Error;
 
@@ -225,76 +225,6 @@ where
     ) -> Result<V::Value> {
         // println!("deserialize_enum call");
 
-        struct RowBinaryEnumAccess<'de, 'cursor, 'data, Validator>
-        where
-            Validator: ValidateDataType,
-        {
-            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
-        }
-
-        struct VariantDeserializer<'de, 'cursor, 'data, Validator>
-        where
-            Validator: ValidateDataType,
-        {
-            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
-        }
-
-        impl<'data, Validator> VariantAccess<'data> for VariantDeserializer<'_, '_, 'data, Validator>
-        where
-            Validator: ValidateDataType,
-        {
-            type Error = Error;
-
-            fn unit_variant(self) -> Result<()> {
-                panic!("unit variants are unsupported");
-            }
-
-            fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
-            where
-                T: DeserializeSeed<'data>,
-            {
-                DeserializeSeed::deserialize(seed, &mut *self.deserializer)
-            }
-
-            fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value>
-            where
-                V: Visitor<'data>,
-            {
-                self.deserializer.deserialize_tuple(len, visitor)
-            }
-
-            fn struct_variant<V>(
-                self,
-                fields: &'static [&'static str],
-                visitor: V,
-            ) -> Result<V::Value>
-            where
-                V: Visitor<'data>,
-            {
-                self.deserializer.deserialize_tuple(fields.len(), visitor)
-            }
-        }
-
-        impl<'de, 'cursor, 'data, Validator> EnumAccess<'data>
-            for RowBinaryEnumAccess<'de, 'cursor, 'data, Validator>
-        where
-            Validator: ValidateDataType,
-        {
-            type Error = Error;
-            type Variant = VariantDeserializer<'de, 'cursor, 'data, Validator>;
-
-            fn variant_seed<T>(self, seed: T) -> Result<(T::Value, Self::Variant), Self::Error>
-            where
-                T: DeserializeSeed<'data>,
-            {
-                let value = seed.deserialize(&mut *self.deserializer)?;
-                let deserializer = VariantDeserializer {
-                    deserializer: self.deserializer,
-                };
-                Ok((value, deserializer))
-            }
-        }
-
         let validator = self.validator.validate(SerdeType::Enum)?;
         visitor.visit_enum(RowBinaryEnumAccess {
             deserializer: &mut RowBinaryDeserializer {
@@ -356,44 +286,6 @@ where
         //      "deserialize_map call",
         //  );
 
-        struct RowBinaryMapAccess<'de, 'cursor, 'data, Validator>
-        where
-            Validator: ValidateDataType,
-        {
-            deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
-            entries_visited: usize,
-            len: usize,
-        }
-
-        impl<'data, Validator> MapAccess<'data> for RowBinaryMapAccess<'_, '_, 'data, Validator>
-        where
-            Validator: ValidateDataType,
-        {
-            type Error = Error;
-
-            fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
-            where
-                K: DeserializeSeed<'data>,
-            {
-                if self.entries_visited >= self.len {
-                    return Ok(None);
-                }
-                self.entries_visited += 1;
-                seed.deserialize(&mut *self.deserializer).map(Some)
-            }
-
-            fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
-            where
-                V: DeserializeSeed<'data>,
-            {
-                seed.deserialize(&mut *self.deserializer)
-            }
-
-            fn size_hint(&self) -> Option<usize> {
-                Some(self.len)
-            }
-        }
-
         let len = self.read_size()?;
         let validator = self.validator.validate(SerdeType::Map(len))?;
         visitor.visit_map(RowBinaryMapAccess {
@@ -415,12 +307,19 @@ where
     ) -> Result<V::Value> {
         // println!("deserialize_struct: {} (fields: {:?})", name, fields,);
 
-        // TODO - skip validation?
-        self.validator.set_struct_name(name);
-        visitor.visit_seq(RowBinarySeqAccess {
-            deserializer: self,
-            len: fields.len(),
-        })
+        let should_use_map_access = self.validator.ensure_struct_metadata(name, fields);
+        if !should_use_map_access {
+            visitor.visit_seq(RowBinarySeqAccess {
+                deserializer: self,
+                len: fields.len(),
+            })
+        } else {
+            visitor.visit_map(RowBinaryStructAsMapAccess {
+                deserializer: self,
+                current_field_idx: 0,
+                fields,
+            })
+        }
     }
 
     #[inline(always)]
@@ -468,9 +367,12 @@ where
     }
 }
 
+/// Used in [`Deserializer::deserialize_seq`], [`Deserializer::deserialize_tuple`],
+/// and it could be used in [`Deserializer::deserialize_struct`],
+/// if we detect that the field order matches the database schema.
 struct RowBinarySeqAccess<'de, 'cursor, 'data, Validator>
 where
-    Validator: ValidateDataType,
+    Validator: SchemaValidator,
 {
     deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
     len: usize,
@@ -478,7 +380,7 @@ where
 
 impl<'data, Validator> SeqAccess<'data> for RowBinarySeqAccess<'_, '_, 'data, Validator>
 where
-    Validator: ValidateDataType,
+    Validator: SchemaValidator,
 {
     type Error = Error;
 
@@ -497,5 +399,205 @@ where
 
     fn size_hint(&self) -> Option<usize> {
         Some(self.len)
+    }
+}
+
+/// Used in [`Deserializer::deserialize_map`].
+struct RowBinaryMapAccess<'de, 'cursor, 'data, Validator>
+where
+    Validator: SchemaValidator,
+{
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+    entries_visited: usize,
+    len: usize,
+}
+
+impl<'data, Validator> MapAccess<'data> for RowBinaryMapAccess<'_, '_, 'data, Validator>
+where
+    Validator: SchemaValidator,
+{
+    type Error = Error;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+    where
+        K: DeserializeSeed<'data>,
+    {
+        if self.entries_visited >= self.len {
+            return Ok(None);
+        }
+        self.entries_visited += 1;
+        seed.deserialize(&mut *self.deserializer).map(Some)
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
+    where
+        V: DeserializeSeed<'data>,
+    {
+        seed.deserialize(&mut *self.deserializer)
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.len)
+    }
+}
+
+/// Used in [`Deserializer::deserialize_struct`] to support wrong field order
+/// as long as the data types are exactly matching the database schema.
+struct RowBinaryStructAsMapAccess<'de, 'cursor, 'data, Validator>
+where
+    Validator: SchemaValidator,
+{
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+    current_field_idx: usize,
+    fields: &'static [&'static str],
+}
+
+struct StructFieldIdentifier(&'static str);
+
+impl<'de> Deserializer<'de> for StructFieldIdentifier {
+    type Error = Error;
+
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_borrowed_str(self.0)
+    }
+
+    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        panic!("StructFieldIdentifier is supposed to use `deserialize_identifier` only");
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf option unit unit_struct newtype_struct seq tuple
+        tuple_struct map struct enum ignored_any
+    }
+}
+
+/// Without schema order "restoration", the following query:
+///
+/// ```sql
+/// SELECT 'foo' :: String AS a,
+///        'bar' :: String AS c
+/// ```
+///
+/// Will produce a wrong result, if the struct is defined as:
+///
+/// ```rs
+///     struct Data {
+///         c: String,
+///         a: String,
+///     }
+/// ```
+impl<'data, Validator> MapAccess<'data> for RowBinaryStructAsMapAccess<'_, '_, 'data, Validator>
+where
+    Validator: SchemaValidator,
+{
+    type Error = Error;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+    where
+        K: DeserializeSeed<'data>,
+    {
+        if self.current_field_idx >= self.fields.len() {
+            return Ok(None);
+        }
+        let schema_index = self
+            .deserializer
+            .validator
+            .get_schema_index(self.current_field_idx);
+        let field_id = StructFieldIdentifier(self.fields[schema_index]);
+        // println!(
+        //     "RowBinaryStructAsMapAccess::next_key_seed: field_id: {}",
+        //     field_id.0
+        // );
+        self.current_field_idx += 1;
+        seed.deserialize(field_id).map(Some)
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
+    where
+        V: DeserializeSeed<'data>,
+    {
+        // println!(
+        //     "RowBinaryStructAsMapAccess::next_value_seed: current_field_idx: {}",
+        //     self.current_field_idx
+        // );
+        seed.deserialize(&mut *self.deserializer)
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.fields.len())
+    }
+}
+
+/// Used in [`Deserializer::deserialize_enum`].
+struct RowBinaryEnumAccess<'de, 'cursor, 'data, Validator>
+where
+    Validator: SchemaValidator,
+{
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+}
+
+struct VariantDeserializer<'de, 'cursor, 'data, Validator>
+where
+    Validator: SchemaValidator,
+{
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+}
+
+impl<'data, Validator> VariantAccess<'data> for VariantDeserializer<'_, '_, 'data, Validator>
+where
+    Validator: SchemaValidator,
+{
+    type Error = Error;
+
+    fn unit_variant(self) -> Result<()> {
+        panic!("unit variants are unsupported");
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
+    where
+        T: DeserializeSeed<'data>,
+    {
+        DeserializeSeed::deserialize(seed, &mut *self.deserializer)
+    }
+
+    fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'data>,
+    {
+        self.deserializer.deserialize_tuple(len, visitor)
+    }
+
+    fn struct_variant<V>(self, fields: &'static [&'static str], visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'data>,
+    {
+        self.deserializer.deserialize_tuple(fields.len(), visitor)
+    }
+}
+
+impl<'de, 'cursor, 'data, Validator> EnumAccess<'data>
+    for RowBinaryEnumAccess<'de, 'cursor, 'data, Validator>
+where
+    Validator: SchemaValidator,
+{
+    type Error = Error;
+    type Variant = VariantDeserializer<'de, 'cursor, 'data, Validator>;
+
+    fn variant_seed<T>(self, seed: T) -> Result<(T::Value, Self::Variant), Self::Error>
+    where
+        T: DeserializeSeed<'data>,
+    {
+        let value = seed.deserialize(&mut *self.deserializer)?;
+        let deserializer = VariantDeserializer {
+            deserializer: self.deserializer,
+        };
+        Ok((value, deserializer))
     }
 }

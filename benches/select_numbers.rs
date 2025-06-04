@@ -5,6 +5,7 @@ use clickhouse::{Client, Compression, Row};
 
 #[derive(Row, Deserialize)]
 struct Data {
+    #[serde(rename = "number")]
     no: u64,
 }
 

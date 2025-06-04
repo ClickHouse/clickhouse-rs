@@ -202,7 +202,7 @@ async fn test_several_simple_rows() {
 async fn test_many_numbers() {
     #[derive(Row, Deserialize)]
     struct Data {
-        no: u64,
+        number: u64,
     }
 
     let client = get_client().with_validation_mode(ValidationMode::Each);
@@ -213,7 +213,7 @@ async fn test_many_numbers() {
 
     let mut sum = 0;
     while let Some(row) = cursor.next().await.unwrap() {
-        sum += row.no;
+        sum += row.number;
     }
     assert_eq!(sum, (0..2000).sum::<u64>());
 }
@@ -264,8 +264,8 @@ async fn test_arrays() {
 async fn test_maps() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
-        map1: HashMap<String, String>,
-        map2: HashMap<u16, HashMap<String, i32>>,
+        m1: HashMap<String, String>,
+        m2: HashMap<u16, HashMap<String, i32>>,
     }
 
     let client = get_client().with_validation_mode(ValidationMode::Each);
@@ -284,13 +284,13 @@ async fn test_maps() {
     assert_eq!(
         result.unwrap(),
         Data {
-            map1: vec![
+            m1: vec![
                 ("key1".to_string(), "value1".to_string()),
                 ("key2".to_string(), "value2".to_string()),
             ]
             .into_iter()
             .collect(),
-            map2: vec![
+            m2: vec![
                 (
                     42,
                     vec![("foo".to_string(), 100), ("bar".to_string(), 200)]
@@ -436,8 +436,8 @@ async fn test_invalid_nullable() {
         n: Option<u32>,
     }
     assert_panic_on_fetch!(
-        &["Data.b", "Bool", "Option<T>"],
-        "SELECT true AS b, 144 :: Int32 AS n2"
+        &["Data.n", "Array(UInt32)", "Option<T>"],
+        "SELECT array(42) :: Array(UInt32) AS n"
     );
 }
 
@@ -517,10 +517,7 @@ async fn test_invalid_serde_with() {
         #[serde(with = "clickhouse::serde::time::datetime64::millis")]
         n1: time::OffsetDateTime, // underlying is still Int64; should not compose it from two (U)Int32
     }
-    assert_panic_on_fetch!(
-        &["Data.n1", "UInt32", "i64"],
-        "SELECT 42 :: UInt32 AS n1, 144 :: Int32 AS n2"
-    );
+    assert_panic_on_fetch!(&["Data.n1", "UInt32", "i64"], "SELECT 42 :: UInt32 AS n1");
 }
 
 #[tokio::test]
@@ -1144,11 +1141,8 @@ async fn test_decimal128_wrong_size() {
     );
 }
 
-// FIXME: RBWNAT should allow for tracking the order of fields in the struct and in the database!
-//  it is possible to use HashMap to deserialize the struct instead of Tuple visitor
 #[tokio::test]
-#[ignore]
-async fn test_different_struct_field_order() {
+async fn test_different_struct_field_order_same_types() {
     #[derive(Debug, Row, Deserialize, PartialEq)]
     struct Data {
         c: String,
@@ -1164,8 +1158,39 @@ async fn test_different_struct_field_order() {
     assert_eq!(
         result.unwrap(),
         Data {
-            a: "foo".to_string(),
             c: "bar".to_string(),
+            a: "foo".to_string(),
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_different_struct_field_order_different_types() {
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct Data {
+        b: u32,
+        a: String,
+        c: Vec<bool>,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query(
+            "
+            SELECT array(true, false, true) AS c,
+                   42 :: UInt32             AS b,
+                   'foo'                    AS a
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            c: vec![true, false, true],
+            b: 42,
+            a: "foo".to_string(),
         }
     );
 }

@@ -128,7 +128,7 @@ async fn rename_insert() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     #[serde(rename_all = "camelCase")]
     struct RenameRow {
-        #[serde(rename = "fix_id")]
+        #[serde(rename = "fixId")]
         pub(crate) fix_id: u64,
         #[serde(rename = "extComplexId")]
         pub(crate) complex_id: String,

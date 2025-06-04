@@ -1,6 +1,8 @@
 use crate::error::Error;
 use bytes::Buf;
 
+/// TODO: it is theoretically possible to ensure size in chunks,
+///  at least for some types, given that we have the database schema.
 #[inline]
 pub(crate) fn ensure_size(buffer: impl Buf, size: usize) -> crate::error::Result<()> {
     if buffer.remaining() < size {
