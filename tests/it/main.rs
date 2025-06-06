@@ -118,7 +118,7 @@ impl SimpleRow {
     }
 }
 
-async fn create_simple_table(client: &Client, table_name: &str) {
+pub(crate) async fn create_simple_table(client: &Client, table_name: &str) {
     client
         .query("CREATE TABLE ?(id UInt64, data String) ENGINE = MergeTree ORDER BY id")
         .with_option("wait_end_of_query", "1")
@@ -128,7 +128,7 @@ async fn create_simple_table(client: &Client, table_name: &str) {
         .unwrap();
 }
 
-async fn fetch_rows<T>(client: &Client, table_name: &str) -> Vec<T>
+pub(crate) async fn fetch_rows<T>(client: &Client, table_name: &str) -> Vec<T>
 where
     T: Row + for<'b> Deserialize<'b>,
 {
@@ -140,8 +140,19 @@ where
         .unwrap()
 }
 
-async fn flush_query_log(client: &Client) {
+pub(crate) async fn flush_query_log(client: &Client) {
     client.query("SYSTEM FLUSH LOGS").execute().await.unwrap();
+}
+
+pub(crate) async fn execute_statements(client: &Client, statements: &[&str]) {
+    for statement in statements {
+        client
+            .query(statement)
+            .with_option("wait_end_of_query", "1")
+            .execute()
+            .await
+            .unwrap_or_else(|err| panic!("cannot execute statement '{statement}', cause: {err}"));
+    }
 }
 
 mod chrono;

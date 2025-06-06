@@ -1,4 +1,4 @@
-use crate::get_client;
+use crate::{execute_statements, get_client};
 use clickhouse::sql::Identifier;
 use clickhouse::validation_mode::ValidationMode;
 use clickhouse_derive::Row;
@@ -945,31 +945,29 @@ async fn test_issue_109_1() {
         call_sign: String,
     }
     let client = prepare_database!().with_validation_mode(ValidationMode::Each);
-    let statements = vec![
-        "
-        CREATE TABLE issue_109 (
-            drone_id  String,
-            call_sign String,
-            journey   UInt32,
-            en_id     String,
-        )
-        ENGINE = MergeTree
-        ORDER BY (drone_id)
-        ",
-        "
-        INSERT INTO issue_109 VALUES
-            ('drone_1', 'call_sign_1', 1, 'en_id_1'),
-            ('drone_2', 'call_sign_2', 2, 'en_id_2'),
-            ('drone_3', 'call_sign_3', 3, 'en_id_3')
-        ",
-    ];
-    for stmt in statements {
-        client
-            .query(stmt)
-            .execute()
-            .await
-            .unwrap_or_else(|e| panic!("Failed to execute query {stmt}, cause: {}", e));
-    }
+    execute_statements(
+        &client,
+        &[
+            "
+            CREATE TABLE issue_109 (
+                drone_id  String,
+                call_sign String,
+                journey   UInt32,
+                en_id     String,
+            )
+            ENGINE = MergeTree
+            ORDER BY (drone_id)
+            ",
+            "
+            INSERT INTO issue_109 VALUES
+                ('drone_1', 'call_sign_1', 1, 'en_id_1'),
+                ('drone_2', 'call_sign_2', 2, 'en_id_2'),
+                ('drone_3', 'call_sign_3', 3, 'en_id_3')
+            ",
+        ],
+    )
+    .await;
+
     let data = client
         .query("SELECT journey, drone_id, call_sign FROM issue_109")
         .fetch_all::<Data>()
@@ -1012,7 +1010,7 @@ async fn test_issue_113() {
         c: f64,
     }
     let client = prepare_database!().with_validation_mode(ValidationMode::Each);
-    let statements = vec![
+    execute_statements(&client, &[
         "
         CREATE TABLE issue_113_1(
             id UInt32
@@ -1030,14 +1028,7 @@ async fn test_issue_113() {
         ",
         "INSERT INTO issue_113_1 VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)",
         "INSERT INTO issue_113_2 VALUES (1, 100.5), (2, 200.2), (3, 300.3), (4, 444.4), (5, 555.5)",
-    ];
-    for stmt in statements {
-        client
-            .query(stmt)
-            .execute()
-            .await
-            .unwrap_or_else(|e| panic!("Failed to execute query {stmt}, cause: {}", e));
-    }
+    ]).await;
 
     // Struct should have had Option<f64> instead of f64
     assert_panic_on_fetch_with_client!(
@@ -1099,8 +1090,11 @@ async fn test_issue_173() {
         ts: time::OffsetDateTime,
     }
 
-    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
-    let statements = vec![
+    let client = prepare_database!()
+        .with_validation_mode(ValidationMode::Each)
+        .with_option("date_time_input_format", "best_effort");
+
+    execute_statements(&client, &[
         "
         CREATE OR REPLACE TABLE logs (
           log_id      String,
@@ -1111,16 +1105,7 @@ async fn test_issue_173() {
         ",
         "INSERT INTO logs VALUES ('56cde52f-5f34-45e0-9f08-79d6f582e913', '2024-11-05T11:52:52+01:00')",
         "INSERT INTO logs VALUES ('0e967129-6271-44f2-967b-0c8d11a60fdc', '2024-11-05T11:59:21+01:00')",
-      ];
-
-    for stmt in statements {
-        client
-            .query(stmt)
-            .with_option("date_time_input_format", "best_effort")
-            .execute()
-            .await
-            .unwrap_or_else(|e| panic!("Failed to execute query {stmt}, cause: {}", e));
-    }
+    ]).await;
 
     // panics as we fetch `ts` two times: one from `?fields` macro, and the second time explicitly
     // the resulting dataset will, in fact, contain 3 columns instead of 2:
@@ -1141,8 +1126,9 @@ async fn test_issue_185() {
     }
 
     let client = prepare_database!().with_validation_mode(ValidationMode::Each);
-    client
-        .query(
+    execute_statements(
+        &client,
+        &[
             "
             CREATE TABLE issue_185(
                 pk UInt32,
@@ -1150,20 +1136,44 @@ async fn test_issue_185() {
             ENGINE MergeTree
             ORDER BY pk
             ",
-        )
-        .execute()
-        .await
-        .unwrap();
-    client
-        .query("INSERT INTO issue_185 VALUES (1, 1.1), (2, 2.2), (3, 3.3)")
-        .execute()
-        .await
-        .unwrap();
+            "INSERT INTO issue_185 VALUES (1, 1.1), (2, 2.2), (3, 3.3)",
+        ],
+    )
+    .await;
 
     assert_panic_on_fetch_with_client!(
         client,
         &["Data.decimal_col", "Decimal(10, 4)", "String"],
         "SELECT ?fields FROM issue_185"
+    );
+}
+
+#[tokio::test]
+async fn test_issue_218() {
+    #[derive(Row, Serialize, Deserialize, Debug)]
+    struct Data {
+        max_time: chrono::DateTime<chrono::Utc>,
+    }
+
+    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
+    execute_statements(
+        &client,
+        &["
+            CREATE TABLE IF NOT EXISTS issue_218 (
+               my_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+            ) ENGINE = MergeTree
+            ORDER BY my_time
+            "],
+    )
+    .await;
+
+    // FIXME: It is not a super clear panic as it hints about `&str`,
+    //  and not about the missing attribute for `chrono::DateTime`.
+    //  Still better than a `premature end of input` error, though.
+    assert_panic_on_fetch_with_client!(
+        client,
+        &["Data.max_time", "DateTime64(3, 'UTC')", "&str"],
+        "SELECT max(my_time) AS max_time FROM issue_218"
     );
 }
 
