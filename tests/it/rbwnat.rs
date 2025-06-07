@@ -1149,6 +1149,7 @@ async fn test_issue_185() {
 }
 
 #[tokio::test]
+#[cfg(feature = "chrono")]
 async fn test_issue_218() {
     #[derive(Row, Serialize, Deserialize, Debug)]
     struct Data {
