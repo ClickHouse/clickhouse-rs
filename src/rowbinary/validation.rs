@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::struct_metadata::StructMetadata;
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -11,145 +12,18 @@ pub(crate) trait SchemaValidator: Sized {
     fn validate_enum8_value(&mut self, value: i8);
     fn validate_enum16_value(&mut self, value: i16);
     fn set_next_variant_value(&mut self, value: u8);
-    fn ensure_struct_metadata(
-        &'_ mut self,
-        name: &'static str,
-        fields: &'static [&'static str],
-    ) -> bool;
     fn get_schema_index(&self, struct_idx: usize) -> usize;
-}
-
-#[derive(Debug, PartialEq)]
-enum StructMetadataState {
-    Pending,
-    WithSeqAccess,
-    WithMapAccess(Vec<usize>),
-}
-
-/// #### StructMetadata
-///
-/// Should reside outside the (de)serializer, so it is calculated only once per struct.
-/// No lifetimes, so it does not introduce a breaking change to [`crate::cursors::RowCursor`].
-///
-/// #### Lifecycle
-///
-/// - the first call to [`crate::cursors::RowCursor::next`] creates an instance with `columns`.
-/// - the first call to [`serde::Deserializer::deserialize_struct`] sets the `struct_name`,
-///   and the field order is checked. If the order is different from the schema, the state is set to
-///   [`StructMetadataState::WithMapAccess`], otherwise to [`StructMetadataState::WithSeqAccess`].
-/// - the following calls to [`crate::cursors::RowCursor::next`] and, consequently,
-///   to [`serde::Deserializer::deserialize_struct`], will re-use the same prepared instance,
-///   without re-checking the fields order for every struct.
-pub(crate) struct StructMetadata {
-    /// Struct name is defined after the first call to [`serde::Deserializer::deserialize_struct`].
-    /// If we are deserializing any other type, e.g., [`u64`], [`Vec<u8>`], etc., it is [`None`],
-    /// and it affects how the validation works, see [`DataTypeValidator::validate`].
-    pub(crate) struct_name: Option<&'static str>,
-    /// Database schema, or columns, are parsed before the first call to (de)serializer.
-    pub(crate) columns: Vec<Column>,
-    /// This state determines whether we can just use [`crate::rowbinary::de::RowBinarySeqAccess`]
-    /// or a more sophisticated approach with [`crate::rowbinary::de::RowBinaryStructAsMapAccess`]
-    /// to support structs defined with different fields order than in the schema.
-    /// Deserializing a struct as a map will be approximately 40% slower than as a sequence.
-    state: StructMetadataState,
-}
-
-impl StructMetadata {
-    pub(crate) fn new(columns: Vec<Column>) -> Self {
-        Self {
-            columns,
-            struct_name: None,
-            state: StructMetadataState::Pending,
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn check_should_use_map(
-        &mut self,
-        name: &'static str,
-        fields: &'static [&'static str],
-    ) -> bool {
-        match &self.state {
-            StructMetadataState::WithSeqAccess => false,
-            StructMetadataState::WithMapAccess(_) => true,
-            StructMetadataState::Pending => {
-                if self.columns.len() != fields.len() {
-                    panic!(
-                        "While processing struct {}: database schema has {} columns, \
-                        but the struct definition has {} fields.\
-                        \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
-                        name,
-                        self.columns.len(),
-                        fields.len(),
-                        join_panic_schema_hint(fields),
-                        join_panic_schema_hint(&self.columns),
-                    );
-                }
-                let mut mapping = Vec::with_capacity(fields.len());
-                let mut expected_index = 0;
-                let mut should_use_map = false;
-                for col in &self.columns {
-                    if let Some(index) = fields.iter().position(|field| col.name == *field) {
-                        if index != expected_index {
-                            should_use_map = true
-                        }
-                        expected_index += 1;
-                        mapping.push(index);
-                    } else {
-                        panic!(
-                            "While processing struct {}: database schema has a column {} \
-                            that was not found in the struct definition.\
-                            \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
-                            name,
-                            col,
-                            join_panic_schema_hint(fields),
-                            join_panic_schema_hint(&self.columns),
-                        );
-                    }
-                }
-                self.state = if should_use_map {
-                    StructMetadataState::WithMapAccess(mapping)
-                } else {
-                    StructMetadataState::WithSeqAccess
-                };
-                true
-            }
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_schema_index(&self, struct_idx: usize) -> usize {
-        match &self.state {
-            StructMetadataState::WithMapAccess(mapping) => {
-                if struct_idx < mapping.len() {
-                    mapping[struct_idx]
-                } else {
-                    panic!(
-                        "Struct {} has more fields than columns in the database schema",
-                        self.struct_name.unwrap_or("Struct")
-                    )
-                }
-            }
-            // these two branches should be unreachable
-            StructMetadataState::WithSeqAccess => struct_idx,
-            StructMetadataState::Pending => {
-                panic!(
-                    "Struct metadata is not initialized yet, \
-                    `ensure_struct_metadata` should be called first"
-                )
-            }
-        }
-    }
+    fn is_field_order_wrong(&self) -> bool;
 }
 
 pub(crate) struct DataTypeValidator<'cursor> {
-    metadata: &'cursor mut StructMetadata,
+    metadata: &'cursor StructMetadata,
     current_column_idx: usize,
 }
 
 impl<'cursor> DataTypeValidator<'cursor> {
     #[inline(always)]
-    pub(crate) fn new(metadata: &'cursor mut StructMetadata) -> Self {
+    pub(crate) fn new(metadata: &'cursor StructMetadata) -> Self {
         Self {
             current_column_idx: 0,
             metadata,
@@ -170,17 +44,12 @@ impl<'cursor> DataTypeValidator<'cursor> {
         self.get_current_column()
             .map(|c| {
                 (
-                    format!("{}.{}", self.get_struct_name(), c.name),
+                    format!("{}.{}", self.metadata.struct_name, c.name),
                     &c.data_type,
                 )
             })
             // both should be defined at this point
             .unwrap_or(("Struct".to_string(), &DataTypeNode::Bool))
-    }
-
-    fn get_struct_name(&self) -> String {
-        // should be available at the time of the panic call
-        self.metadata.struct_name.unwrap_or("Struct").to_string()
     }
 
     #[inline(always)]
@@ -215,8 +84,8 @@ impl SchemaValidator for DataTypeValidator<'_> {
         &'_ mut self,
         serde_type: SerdeType,
     ) -> Result<Option<InnerDataTypeValidator<'_, '_>>> {
-        if self.current_column_idx == 0 && self.metadata.struct_name.is_none() {
-            // this allows validating and deserializing tuples from fetch calls
+        if self.current_column_idx == 0 && !self.metadata.is_struct() {
+            // this allows validating and deserializing tuples/vectors/primitives from fetch calls
             Ok(Some(InnerDataTypeValidator {
                 root: self,
                 kind: if matches!(serde_type, SerdeType::Seq(_)) && self.metadata.columns.len() == 1
@@ -242,21 +111,13 @@ impl SchemaValidator for DataTypeValidator<'_> {
         } else {
             panic!(
                 "Struct {} has more fields than columns in the database schema",
-                self.get_struct_name()
+                self.metadata.struct_name
             )
         }
     }
 
-    #[inline(always)]
-    fn ensure_struct_metadata(
-        &'_ mut self,
-        name: &'static str,
-        fields: &'static [&'static str],
-    ) -> bool {
-        if self.metadata.struct_name.is_none() {
-            self.metadata.struct_name = Some(name);
-        }
-        self.metadata.check_should_use_map(name, fields)
+    fn is_field_order_wrong(&self) -> bool {
+        true
     }
 
     #[cold]
@@ -331,7 +192,6 @@ impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'curso
         &mut self,
         serde_type: SerdeType,
     ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
-        // println!("[validate] Validating serde type: {}", serde_type);
         match self {
             None => Ok(None),
             Some(inner) => match &mut inner.kind {
@@ -404,7 +264,6 @@ impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'curso
                         unreachable!()
                     }
                     VariantValidationState::Identifier(value) => {
-                        // println!("Validating variant identifier: {}", value);
                         if *value as usize >= possible_types.len() {
                             let (full_name, full_data_type) =
                                 inner.root.get_current_column_name_and_type();
@@ -474,11 +333,7 @@ impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'curso
     }
 
     #[inline(always)]
-    fn ensure_struct_metadata(
-        &mut self,
-        _name: &'static str,
-        _fields: &'static [&'static str],
-    ) -> bool {
+    fn is_field_order_wrong(&self) -> bool {
         false
     }
 
@@ -515,12 +370,10 @@ fn validate_impl<'de, 'cursor>(
     serde_type: &SerdeType,
     is_inner: bool,
 ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
-    // println!(
-    //     "Validating data type: {} against serde type: {}",
-    //     column_data_type, serde_type,
-    // );
     let data_type = column_data_type.remove_low_cardinality();
-    // TODO: eliminate multiple branches with similar patterns?
+    // TODO: is there a way to eliminate multiple branches with similar patterns?
+    //  static/const dispatch?
+    //  separate smaller inline functions?
     match serde_type {
         SerdeType::Bool
             if data_type == &DataTypeNode::Bool || data_type == &DataTypeNode::UInt8 =>
@@ -765,11 +618,7 @@ impl SchemaValidator for () {
     fn set_next_variant_value(&mut self, _value: u8) {}
 
     #[inline(always)]
-    fn ensure_struct_metadata(
-        &mut self,
-        _name: &'static str,
-        _fields: &'static [&'static str],
-    ) -> bool {
+    fn is_field_order_wrong(&self) -> bool {
         false
     }
 
@@ -850,14 +699,4 @@ impl Display for SerdeType {
             // SerdeType::IgnoredAny => "ignored any",
         }
     }
-}
-
-fn join_panic_schema_hint<T: Display>(col: &[T]) -> String {
-    if col.is_empty() {
-        return String::default();
-    }
-    col.iter()
-        .map(|c| format!("- {}", c))
-        .collect::<Vec<String>>()
-        .join("\n")
 }

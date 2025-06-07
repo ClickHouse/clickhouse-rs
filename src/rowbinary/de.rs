@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::SerdeType;
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator};
-use crate::rowbinary::StructMetadata;
+use crate::struct_metadata::StructMetadata;
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
@@ -26,13 +26,13 @@ use std::{convert::TryFrom, str};
 /// After the header, the rows format is the same as `RowBinary`.
 pub(crate) fn deserialize_from<'data, 'cursor, T: Deserialize<'data>>(
     input: &mut &'data [u8],
-    mapping: Option<&'cursor mut StructMetadata>,
+    metadata: Option<&'cursor StructMetadata>,
 ) -> (Result<T>, bool) {
-    let result = if mapping.is_none() {
+    let result = if metadata.is_none() {
         let mut deserializer = RowBinaryDeserializer::new(input, ());
         T::deserialize(&mut deserializer)
     } else {
-        let validator = DataTypeValidator::new(mapping.unwrap());
+        let validator = DataTypeValidator::new(metadata.unwrap());
         let mut deserializer = RowBinaryDeserializer::new(input, validator);
         T::deserialize(&mut deserializer)
     };
@@ -166,8 +166,6 @@ where
 
     #[inline(always)]
     fn deserialize_str<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        // println!("deserialize_str call");
-
         self.validator.validate(SerdeType::Str)?;
         let size = self.read_size()?;
         let slice = self.read_slice(size)?;
@@ -177,8 +175,6 @@ where
 
     #[inline(always)]
     fn deserialize_string<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        // println!("deserialize_string call");
-
         self.validator.validate(SerdeType::String)?;
         let size = self.read_size()?;
         let vec = self.read_vec(size)?;
@@ -188,8 +184,6 @@ where
 
     #[inline(always)]
     fn deserialize_bytes<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        // println!("deserialize_bytes call");
-
         let size = self.read_size()?;
         self.validator.validate(SerdeType::Bytes(size))?;
         let slice = self.read_slice(size)?;
@@ -198,8 +192,6 @@ where
 
     #[inline(always)]
     fn deserialize_byte_buf<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        // println!("deserialize_byte_buf call");
-
         let size = self.read_size()?;
         self.validator.validate(SerdeType::ByteBuf(size))?;
         visitor.visit_byte_buf(self.read_vec(size)?)
@@ -207,8 +199,6 @@ where
 
     #[inline(always)]
     fn deserialize_identifier<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        // println!("deserialize_identifier call");
-
         ensure_size(&mut self.input, size_of::<u8>())?;
         let value = self.input.get_u8();
         // TODO: is there a better way to validate that the deserialized value matches the schema?
@@ -223,8 +213,6 @@ where
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        // println!("deserialize_enum call");
-
         let validator = self.validator.validate(SerdeType::Enum)?;
         visitor.visit_enum(RowBinaryEnumAccess {
             deserializer: &mut RowBinaryDeserializer {
@@ -236,8 +224,6 @@ where
 
     #[inline(always)]
     fn deserialize_tuple<V: Visitor<'data>>(self, len: usize, visitor: V) -> Result<V::Value> {
-        // println!("deserialize_tuple call, len {}", len);
-
         let validator = self.validator.validate(SerdeType::Tuple(len))?;
         let mut de = RowBinaryDeserializer {
             input: self.input,
@@ -252,8 +238,6 @@ where
 
     #[inline(always)]
     fn deserialize_option<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        // println!("deserialize_option call");
-
         ensure_size(&mut self.input, 1)?;
         let inner_validator = self.validator.validate(SerdeType::Option)?;
         match self.input.get_u8() {
@@ -268,8 +252,6 @@ where
 
     #[inline(always)]
     fn deserialize_seq<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        // println!("deserialize_seq call");
-
         let len = self.read_size()?;
         visitor.visit_seq(RowBinarySeqAccess {
             deserializer: &mut RowBinaryDeserializer {
@@ -282,10 +264,6 @@ where
 
     #[inline(always)]
     fn deserialize_map<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        // println!(
-        //      "deserialize_map call",
-        //  );
-
         let len = self.read_size()?;
         let validator = self.validator.validate(SerdeType::Map(len))?;
         visitor.visit_map(RowBinaryMapAccess {
@@ -301,14 +279,11 @@ where
     #[inline(always)]
     fn deserialize_struct<V: Visitor<'data>>(
         self,
-        name: &'static str,
+        _name: &'static str,
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        // println!("deserialize_struct: {} (fields: {:?})", name, fields,);
-
-        let should_use_map_access = self.validator.ensure_struct_metadata(name, fields);
-        if !should_use_map_access {
+        if !self.validator.is_field_order_wrong() {
             visitor.visit_seq(RowBinarySeqAccess {
                 deserializer: self,
                 len: fields.len(),
@@ -441,8 +416,8 @@ where
     }
 }
 
-/// Used in [`Deserializer::deserialize_struct`] to support wrong field order
-/// as long as the data types are exactly matching the database schema.
+/// Used in [`Deserializer::deserialize_struct`] to support wrong struct field order
+/// as long as the data types and field names are exactly matching the database schema.
 struct RowBinaryStructAsMapAccess<'de, 'cursor, 'data, Validator>
 where
     Validator: SchemaValidator,
@@ -493,6 +468,9 @@ impl<'de> Deserializer<'de> for StructFieldIdentifier {
 ///         a: String,
 ///     }
 /// ```
+///
+/// If we just use [`RowBinarySeqAccess`] here, `c` will be deserialized into the `a` field,
+/// and `a` will be deserialized into the `c` field, which is a classic case of data corruption.
 impl<'data, Validator> MapAccess<'data> for RowBinaryStructAsMapAccess<'_, '_, 'data, Validator>
 where
     Validator: SchemaValidator,
@@ -511,10 +489,6 @@ where
             .validator
             .get_schema_index(self.current_field_idx);
         let field_id = StructFieldIdentifier(self.fields[schema_index]);
-        // println!(
-        //     "RowBinaryStructAsMapAccess::next_key_seed: field_id: {}",
-        //     field_id.0
-        // );
         self.current_field_idx += 1;
         seed.deserialize(field_id).map(Some)
     }
@@ -523,10 +497,6 @@ where
     where
         V: DeserializeSeed<'data>,
     {
-        // println!(
-        //     "RowBinaryStructAsMapAccess::next_value_seed: current_field_idx: {}",
-        //     self.current_field_idx
-        // );
         seed.deserialize(&mut *self.deserializer)
     }
 

@@ -153,13 +153,15 @@ struct EventPayload {
 }
 
 impl Row for EventPayload {
+    const NAME: &'static str = "EventPayload";
     const COLUMN_NAMES: &'static [&'static str] = &[];
+    const TYPE: crate::row::RowType = crate::row::RowType::Struct;
 }
 
 impl EventCursor {
     /// Emits the next version.
     ///
-    /// An result is unspecified if it's called after `Err` is returned.
+    /// The result is unspecified if it's called after `Err` is returned.
     pub async fn next(&mut self) -> Result<Option<Version>> {
         Ok(self.0.next().await?.map(|payload| payload.version))
     }
@@ -178,7 +180,9 @@ struct RowPayload<T> {
 }
 
 impl<T: Row> Row for RowPayload<T> {
+    const NAME: &'static str = T::NAME;
     const COLUMN_NAMES: &'static [&'static str] = T::COLUMN_NAMES;
+    const TYPE: crate::row::RowType = T::TYPE;
 }
 
 impl<T> RowCursor<T> {

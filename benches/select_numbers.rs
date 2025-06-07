@@ -48,9 +48,9 @@ async fn main() {
     println!("compress  validation  elapsed  throughput  received");
     bench("none", Compression::None, ValidationMode::First(1)).await;
     bench("none", Compression::None, ValidationMode::Each).await;
-    // #[cfg(feature = "lz4")]
-    // {
-    //     bench("lz4", Compression::Lz4, ValidationMode::First(1)).await;
-    //     bench("lz4", Compression::Lz4, ValidationMode::Each).await;
-    // }
+    #[cfg(feature = "lz4")]
+    {
+        bench("lz4", Compression::Lz4, ValidationMode::First(1)).await;
+        bench("lz4", Compression::Lz4, ValidationMode::Each).await;
+    }
 }

@@ -5,11 +5,12 @@
 #[macro_use]
 extern crate static_assertions;
 
+#[cfg(feature = "test-util")]
+pub use self::struct_metadata::StructMetadata;
+pub use self::{compression::Compression, row::Row, row::RowType};
 use self::{error::Result, http_client::HttpClient, validation_mode::ValidationMode};
-use std::{collections::HashMap, fmt::Display, sync::Arc};
-
-pub use self::{compression::Compression, row::Row};
 pub use clickhouse_derive::Row;
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub mod error;
 pub mod insert;
@@ -33,6 +34,7 @@ mod request_body;
 mod response;
 mod row;
 mod rowbinary;
+mod struct_metadata;
 #[cfg(feature = "inserter")]
 mod ticks;
 

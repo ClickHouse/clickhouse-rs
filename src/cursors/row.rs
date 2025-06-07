@@ -1,11 +1,11 @@
-use crate::rowbinary::StructMetadata;
+use crate::struct_metadata::StructMetadata;
 use crate::validation_mode::ValidationMode;
 use crate::{
     bytes_ext::BytesExt,
     cursors::RawCursor,
     error::{Error, Result},
     response::Response,
-    rowbinary,
+    rowbinary, Row,
 };
 use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
@@ -19,7 +19,7 @@ pub struct RowCursor<T> {
     bytes: BytesExt,
     /// [`None`] until the first call to [`RowCursor::next()`],
     /// as [`RowCursor::new`] is not `async`, so it loads lazily.
-    struct_mapping: Option<StructMetadata>,
+    struct_metadata: Option<StructMetadata>,
     rows_to_validate: u64,
     _marker: PhantomData<T>,
 }
@@ -30,7 +30,7 @@ impl<T> RowCursor<T> {
             _marker: PhantomData,
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
-            struct_mapping: None,
+            struct_metadata: None,
             rows_to_validate: match validation_mode {
                 ValidationMode::First(n) => n as u64,
                 ValidationMode::Each => u64::MAX,
@@ -40,14 +40,17 @@ impl<T> RowCursor<T> {
 
     #[cold]
     #[inline(never)]
-    async fn read_columns(&mut self) -> Result<()> {
+    async fn read_columns(&mut self) -> Result<()>
+    where
+        T: Row,
+    {
         loop {
             if self.bytes.remaining() > 0 {
                 let mut slice = self.bytes.slice();
                 match parse_rbwnat_columns_header(&mut slice) {
                     Ok(columns) if !columns.is_empty() => {
                         self.bytes.set_remaining(slice.len());
-                        self.struct_mapping = Some(StructMetadata::new(columns));
+                        self.struct_metadata = Some(StructMetadata::new::<T>(columns));
                         return Ok(());
                     }
                     Ok(_) => {
@@ -64,7 +67,7 @@ impl<T> RowCursor<T> {
             }
             match self.raw.next().await? {
                 Some(chunk) => self.bytes.extend(chunk),
-                None if self.struct_mapping.is_none() => {
+                None if self.struct_metadata.is_none() => {
                     return Err(Error::BadResponse(
                         "Could not read columns header".to_string(),
                     ));
@@ -84,11 +87,11 @@ impl<T> RowCursor<T> {
     /// This method is cancellation safe.
     pub async fn next<'cursor, 'data: 'cursor>(&'cursor mut self) -> Result<Option<T>>
     where
-        T: Deserialize<'data>,
+        T: Deserialize<'data> + Row,
     {
         loop {
             if self.bytes.remaining() > 0 {
-                if self.struct_mapping.is_none() {
+                if self.struct_metadata.is_none() {
                     self.read_columns().await?;
                     if self.bytes.remaining() == 0 {
                         continue;
@@ -98,12 +101,12 @@ impl<T> RowCursor<T> {
                 let (result, not_enough_data) = match self.rows_to_validate {
                     0 => rowbinary::deserialize_from::<T>(&mut slice, None),
                     u64::MAX => {
-                        rowbinary::deserialize_from::<T>(&mut slice, self.struct_mapping.as_mut())
+                        rowbinary::deserialize_from::<T>(&mut slice, self.struct_metadata.as_ref())
                     }
                     _ => {
                         let result = rowbinary::deserialize_from::<T>(
                             &mut slice,
-                            self.struct_mapping.as_mut(),
+                            self.struct_metadata.as_ref(),
                         );
                         self.rows_to_validate -= 1;
                         result
