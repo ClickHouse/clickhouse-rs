@@ -58,6 +58,20 @@ impl From<hyper::Error> for Error {
 
 impl From<hyper_util::client::legacy::Error> for Error {
     fn from(error: hyper_util::client::legacy::Error) -> Self {
+        #[cfg(not(any(feature = "rustls-tls", feature = "native-tls")))]
+        if error.is_connect() {
+            static SCHEME_IS_NOT_HTTP: &str = "invalid URL, scheme is not http";
+
+            let src = error.source().unwrap();
+            // Unfortunately, this seems to be the only way, as `INVALID_NOT_HTTP` is not public.
+            // See https://github.com/hyperium/hyper-util/blob/v0.1.14/src/client/legacy/connect/http.rs#L491-L495
+            if src.to_string() == SCHEME_IS_NOT_HTTP {
+                return Self::Unsupported(format!(
+                    "{SCHEME_IS_NOT_HTTP}; if you are trying to connect via HTTPS, \
+                    consider enabling `native-tls` or `rustls-tls` feature"
+                ));
+            }
+        }
         Self::Network(Box::new(error))
     }
 }
