@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use bytes::Bytes;
+use clickhouse_types::put_rbwnat_columns_header;
 use futures::channel::oneshot;
 use hyper::{Request, Response, StatusCode};
 use sealed::sealed;
@@ -8,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Handler, HandlerFn};
 use crate::rowbinary;
+use crate::struct_metadata::StructMetadata;
 
 const BUFFER_INITIAL_CAPACITY: usize = 1024;
 
@@ -40,11 +42,16 @@ pub fn failure(status: StatusCode) -> impl Handler {
 // === provide ===
 
 #[track_caller]
-pub fn provide<T>(rows: impl IntoIterator<Item = T>) -> impl Handler
+pub fn provide<T>(
+    struct_metadata: &StructMetadata,
+    rows: impl IntoIterator<Item = T>,
+) -> impl Handler
 where
     T: Serialize,
 {
     let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
+    put_rbwnat_columns_header(&struct_metadata.columns, &mut buffer)
+        .expect("failed to write columns header");
     for row in rows {
         rowbinary::serialize_into(&mut buffer, &row).expect("failed to serialize");
     }
@@ -93,7 +100,8 @@ where
         let mut result = C::default();
 
         while !slice.is_empty() {
-            let row: T = rowbinary::deserialize_from(slice).expect("failed to deserialize");
+            let (de_result, _) = rowbinary::deserialize_from(slice, None);
+            let row: T = de_result.expect("failed to deserialize");
             result.extend(std::iter::once(row));
         }
 

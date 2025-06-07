@@ -1,7 +1,17 @@
 use crate::sql;
 
+#[derive(Debug, Clone)]
+pub enum RowType {
+    Primitive,
+    Struct,
+    Tuple,
+    Vec,
+}
+
 pub trait Row {
+    const NAME: &'static str;
     const COLUMN_NAMES: &'static [&'static str];
+    const TYPE: RowType;
 
     // TODO: count
     // TODO: different list for SELECT/INSERT (de/ser)
@@ -32,7 +42,9 @@ macro_rules! impl_row_for_tuple {
         /// The second one is useful for queries like
         /// `SELECT ?fields, count() FROM .. GROUP BY ?fields`.
         impl<$i: Row, $($other: Primitive),+> Row for ($i, $($other),+) {
+            const NAME: &'static str = $i::NAME;
             const COLUMN_NAMES: &'static [&'static str] = $i::COLUMN_NAMES;
+            const TYPE: RowType = RowType::Tuple;
         }
 
         impl_row_for_tuple!($($other)+);
@@ -44,13 +56,17 @@ macro_rules! impl_row_for_tuple {
 impl Primitive for () {}
 
 impl<P: Primitive> Row for P {
+    const NAME: &'static str = stringify!(P);
     const COLUMN_NAMES: &'static [&'static str] = &[];
+    const TYPE: RowType = RowType::Primitive;
 }
 
 impl_row_for_tuple!(T0 T1 T2 T3 T4 T5 T6 T7 T8);
 
 impl<T> Row for Vec<T> {
+    const NAME: &'static str = "Vec";
     const COLUMN_NAMES: &'static [&'static str] = &[];
+    const TYPE: RowType = RowType::Vec;
 }
 
 /// Collects all field names in depth and joins them with comma.

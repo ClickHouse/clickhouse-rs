@@ -52,9 +52,9 @@ impl Mock {
 
         Self {
             url: format!("http://{addr}"),
-            shared,
             non_exhaustive: false,
             server_handle: server_handle.abort_handle(),
+            shared,
         }
     }
 

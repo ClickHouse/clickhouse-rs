@@ -93,9 +93,9 @@ async fn server_side_param() {
         .query("SELECT plus({val1: Int32}, {val2: Int32}) AS result")
         .param("val1", 42)
         .param("val2", 144)
-        .fetch_one::<u64>()
+        .fetch_one::<i64>()
         .await
-        .expect("failed to fetch u64");
+        .expect("failed to fetch Int64");
     assert_eq!(result, 186);
 
     let result = client
