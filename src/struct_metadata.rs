@@ -2,6 +2,7 @@
 //  before the insert RBWNAT implementation is ready,
 //  cause otherwise the caches are never used.
 #![allow(dead_code)]
+#![allow(unreachable_pub)]
 
 use crate::row::RowType;
 use crate::sql::Identifier;
@@ -31,7 +32,7 @@ pub struct StructMetadata {
     /// See [`Row::NAME`]
     pub(crate) struct_name: &'static str,
     /// See [`Row::COLUMN_NAMES`] (currently unused)
-    // pub(crate) struct_fields: &'static [&'static str],
+    pub(crate) struct_fields: &'static [&'static str],
     /// See [`Row::TYPE`]
     pub(crate) row_type: RowType,
     /// Database schema, or columns, are parsed before the first call to (de)serializer.
@@ -85,7 +86,7 @@ impl StructMetadata {
         Self {
             columns,
             struct_name,
-            // struct_fields,
+            struct_fields,
             row_type: T::TYPE,
             access_type: if should_use_map {
                 AccessType::WithMapAccess(mapping)
