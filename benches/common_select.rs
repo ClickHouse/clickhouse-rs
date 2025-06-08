@@ -72,6 +72,7 @@ pub(crate) fn print_results<'a, T: BenchmarkRow<'a>>(
     };
     let compression = match compression {
         Compression::None => "none",
+        #[cfg(feature = "lz4")]
         Compression::Lz4 => "lz4",
         _ => panic!("Unexpected compression mode"),
     };

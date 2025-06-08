@@ -90,9 +90,12 @@ async fn bench<'a, T: BenchmarkRow<'a>>(compression: Compression, validation_mod
 async fn main() {
     print_header(Some("  access"));
     bench::<TripSmallSeqAccess>(Compression::None, ValidationMode::First(1)).await;
-    bench::<TripSmallSeqAccess>(Compression::Lz4, ValidationMode::First(1)).await;
     bench::<TripSmallSeqAccess>(Compression::None, ValidationMode::Each).await;
-    bench::<TripSmallSeqAccess>(Compression::Lz4, ValidationMode::Each).await;
     bench::<TripSmallMapAccess>(Compression::None, ValidationMode::Each).await;
-    bench::<TripSmallMapAccess>(Compression::Lz4, ValidationMode::Each).await;
+    #[cfg(feature = "lz4")]
+    {
+        bench::<TripSmallSeqAccess>(Compression::Lz4, ValidationMode::First(1)).await;
+        bench::<TripSmallSeqAccess>(Compression::Lz4, ValidationMode::Each).await;
+        bench::<TripSmallMapAccess>(Compression::Lz4, ValidationMode::Each).await;
+    }
 }
