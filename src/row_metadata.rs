@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 #![allow(unreachable_pub)]
 
-use crate::row::RowType;
+use crate::row::RowKind;
 use crate::sql::Identifier;
 use crate::Result;
 use crate::Row;
@@ -14,10 +14,10 @@ use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::{OnceCell, RwLock};
 
-/// Cache for [`StructMetadata`] to avoid allocating it for the same struct more than once
+/// Cache for [`RowMetadata`] to avoid allocating it for the same struct more than once
 /// during the application lifecycle. Key: fully qualified table name (e.g. `database.table`).
-type LockedStructMetadataCache = RwLock<HashMap<String, Arc<StructMetadata>>>;
-static STRUCT_METADATA_CACHE: OnceCell<LockedStructMetadataCache> = OnceCell::const_new();
+type LockedRowMetadataCache = RwLock<HashMap<String, Arc<RowMetadata>>>;
+static ROW_METADATA_CACHE: OnceCell<LockedRowMetadataCache> = OnceCell::const_new();
 
 #[derive(Debug, PartialEq)]
 enum AccessType {
@@ -25,16 +25,14 @@ enum AccessType {
     WithMapAccess(Vec<usize>),
 }
 
-/// [`StructMetadata`] should be owned outside the (de)serializer,
+/// [`RowMetadata`] should be owned outside the (de)serializer,
 /// as it is calculated only once per struct. It does not have lifetimes,
 /// so it does not introduce a breaking change to [`crate::cursors::RowCursor`].
-pub struct StructMetadata {
+pub struct RowMetadata {
     /// See [`Row::NAME`]
-    pub(crate) struct_name: &'static str,
-    /// See [`Row::COLUMN_NAMES`] (currently unused)
-    pub(crate) struct_fields: &'static [&'static str],
+    pub(crate) name: &'static str,
     /// See [`Row::TYPE`]
-    pub(crate) row_type: RowType,
+    pub(crate) kind: RowKind,
     /// Database schema, or columns, are parsed before the first call to (de)serializer.
     pub(crate) columns: Vec<Column>,
     /// This determines whether we can just use [`crate::rowbinary::de::RowBinarySeqAccess`]
@@ -44,11 +42,11 @@ pub struct StructMetadata {
     access_type: AccessType,
 }
 
-impl StructMetadata {
+impl RowMetadata {
     // FIXME: perhaps it should not be public? But it is required for mocks/provide.
     pub fn new<T: Row>(columns: Vec<Column>) -> Self {
-        let access_type = match T::TYPE {
-            RowType::Primitive => {
+        let access_type = match T::KIND {
+            RowKind::Primitive => {
                 if columns.len() != 1 {
                     panic!(
                         "While processing a primitive row: \
@@ -58,10 +56,22 @@ impl StructMetadata {
                         join_panic_schema_hint(&columns),
                     );
                 }
-                AccessType::WithSeqAccess
+                AccessType::WithSeqAccess // ignored
             }
-            RowType::Tuple => AccessType::WithSeqAccess,
-            RowType::Vec => {
+            RowKind::Tuple => {
+                if T::COLUMN_COUNT != columns.len() {
+                    panic!(
+                        "While processing a tuple row: database schema has {} columns, \
+                        but the tuple definition has {} fields in total.\
+                        \n#### All schema columns:\n{}",
+                        columns.len(),
+                        T::COLUMN_COUNT,
+                        join_panic_schema_hint(&columns),
+                    );
+                }
+                AccessType::WithSeqAccess // ignored
+            }
+            RowKind::Vec => {
                 if columns.len() != 1 {
                     panic!(
                         "While processing a row defined as a vector: \
@@ -71,9 +81,9 @@ impl StructMetadata {
                         join_panic_schema_hint(&columns),
                     );
                 }
-                AccessType::WithSeqAccess
+                AccessType::WithSeqAccess // ignored
             }
-            RowType::Struct => {
+            RowKind::Struct => {
                 if columns.len() != T::COLUMN_NAMES.len() {
                     panic!(
                         "While processing struct {}: database schema has {} columns, \
@@ -119,9 +129,8 @@ impl StructMetadata {
         Self {
             columns,
             access_type,
-            row_type: T::TYPE,
-            struct_name: T::NAME,
-            struct_fields: T::COLUMN_NAMES,
+            kind: T::KIND,
+            name: T::NAME,
         }
     }
 
@@ -134,7 +143,7 @@ impl StructMetadata {
                 } else {
                     panic!(
                         "Struct {} has more fields than columns in the database schema",
-                        self.struct_name
+                        self.name
                     )
                 }
             }
@@ -148,27 +157,27 @@ impl StructMetadata {
     }
 }
 
-pub(crate) async fn get_struct_metadata<T: Row>(
+pub(crate) async fn get_row_metadata<T: Row>(
     client: &crate::Client,
     table_name: &str,
-) -> Result<Arc<StructMetadata>> {
-    let locked_cache = STRUCT_METADATA_CACHE
+) -> Result<Arc<RowMetadata>> {
+    let locked_cache = ROW_METADATA_CACHE
         .get_or_init(|| async { RwLock::new(HashMap::new()) })
         .await;
     let cache_guard = locked_cache.read().await;
     match cache_guard.get(table_name) {
         Some(metadata) => Ok(metadata.clone()),
-        None => cache_struct_metadata::<T>(client, table_name, locked_cache).await,
+        None => cache_row_metadata::<T>(client, table_name, locked_cache).await,
     }
 }
 
 /// Used internally to introspect and cache the table structure to allow validation
 /// of serialized rows before submitting the first [`insert::Insert::write`].
-async fn cache_struct_metadata<T: Row>(
+async fn cache_row_metadata<T: Row>(
     client: &crate::Client,
     table_name: &str,
-    locked_cache: &LockedStructMetadataCache,
-) -> Result<Arc<StructMetadata>> {
+    locked_cache: &LockedRowMetadataCache,
+) -> Result<Arc<RowMetadata>> {
     let mut bytes_cursor = client
         .query("SELECT * FROM ? LIMIT 0")
         .bind(Identifier(table_name))
@@ -179,7 +188,7 @@ async fn cache_struct_metadata<T: Row>(
     }
     let columns = parse_rbwnat_columns_header(&mut buffer.as_slice())?;
     let mut cache = locked_cache.write().await;
-    let metadata = Arc::new(StructMetadata::new::<T>(columns));
+    let metadata = Arc::new(RowMetadata::new::<T>(columns));
     cache.insert(table_name.to_string(), metadata.clone());
     Ok(metadata)
 }

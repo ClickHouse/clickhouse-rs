@@ -8,8 +8,8 @@ use sealed::sealed;
 use serde::{Deserialize, Serialize};
 
 use super::{Handler, HandlerFn};
+use crate::row_metadata::RowMetadata;
 use crate::rowbinary;
-use crate::struct_metadata::StructMetadata;
 
 const BUFFER_INITIAL_CAPACITY: usize = 1024;
 
@@ -42,15 +42,12 @@ pub fn failure(status: StatusCode) -> impl Handler {
 // === provide ===
 
 #[track_caller]
-pub fn provide<T>(
-    struct_metadata: &StructMetadata,
-    rows: impl IntoIterator<Item = T>,
-) -> impl Handler
+pub fn provide<T>(row_metadata: &RowMetadata, rows: impl IntoIterator<Item = T>) -> impl Handler
 where
     T: Serialize,
 {
     let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
-    put_rbwnat_columns_header(&struct_metadata.columns, &mut buffer)
+    put_rbwnat_columns_header(&row_metadata.columns, &mut buffer)
         .expect("failed to write columns header");
     for row in rows {
         rowbinary::serialize_into(&mut buffer, &row).expect("failed to serialize");

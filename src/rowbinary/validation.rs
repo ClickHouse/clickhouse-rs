@@ -1,6 +1,6 @@
 use crate::error::Result;
-use crate::struct_metadata::StructMetadata;
-use crate::RowType;
+use crate::row_metadata::RowMetadata;
+use crate::RowKind;
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -18,12 +18,12 @@ pub(crate) trait SchemaValidator: Sized {
 }
 
 pub(crate) struct DataTypeValidator<'cursor> {
-    metadata: &'cursor StructMetadata,
+    metadata: &'cursor RowMetadata,
     current_column_idx: usize,
 }
 
 impl<'cursor> DataTypeValidator<'cursor> {
-    pub(crate) fn new(metadata: &'cursor StructMetadata) -> Self {
+    pub(crate) fn new(metadata: &'cursor RowMetadata) -> Self {
         Self {
             current_column_idx: 0,
             metadata,
@@ -42,12 +42,7 @@ impl<'cursor> DataTypeValidator<'cursor> {
 
     fn get_current_column_name_and_type(&self) -> (String, &DataTypeNode) {
         self.get_current_column()
-            .map(|c| {
-                (
-                    format!("{}.{}", self.metadata.struct_name, c.name),
-                    &c.data_type,
-                )
-            })
+            .map(|c| (format!("{}.{}", self.metadata.name, c.name), &c.data_type))
             // both should be defined at this point
             .unwrap_or(("Struct".to_string(), &DataTypeNode::Bool))
     }
@@ -58,29 +53,29 @@ impl<'cursor> DataTypeValidator<'cursor> {
         serde_type: &SerdeType,
         is_inner: bool,
     ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
-        match self.metadata.row_type {
-            RowType::Primitive => {
+        match self.metadata.kind {
+            RowKind::Primitive => {
                 panic!(
                     "While processing row as a primitive: attempting to deserialize \
                     ClickHouse type {} as {} which is not compatible",
                     data_type, serde_type
                 )
             }
-            RowType::Vec => {
+            RowKind::Vec => {
                 panic!(
                     "While processing row as a vector: attempting to deserialize \
                     ClickHouse type {} as {} which is not compatible",
                     data_type, serde_type
                 )
             }
-            RowType::Tuple => {
+            RowKind::Tuple => {
                 panic!(
                     "While processing row as a tuple: attempting to deserialize \
                     ClickHouse type {} as {} which is not compatible",
                     data_type, serde_type
                 )
             }
-            RowType::Struct => {
+            RowKind::Struct => {
                 if is_inner {
                     let (full_name, full_data_type) = self.get_current_column_name_and_type();
                     panic!(
@@ -108,9 +103,9 @@ impl SchemaValidator for DataTypeValidator<'_> {
         &'_ mut self,
         serde_type: SerdeType,
     ) -> Result<Option<InnerDataTypeValidator<'_, '_>>> {
-        match self.metadata.row_type {
-            // fetch::<i32>() for a "primitive row" type
-            RowType::Primitive => {
+        match self.metadata.kind {
+            // `fetch::<i32>` for a "primitive row" type
+            RowKind::Primitive => {
                 if self.current_column_idx == 0 && self.metadata.columns.len() == 1 {
                     let data_type = &self.metadata.columns[0].data_type;
                     validate_impl(self, data_type, &serde_type, false)
@@ -121,25 +116,13 @@ impl SchemaValidator for DataTypeValidator<'_> {
                     );
                 }
             }
-            // fetch::<(i16, i32)>() for a "tuple row" type
-            RowType::Tuple => {
+            // `fetch::<(i16, i32)>` or `fetch::<(T, u64)>` for a "tuple row" type
+            RowKind::Tuple => {
                 match serde_type {
-                    SerdeType::Tuple(len) if len == self.metadata.columns.len() => {
-                        Ok(Some(InnerDataTypeValidator {
-                            root: self,
-                            kind: InnerDataTypeValidatorKind::RootTuple(&self.metadata.columns, 0),
-                        }))
-                    }
-                    SerdeType::Tuple(len) => {
-                        // TODO: theoretically, we can derive that from the Row macro,
-                        //  and check when creating StructMetadata
-                        panic!(
-                            "While processing tuple row: database schema has {} columns, \
-                            but the tuple definition has {} fields.",
-                            self.metadata.columns.len(),
-                            len
-                        )
-                    }
+                    SerdeType::Tuple(_) => Ok(Some(InnerDataTypeValidator {
+                        root: self,
+                        kind: InnerDataTypeValidatorKind::RootTuple(&self.metadata.columns, 0),
+                    })),
                     _ => {
                         // should be unreachable
                         panic!(
@@ -149,8 +132,8 @@ impl SchemaValidator for DataTypeValidator<'_> {
                     }
                 }
             }
-            // fetch::<Vec<i32>>() for a "vector row" type
-            RowType::Vec => {
+            // `fetch::<Vec<i32>>` for a "vector row" type
+            RowKind::Vec => {
                 let data_type = &self.metadata.columns[0].data_type;
                 let kind = match data_type {
                     DataTypeNode::Array(inner_type) => {
@@ -163,8 +146,8 @@ impl SchemaValidator for DataTypeValidator<'_> {
                 };
                 Ok(Some(InnerDataTypeValidator { root: self, kind }))
             }
-            // fetch::<T>() for a "struct row" type, which is supposed to be the default flow
-            RowType::Struct => {
+            // `fetch::<T>` for a "struct row" type, which is supposed to be the default flow
+            RowKind::Struct => {
                 if self.current_column_idx < self.metadata.columns.len() {
                     let current_column = &self.metadata.columns[self.current_column_idx];
                     self.current_column_idx += 1;
@@ -172,7 +155,7 @@ impl SchemaValidator for DataTypeValidator<'_> {
                 } else {
                     panic!(
                         "Struct {} has more fields than columns in the database schema",
-                        self.metadata.struct_name
+                        self.metadata.name
                     )
                 }
             }

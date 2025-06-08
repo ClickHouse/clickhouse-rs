@@ -1,8 +1,8 @@
 use crate::error::{Error, Result};
+use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::SerdeType;
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator};
-use crate::struct_metadata::StructMetadata;
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
@@ -26,7 +26,7 @@ use std::{convert::TryFrom, str};
 /// After the header, the rows format is the same as `RowBinary`.
 pub(crate) fn deserialize_from<'data, 'cursor, T: Deserialize<'data>>(
     input: &mut &'data [u8],
-    metadata: Option<&'cursor StructMetadata>,
+    metadata: Option<&'cursor RowMetadata>,
 ) -> (Result<T>, bool) {
     let result = if metadata.is_none() {
         let mut deserializer = RowBinaryDeserializer::new(input, ());

@@ -6,8 +6,8 @@
 extern crate static_assertions;
 
 #[cfg(feature = "test-util")]
-pub use self::struct_metadata::StructMetadata;
-pub use self::{compression::Compression, row::Row, row::RowType};
+pub use self::row_metadata::RowMetadata;
+pub use self::{compression::Compression, row::Row, row::RowKind};
 use self::{error::Result, http_client::HttpClient, validation_mode::ValidationMode};
 pub use clickhouse_derive::Row;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
@@ -33,8 +33,8 @@ mod http_client;
 mod request_body;
 mod response;
 mod row;
+mod row_metadata;
 mod rowbinary;
-mod struct_metadata;
 #[cfg(feature = "inserter")]
 mod ticks;
 

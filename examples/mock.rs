@@ -57,7 +57,7 @@ async fn main() {
     assert!(recording.query().await.contains("CREATE TABLE"));
 
     let metadata =
-        clickhouse::StructMetadata::new::<SomeRow>(vec![Column::new("no".to_string(), UInt32)]);
+        clickhouse::RowMetadata::new::<SomeRow>(vec![Column::new("no".to_string(), UInt32)]);
 
     // How to test SELECT.
     mock.add(test::handlers::provide(&metadata, list.clone()));

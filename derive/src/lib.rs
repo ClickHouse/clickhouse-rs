@@ -60,7 +60,8 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         impl #impl_generics clickhouse::Row for #name #ty_generics #where_clause {
             const NAME: &'static str = stringify!(#name);
             const COLUMN_NAMES: &'static [&'static str] = #column_names;
-            const TYPE: clickhouse::RowType = clickhouse::RowType::Struct;
+            const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
+            const KIND: clickhouse::RowKind = clickhouse::RowKind::Struct;
         }
     };
 

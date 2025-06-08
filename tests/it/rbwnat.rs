@@ -194,6 +194,101 @@ async fn test_fetch_tuple_row_schema_mismatch_too_many_elements() {
 }
 
 #[tokio::test]
+async fn test_fetch_tuple_row_with_struct() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: u32,
+        b: String,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query("SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c")
+        .fetch_one::<(Data, u64)>()
+        .await;
+    assert_eq!(
+        result.unwrap(),
+        (
+            Data {
+                a: 42,
+                b: "foo".to_string()
+            },
+            144
+        )
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_tuple_row_with_struct_schema_mismatch() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct _Data {
+        a: u64, // expected type is u32
+        b: String,
+    }
+    type Data = (_Data, u64);
+    assert_panic_on_fetch!(
+        &["tuple", "UInt32", "u64"],
+        "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c"
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_many_struct_fields() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct _Data {
+        a: u32,
+        b: String,
+        c: u64, // this field should not be here
+    }
+    type Data = (_Data, u64);
+    assert_panic_on_fetch!(
+        &["3 columns", "4 fields"],
+        "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c"
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_many_fields() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct _Data {
+        a: u32,
+        b: String,
+    }
+    type Data = (_Data, u64, u64); // one too many u64
+    assert_panic_on_fetch!(
+        &["3 columns", "4 fields"],
+        "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c"
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_few_struct_fields() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct _Data {
+        a: u32, // the second field is missing now
+    }
+    type Data = (_Data, u64);
+    assert_panic_on_fetch!(
+        &["3 columns", "2 fields"],
+        "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c"
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_few_fields() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct _Data {
+        a: u32,
+        b: String,
+    }
+    type Data = (_Data, u64); // another u64 is missing here
+    assert_panic_on_fetch!(
+        &["4 columns", "3 fields"],
+        "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c, 255 :: UInt64 AS d"
+    );
+}
+
+#[tokio::test]
 async fn test_basic_types() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {

@@ -155,7 +155,8 @@ struct EventPayload {
 impl Row for EventPayload {
     const NAME: &'static str = "EventPayload";
     const COLUMN_NAMES: &'static [&'static str] = &[];
-    const TYPE: crate::row::RowType = crate::row::RowType::Struct;
+    const COLUMN_COUNT: usize = 1;
+    const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
 }
 
 impl EventCursor {
@@ -182,7 +183,8 @@ struct RowPayload<T> {
 impl<T: Row> Row for RowPayload<T> {
     const NAME: &'static str = T::NAME;
     const COLUMN_NAMES: &'static [&'static str] = T::COLUMN_NAMES;
-    const TYPE: crate::row::RowType = T::TYPE;
+    const COLUMN_COUNT: usize = T::COLUMN_COUNT;
+    const KIND: crate::row::RowKind = T::KIND;
 }
 
 impl<T> RowCursor<T> {

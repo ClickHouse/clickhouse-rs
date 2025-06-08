@@ -15,7 +15,7 @@ async fn test_provide() {
         Column::new("data".to_string(), DataTypeNode::String),
     ];
 
-    let metadata = clickhouse::StructMetadata::new::<SimpleRow>(columns);
+    let metadata = clickhouse::RowMetadata::new::<SimpleRow>(columns);
     mock.add(test::handlers::provide(&metadata, &expected));
 
     let actual = crate::fetch_rows::<SimpleRow>(&client, "doesn't matter").await;
