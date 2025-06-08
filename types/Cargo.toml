@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse-types"
-version = "0.0.1"
+version = "0.1.0"
 description = "Data types utils to use with Native and RowBinary(WithNamesAndTypes) formats in ClickHouse"
 authors = ["ClickHouse"]
 repository = "https://github.com/ClickHouse/clickhouse-rs"

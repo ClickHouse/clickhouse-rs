@@ -47,7 +47,11 @@ macro_rules! assert_panic_on_fetch {
         let async_panic =
             std::panic::AssertUnwindSafe(async { client.query($query).fetch_all::<Data>().await });
         let result = async_panic.catch_unwind().await;
-        assert!(result.is_err());
+        assert!(
+            result.is_err(),
+            "expected a panic, but got a result instead: {:?}",
+            result.unwrap()
+        );
         let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
         for &msg in $msg_parts {
             assert!(

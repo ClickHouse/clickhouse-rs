@@ -61,7 +61,7 @@ impl<T> RowCursor<T> {
                     }
                     Err(TypesError::NotEnoughData(_)) => {}
                     Err(err) => {
-                        return Err(Error::ColumnsHeaderParserError(err.into()));
+                        return Err(Error::InvalidColumnsHeader(err.into()));
                     }
                 }
             }

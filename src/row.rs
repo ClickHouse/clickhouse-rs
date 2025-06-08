@@ -1,6 +1,6 @@
 use crate::sql;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RowType {
     Primitive,
     Struct,

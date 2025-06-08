@@ -47,61 +47,85 @@ pub struct StructMetadata {
 impl StructMetadata {
     // FIXME: perhaps it should not be public? But it is required for mocks/provide.
     pub fn new<T: Row>(columns: Vec<Column>) -> Self {
-        let struct_name = T::NAME;
-        let struct_fields = T::COLUMN_NAMES;
-        if columns.len() != struct_fields.len() {
-            panic!(
-                "While processing struct {}: database schema has {} columns, \
-                but the struct definition has {} fields.\
-                \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
-                struct_name,
-                columns.len(),
-                struct_fields.len(),
-                join_panic_schema_hint(struct_fields),
-                join_panic_schema_hint(&columns),
-            );
-        }
-        let mut mapping = Vec::with_capacity(struct_fields.len());
-        let mut expected_index = 0;
-        let mut should_use_map = false;
-        for col in &columns {
-            if let Some(index) = struct_fields.iter().position(|field| col.name == *field) {
-                if index != expected_index {
-                    should_use_map = true
+        let access_type = match T::TYPE {
+            RowType::Primitive => {
+                if columns.len() != 1 {
+                    panic!(
+                        "While processing a primitive row: \
+                        expected only 1 column in the database schema, \
+                        but got {} instead.\n#### All schema columns:\n{}",
+                        columns.len(),
+                        join_panic_schema_hint(&columns),
+                    );
                 }
-                expected_index += 1;
-                mapping.push(index);
-            } else {
-                panic!(
-                    "While processing struct {}: database schema has a column {} \
-                    that was not found in the struct definition.\
-                    \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
-                    struct_name,
-                    col,
-                    join_panic_schema_hint(struct_fields),
-                    join_panic_schema_hint(&columns),
-                );
+                AccessType::WithSeqAccess
             }
-        }
+            RowType::Tuple => AccessType::WithSeqAccess,
+            RowType::Vec => {
+                if columns.len() != 1 {
+                    panic!(
+                        "While processing a row defined as a vector: \
+                        expected only 1 column in the database schema, \
+                        but got {} instead.\n#### All schema columns:\n{}",
+                        columns.len(),
+                        join_panic_schema_hint(&columns),
+                    );
+                }
+                AccessType::WithSeqAccess
+            }
+            RowType::Struct => {
+                if columns.len() != T::COLUMN_NAMES.len() {
+                    panic!(
+                        "While processing struct {}: database schema has {} columns, \
+                        but the struct definition has {} fields.\
+                        \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
+                        T::NAME,
+                        columns.len(),
+                        T::COLUMN_NAMES.len(),
+                        join_panic_schema_hint(T::COLUMN_NAMES),
+                        join_panic_schema_hint(&columns),
+                    );
+                }
+                let mut mapping = Vec::with_capacity(T::COLUMN_NAMES.len());
+                let mut expected_index = 0;
+                let mut should_use_map = false;
+                for col in &columns {
+                    if let Some(index) = T::COLUMN_NAMES.iter().position(|field| col.name == *field)
+                    {
+                        if index != expected_index {
+                            should_use_map = true
+                        }
+                        expected_index += 1;
+                        mapping.push(index);
+                    } else {
+                        panic!(
+                            "While processing struct {}: database schema has a column {} \
+                            that was not found in the struct definition.\
+                            \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
+                            T::NAME,
+                            col,
+                            join_panic_schema_hint(T::COLUMN_NAMES),
+                            join_panic_schema_hint(&columns),
+                        );
+                    }
+                }
+                if should_use_map {
+                    AccessType::WithMapAccess(mapping)
+                } else {
+                    AccessType::WithSeqAccess
+                }
+            }
+        };
         Self {
             columns,
-            struct_name,
-            struct_fields,
+            access_type,
             row_type: T::TYPE,
-            access_type: if should_use_map {
-                AccessType::WithMapAccess(mapping)
-            } else {
-                AccessType::WithSeqAccess
-            },
+            struct_name: T::NAME,
+            struct_fields: T::COLUMN_NAMES,
         }
     }
 
-    #[inline(always)]
-    pub(crate) fn is_struct(&self) -> bool {
-        matches!(self.row_type, RowType::Struct)
-    }
-
-    #[inline(always)]
+    #[inline]
     pub(crate) fn get_schema_index(&self, struct_idx: usize) -> usize {
         match &self.access_type {
             AccessType::WithMapAccess(mapping) => {
@@ -116,6 +140,11 @@ impl StructMetadata {
             }
             AccessType::WithSeqAccess => struct_idx, // should be unreachable
         }
+    }
+
+    #[inline]
+    pub(crate) fn is_field_order_wrong(&self) -> bool {
+        matches!(self.access_type, AccessType::WithMapAccess(_))
     }
 }
 

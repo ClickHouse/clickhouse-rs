@@ -1,5 +1,3 @@
-#[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// The preferred mode of validation for struct (de)serialization.
 /// It also affects which format is used by the client when sending queries.
 ///
@@ -17,13 +15,13 @@
 /// It is done to minimize the performance impact of the validation,
 /// while still providing reasonable safety guarantees by default.
 ///
-/// # Safety
-///
 /// While it is expected that the default validation mode is sufficient for most use cases,
 /// in certain corner case scenarios there still can be schema mismatches after the first rows,
 /// e.g., when a field is `Nullable(T)`, and the first value is `NULL`. In that case,
 /// consider increasing the number of rows in [`ValidationMode::First`],
 /// or even using [`ValidationMode::Each`] instead.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValidationMode {
     First(usize),
     Each,
@@ -32,14 +30,5 @@ pub enum ValidationMode {
 impl Default for ValidationMode {
     fn default() -> Self {
         Self::First(1)
-    }
-}
-
-impl std::fmt::Display for ValidationMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::First(n) => f.pad(&format!("FirstN({})", n)),
-            Self::Each => f.pad("Each"),
-        }
     }
 }

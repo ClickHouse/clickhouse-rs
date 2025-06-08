@@ -42,7 +42,7 @@ pub enum Error {
     #[error("timeout expired")]
     TimedOut,
     #[error("error while parsing columns header from the response: {0}")]
-    ColumnsHeaderParserError(#[source] BoxedError),
+    InvalidColumnsHeader(#[source] BoxedError),
     #[error("{0}")]
     Other(BoxedError),
 }
@@ -51,7 +51,7 @@ assert_impl_all!(Error: StdError, Send, Sync);
 
 impl From<clickhouse_types::error::TypesError> for Error {
     fn from(err: clickhouse_types::error::TypesError) -> Self {
-        Self::ColumnsHeaderParserError(Box::new(err))
+        Self::InvalidColumnsHeader(Box::new(err))
     }
 }
 

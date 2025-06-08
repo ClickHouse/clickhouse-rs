@@ -1,5 +1,6 @@
 use crate::error::Result;
 use crate::struct_metadata::StructMetadata;
+use crate::RowType;
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -22,7 +23,6 @@ pub(crate) struct DataTypeValidator<'cursor> {
 }
 
 impl<'cursor> DataTypeValidator<'cursor> {
-    #[inline(always)]
     pub(crate) fn new(metadata: &'cursor StructMetadata) -> Self {
         Self {
             current_column_idx: 0,
@@ -52,28 +52,52 @@ impl<'cursor> DataTypeValidator<'cursor> {
             .unwrap_or(("Struct".to_string(), &DataTypeNode::Bool))
     }
 
-    #[inline(always)]
     fn panic_on_schema_mismatch<'de>(
         &'de self,
         data_type: &DataTypeNode,
         serde_type: &SerdeType,
         is_inner: bool,
     ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
-        if is_inner {
-            let (full_name, full_data_type) = self.get_current_column_name_and_type();
-            panic!(
-                "While processing column {} defined as {}: attempting to deserialize \
-                nested ClickHouse type {} as {} which is not compatible",
-                full_name, full_data_type, data_type, serde_type
-            )
-        } else {
-            panic!(
-                "While processing column {}: attempting to deserialize \
-                ClickHouse type {} as {} which is not compatible",
-                self.get_current_column_name_and_type().0,
-                data_type,
-                serde_type
-            )
+        match self.metadata.row_type {
+            RowType::Primitive => {
+                panic!(
+                    "While processing row as a primitive: attempting to deserialize \
+                    ClickHouse type {} as {} which is not compatible",
+                    data_type, serde_type
+                )
+            }
+            RowType::Vec => {
+                panic!(
+                    "While processing row as a vector: attempting to deserialize \
+                    ClickHouse type {} as {} which is not compatible",
+                    data_type, serde_type
+                )
+            }
+            RowType::Tuple => {
+                panic!(
+                    "While processing row as a tuple: attempting to deserialize \
+                    ClickHouse type {} as {} which is not compatible",
+                    data_type, serde_type
+                )
+            }
+            RowType::Struct => {
+                if is_inner {
+                    let (full_name, full_data_type) = self.get_current_column_name_and_type();
+                    panic!(
+                        "While processing column {} defined as {}: attempting to deserialize \
+                        nested ClickHouse type {} as {} which is not compatible",
+                        full_name, full_data_type, data_type, serde_type
+                    )
+                } else {
+                    panic!(
+                        "While processing column {}: attempting to deserialize \
+                        ClickHouse type {} as {} which is not compatible",
+                        self.get_current_column_name_and_type().0,
+                        data_type,
+                        serde_type
+                    )
+                }
+            }
         }
     }
 }
@@ -84,40 +108,85 @@ impl SchemaValidator for DataTypeValidator<'_> {
         &'_ mut self,
         serde_type: SerdeType,
     ) -> Result<Option<InnerDataTypeValidator<'_, '_>>> {
-        if self.current_column_idx == 0 && !self.metadata.is_struct() {
-            // this allows validating and deserializing tuples/vectors/primitives from fetch calls
-            Ok(Some(InnerDataTypeValidator {
-                root: self,
-                kind: if matches!(serde_type, SerdeType::Seq(_)) && self.metadata.columns.len() == 1
-                {
+        match self.metadata.row_type {
+            // fetch::<i32>() for a "primitive row" type
+            RowType::Primitive => {
+                if self.current_column_idx == 0 && self.metadata.columns.len() == 1 {
                     let data_type = &self.metadata.columns[0].data_type;
-                    match data_type {
-                        DataTypeNode::Array(inner_type) => {
-                            InnerDataTypeValidatorKind::RootArray(inner_type)
-                        }
-                        _ => panic!(
-                            "Expected Array type when validating root level sequence, but got {}",
-                            self.metadata.columns[0].data_type
-                        ),
-                    }
+                    validate_impl(self, data_type, &serde_type, false)
                 } else {
-                    InnerDataTypeValidatorKind::RootTuple(&self.metadata.columns, 0)
-                },
-            }))
-        } else if self.current_column_idx < self.metadata.columns.len() {
-            let current_column = &self.metadata.columns[self.current_column_idx];
-            self.current_column_idx += 1;
-            validate_impl(self, &current_column.data_type, &serde_type, false)
-        } else {
-            panic!(
-                "Struct {} has more fields than columns in the database schema",
-                self.metadata.struct_name
-            )
+                    panic!(
+                        "Primitive row is expected to be a single value, got columns: {:?}",
+                        self.metadata.columns
+                    );
+                }
+            }
+            // fetch::<(i16, i32)>() for a "tuple row" type
+            RowType::Tuple => {
+                match serde_type {
+                    SerdeType::Tuple(len) if len == self.metadata.columns.len() => {
+                        Ok(Some(InnerDataTypeValidator {
+                            root: self,
+                            kind: InnerDataTypeValidatorKind::RootTuple(&self.metadata.columns, 0),
+                        }))
+                    }
+                    SerdeType::Tuple(len) => {
+                        // TODO: theoretically, we can derive that from the Row macro,
+                        //  and check when creating StructMetadata
+                        panic!(
+                            "While processing tuple row: database schema has {} columns, \
+                            but the tuple definition has {} fields.",
+                            self.metadata.columns.len(),
+                            len
+                        )
+                    }
+                    _ => {
+                        // should be unreachable
+                        panic!(
+                            "While processing tuple row: expected serde type Tuple(N), got {}",
+                            serde_type
+                        );
+                    }
+                }
+            }
+            // fetch::<Vec<i32>>() for a "vector row" type
+            RowType::Vec => {
+                let data_type = &self.metadata.columns[0].data_type;
+                let kind = match data_type {
+                    DataTypeNode::Array(inner_type) => {
+                        InnerDataTypeValidatorKind::RootArray(inner_type)
+                    }
+                    _ => panic!(
+                        "Expected Array type when validating root level sequence, but got {}",
+                        self.metadata.columns[0].data_type
+                    ),
+                };
+                Ok(Some(InnerDataTypeValidator { root: self, kind }))
+            }
+            // fetch::<T>() for a "struct row" type, which is supposed to be the default flow
+            RowType::Struct => {
+                if self.current_column_idx < self.metadata.columns.len() {
+                    let current_column = &self.metadata.columns[self.current_column_idx];
+                    self.current_column_idx += 1;
+                    validate_impl(self, &current_column.data_type, &serde_type, false)
+                } else {
+                    panic!(
+                        "Struct {} has more fields than columns in the database schema",
+                        self.metadata.struct_name
+                    )
+                }
+            }
         }
     }
 
+    #[inline]
     fn is_field_order_wrong(&self) -> bool {
-        true
+        self.metadata.is_field_order_wrong()
+    }
+
+    #[inline]
+    fn get_schema_index(&self, struct_idx: usize) -> usize {
+        self.metadata.get_schema_index(struct_idx)
     }
 
     #[cold]
@@ -136,11 +205,6 @@ impl SchemaValidator for DataTypeValidator<'_> {
     #[inline(never)]
     fn set_next_variant_value(&mut self, _value: u8) {
         unreachable!()
-    }
-
-    #[inline]
-    fn get_schema_index(&self, struct_idx: usize) -> usize {
-        self.metadata.get_schema_index(struct_idx)
     }
 }
 

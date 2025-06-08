@@ -104,6 +104,96 @@ async fn test_header_parsing() {
 }
 
 #[tokio::test]
+async fn test_fetch_primitive_row() {
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query("SELECT count() FROM (SELECT * FROM system.numbers LIMIT 3)")
+        .fetch_one::<u64>()
+        .await;
+    assert_eq!(result.unwrap(), 3);
+}
+
+#[tokio::test]
+async fn test_fetch_primitive_row_schema_mismatch() {
+    type Data = i32; // expected type is UInt64
+    assert_panic_on_fetch!(
+        &["primitive", "UInt64", "i32"],
+        "SELECT count() FROM (SELECT * FROM system.numbers LIMIT 3)"
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_vector_row() {
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query("SELECT [1, 2, 3] :: Array(UInt32)")
+        .fetch_one::<Vec<u32>>()
+        .await;
+    assert_eq!(result.unwrap(), vec![1, 2, 3]);
+}
+
+#[tokio::test]
+async fn test_fetch_vector_row_schema_mismatch_nested_type() {
+    type Data = Vec<i128>; // expected type for Array(UInt32) is Vec<u32>
+    assert_panic_on_fetch!(
+        &["vector", "UInt32", "i128"],
+        "SELECT [1, 2, 3] :: Array(UInt32)"
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_tuple_row() {
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query("SELECT 42 :: UInt32 AS a, 'foo' :: String AS b")
+        .fetch_one::<(u32, String)>()
+        .await;
+    assert_eq!(result.unwrap(), (42, "foo".to_string()));
+}
+
+#[tokio::test]
+async fn test_fetch_tuple_row_schema_mismatch_first_element() {
+    type Data = (i128, String); // expected u32 instead of i128
+    assert_panic_on_fetch!(
+        &["tuple", "UInt32", "i128"],
+        "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b"
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_tuple_row_schema_mismatch_second_element() {
+    type Data = (u32, i64); // expected String instead of i64
+    assert_panic_on_fetch!(
+        &["tuple", "String", "i64"],
+        "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b"
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_tuple_row_schema_mismatch_missing_element() {
+    type Data = (u32, String); // expected to have the third element as i64
+    assert_panic_on_fetch!(
+        &[
+            "database schema has 3 columns",
+            "tuple definition has 2 fields"
+        ],
+        "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: Int64 AS c"
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_tuple_row_schema_mismatch_too_many_elements() {
+    type Data = (u32, String, i128); // i128 should not be there
+    assert_panic_on_fetch!(
+        &[
+            "database schema has 2 columns",
+            "tuple definition has 3 fields"
+        ],
+        "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b"
+    );
+}
+
+#[tokio::test]
 async fn test_basic_types() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
