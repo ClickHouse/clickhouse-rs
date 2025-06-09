@@ -164,7 +164,6 @@ mod cloud_jwt;
 mod compression;
 mod cursor_error;
 mod cursor_stats;
-mod examples;
 mod fetch_bytes;
 mod https_errors;
 mod insert;
