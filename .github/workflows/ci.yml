@@ -100,12 +100,14 @@ jobs:
       - run: cargo test --features uuid,time
       - run: cargo test --all-features
 
-      # Temporary runs tests with `cloud_` prefix only until we validate that the rest of the tests are working
       - name: Run tests with ClickHouse Cloud
         env:
           CLICKHOUSE_TEST_ENVIRONMENT: cloud
           CLICKHOUSE_CLOUD_HOST: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_HOST_SMT }}
           CLICKHOUSE_CLOUD_PASSWORD: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_PASSWORD_SMT }}
           CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_JWT_DESERT_VM_43 }}
+        # Temporary runs tests with `cloud_` prefix only until we validate that the rest of the tests are working
+        # `https_errors` should assert ClickHouse Cloud connection errors without enabled TLS features
         run: |
           cargo test cloud_ --features rustls-tls -- --nocapture
+          cargo test https_errors -- --nocapture
