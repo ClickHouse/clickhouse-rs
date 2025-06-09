@@ -351,6 +351,96 @@ async fn test_basic_types() {
 }
 
 #[tokio::test]
+async fn test_borrowed_data() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data<'a> {
+        str: &'a str,
+        array: Vec<&'a str>,
+        tuple: (&'a str, &'a str),
+        str_opt: Option<&'a str>,
+        vec_map_str: Vec<(&'a str, &'a str)>,
+        vec_map_f32: Vec<(&'a str, f32)>,
+        vec_map_nested: Vec<(&'a str, Vec<(&'a str, &'a str)>)>,
+        hash_map_str: HashMap<&'a str, &'a str>,
+        hash_map_f32: HashMap<&'a str, f32>,
+        hash_map_nested: HashMap<&'a str, HashMap<&'a str, &'a str>>,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let mut cursor = client
+        .query(
+            "
+            SELECT
+                'a'                                     :: String                           AS str,
+                ['b', 'c']                              :: Array(String)                    AS array,
+                ('d', 'e')                              :: Tuple(String, String)            AS tuple,
+                NULL                                    :: Nullable(String)                 AS str_opt,
+                map('key1', 'value1', 'key2', 'value2') :: Map(String, String)              AS hash_map_str,
+                map('key3', 100, 'key4', 200)           :: Map(String, Float32)             AS hash_map_f32,
+                map('n1', hash_map_str)                 :: Map(String, Map(String, String)) AS hash_map_nested,
+                hash_map_str                                                                AS vec_map_str,
+                hash_map_f32                                                                AS vec_map_f32,
+                hash_map_nested                                                             AS vec_map_nested
+            UNION ALL
+            SELECT
+                'f'                                     :: String                           AS str,
+                ['g', 'h']                              :: Array(String)                    AS array,
+                ('i', 'j')                              :: Tuple(String, String)            AS tuple,
+                'k'                                     :: Nullable(String)                 AS str_opt,
+                map('key4', 'value4', 'key5', 'value5') :: Map(String, String)              AS hash_map_str,
+                map('key6', 300, 'key7', 400)           :: Map(String, Float32)             AS hash_map_f32,
+                map('n2', hash_map_str)                 :: Map(String, Map(String, String)) AS hash_map_nested,
+                hash_map_str                                                                AS vec_map_str,
+                hash_map_f32                                                                AS vec_map_f32,
+                hash_map_nested                                                             AS vec_map_nested
+            ",
+        )
+        .fetch::<Data<'_>>()
+        .unwrap();
+
+    let mut result = Vec::new();
+    while let Some(row) = cursor.next().await.unwrap() {
+        result.push(row);
+    }
+
+    assert_eq!(
+        result,
+        vec![
+            Data {
+                str: "a",
+                array: vec!["b", "c"],
+                tuple: ("d", "e"),
+                str_opt: None,
+                vec_map_str: vec![("key1", "value1"), ("key2", "value2")],
+                vec_map_f32: vec![("key3", 100.0), ("key4", 200.0)],
+                vec_map_nested: vec![("n1", vec![("key1", "value1"), ("key2", "value2")])],
+                hash_map_str: HashMap::from([("key1", "value1"), ("key2", "value2"),]),
+                hash_map_f32: HashMap::from([("key3", 100.0), ("key4", 200.0),]),
+                hash_map_nested: HashMap::from([(
+                    "n1",
+                    HashMap::from([("key1", "value1"), ("key2", "value2"),]),
+                )]),
+            },
+            Data {
+                str: "f",
+                array: vec!["g", "h"],
+                tuple: ("i", "j"),
+                str_opt: Some("k"),
+                vec_map_str: vec![("key4", "value4"), ("key5", "value5")],
+                vec_map_f32: vec![("key6", 300.0), ("key7", 400.0)],
+                vec_map_nested: vec![("n2", vec![("key4", "value4"), ("key5", "value5")])],
+                hash_map_str: HashMap::from([("key4", "value4"), ("key5", "value5"),]),
+                hash_map_f32: HashMap::from([("key6", 300.0), ("key7", 400.0),]),
+                hash_map_nested: HashMap::from([(
+                    "n2",
+                    HashMap::from([("key4", "value4"), ("key5", "value5"),]),
+                )]),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
 async fn test_several_simple_rows() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
@@ -401,6 +491,28 @@ async fn test_many_numbers() {
         sum += row.number;
     }
     assert_eq!(sum, (0..2000).sum::<u64>());
+}
+
+#[tokio::test]
+async fn test_blob_string_with_serde_bytes() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        #[serde(with = "serde_bytes")]
+        blob: Vec<u8>,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query("SELECT 'foo' :: String AS blob")
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            blob: "foo".as_bytes().to_vec(),
+        }
+    );
 }
 
 #[tokio::test]
@@ -494,6 +606,84 @@ async fn test_maps() {
         }
     );
 }
+
+#[tokio::test]
+async fn test_map_as_vec_of_tuples() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        m1: Vec<(i128, String)>,
+        m2: Vec<(u16, Vec<(String, i32)>)>,
+    }
+
+    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let result = client
+        .query(
+            "
+            SELECT
+                map(100, 'value1', 200, 'value2')       :: Map(Int128, String)              AS m1,
+                map(42,  map('foo', 100, 'bar', 200),
+                    144, map('qaz', 300, 'qux', 400))   :: Map(UInt16, Map(String, Int32))  AS m2
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            m1: vec![(100, "value1".to_string()), (200, "value2".to_string()),],
+            m2: vec![
+                (
+                    42,
+                    vec![("foo".to_string(), 100), ("bar".to_string(), 200)]
+                        .into_iter()
+                        .collect()
+                ),
+                (
+                    144,
+                    vec![("qaz".to_string(), 300), ("qux".to_string(), 400)]
+                        .into_iter()
+                        .collect()
+                )
+            ],
+        }
+    )
+}
+
+#[tokio::test]
+async fn test_map_as_vec_of_tuples_schema_mismatch() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        m: Vec<(u16, Vec<(String, i32)>)>,
+    }
+
+    assert_panic_on_fetch!(
+        &["Data.m", "Map(Int64, String)", "Int64", "u16"],
+        "SELECT map(100, 'value1', 200, 'value2') :: Map(Int64, String) AS m"
+    );
+}
+
+#[tokio::test]
+async fn test_map_as_vec_of_tuples_schema_mismatch_nested() {
+    type Inner = Vec<(i32, i64)>; // the value should be i128 instead of i64
+
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        m: Vec<(u16, Vec<(String, Inner)>)>,
+    }
+
+    assert_panic_on_fetch!(
+        &[
+            "Data.m",
+            "Map(UInt16, Map(String, Map(Int32, Int128)))",
+            "Int128",
+            "i64"
+        ],
+        "SELECT map(42, map('foo', map(144, 255)))
+                :: Map(UInt16, Map(String, Map(Int32, Int128))) AS m"
+    );
+}
+
 #[tokio::test]
 async fn test_enum() {
     #[derive(Debug, PartialEq, Serialize_repr, Deserialize_repr)]

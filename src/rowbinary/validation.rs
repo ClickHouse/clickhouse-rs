@@ -191,17 +191,26 @@ impl SchemaValidator for DataTypeValidator<'_> {
     }
 }
 
+/// Having a ClickHouse `Map<K, V>` defined as a `HashMap<K, V>` in Rust, Serde will call:
+/// - `deserialize_map`     for `Vec<(K, V)>`
+/// - `deserialize_<key>`   suitable for `K`
+/// - `deserialize_<value>` suitable for `V`
 #[derive(Debug)]
 pub(crate) enum MapValidatorState {
     Key,
     Value,
-    Validated,
 }
 
+/// Having a ClickHouse `Map<K, V>` defined as `Vec<(K, V)>` in Rust, Serde will call:
+/// - `deserialize_seq`     for `Vec<(K, V)>`
+/// - `deserialize_tuple`   for `(K, V)`
+/// - `deserialize_<key>`   suitable for `K`
+/// - `deserialize_<value>` suitable for `V`
 #[derive(Debug)]
-pub(crate) enum ArrayValidatorState {
-    Pending,
-    Validated,
+pub(crate) enum MapAsSequenceValidatorState {
+    Tuple,
+    Key,
+    Value,
 }
 
 pub(crate) struct InnerDataTypeValidator<'de, 'cursor> {
@@ -211,15 +220,13 @@ pub(crate) struct InnerDataTypeValidator<'de, 'cursor> {
 
 #[derive(Debug)]
 pub(crate) enum InnerDataTypeValidatorKind<'cursor> {
-    Array(&'cursor DataTypeNode, ArrayValidatorState),
+    Array(&'cursor DataTypeNode),
     FixedString(usize),
-    Map(
-        &'cursor DataTypeNode,
-        &'cursor DataTypeNode,
-        MapValidatorState,
-    ),
+    Map(&'cursor [Box<DataTypeNode>; 2], MapValidatorState),
+    /// Allows supporting ClickHouse `Map<K, V>` defined as `Vec<(K, V)>` in Rust
+    MapAsSequence(&'cursor [Box<DataTypeNode>; 2], MapAsSequenceValidatorState),
     Tuple(&'cursor [DataTypeNode]),
-    /// This is a hack to support deserializing tuples/vectors (and not structs) from fetch calls
+    /// This is a hack to support deserializing tuples/arrays (and not structs) from fetch calls
     RootTuple(&'cursor [Column], usize),
     RootArray(&'cursor DataTypeNode),
     Enum(&'cursor HashMap<i16, String>),
@@ -242,29 +249,41 @@ impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'curso
         match self {
             None => Ok(None),
             Some(inner) => match &mut inner.kind {
-                InnerDataTypeValidatorKind::Map(key_type, value_type, state) => match state {
+                InnerDataTypeValidatorKind::Map(kv, state) => match state {
                     MapValidatorState::Key => {
-                        let result = validate_impl(inner.root, key_type, &serde_type, true);
+                        let result = validate_impl(inner.root, &kv[0], &serde_type, true);
                         *state = MapValidatorState::Value;
                         result
                     }
                     MapValidatorState::Value => {
-                        let result = validate_impl(inner.root, value_type, &serde_type, true);
-                        *state = MapValidatorState::Validated;
+                        let result = validate_impl(inner.root, &kv[1], &serde_type, true);
+                        *state = MapValidatorState::Key;
                         result
                     }
-                    MapValidatorState::Validated => Ok(None),
                 },
-                InnerDataTypeValidatorKind::Array(inner_type, state) => match state {
-                    ArrayValidatorState::Pending => {
-                        let result = validate_impl(inner.root, inner_type, &serde_type, true);
-                        *state = ArrayValidatorState::Validated;
-                        result
+                InnerDataTypeValidatorKind::MapAsSequence(kv, state) => {
+                    match state {
+                        // the first state is simply skipped, as the same validator
+                        // will be called again for the Key and then the Value types
+                        MapAsSequenceValidatorState::Tuple => {
+                            *state = MapAsSequenceValidatorState::Key;
+                            Ok(self.take())
+                        }
+                        MapAsSequenceValidatorState::Key => {
+                            let result = validate_impl(inner.root, &kv[0], &serde_type, true);
+                            *state = MapAsSequenceValidatorState::Value;
+                            result
+                        }
+                        MapAsSequenceValidatorState::Value => {
+                            let result = validate_impl(inner.root, &kv[1], &serde_type, true);
+                            *state = MapAsSequenceValidatorState::Tuple;
+                            result
+                        }
                     }
-                    // TODO: perhaps we can allow to validate the inner type more than once
-                    //  avoiding e.g. issues with Array(Nullable(T)) when the first element in NULL
-                    ArrayValidatorState::Validated => Ok(None),
-                },
+                }
+                InnerDataTypeValidatorKind::Array(inner_type) => {
+                    validate_impl(inner.root, inner_type, &serde_type, true)
+                }
                 InnerDataTypeValidatorKind::Nullable(inner_type) => {
                     validate_impl(inner.root, inner_type, &serde_type, true)
                 }
@@ -315,17 +334,19 @@ impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'curso
                             let (full_name, full_data_type) =
                                 inner.root.get_current_column_name_and_type();
                             panic!(
-                                    "While processing column {full_name} defined as {full_data_type}: \
-                                     Variant identifier {value} is out of bounds, max allowed index is {}",
-                                    possible_types.len() - 1
-                                );
+                                "While processing column {full_name} defined as {full_data_type}: \
+                                 Variant identifier {value} is out of bounds, max allowed index is {}",
+                                possible_types.len() - 1
+                            );
                         }
                         let data_type = &possible_types[*value as usize];
                         validate_impl(inner.root, data_type, &serde_type, true)
                     }
                 },
+                // TODO - check enum string value correctness in the hashmap?
+                //  is this even possible?
                 InnerDataTypeValidatorKind::Enum(_values_map) => {
-                    todo!() // TODO - check value correctness in the hashmap
+                    unreachable!()
                 }
             },
         }
@@ -410,6 +431,9 @@ impl Drop for InnerDataTypeValidator<'_, '_> {
     }
 }
 
+// TODO: is there a way to eliminate multiple branches with similar patterns?
+//  static/const dispatch?
+//  separate smaller inline functions?
 #[inline]
 fn validate_impl<'de, 'cursor>(
     root: &'de DataTypeValidator<'cursor>,
@@ -418,9 +442,6 @@ fn validate_impl<'de, 'cursor>(
     is_inner: bool,
 ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
     let data_type = column_data_type.remove_low_cardinality();
-    // TODO: is there a way to eliminate multiple branches with similar patterns?
-    //  static/const dispatch?
-    //  separate smaller inline functions?
     match serde_type {
         SerdeType::Bool
             if data_type == &DataTypeNode::Bool || data_type == &DataTypeNode::UInt8 =>
@@ -494,17 +515,10 @@ fn validate_impl<'de, 'cursor>(
         {
             Ok(None)
         }
-        // TODO: find use cases where this is called instead of `deserialize_tuple`
-        // SerdeType::Bytes | SerdeType::ByteBuf => {
-        //     if let DataTypeNode::FixedString(n) = data_type {
-        //         Ok(Some(InnerDataTypeValidator::FixedString(*n)))
-        //     } else {
-        //         panic!(
-        //             "Expected FixedString(N) for {} call, but got {}",
-        //             serde_type, data_type
-        //         )
-        //     }
-        // }
+        // allows to work with BLOB strings as well
+        SerdeType::Bytes(_) | SerdeType::ByteBuf(_) if data_type == &DataTypeNode::String => {
+            Ok(None)
+        }
         SerdeType::Option => {
             if let DataTypeNode::Nullable(inner_type) = data_type {
                 Ok(Some(InnerDataTypeValidator {
@@ -518,42 +532,35 @@ fn validate_impl<'de, 'cursor>(
         SerdeType::Seq(_) => match data_type {
             DataTypeNode::Array(inner_type) => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::Array(inner_type, ArrayValidatorState::Pending),
+                kind: InnerDataTypeValidatorKind::Array(inner_type),
+            })),
+            // A map can be defined as `Vec<(K, V)>` in the struct
+            DataTypeNode::Map(kv) => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::MapAsSequence(
+                    kv,
+                    MapAsSequenceValidatorState::Tuple,
+                ),
             })),
             DataTypeNode::Ring => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::Array(
-                    &DataTypeNode::Point,
-                    ArrayValidatorState::Pending,
-                ),
+                kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Point),
             })),
             DataTypeNode::Polygon => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::Array(
-                    &DataTypeNode::Ring,
-                    ArrayValidatorState::Pending,
-                ),
+                kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Ring),
             })),
             DataTypeNode::MultiPolygon => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::Array(
-                    &DataTypeNode::Polygon,
-                    ArrayValidatorState::Pending,
-                ),
+                kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Polygon),
             })),
             DataTypeNode::LineString => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::Array(
-                    &DataTypeNode::Point,
-                    ArrayValidatorState::Pending,
-                ),
+                kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Point),
             })),
             DataTypeNode::MultiLineString => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::Array(
-                    &DataTypeNode::LineString,
-                    ArrayValidatorState::Pending,
-                ),
+                kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::LineString),
             })),
             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },
@@ -579,40 +586,27 @@ fn validate_impl<'de, 'cursor>(
             })),
             DataTypeNode::Array(inner_type) => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::Array(inner_type, ArrayValidatorState::Pending),
+                kind: InnerDataTypeValidatorKind::Array(inner_type),
             })),
             DataTypeNode::IPv6 => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::Array(
-                    &DataTypeNode::UInt8,
-                    ArrayValidatorState::Pending,
-                ),
+                kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::UInt8),
             })),
             DataTypeNode::UUID => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::Tuple(&[
-                    DataTypeNode::UInt64,
-                    DataTypeNode::UInt64,
-                ]),
+                kind: InnerDataTypeValidatorKind::Tuple(UUID_TUPLE_ELEMENTS),
             })),
             DataTypeNode::Point => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::Tuple(&[
-                    DataTypeNode::Float64,
-                    DataTypeNode::Float64,
-                ]),
+                kind: InnerDataTypeValidatorKind::Tuple(POINT_TUPLE_ELEMENTS),
             })),
             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::Map(_) => {
-            if let DataTypeNode::Map(key_type, value_type) = data_type {
+            if let DataTypeNode::Map(kv) = data_type {
                 Ok(Some(InnerDataTypeValidator {
                     root,
-                    kind: InnerDataTypeValidatorKind::Map(
-                        key_type,
-                        value_type,
-                        MapValidatorState::Key,
-                    ),
+                    kind: InnerDataTypeValidatorKind::Map(kv, MapValidatorState::Key),
                 }))
             } else {
                 panic!(
@@ -747,3 +741,6 @@ impl Display for SerdeType {
         }
     }
 }
+
+const UUID_TUPLE_ELEMENTS: &[DataTypeNode; 2] = &[DataTypeNode::UInt64, DataTypeNode::UInt64];
+const POINT_TUPLE_ELEMENTS: &[DataTypeNode; 2] = &[DataTypeNode::Float64, DataTypeNode::Float64];

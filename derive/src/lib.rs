@@ -50,7 +50,7 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     };
 
     // TODO: do something more clever?
-    let _ = cx.check().expect("derive context error");
+    cx.check().expect("derive context error");
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 

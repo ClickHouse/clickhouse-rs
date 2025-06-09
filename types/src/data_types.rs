@@ -61,8 +61,10 @@ pub enum DataTypeNode {
 
     Array(Box<DataTypeNode>),
     Tuple(Vec<DataTypeNode>),
-    Map(Box<DataTypeNode>, Box<DataTypeNode>),
     Enum(EnumType, HashMap<i16, String>),
+
+    // key-value pair is defined as an array, so we can also use it as a slice
+    Map([Box<DataTypeNode>; 2]),
 
     AggregateFunction(String, Vec<DataTypeNode>),
 
@@ -142,9 +144,9 @@ impl DataTypeNode {
     }
 }
 
-impl Into<String> for DataTypeNode {
-    fn into(self) -> String {
-        self.to_string()
+impl From<DataTypeNode> for String {
+    fn from(value: DataTypeNode) -> Self {
+        value.to_string()
     }
 }
 
@@ -181,17 +183,17 @@ impl Display for DataTypeNode {
             IPv4 => "IPv4".to_string(),
             IPv6 => "IPv6".to_string(),
             Bool => "Bool".to_string(),
-            Nullable(inner) => format!("Nullable({})", inner.to_string()),
-            Array(inner) => format!("Array({})", inner.to_string()),
+            Nullable(inner) => format!("Nullable({})", inner),
+            Array(inner) => format!("Array({})", inner),
             Tuple(elements) => {
                 let elements_str = data_types_to_string(elements);
                 format!("Tuple({})", elements_str)
             }
-            Map(key, value) => {
-                format!("Map({}, {})", key.to_string(), value.to_string())
+            Map([key, value]) => {
+                format!("Map({}, {})", key, value)
             }
             LowCardinality(inner) => {
-                format!("LowCardinality({})", inner.to_string())
+                format!("LowCardinality({})", inner)
             }
             Enum(enum_type, values) => {
                 let mut values_vec = values.iter().collect::<Vec<_>>();
@@ -402,7 +404,7 @@ fn parse_datetime(input: &str) -> Result<DataTypeNode, TypesError> {
         return Ok(DataTypeNode::DateTime(None));
     }
     if input.len() >= 12 {
-        let timezone = (&input[10..input.len() - 2]).to_string();
+        let timezone = input[10..input.len() - 2].to_string();
         return Ok(DataTypeNode::DateTime(Some(timezone)));
     }
     Err(TypesError::TypeParsingError(format!(
@@ -413,7 +415,7 @@ fn parse_datetime(input: &str) -> Result<DataTypeNode, TypesError> {
 
 fn parse_decimal(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 10 {
-        let precision_and_scale_str = (&input[8..input.len() - 1]).split(", ").collect::<Vec<_>>();
+        let precision_and_scale_str = input[8..input.len() - 1].split(", ").collect::<Vec<_>>();
         if precision_and_scale_str.len() != 2 {
             return Err(TypesError::TypeParsingError(format!(
                 "Invalid Decimal format, expected Decimal(P, S), got {}",
@@ -455,14 +457,14 @@ fn parse_decimal(input: &str) -> Result<DataTypeNode, TypesError> {
 
 fn parse_datetime64(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 13 {
-        let mut chars = (&input[11..input.len() - 1]).chars();
+        let mut chars = input[11..input.len() - 1].chars();
         let precision_char = chars.next().ok_or(TypesError::TypeParsingError(format!(
             "Invalid DateTime64 precision, expected a positive number. Input: {}",
             input
         )))?;
         let precision = DateTimePrecision::new(precision_char)?;
         let maybe_tz = match chars.as_str() {
-            str if str.len() > 2 => Some((&str[3..str.len() - 1]).to_string()),
+            str if str.len() > 2 => Some(str[3..str.len() - 1].to_string()),
             _ => None,
         };
         return Ok(DataTypeNode::DateTime64(precision, maybe_tz));
@@ -507,10 +509,10 @@ fn parse_map(input: &str) -> Result<DataTypeNode, TypesError> {
                 input
             )));
         }
-        return Ok(DataTypeNode::Map(
+        return Ok(DataTypeNode::Map([
             Box::new(inner_types[0].clone()),
             Box::new(inner_types[1].clone()),
-        ));
+        ]));
     }
     Err(TypesError::TypeParsingError(format!(
         "Invalid Map format, expected Map(KeyType, ValueType), got {}",
@@ -572,34 +574,29 @@ fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, TypesError> {
             char_escaped = true;
         } else if input_bytes[i] == b'\'' {
             quote_open = !quote_open; // unescaped quote
-        } else {
-            if !quote_open {
-                if input_bytes[i] == b'(' {
-                    open_parens += 1;
-                } else if input_bytes[i] == b')' {
-                    open_parens -= 1;
-                } else if input_bytes[i] == b',' {
-                    if open_parens == 0 {
-                        let data_type_str =
-                            String::from_utf8(input_bytes[last_element_index..i].to_vec())
-                                .map_err(|_| {
-                                    TypesError::TypeParsingError(format!(
-                                "Invalid UTF-8 sequence in input for the inner data type: {}",
-                                &input[last_element_index..]
-                            ))
-                                })?;
-                        let data_type = DataTypeNode::new(&data_type_str)?;
-                        inner_types.push(data_type);
-                        // Skip ', ' (comma and space)
-                        if i + 2 <= input_bytes.len() && input_bytes[i + 1] == b' ' {
-                            i += 2;
-                        } else {
-                            i += 1;
-                        }
-                        last_element_index = i;
-                        continue; // Skip the normal increment at the end of the loop
-                    }
+        } else if !quote_open {
+            if input_bytes[i] == b'(' {
+                open_parens += 1;
+            } else if input_bytes[i] == b')' {
+                open_parens -= 1;
+            } else if input_bytes[i] == b',' && open_parens == 0 {
+                let data_type_str = String::from_utf8(input_bytes[last_element_index..i].to_vec())
+                    .map_err(|_| {
+                        TypesError::TypeParsingError(format!(
+                            "Invalid UTF-8 sequence in input for the inner data type: {}",
+                            &input[last_element_index..]
+                        ))
+                    })?;
+                let data_type = DataTypeNode::new(&data_type_str)?;
+                inner_types.push(data_type);
+                // Skip ', ' (comma and space)
+                if i + 2 <= input_bytes.len() && input_bytes[i + 1] == b' ' {
+                    i += 2;
+                } else {
+                    i += 1;
                 }
+                last_element_index = i;
+                continue; // Skip the normal increment at the end of the loop
             }
         }
         i += 1;
@@ -652,31 +649,29 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
         if parsing_name {
             if char_escaped {
                 char_escaped = false;
-            } else {
-                if input_bytes[i] == b'\\' {
-                    char_escaped = true;
-                } else if input_bytes[i] == b'\'' {
-                    // non-escaped closing tick - push the name
-                    let name_bytes = &input_bytes[start_index..i];
-                    let name = String::from_utf8(name_bytes.to_vec()).map_err(|_| {
-                        TypesError::TypeParsingError(format!(
-                            "Invalid UTF-8 sequence in input for the enum name: {}",
-                            &input[start_index..i]
-                        ))
-                    })?;
-                    names.push(name);
+            } else if input_bytes[i] == b'\\' {
+                char_escaped = true;
+            } else if input_bytes[i] == b'\'' {
+                // non-escaped closing tick - push the name
+                let name_bytes = &input_bytes[start_index..i];
+                let name = String::from_utf8(name_bytes.to_vec()).map_err(|_| {
+                    TypesError::TypeParsingError(format!(
+                        "Invalid UTF-8 sequence in input for the enum name: {}",
+                        &input[start_index..i]
+                    ))
+                })?;
+                names.push(name);
 
-                    // Skip ` = ` and the first digit, as it will always have at least one
-                    if i + 4 >= input_bytes.len() {
-                        return Err(TypesError::TypeParsingError(format!(
-                            "Invalid Enum format - expected ` = ` after name, input: {}",
-                            input,
-                        )));
-                    }
-                    i += 4;
-                    start_index = i;
-                    parsing_name = false;
+                // Skip ` = ` and the first digit, as it will always have at least one
+                if i + 4 >= input_bytes.len() {
+                    return Err(TypesError::TypeParsingError(format!(
+                        "Invalid Enum format - expected ` = ` after name, input: {}",
+                        input,
+                    )));
                 }
+                i += 4;
+                start_index = i;
+                parsing_name = false;
             }
         }
         // Parsing the index, skipping next iterations until the first non-digit one
@@ -968,29 +963,29 @@ mod tests {
     fn test_data_type_new_map() {
         assert_eq!(
             DataTypeNode::new("Map(UInt8, String)").unwrap(),
-            DataTypeNode::Map(
+            DataTypeNode::Map([
                 Box::new(DataTypeNode::UInt8),
                 Box::new(DataTypeNode::String)
-            )
+            ])
         );
         assert_eq!(
             DataTypeNode::new("Map(String, Int32)").unwrap(),
-            DataTypeNode::Map(
+            DataTypeNode::Map([
                 Box::new(DataTypeNode::String),
                 Box::new(DataTypeNode::Int32)
-            )
+            ])
         );
         assert_eq!(
             DataTypeNode::new("Map(String, Map(Int32, Array(Nullable(String))))").unwrap(),
-            DataTypeNode::Map(
+            DataTypeNode::Map([
                 Box::new(DataTypeNode::String),
-                Box::new(DataTypeNode::Map(
+                Box::new(DataTypeNode::Map([
                     Box::new(DataTypeNode::Int32),
                     Box::new(DataTypeNode::Array(Box::new(DataTypeNode::Nullable(
                         Box::new(DataTypeNode::String)
                     ))))
-                ))
-            )
+                ]))
+            ])
         );
         assert!(DataTypeNode::new("Map()").is_err());
         assert!(DataTypeNode::new("Map").is_err());
@@ -1019,10 +1014,10 @@ mod tests {
                 DataTypeNode::Array(Box::new(DataTypeNode::Nullable(Box::new(
                     DataTypeNode::String
                 )))),
-                DataTypeNode::Map(
+                DataTypeNode::Map([
                     Box::new(DataTypeNode::Int32),
                     Box::new(DataTypeNode::String)
-                )
+                ])
             ])
         );
         assert!(DataTypeNode::new("Variant").is_err());
@@ -1052,13 +1047,13 @@ mod tests {
                 DataTypeNode::Array(Box::new(DataTypeNode::Nullable(Box::new(
                     DataTypeNode::String
                 )))),
-                DataTypeNode::Map(
+                DataTypeNode::Map([
                     Box::new(DataTypeNode::Int32),
                     Box::new(DataTypeNode::Tuple(vec![
                         DataTypeNode::String,
                         DataTypeNode::Array(Box::new(DataTypeNode::UInt8))
                     ]))
-                )
+                ])
             ])
         );
         assert_eq!(
@@ -1210,10 +1205,10 @@ mod tests {
             "Tuple(String, UInt32, Float64)"
         );
         assert_eq!(
-            DataTypeNode::Map(
+            DataTypeNode::Map([
                 Box::new(DataTypeNode::String),
                 Box::new(DataTypeNode::UInt32)
-            )
+            ])
             .to_string(),
             "Map(String, UInt32)"
         );
