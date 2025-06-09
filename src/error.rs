@@ -43,6 +43,8 @@ pub enum Error {
     TimedOut,
     #[error("error while parsing columns header from the response: {0}")]
     InvalidColumnsHeader(#[source] BoxedError),
+    #[error("unsupported: {0}")]
+    Unsupported(String),
     #[error("{0}")]
     Other(BoxedError),
 }
