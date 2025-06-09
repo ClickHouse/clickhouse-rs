@@ -85,7 +85,7 @@ macro_rules! impl_num {
     ($ty:ty, $deser_method:ident, $visitor_method:ident, $reader_method:ident, $serde_type:expr) => {
         #[inline(always)]
         fn $deser_method<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-            self.validator.validate($serde_type)?;
+            self.validator.validate($serde_type);
             ensure_size(&mut self.input, core::mem::size_of::<$ty>())?;
             let value = self.input.$reader_method();
             visitor.$visitor_method(value)
@@ -101,7 +101,7 @@ where
 
     #[inline(always)]
     fn deserialize_i8<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        let mut maybe_enum_validator = self.validator.validate(SerdeType::I8)?;
+        let mut maybe_enum_validator = self.validator.validate(SerdeType::I8);
         ensure_size(&mut self.input, size_of::<i8>())?;
         let value = self.input.get_i8();
         maybe_enum_validator.validate_enum8_value(value);
@@ -110,7 +110,7 @@ where
 
     #[inline(always)]
     fn deserialize_i16<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        let mut maybe_enum_validator = self.validator.validate(SerdeType::I16)?;
+        let mut maybe_enum_validator = self.validator.validate(SerdeType::I16);
         ensure_size(&mut self.input, size_of::<i16>())?;
         let value = self.input.get_i16_le();
         // TODO: is there a better way to validate that the deserialized value matches the schema?
@@ -155,7 +155,7 @@ where
 
     #[inline(always)]
     fn deserialize_bool<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.validator.validate(SerdeType::Bool)?;
+        self.validator.validate(SerdeType::Bool);
         ensure_size(&mut self.input, 1)?;
         match self.input.get_u8() {
             0 => visitor.visit_bool(false),
@@ -166,7 +166,7 @@ where
 
     #[inline(always)]
     fn deserialize_str<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.validator.validate(SerdeType::Str)?;
+        self.validator.validate(SerdeType::Str);
         let size = self.read_size()?;
         let slice = self.read_slice(size)?;
         let str = str::from_utf8(slice).map_err(Error::from)?;
@@ -175,7 +175,7 @@ where
 
     #[inline(always)]
     fn deserialize_string<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.validator.validate(SerdeType::String)?;
+        self.validator.validate(SerdeType::String);
         let size = self.read_size()?;
         let vec = self.read_vec(size)?;
         let string = String::from_utf8(vec).map_err(|err| Error::from(err.utf8_error()))?;
@@ -185,7 +185,7 @@ where
     #[inline(always)]
     fn deserialize_bytes<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
-        self.validator.validate(SerdeType::Bytes(size))?;
+        self.validator.validate(SerdeType::Bytes(size));
         let slice = self.read_slice(size)?;
         visitor.visit_borrowed_bytes(slice)
     }
@@ -193,7 +193,7 @@ where
     #[inline(always)]
     fn deserialize_byte_buf<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
-        self.validator.validate(SerdeType::ByteBuf(size))?;
+        self.validator.validate(SerdeType::ByteBuf(size));
         visitor.visit_byte_buf(self.read_vec(size)?)
     }
 
@@ -213,7 +213,7 @@ where
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        let validator = self.validator.validate(SerdeType::Enum)?;
+        let validator = self.validator.validate(SerdeType::Enum);
         visitor.visit_enum(RowBinaryEnumAccess {
             deserializer: &mut RowBinaryDeserializer {
                 input: self.input,
@@ -224,7 +224,7 @@ where
 
     #[inline(always)]
     fn deserialize_tuple<V: Visitor<'data>>(self, len: usize, visitor: V) -> Result<V::Value> {
-        let validator = self.validator.validate(SerdeType::Tuple(len))?;
+        let validator = self.validator.validate(SerdeType::Tuple(len));
         let mut de = RowBinaryDeserializer {
             input: self.input,
             validator,
@@ -239,7 +239,7 @@ where
     #[inline(always)]
     fn deserialize_option<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         ensure_size(&mut self.input, 1)?;
-        let inner_validator = self.validator.validate(SerdeType::Option)?;
+        let inner_validator = self.validator.validate(SerdeType::Option);
         match self.input.get_u8() {
             0 => visitor.visit_some(&mut RowBinaryDeserializer {
                 input: self.input,
@@ -256,7 +256,7 @@ where
         visitor.visit_seq(RowBinarySeqAccess {
             deserializer: &mut RowBinaryDeserializer {
                 input: self.input,
-                validator: self.validator.validate(SerdeType::Seq(len))?,
+                validator: self.validator.validate(SerdeType::Seq(len)),
             },
             len,
         })
@@ -265,7 +265,7 @@ where
     #[inline(always)]
     fn deserialize_map<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let len = self.read_size()?;
-        let validator = self.validator.validate(SerdeType::Map(len))?;
+        let validator = self.validator.validate(SerdeType::Map(len));
         visitor.visit_map(RowBinaryMapAccess {
             deserializer: &mut RowBinaryDeserializer {
                 input: self.input,

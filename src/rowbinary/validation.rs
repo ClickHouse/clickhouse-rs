@@ -1,4 +1,3 @@
-use crate::error::Result;
 use crate::row_metadata::RowMetadata;
 use crate::RowKind;
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
@@ -6,10 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 pub(crate) trait SchemaValidator: Sized {
-    fn validate(
-        &'_ mut self,
-        serde_type: SerdeType,
-    ) -> Result<Option<InnerDataTypeValidator<'_, '_>>>;
+    fn validate(&'_ mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_>>;
     fn validate_enum8_value(&mut self, value: i8);
     fn validate_enum16_value(&mut self, value: i16);
     fn set_next_variant_value(&mut self, value: u8);
@@ -52,7 +48,7 @@ impl<'cursor> DataTypeValidator<'cursor> {
         data_type: &DataTypeNode,
         serde_type: &SerdeType,
         is_inner: bool,
-    ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
+    ) -> Option<InnerDataTypeValidator<'de, 'cursor>> {
         match self.metadata.kind {
             RowKind::Primitive => {
                 panic!(
@@ -99,10 +95,7 @@ impl<'cursor> DataTypeValidator<'cursor> {
 
 impl SchemaValidator for DataTypeValidator<'_> {
     #[inline]
-    fn validate(
-        &'_ mut self,
-        serde_type: SerdeType,
-    ) -> Result<Option<InnerDataTypeValidator<'_, '_>>> {
+    fn validate(&'_ mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_>> {
         match self.metadata.kind {
             // `fetch::<i32>` for a "primitive row" type
             RowKind::Primitive => {
@@ -119,10 +112,10 @@ impl SchemaValidator for DataTypeValidator<'_> {
             // `fetch::<(i16, i32)>` or `fetch::<(T, u64)>` for a "tuple row" type
             RowKind::Tuple => {
                 match serde_type {
-                    SerdeType::Tuple(_) => Ok(Some(InnerDataTypeValidator {
+                    SerdeType::Tuple(_) => Some(InnerDataTypeValidator {
                         root: self,
                         kind: InnerDataTypeValidatorKind::RootTuple(&self.metadata.columns, 0),
-                    })),
+                    }),
                     _ => {
                         // should be unreachable
                         panic!(
@@ -144,7 +137,7 @@ impl SchemaValidator for DataTypeValidator<'_> {
                         self.metadata.columns[0].data_type
                     ),
                 };
-                Ok(Some(InnerDataTypeValidator { root: self, kind }))
+                Some(InnerDataTypeValidator { root: self, kind })
             }
             // `fetch::<T>` for a "struct row" type, which is supposed to be the default flow
             RowKind::Struct => {
@@ -242,12 +235,9 @@ pub(crate) enum VariantValidationState {
 
 impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'cursor>> {
     #[inline]
-    fn validate(
-        &mut self,
-        serde_type: SerdeType,
-    ) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
+    fn validate(&mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'de, 'cursor>> {
         match self {
-            None => Ok(None),
+            None => None,
             Some(inner) => match &mut inner.kind {
                 InnerDataTypeValidatorKind::Map(kv, state) => match state {
                     MapValidatorState::Key => {
@@ -267,7 +257,7 @@ impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'curso
                         // will be called again for the Key and then the Value types
                         MapAsSequenceValidatorState::Tuple => {
                             *state = MapAsSequenceValidatorState::Key;
-                            Ok(self.take())
+                            self.take()
                         }
                         MapAsSequenceValidatorState::Key => {
                             let result = validate_impl(inner.root, &kv[0], &serde_type, true);
@@ -305,7 +295,7 @@ impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'curso
                     }
                 }
                 InnerDataTypeValidatorKind::FixedString(_len) => {
-                    Ok(None) // actually unreachable
+                    None // actually unreachable
                 }
                 InnerDataTypeValidatorKind::RootTuple(columns, current_index) => {
                     if *current_index < columns.len() {
@@ -431,6 +421,89 @@ impl Drop for InnerDataTypeValidator<'_, '_> {
     }
 }
 
+// #[inline]
+// fn simple_types_impl<'de, 'cursor>(
+//     root: &'de DataTypeValidator<'cursor>,
+//     data_type: &'cursor DataTypeNode,
+//     serde_type: &SerdeType,
+//     is_inner: bool,
+// ) {
+//     match serde_type {
+//         SerdeType::Bool
+//         if data_type == &DataTypeNode::Bool || data_type == &DataTypeNode::UInt8 =>
+//             {
+//                 None
+//             }
+//         SerdeType::I8 => match data_type {
+//             DataTypeNode::Int8 => None,
+//             DataTypeNode::Enum(EnumType::Enum8, values_map) => Some(InnerDataTypeValidator {
+//                 root,
+//                 kind: InnerDataTypeValidatorKind::Enum(values_map),
+//             })),
+//             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
+//         },
+//         SerdeType::I16 => match data_type {
+//             DataTypeNode::Int16 => None,
+//             DataTypeNode::Enum(EnumType::Enum16, values_map) => Some(InnerDataTypeValidator {
+//                 root,
+//                 kind: InnerDataTypeValidatorKind::Enum(values_map),
+//             })),
+//             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
+//         },
+//         SerdeType::I32
+//         if data_type == &DataTypeNode::Int32
+//             || data_type == &DataTypeNode::Date32
+//             || matches!(
+//                     data_type,
+//                     DataTypeNode::Decimal(_, _, DecimalType::Decimal32)
+//                 ) =>
+//             {
+//                 None
+//             }
+//         SerdeType::I64
+//         if data_type == &DataTypeNode::Int64
+//             || matches!(data_type, DataTypeNode::DateTime64(_, _))
+//             || matches!(
+//                     data_type,
+//                     DataTypeNode::Decimal(_, _, DecimalType::Decimal64)
+//                 ) =>
+//             {
+//                 None
+//             }
+//         SerdeType::I128
+//         if data_type == &DataTypeNode::Int128
+//             || matches!(
+//                     data_type,
+//                     DataTypeNode::Decimal(_, _, DecimalType::Decimal128)
+//                 ) =>
+//             {
+//                 None
+//             }
+//         SerdeType::U8 if data_type == &DataTypeNode::UInt8 => None,
+//         SerdeType::U16
+//         if data_type == &DataTypeNode::UInt16 || data_type == &DataTypeNode::Date =>
+//             {
+//                 None
+//             }
+//         SerdeType::U32
+//         if data_type == &DataTypeNode::UInt32
+//             || matches!(data_type, DataTypeNode::DateTime(_))
+//             || data_type == &DataTypeNode::IPv4 =>
+//             {
+//                 None
+//             }
+//         SerdeType::U64 if data_type == &DataTypeNode::UInt64 => None,
+//         SerdeType::U128 if data_type == &DataTypeNode::UInt128 => None,
+//         SerdeType::F32 if data_type == &DataTypeNode::Float32 => None,
+//         SerdeType::F64 if data_type == &DataTypeNode::Float64 => None,
+//         SerdeType::Str | SerdeType::String
+//         if data_type == &DataTypeNode::String || data_type == &DataTypeNode::JSON =>
+//             {
+//                 None
+//             }
+//     }
+// }
+
 // TODO: is there a way to eliminate multiple branches with similar patterns?
 //  static/const dispatch?
 //  separate smaller inline functions?
@@ -440,28 +513,28 @@ fn validate_impl<'de, 'cursor>(
     column_data_type: &'cursor DataTypeNode,
     serde_type: &SerdeType,
     is_inner: bool,
-) -> Result<Option<InnerDataTypeValidator<'de, 'cursor>>> {
+) -> Option<InnerDataTypeValidator<'de, 'cursor>> {
     let data_type = column_data_type.remove_low_cardinality();
     match serde_type {
         SerdeType::Bool
             if data_type == &DataTypeNode::Bool || data_type == &DataTypeNode::UInt8 =>
         {
-            Ok(None)
+            None
         }
         SerdeType::I8 => match data_type {
-            DataTypeNode::Int8 => Ok(None),
-            DataTypeNode::Enum(EnumType::Enum8, values_map) => Ok(Some(InnerDataTypeValidator {
+            DataTypeNode::Int8 => None,
+            DataTypeNode::Enum(EnumType::Enum8, values_map) => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Enum(values_map),
-            })),
+            }),
             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::I16 => match data_type {
-            DataTypeNode::Int16 => Ok(None),
-            DataTypeNode::Enum(EnumType::Enum16, values_map) => Ok(Some(InnerDataTypeValidator {
+            DataTypeNode::Int16 => None,
+            DataTypeNode::Enum(EnumType::Enum16, values_map) => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Enum(values_map),
-            })),
+            }),
             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::I32
@@ -472,7 +545,7 @@ fn validate_impl<'de, 'cursor>(
                     DataTypeNode::Decimal(_, _, DecimalType::Decimal32)
                 ) =>
         {
-            Ok(None)
+            None
         }
         SerdeType::I64
             if data_type == &DataTypeNode::Int64
@@ -482,7 +555,7 @@ fn validate_impl<'de, 'cursor>(
                     DataTypeNode::Decimal(_, _, DecimalType::Decimal64)
                 ) =>
         {
-            Ok(None)
+            None
         }
         SerdeType::I128
             if data_type == &DataTypeNode::Int128
@@ -491,86 +564,84 @@ fn validate_impl<'de, 'cursor>(
                     DataTypeNode::Decimal(_, _, DecimalType::Decimal128)
                 ) =>
         {
-            Ok(None)
+            None
         }
-        SerdeType::U8 if data_type == &DataTypeNode::UInt8 => Ok(None),
+        SerdeType::U8 if data_type == &DataTypeNode::UInt8 => None,
         SerdeType::U16
             if data_type == &DataTypeNode::UInt16 || data_type == &DataTypeNode::Date =>
         {
-            Ok(None)
+            None
         }
         SerdeType::U32
             if data_type == &DataTypeNode::UInt32
                 || matches!(data_type, DataTypeNode::DateTime(_))
                 || data_type == &DataTypeNode::IPv4 =>
         {
-            Ok(None)
+            None
         }
-        SerdeType::U64 if data_type == &DataTypeNode::UInt64 => Ok(None),
-        SerdeType::U128 if data_type == &DataTypeNode::UInt128 => Ok(None),
-        SerdeType::F32 if data_type == &DataTypeNode::Float32 => Ok(None),
-        SerdeType::F64 if data_type == &DataTypeNode::Float64 => Ok(None),
+        SerdeType::U64 if data_type == &DataTypeNode::UInt64 => None,
+        SerdeType::U128 if data_type == &DataTypeNode::UInt128 => None,
+        SerdeType::F32 if data_type == &DataTypeNode::Float32 => None,
+        SerdeType::F64 if data_type == &DataTypeNode::Float64 => None,
         SerdeType::Str | SerdeType::String
             if data_type == &DataTypeNode::String || data_type == &DataTypeNode::JSON =>
         {
-            Ok(None)
+            None
         }
         // allows to work with BLOB strings as well
-        SerdeType::Bytes(_) | SerdeType::ByteBuf(_) if data_type == &DataTypeNode::String => {
-            Ok(None)
-        }
+        SerdeType::Bytes(_) | SerdeType::ByteBuf(_) if data_type == &DataTypeNode::String => None,
         SerdeType::Option => {
             if let DataTypeNode::Nullable(inner_type) = data_type {
-                Ok(Some(InnerDataTypeValidator {
+                Some(InnerDataTypeValidator {
                     root,
                     kind: InnerDataTypeValidatorKind::Nullable(inner_type),
-                }))
+                })
             } else {
                 root.panic_on_schema_mismatch(data_type, serde_type, is_inner)
             }
         }
         SerdeType::Seq(_) => match data_type {
-            DataTypeNode::Array(inner_type) => Ok(Some(InnerDataTypeValidator {
+            DataTypeNode::Array(inner_type) => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(inner_type),
-            })),
+            }),
             // A map can be defined as `Vec<(K, V)>` in the struct
-            DataTypeNode::Map(kv) => Ok(Some(InnerDataTypeValidator {
+            DataTypeNode::Map(kv) => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::MapAsSequence(
                     kv,
                     MapAsSequenceValidatorState::Tuple,
                 ),
-            })),
-            DataTypeNode::Ring => Ok(Some(InnerDataTypeValidator {
+            }),
+            DataTypeNode::Ring => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Point),
-            })),
-            DataTypeNode::Polygon => Ok(Some(InnerDataTypeValidator {
+            }),
+            DataTypeNode::Polygon => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Ring),
-            })),
-            DataTypeNode::MultiPolygon => Ok(Some(InnerDataTypeValidator {
+            }),
+            DataTypeNode::MultiPolygon => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Polygon),
-            })),
-            DataTypeNode::LineString => Ok(Some(InnerDataTypeValidator {
+            }),
+            DataTypeNode::LineString => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Point),
-            })),
-            DataTypeNode::MultiLineString => Ok(Some(InnerDataTypeValidator {
+            }),
+            DataTypeNode::MultiLineString => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::LineString),
-            })),
+            }),
             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::Tuple(len) => match data_type {
             DataTypeNode::FixedString(n) => {
                 if n == len {
-                    Ok(Some(InnerDataTypeValidator {
+                    Some(InnerDataTypeValidator {
                         root,
                         kind: InnerDataTypeValidatorKind::FixedString(*n),
-                    }))
+                    })
                 } else {
                     let (full_name, full_data_type) = root.get_current_column_name_and_type();
                     panic!(
@@ -580,34 +651,34 @@ fn validate_impl<'de, 'cursor>(
                     )
                 }
             }
-            DataTypeNode::Tuple(elements) => Ok(Some(InnerDataTypeValidator {
+            DataTypeNode::Tuple(elements) => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Tuple(elements),
-            })),
-            DataTypeNode::Array(inner_type) => Ok(Some(InnerDataTypeValidator {
+            }),
+            DataTypeNode::Array(inner_type) => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(inner_type),
-            })),
-            DataTypeNode::IPv6 => Ok(Some(InnerDataTypeValidator {
+            }),
+            DataTypeNode::IPv6 => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::UInt8),
-            })),
-            DataTypeNode::UUID => Ok(Some(InnerDataTypeValidator {
+            }),
+            DataTypeNode::UUID => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Tuple(UUID_TUPLE_ELEMENTS),
-            })),
-            DataTypeNode::Point => Ok(Some(InnerDataTypeValidator {
+            }),
+            DataTypeNode::Point => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Tuple(POINT_TUPLE_ELEMENTS),
-            })),
+            }),
             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::Map(_) => {
             if let DataTypeNode::Map(kv) = data_type {
-                Ok(Some(InnerDataTypeValidator {
+                Some(InnerDataTypeValidator {
                     root,
                     kind: InnerDataTypeValidatorKind::Map(kv, MapValidatorState::Key),
-                }))
+                })
             } else {
                 panic!(
                     "Expected Map for {} call, but got {}",
@@ -617,13 +688,13 @@ fn validate_impl<'de, 'cursor>(
         }
         SerdeType::Enum => {
             if let DataTypeNode::Variant(possible_types) = data_type {
-                Ok(Some(InnerDataTypeValidator {
+                Some(InnerDataTypeValidator {
                     root,
                     kind: InnerDataTypeValidatorKind::Variant(
                         possible_types,
                         VariantValidationState::Pending,
                     ),
-                }))
+                })
             } else {
                 panic!(
                     "Expected Variant for {} call, but got {}",
@@ -642,11 +713,8 @@ fn validate_impl<'de, 'cursor>(
 
 impl SchemaValidator for () {
     #[inline(always)]
-    fn validate(
-        &mut self,
-        _serde_type: SerdeType,
-    ) -> Result<Option<InnerDataTypeValidator<'_, '_>>> {
-        Ok(None)
+    fn validate(&mut self, _serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_>> {
+        None
     }
 
     #[inline(always)]
