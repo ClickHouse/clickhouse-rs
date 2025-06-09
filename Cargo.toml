@@ -9,8 +9,19 @@ homepage = "https://clickhouse.com"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 edition = "2021"
-# update `derive/Cargo.toml` and CI if changed
+# update `workspace.package.rust-version` below and CI if changed
 # TODO: after bumping to v1.80, remove `--precise` in the "msrv" CI job
+rust-version = "1.73.0"
+
+[workspace]
+members = ["derive", "types"]
+
+[workspace.package]
+authors = ["ClickHouse Contributors", "Paul Loyd <pavelko95@gmail.com>"]
+repository = "https://github.com/ClickHouse/clickhouse-rs"
+homepage = "https://clickhouse.com"
+edition = "2021"
+license = "MIT OR Apache-2.0"
 rust-version = "1.73.0"
 
 [lints.rust]
@@ -36,11 +47,11 @@ name = "select_numbers"
 harness = false
 
 [[bench]]
-name = "insert"
+name = "mocked_insert"
 harness = false
 
 [[bench]]
-name = "select"
+name = "mocked_select"
 harness = false
 
 [[example]]

@@ -282,7 +282,7 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/).
+* `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/). You could use `#[repr(i8)]` for `Enum8` and `#[repr(i16)]` for `Enum16`.
     <details>
     <summary>Example</summary>
 
@@ -295,7 +295,7 @@ How to choose between all these features? Here are some considerations:
     }
 
     #[derive(Debug, Serialize_repr, Deserialize_repr)]
-    #[repr(u8)]
+    #[repr(i8)]
     enum Level {
         Debug = 1,
         Info = 2,
