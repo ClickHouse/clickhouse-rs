@@ -14,7 +14,7 @@ rust-version = "1.73.0"
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1.0"
-syn = "2.0"
-quote = "1.0"
-serde_derive_internals = "0.29.1"
+proc-macro2 = "1"
+syn = "2"
+quote = "1"
+serde_derive_internals = "0.29"
