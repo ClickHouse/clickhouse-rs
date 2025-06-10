@@ -43,7 +43,7 @@ macro_rules! assert_panic_on_fetch_with_client {
 macro_rules! assert_panic_on_fetch {
     ($msg_parts:expr, $query:expr) => {
         use futures::FutureExt;
-        let client = get_client().with_validation_mode(ValidationMode::Each);
+        let client = get_client();
         let async_panic =
             std::panic::AssertUnwindSafe(async { client.query($query).fetch_all::<Data>().await });
         let result = async_panic.catch_unwind().await;

@@ -1,6 +1,4 @@
 use clickhouse::{error::Result, test, Client, Row};
-use clickhouse_types::Column;
-use clickhouse_types::DataTypeNode::UInt32;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,7 +46,9 @@ async fn make_watch_only_events(client: &Client) -> Result<u64> {
 #[tokio::main]
 async fn main() {
     let mock = test::Mock::new();
-    let client = Client::default().with_url(mock.url());
+    let client = Client::default()
+        .with_url(mock.url())
+        .with_disabled_validation();
     let list = vec![SomeRow { no: 1 }, SomeRow { no: 2 }];
 
     // How to test DDL.
@@ -56,11 +56,8 @@ async fn main() {
     make_create(&client).await.unwrap();
     assert!(recording.query().await.contains("CREATE TABLE"));
 
-    let metadata =
-        clickhouse::RowMetadata::new::<SomeRow>(vec![Column::new("no".to_string(), UInt32)]);
-
     // How to test SELECT.
-    mock.add(test::handlers::provide(&metadata, list.clone()));
+    mock.add(test::handlers::provide(list.clone()));
     let rows = make_select(&client).await.unwrap();
     assert_eq!(rows, list);
 

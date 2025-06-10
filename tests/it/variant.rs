@@ -3,13 +3,12 @@
 use serde::{Deserialize, Serialize};
 use time::Month::January;
 
-use clickhouse::validation_mode::ValidationMode::Each;
 use clickhouse::Row;
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types/variant
 
 #[tokio::test]
 async fn variant_data_type() {
-    let client = prepare_database!().with_validation_mode(Each);
+    let client = prepare_database!();
 
     // NB: Inner Variant types are _always_ sorted alphabetically,
     // and should be defined in _exactly_ the same order in the enum.

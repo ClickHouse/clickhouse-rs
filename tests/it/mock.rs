@@ -2,21 +2,16 @@
 
 use crate::SimpleRow;
 use clickhouse::{test, Client};
-use clickhouse_types::data_types::Column;
-use clickhouse_types::DataTypeNode;
 use std::time::Duration;
 
 async fn test_provide() {
     let mock = test::Mock::new();
-    let client = Client::default().with_url(mock.url());
+    let client = Client::default()
+        .with_url(mock.url())
+        .with_disabled_validation();
     let expected = vec![SimpleRow::new(1, "one"), SimpleRow::new(2, "two")];
-    let columns = vec![
-        Column::new("id".to_string(), DataTypeNode::UInt64),
-        Column::new("data".to_string(), DataTypeNode::String),
-    ];
 
-    let metadata = clickhouse::RowMetadata::new::<SimpleRow>(columns);
-    mock.add(test::handlers::provide(&metadata, &expected));
+    mock.add(test::handlers::provide(&expected));
 
     let actual = crate::fetch_rows::<SimpleRow>(&client, "doesn't matter").await;
     assert_eq!(actual, expected);

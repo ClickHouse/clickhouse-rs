@@ -84,13 +84,21 @@ impl Query {
     /// # Ok(()) }
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
-        let validation_mode = self.client.validation_mode;
-
         self.sql.bind_fields::<T>();
-        self.sql.set_output_format("RowBinaryWithNamesAndTypes");
+
+        let validation = self.client.validation;
+        if validation {
+            self.sql.set_output_format("RowBinaryWithNamesAndTypes");
+        } else {
+            self.sql.set_output_format("RowBinary");
+        }
 
         let response = self.do_execute(true)?;
-        Ok(RowCursor::new(response, validation_mode))
+
+        // #[cfg(feature = "test_util")]
+        // if response.headers
+
+        Ok(RowCursor::new(response, validation))
     }
 
     /// Executes the query and returns just a single row.

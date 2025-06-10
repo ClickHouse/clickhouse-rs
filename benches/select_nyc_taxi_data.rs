@@ -3,7 +3,6 @@
 use crate::common_select::{
     do_select_bench, print_header, print_results, BenchmarkRow, WithAccessType, WithId,
 };
-use clickhouse::validation_mode::ValidationMode;
 use clickhouse::{Compression, Row};
 use serde::Deserialize;
 use serde_repr::Deserialize_repr;
@@ -75,27 +74,27 @@ struct TripSmallMapAccess {
 impl_benchmark_row!(TripSmallSeqAccess, trip_id, "seq");
 impl_benchmark_row!(TripSmallMapAccess, trip_id, "map");
 
-async fn bench<'a, T: BenchmarkRow<'a>>(compression: Compression, validation_mode: ValidationMode) {
+async fn bench<'a, T: BenchmarkRow<'a>>(compression: Compression, validation: bool) {
     let stats = do_select_bench::<T>(
         "SELECT * FROM nyc_taxi.trips_small ORDER BY trip_id DESC",
         compression,
-        validation_mode,
+        validation,
     )
     .await;
     assert_eq!(stats.result, 3630387815532582);
-    print_results::<T>(&stats, compression, validation_mode);
+    print_results::<T>(&stats, compression, validation);
 }
 
 #[tokio::main]
 async fn main() {
     print_header(Some("  access"));
-    bench::<TripSmallSeqAccess>(Compression::None, ValidationMode::First(1)).await;
-    bench::<TripSmallSeqAccess>(Compression::None, ValidationMode::Each).await;
-    bench::<TripSmallMapAccess>(Compression::None, ValidationMode::Each).await;
+    bench::<TripSmallSeqAccess>(Compression::None, false).await;
+    bench::<TripSmallSeqAccess>(Compression::None, true).await;
+    bench::<TripSmallMapAccess>(Compression::None, true).await;
     #[cfg(feature = "lz4")]
     {
-        bench::<TripSmallSeqAccess>(Compression::Lz4, ValidationMode::First(1)).await;
-        bench::<TripSmallSeqAccess>(Compression::Lz4, ValidationMode::Each).await;
-        bench::<TripSmallMapAccess>(Compression::Lz4, ValidationMode::Each).await;
+        bench::<TripSmallSeqAccess>(Compression::Lz4, false).await;
+        bench::<TripSmallSeqAccess>(Compression::Lz4, true).await;
+        bench::<TripSmallMapAccess>(Compression::Lz4, true).await;
     }
 }

@@ -4,13 +4,29 @@ use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
 
+/// This trait is used to validate the schema of a [`crate::Row`] against the parsed RBWNAT schema.
+/// Note that [`SchemaValidator`] is also implemented for `()`,
+/// which is used to skip validation if the user disabled it.
 pub(crate) trait SchemaValidator: Sized {
+    /// Ensures that the branching is completely optimized out based on the validation settings.
+    const VALIDATION: bool;
+    /// The main entry point. The validation flow based on the [`crate::Row::KIND`].
+    /// For container types (nullable, array, map, tuple, variant, etc.),
+    /// it will return an [`InnerDataTypeValidator`] instance (see [`InnerDataTypeValidatorKind`]),
+    /// which has its own implementation of this method, allowing recursive validation.
     fn validate(&'_ mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_>>;
-    fn validate_enum8_value(&mut self, value: i8);
-    fn validate_enum16_value(&mut self, value: i16);
-    fn set_next_variant_value(&mut self, value: u8);
-    fn get_schema_index(&self, struct_idx: usize) -> usize;
+    /// Validates that an identifier exists in the values map for enums,
+    /// or stores the variant identifier for the next serde call.
+    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, value: T);
+    /// Having the database schema from RBWNAT, the crate can detect that
+    /// while the field names and the types are correct, the field order in the struct
+    /// does not match the column order in the database schema, and we should use
+    /// `MapAccess` instead of `SeqAccess` to seamlessly deserialize the struct.
     fn is_field_order_wrong(&self) -> bool;
+    /// Returns the "restored" index of the schema column for the given struct field index.
+    /// It is used only if the crate detects that while the field names and the types are correct,
+    /// the field order in the struct does not match the column order in the database schema.
+    fn get_schema_index(&self, struct_idx: usize) -> usize;
 }
 
 pub(crate) struct DataTypeValidator<'cursor> {
@@ -94,6 +110,8 @@ impl<'cursor> DataTypeValidator<'cursor> {
 }
 
 impl SchemaValidator for DataTypeValidator<'_> {
+    const VALIDATION: bool = true;
+
     #[inline]
     fn validate(&'_ mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_>> {
         match self.metadata.kind {
@@ -166,20 +184,7 @@ impl SchemaValidator for DataTypeValidator<'_> {
     }
 
     #[cold]
-    #[inline(never)]
-    fn validate_enum8_value(&mut self, _value: i8) {
-        unreachable!()
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn validate_enum16_value(&mut self, _value: i16) {
-        unreachable!()
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn set_next_variant_value(&mut self, _value: u8) {
+    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, _value: T) {
         unreachable!()
     }
 }
@@ -234,6 +239,8 @@ pub(crate) enum VariantValidationState {
 }
 
 impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'cursor>> {
+    const VALIDATION: bool = true;
+
     #[inline]
     fn validate(&mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'de, 'cursor>> {
         match self {
@@ -342,49 +349,37 @@ impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'curso
         }
     }
 
-    #[inline(always)]
-    fn validate_enum8_value(&mut self, value: i8) {
+    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, value: T) {
+        use InnerDataTypeValidatorKind::{Enum, Variant};
         if let Some(inner) = self {
-            if let InnerDataTypeValidatorKind::Enum(values_map) = &inner.kind {
-                if !values_map.contains_key(&(value as i16)) {
-                    let (full_name, full_data_type) = inner.root.get_current_column_name_and_type();
-                    panic!(
-                        "While processing column {full_name} defined as {full_data_type}: \
-                         Enum8 value {value} is not present in the database schema"
-                    );
+            match T::IDENTIFIER_TYPE {
+                IdentifierType::Enum8 | IdentifierType::Enum16 => {
+                    if let Enum(values_map) = &inner.kind {
+                        if !values_map.contains_key(&(value.into_i16())) {
+                            let (full_name, full_data_type) =
+                                inner.root.get_current_column_name_and_type();
+                            panic!(
+                                "While processing column {full_name} defined as {full_data_type}: \
+                                Enum8 value {value} is not present in the database schema"
+                            );
+                        }
+                    }
                 }
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn validate_enum16_value(&mut self, value: i16) {
-        if let Some(inner) = self {
-            if let InnerDataTypeValidatorKind::Enum(values_map) = &inner.kind {
-                if !values_map.contains_key(&value) {
-                    let (full_name, full_data_type) = inner.root.get_current_column_name_and_type();
-                    panic!(
-                        "While processing column {full_name} defined as {full_data_type}: \
-                         Enum16 value {value} is not present in the database schema"
-                    );
-                }
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn set_next_variant_value(&mut self, value: u8) {
-        if let Some(inner) = self {
-            if let InnerDataTypeValidatorKind::Variant(possible_types, state) = &mut inner.kind {
-                if (value as usize) < possible_types.len() {
-                    *state = VariantValidationState::Identifier(value);
-                } else {
-                    let (full_name, full_data_type) = inner.root.get_current_column_name_and_type();
-                    panic!(
-                        "While processing column {full_name} defined as {full_data_type}: \
-                         Variant identifier {value} is out of bounds, max allowed index is {}",
-                        possible_types.len() - 1
-                    );
+                IdentifierType::Variant => {
+                    if let Variant(possible_types, state) = &mut inner.kind {
+                        // ClickHouse guarantees max 255 variants, i.e. the same max value as u8
+                        if value.into_u8() < (possible_types.len() as u8) {
+                            *state = VariantValidationState::Identifier(value.into_u8());
+                        } else {
+                            let (full_name, full_data_type) =
+                                inner.root.get_current_column_name_and_type();
+                            panic!(
+                                "While processing column {full_name} defined as {full_data_type}: \
+                                 Variant identifier {value} is out of bounds, max allowed index is {}",
+                                possible_types.len() - 1
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -395,6 +390,7 @@ impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'curso
         false
     }
 
+    #[cold]
     fn get_schema_index(&self, _struct_idx: usize) -> usize {
         unreachable!()
     }
@@ -420,89 +416,6 @@ impl Drop for InnerDataTypeValidator<'_, '_> {
         }
     }
 }
-
-// #[inline]
-// fn simple_types_impl<'de, 'cursor>(
-//     root: &'de DataTypeValidator<'cursor>,
-//     data_type: &'cursor DataTypeNode,
-//     serde_type: &SerdeType,
-//     is_inner: bool,
-// ) {
-//     match serde_type {
-//         SerdeType::Bool
-//         if data_type == &DataTypeNode::Bool || data_type == &DataTypeNode::UInt8 =>
-//             {
-//                 None
-//             }
-//         SerdeType::I8 => match data_type {
-//             DataTypeNode::Int8 => None,
-//             DataTypeNode::Enum(EnumType::Enum8, values_map) => Some(InnerDataTypeValidator {
-//                 root,
-//                 kind: InnerDataTypeValidatorKind::Enum(values_map),
-//             })),
-//             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
-//         },
-//         SerdeType::I16 => match data_type {
-//             DataTypeNode::Int16 => None,
-//             DataTypeNode::Enum(EnumType::Enum16, values_map) => Some(InnerDataTypeValidator {
-//                 root,
-//                 kind: InnerDataTypeValidatorKind::Enum(values_map),
-//             })),
-//             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
-//         },
-//         SerdeType::I32
-//         if data_type == &DataTypeNode::Int32
-//             || data_type == &DataTypeNode::Date32
-//             || matches!(
-//                     data_type,
-//                     DataTypeNode::Decimal(_, _, DecimalType::Decimal32)
-//                 ) =>
-//             {
-//                 None
-//             }
-//         SerdeType::I64
-//         if data_type == &DataTypeNode::Int64
-//             || matches!(data_type, DataTypeNode::DateTime64(_, _))
-//             || matches!(
-//                     data_type,
-//                     DataTypeNode::Decimal(_, _, DecimalType::Decimal64)
-//                 ) =>
-//             {
-//                 None
-//             }
-//         SerdeType::I128
-//         if data_type == &DataTypeNode::Int128
-//             || matches!(
-//                     data_type,
-//                     DataTypeNode::Decimal(_, _, DecimalType::Decimal128)
-//                 ) =>
-//             {
-//                 None
-//             }
-//         SerdeType::U8 if data_type == &DataTypeNode::UInt8 => None,
-//         SerdeType::U16
-//         if data_type == &DataTypeNode::UInt16 || data_type == &DataTypeNode::Date =>
-//             {
-//                 None
-//             }
-//         SerdeType::U32
-//         if data_type == &DataTypeNode::UInt32
-//             || matches!(data_type, DataTypeNode::DateTime(_))
-//             || data_type == &DataTypeNode::IPv4 =>
-//             {
-//                 None
-//             }
-//         SerdeType::U64 if data_type == &DataTypeNode::UInt64 => None,
-//         SerdeType::U128 if data_type == &DataTypeNode::UInt128 => None,
-//         SerdeType::F32 if data_type == &DataTypeNode::Float32 => None,
-//         SerdeType::F64 if data_type == &DataTypeNode::Float64 => None,
-//         SerdeType::Str | SerdeType::String
-//         if data_type == &DataTypeNode::String || data_type == &DataTypeNode::JSON =>
-//             {
-//                 None
-//             }
-//     }
-// }
 
 // TODO: is there a way to eliminate multiple branches with similar patterns?
 //  static/const dispatch?
@@ -712,25 +625,22 @@ fn validate_impl<'de, 'cursor>(
 }
 
 impl SchemaValidator for () {
+    const VALIDATION: bool = false;
+
     #[inline(always)]
     fn validate(&mut self, _serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_>> {
         None
     }
 
     #[inline(always)]
-    fn validate_enum8_value(&mut self, _value: i8) {}
-
-    #[inline(always)]
-    fn validate_enum16_value(&mut self, _value: i16) {}
-
-    #[inline(always)]
-    fn set_next_variant_value(&mut self, _value: u8) {}
-
-    #[inline(always)]
     fn is_field_order_wrong(&self) -> bool {
         false
     }
 
+    #[inline(always)]
+    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, _value: T) {}
+
+    #[cold]
     fn get_schema_index(&self, _struct_idx: usize) -> usize {
         unreachable!()
     }
@@ -807,6 +717,54 @@ impl Display for SerdeType {
             // SerdeType::UnitStruct => "unit struct",
             // SerdeType::IgnoredAny => "ignored any",
         }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum IdentifierType {
+    Enum8,
+    Enum16,
+    Variant,
+}
+pub(crate) trait EnumOrVariantIdentifier: Display + Copy {
+    const IDENTIFIER_TYPE: IdentifierType;
+    fn into_u8(self) -> u8;
+    fn into_i16(self) -> i16;
+}
+impl EnumOrVariantIdentifier for u8 {
+    const IDENTIFIER_TYPE: IdentifierType = IdentifierType::Variant;
+    // none of these should be ever called
+    #[inline(always)]
+    fn into_u8(self) -> u8 {
+        self
+    }
+    #[inline(always)]
+    fn into_i16(self) -> i16 {
+        self as i16
+    }
+}
+impl EnumOrVariantIdentifier for i8 {
+    const IDENTIFIER_TYPE: IdentifierType = IdentifierType::Enum8;
+    #[inline(always)]
+    fn into_i16(self) -> i16 {
+        self as i16
+    }
+    // we need only i16 for enum values HashMap
+    #[inline(always)]
+    fn into_u8(self) -> u8 {
+        self as u8
+    }
+}
+impl EnumOrVariantIdentifier for i16 {
+    const IDENTIFIER_TYPE: IdentifierType = IdentifierType::Enum16;
+    #[inline(always)]
+    fn into_i16(self) -> i16 {
+        self
+    }
+    // should not be ever called
+    #[inline(always)]
+    fn into_u8(self) -> u8 {
+        self as u8
     }
 }
 

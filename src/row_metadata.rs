@@ -20,7 +20,7 @@ type LockedRowMetadataCache = RwLock<HashMap<String, Arc<RowMetadata>>>;
 static ROW_METADATA_CACHE: OnceCell<LockedRowMetadataCache> = OnceCell::const_new();
 
 #[derive(Debug, PartialEq)]
-enum AccessType {
+pub(crate) enum AccessType {
     WithSeqAccess,
     WithMapAccess(Vec<usize>),
 }
@@ -28,7 +28,7 @@ enum AccessType {
 /// [`RowMetadata`] should be owned outside the (de)serializer,
 /// as it is calculated only once per struct. It does not have lifetimes,
 /// so it does not introduce a breaking change to [`crate::cursors::RowCursor`].
-pub struct RowMetadata {
+pub(crate) struct RowMetadata {
     /// See [`Row::NAME`]
     pub(crate) name: &'static str,
     /// See [`Row::TYPE`]
@@ -43,8 +43,7 @@ pub struct RowMetadata {
 }
 
 impl RowMetadata {
-    // FIXME: perhaps it should not be public? But it is required for mocks/provide.
-    pub fn new<T: Row>(columns: Vec<Column>) -> Self {
+    pub(crate) fn new<T: Row>(columns: Vec<Column>) -> Self {
         let access_type = match T::KIND {
             RowKind::Primitive => {
                 if columns.len() != 1 {

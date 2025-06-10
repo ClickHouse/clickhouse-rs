@@ -122,12 +122,10 @@ fn it_deserializes() {
         let (mut left, mut right) = input.split_at(i);
 
         // It shouldn't panic.
-        let _: Result<Sample<'_>, _> = super::deserialize_from(&mut left, None).0;
-        let _: Result<Sample<'_>, _> = super::deserialize_from(&mut right, None).0;
+        let _: Result<Sample<'_>, _> = super::deserialize_row_binary(&mut left);
+        let _: Result<Sample<'_>, _> = super::deserialize_row_binary(&mut right);
 
-        let actual: Sample<'_> = super::deserialize_from(&mut input.as_slice(), None)
-            .0
-            .unwrap();
+        let actual: Sample<'_> = super::deserialize_row_binary(&mut input.as_slice()).unwrap();
         assert_eq!(actual, sample());
     }
 }

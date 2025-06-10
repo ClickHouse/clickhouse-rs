@@ -24,24 +24,20 @@ use std::{convert::TryFrom, str};
 /// It expects a slice of [`Column`] objects parsed
 /// from the beginning of `RowBinaryWithNamesAndTypes` data stream.
 /// After the header, the rows format is the same as `RowBinary`.
-pub(crate) fn deserialize_from<'data, 'cursor, T: Deserialize<'data>>(
+pub(crate) fn deserialize_row_binary<'data, 'cursor, T: Deserialize<'data>>(
+    input: &mut &'data [u8],
+) -> Result<T> {
+    let mut deserializer = RowBinaryDeserializer::new(input, ());
+    T::deserialize(&mut deserializer)
+}
+
+pub(crate) fn deserialize_rbwnat<'data, 'cursor, T: Deserialize<'data>>(
     input: &mut &'data [u8],
     metadata: Option<&'cursor RowMetadata>,
-) -> (Result<T>, bool) {
-    let result = if metadata.is_none() {
-        let mut deserializer = RowBinaryDeserializer::new(input, ());
-        T::deserialize(&mut deserializer)
-    } else {
-        let validator = DataTypeValidator::new(metadata.unwrap());
-        let mut deserializer = RowBinaryDeserializer::new(input, validator);
-        T::deserialize(&mut deserializer)
-    };
-    // an explicit hint about NotEnoughData error boosts RowCursor performance ~20%
-    match result {
-        Ok(value) => (Ok(value), false),
-        Err(Error::NotEnoughData) => (Err(Error::NotEnoughData), true),
-        Err(e) => (Err(e), false),
-    }
+) -> Result<T> {
+    let validator = DataTypeValidator::new(metadata.unwrap());
+    let mut deserializer = RowBinaryDeserializer::new(input, validator);
+    T::deserialize(&mut deserializer)
 }
 
 /// A deserializer for the `RowBinary(WithNamesAndTypes)` format.
@@ -85,10 +81,30 @@ macro_rules! impl_num {
     ($ty:ty, $deser_method:ident, $visitor_method:ident, $reader_method:ident, $serde_type:expr) => {
         #[inline(always)]
         fn $deser_method<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-            self.validator.validate($serde_type);
+            if Validator::VALIDATION {
+                self.validator.validate($serde_type);
+            }
             ensure_size(&mut self.input, core::mem::size_of::<$ty>())?;
             let value = self.input.$reader_method();
             visitor.$visitor_method(value)
+        }
+    };
+}
+
+macro_rules! impl_num_or_enum {
+    ($ty:ty, $deser_method:ident, $visitor_method:ident, $reader_method:ident, $serde_type:expr) => {
+        #[inline(always)]
+        fn $deser_method<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+            if Validator::VALIDATION {
+                let mut maybe_enum_validator = self.validator.validate($serde_type);
+                ensure_size(&mut self.input, core::mem::size_of::<$ty>())?;
+                let value = self.input.$reader_method();
+                maybe_enum_validator.validate_identifier::<$ty>(value);
+                visitor.$visitor_method(value)
+            } else {
+                ensure_size(&mut self.input, core::mem::size_of::<$ty>())?;
+                visitor.$visitor_method(self.input.$reader_method())
+            }
         }
     };
 }
@@ -99,47 +115,24 @@ where
 {
     type Error = Error;
 
-    #[inline(always)]
-    fn deserialize_i8<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        let mut maybe_enum_validator = self.validator.validate(SerdeType::I8);
-        ensure_size(&mut self.input, size_of::<i8>())?;
-        let value = self.input.get_i8();
-        maybe_enum_validator.validate_enum8_value(value);
-        visitor.visit_i8(value)
-    }
-
-    #[inline(always)]
-    fn deserialize_i16<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        let mut maybe_enum_validator = self.validator.validate(SerdeType::I16);
-        ensure_size(&mut self.input, size_of::<i16>())?;
-        let value = self.input.get_i16_le();
-        // TODO: is there a better way to validate that the deserialized value matches the schema?
-        maybe_enum_validator.validate_enum16_value(value);
-        visitor.visit_i16(value)
-    }
+    impl_num_or_enum!(i8, deserialize_i8, visit_i8, get_i8, SerdeType::I8);
+    impl_num_or_enum!(i16, deserialize_i16, visit_i16, get_i16_le, SerdeType::I16);
 
     impl_num!(i32, deserialize_i32, visit_i32, get_i32_le, SerdeType::I32);
     impl_num!(i64, deserialize_i64, visit_i64, get_i64_le, SerdeType::I64);
-    impl_num!(
-        i128,
-        deserialize_i128,
-        visit_i128,
-        get_i128_le,
-        SerdeType::I128
-    );
+
     impl_num!(u8, deserialize_u8, visit_u8, get_u8, SerdeType::U8);
     impl_num!(u16, deserialize_u16, visit_u16, get_u16_le, SerdeType::U16);
     impl_num!(u32, deserialize_u32, visit_u32, get_u32_le, SerdeType::U32);
     impl_num!(u64, deserialize_u64, visit_u64, get_u64_le, SerdeType::U64);
-    impl_num!(
-        u128,
-        deserialize_u128,
-        visit_u128,
-        get_u128_le,
-        SerdeType::U128
-    );
+
     impl_num!(f32, deserialize_f32, visit_f32, get_f32_le, SerdeType::F32);
     impl_num!(f64, deserialize_f64, visit_f64, get_f64_le, SerdeType::F64);
+
+    #[rustfmt::skip]
+    impl_num!(i128, deserialize_i128, visit_i128, get_i128_le, SerdeType::I128);
+    #[rustfmt::skip]
+    impl_num!(u128, deserialize_u128, visit_u128, get_u128_le, SerdeType::U128);
 
     #[inline(always)]
     fn deserialize_any<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
@@ -155,7 +148,9 @@ where
 
     #[inline(always)]
     fn deserialize_bool<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.validator.validate(SerdeType::Bool);
+        if Validator::VALIDATION {
+            self.validator.validate(SerdeType::Bool);
+        }
         ensure_size(&mut self.input, 1)?;
         match self.input.get_u8() {
             0 => visitor.visit_bool(false),
@@ -166,7 +161,9 @@ where
 
     #[inline(always)]
     fn deserialize_str<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.validator.validate(SerdeType::Str);
+        if Validator::VALIDATION {
+            self.validator.validate(SerdeType::Str);
+        }
         let size = self.read_size()?;
         let slice = self.read_slice(size)?;
         let str = str::from_utf8(slice).map_err(Error::from)?;
@@ -175,7 +172,9 @@ where
 
     #[inline(always)]
     fn deserialize_string<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.validator.validate(SerdeType::String);
+        if Validator::VALIDATION {
+            self.validator.validate(SerdeType::String);
+        }
         let size = self.read_size()?;
         let vec = self.read_vec(size)?;
         let string = String::from_utf8(vec).map_err(|err| Error::from(err.utf8_error()))?;
@@ -185,7 +184,9 @@ where
     #[inline(always)]
     fn deserialize_bytes<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
-        self.validator.validate(SerdeType::Bytes(size));
+        if Validator::VALIDATION {
+            self.validator.validate(SerdeType::Bytes(size));
+        }
         let slice = self.read_slice(size)?;
         visitor.visit_borrowed_bytes(slice)
     }
@@ -193,16 +194,25 @@ where
     #[inline(always)]
     fn deserialize_byte_buf<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
-        self.validator.validate(SerdeType::ByteBuf(size));
+        if Validator::VALIDATION {
+            self.validator.validate(SerdeType::ByteBuf(size));
+        }
         visitor.visit_byte_buf(self.read_vec(size)?)
     }
 
+    /// This is used to deserialize identifiers for either:
+    /// - `Variant` data type
+    /// - [`RowBinaryStructAsMapAccess`] field.
     #[inline(always)]
     fn deserialize_identifier<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         ensure_size(&mut self.input, size_of::<u8>())?;
         let value = self.input.get_u8();
         // TODO: is there a better way to validate that the deserialized value matches the schema?
-        self.validator.set_next_variant_value(value);
+        if Validator::VALIDATION {
+            // TODO: theoretically, we can track if we are currently processing a struct field id,
+            //  and don't call the validator in that case, cause it will never be a `Variant`.
+            self.validator.validate_identifier::<u8>(value);
+        }
         visitor.visit_u8(value)
     }
 
@@ -213,67 +223,98 @@ where
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        let validator = self.validator.validate(SerdeType::Enum);
-        visitor.visit_enum(RowBinaryEnumAccess {
-            deserializer: &mut RowBinaryDeserializer {
-                input: self.input,
-                validator,
-            },
-        })
+        if Validator::VALIDATION {
+            visitor.visit_enum(RowBinaryEnumAccess {
+                deserializer: &mut RowBinaryDeserializer {
+                    input: self.input,
+                    validator: self.validator.validate(SerdeType::Enum),
+                },
+            })
+        } else {
+            visitor.visit_enum(RowBinaryEnumAccess { deserializer: self })
+        }
     }
 
     #[inline(always)]
     fn deserialize_tuple<V: Visitor<'data>>(self, len: usize, visitor: V) -> Result<V::Value> {
-        let validator = self.validator.validate(SerdeType::Tuple(len));
-        let mut de = RowBinaryDeserializer {
-            input: self.input,
-            validator,
-        };
-        let access = RowBinarySeqAccess {
-            deserializer: &mut de,
-            len,
-        };
-        visitor.visit_seq(access)
+        if Validator::VALIDATION {
+            visitor.visit_seq(RowBinarySeqAccess {
+                deserializer: &mut RowBinaryDeserializer {
+                    input: self.input,
+                    validator: self.validator.validate(SerdeType::Tuple(len)),
+                },
+                len,
+            })
+        } else {
+            visitor.visit_seq(RowBinarySeqAccess {
+                deserializer: self,
+                len,
+            })
+        }
     }
 
     #[inline(always)]
     fn deserialize_option<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         ensure_size(&mut self.input, 1)?;
-        let inner_validator = self.validator.validate(SerdeType::Option);
-        match self.input.get_u8() {
-            0 => visitor.visit_some(&mut RowBinaryDeserializer {
-                input: self.input,
-                validator: inner_validator,
-            }),
-            1 => visitor.visit_none(),
-            v => Err(Error::InvalidTagEncoding(v as usize)),
+        let is_null = self.input.get_u8();
+        if Validator::VALIDATION {
+            let inner_validator = self.validator.validate(SerdeType::Option);
+            match is_null {
+                0 => visitor.visit_some(&mut RowBinaryDeserializer {
+                    input: self.input,
+                    validator: inner_validator,
+                }),
+                1 => visitor.visit_none(),
+                v => Err(Error::InvalidTagEncoding(v as usize)),
+            }
+        } else {
+            // a bit of copy-paste here, since Deserializer types are not exactly the same
+            match is_null {
+                0 => visitor.visit_some(self),
+                1 => visitor.visit_none(),
+                v => Err(Error::InvalidTagEncoding(v as usize)),
+            }
         }
     }
 
     #[inline(always)]
     fn deserialize_seq<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let len = self.read_size()?;
-        visitor.visit_seq(RowBinarySeqAccess {
-            deserializer: &mut RowBinaryDeserializer {
-                input: self.input,
-                validator: self.validator.validate(SerdeType::Seq(len)),
-            },
-            len,
-        })
+        if Validator::VALIDATION {
+            visitor.visit_seq(RowBinarySeqAccess {
+                deserializer: &mut RowBinaryDeserializer {
+                    input: self.input,
+                    validator: self.validator.validate(SerdeType::Seq(len)),
+                },
+                len,
+            })
+        } else {
+            visitor.visit_seq(RowBinarySeqAccess {
+                deserializer: self,
+                len,
+            })
+        }
     }
 
     #[inline(always)]
     fn deserialize_map<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let len = self.read_size()?;
-        let validator = self.validator.validate(SerdeType::Map(len));
-        visitor.visit_map(RowBinaryMapAccess {
-            deserializer: &mut RowBinaryDeserializer {
-                input: self.input,
-                validator,
-            },
-            entries_visited: 0,
-            len,
-        })
+        if Validator::VALIDATION {
+            visitor.visit_map(RowBinaryMapAccess {
+                deserializer: &mut RowBinaryDeserializer {
+                    input: self.input,
+                    validator: self.validator.validate(SerdeType::Map(len)),
+                },
+                entries_visited: 0,
+                len,
+            })
+        } else {
+            visitor.visit_map(RowBinaryMapAccess {
+                deserializer: self,
+                entries_visited: 0,
+                len,
+            })
+        }
     }
 
     #[inline(always)]
@@ -283,16 +324,24 @@ where
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        if !self.validator.is_field_order_wrong() {
+        if Validator::VALIDATION {
+            if !self.validator.is_field_order_wrong() {
+                visitor.visit_seq(RowBinarySeqAccess {
+                    deserializer: self,
+                    len: fields.len(),
+                })
+            } else {
+                visitor.visit_map(RowBinaryStructAsMapAccess {
+                    deserializer: self,
+                    current_field_idx: 0,
+                    fields,
+                })
+            }
+        } else {
+            // We can't detect incorrect field order with just plain `RowBinary` format
             visitor.visit_seq(RowBinarySeqAccess {
                 deserializer: self,
                 len: fields.len(),
-            })
-        } else {
-            visitor.visit_map(RowBinaryStructAsMapAccess {
-                deserializer: self,
-                current_field_idx: 0,
-                fields,
             })
         }
     }

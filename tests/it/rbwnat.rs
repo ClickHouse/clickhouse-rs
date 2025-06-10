@@ -1,6 +1,5 @@
 use crate::{execute_statements, get_client};
 use clickhouse::sql::Identifier;
-use clickhouse::validation_mode::ValidationMode;
 use clickhouse_derive::Row;
 use clickhouse_types::data_types::{Column, DataTypeNode};
 use clickhouse_types::parse_rbwnat_columns_header;
@@ -105,7 +104,7 @@ async fn test_header_parsing() {
 
 #[tokio::test]
 async fn test_fetch_primitive_row() {
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query("SELECT count() FROM (SELECT * FROM system.numbers LIMIT 3)")
         .fetch_one::<u64>()
@@ -124,7 +123,7 @@ async fn test_fetch_primitive_row_schema_mismatch() {
 
 #[tokio::test]
 async fn test_fetch_vector_row() {
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query("SELECT [1, 2, 3] :: Array(UInt32)")
         .fetch_one::<Vec<u32>>()
@@ -143,7 +142,7 @@ async fn test_fetch_vector_row_schema_mismatch_nested_type() {
 
 #[tokio::test]
 async fn test_fetch_tuple_row() {
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query("SELECT 42 :: UInt32 AS a, 'foo' :: String AS b")
         .fetch_one::<(u32, String)>()
@@ -201,7 +200,7 @@ async fn test_fetch_tuple_row_with_struct() {
         b: String,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query("SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c")
         .fetch_one::<(Data, u64)>()
@@ -307,7 +306,7 @@ async fn test_basic_types() {
         string_val: String,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -368,7 +367,7 @@ async fn test_borrowed_data() {
         hash_map_nested: HashMap<&'a str, HashMap<&'a str, &'a str>>,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let mut cursor = client
         .query(
             "
@@ -454,7 +453,7 @@ async fn test_several_simple_rows() {
         str: String,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query("SELECT number AS num, toString(number) AS str FROM system.numbers LIMIT 3")
         .fetch_all::<Data>()
@@ -486,7 +485,7 @@ async fn test_many_numbers() {
         number: u64,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let mut cursor = client
         .query("SELECT number FROM system.numbers_mt LIMIT 2000")
         .fetch::<Data>()
@@ -507,7 +506,7 @@ async fn test_blob_string_with_serde_bytes() {
         blob: Vec<u8>,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query("SELECT 'foo' :: String AS blob")
         .fetch_one::<Data>()
@@ -532,7 +531,7 @@ async fn test_arrays() {
         description: String,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -571,7 +570,7 @@ async fn test_maps() {
         m2: HashMap<u16, HashMap<String, i32>>,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -621,7 +620,7 @@ async fn test_map_as_vec_of_tuples() {
         m2: Vec<(u16, Vec<(String, i32)>)>,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -719,7 +718,7 @@ async fn test_enum() {
 
     let table_name = "test_rbwnat_enum";
 
-    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
+    let client = prepare_database!();
     client
         .query(
             "
@@ -783,7 +782,7 @@ async fn test_nullable() {
         b: Option<i64>,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -830,7 +829,7 @@ async fn test_low_cardinality() {
         b: Option<i64>,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -864,9 +863,7 @@ async fn test_invalid_low_cardinality() {
     struct Data {
         a: u32,
     }
-    let client = get_client()
-        .with_validation_mode(ValidationMode::Each)
-        .with_option("allow_suspicious_low_cardinality_types", "1");
+    let client = get_client().with_option("allow_suspicious_low_cardinality_types", "1");
     assert_panic_on_fetch_with_client!(
         client,
         &["Data.a", "LowCardinality(Int32)", "u32"],
@@ -880,9 +877,7 @@ async fn test_invalid_nullable_low_cardinality() {
     struct Data {
         a: Option<u32>,
     }
-    let client = get_client()
-        .with_validation_mode(ValidationMode::Each)
-        .with_option("allow_suspicious_low_cardinality_types", "1");
+    let client = get_client().with_option("allow_suspicious_low_cardinality_types", "1");
     assert_panic_on_fetch_with_client!(
         client,
         &["Data.a", "LowCardinality(Nullable(Int32))", "u32"],
@@ -925,7 +920,7 @@ async fn test_serde_skip_deserializing() {
         c: u32,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query("SELECT 42 :: UInt32 AS a, 144 :: UInt32 AS c")
         .fetch_one::<Data>()
@@ -966,7 +961,7 @@ async fn test_date_and_time() {
         date_time64_9: OffsetDateTime,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -1014,7 +1009,7 @@ async fn test_uuid() {
         uuid: uuid::Uuid,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -1045,7 +1040,7 @@ async fn test_ipv4_ipv6() {
         ipv6: std::net::Ipv6Addr,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -1076,7 +1071,7 @@ async fn test_fixed_str() {
         b: [u8; 3],
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query("SELECT '1234' :: FixedString(4) AS a, '777' :: FixedString(3) AS b")
         .fetch_one::<Data>()
@@ -1108,7 +1103,7 @@ async fn test_tuple() {
         b: (i128, HashMap<u16, String>),
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -1223,7 +1218,7 @@ async fn test_geo() {
         multi_line_string: MultiLineString,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -1325,7 +1320,7 @@ async fn test_issue_109_1() {
         drone_id: String,
         call_sign: String,
     }
-    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
+    let client = prepare_database!();
     execute_statements(
         &client,
         &[
@@ -1390,7 +1385,7 @@ async fn test_issue_113() {
         b: f64,
         c: f64,
     }
-    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
+    let client = prepare_database!();
     execute_statements(&client, &[
         "
         CREATE TABLE issue_113_1(
@@ -1436,7 +1431,7 @@ async fn test_issue_114() {
         arr: Vec<HashMap<String, String>>,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -1471,9 +1466,7 @@ async fn test_issue_173() {
         ts: time::OffsetDateTime,
     }
 
-    let client = prepare_database!()
-        .with_validation_mode(ValidationMode::Each)
-        .with_option("date_time_input_format", "best_effort");
+    let client = prepare_database!().with_option("date_time_input_format", "best_effort");
 
     execute_statements(&client, &[
         "
@@ -1506,7 +1499,7 @@ async fn test_issue_185() {
         decimal_col: Option<String>,
     }
 
-    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
+    let client = prepare_database!();
     execute_statements(
         &client,
         &[
@@ -1537,7 +1530,7 @@ async fn test_issue_218() {
         max_time: chrono::DateTime<chrono::Utc>,
     }
 
-    let client = prepare_database!().with_validation_mode(ValidationMode::Each);
+    let client = prepare_database!();
     execute_statements(
         &client,
         &["
@@ -1573,9 +1566,7 @@ async fn test_variant_wrong_definition() {
         var: MyVariant,
     }
 
-    let client = get_client()
-        .with_validation_mode(ValidationMode::Each)
-        .with_option("allow_experimental_variant_type", "1");
+    let client = get_client().with_option("allow_experimental_variant_type", "1");
 
     assert_panic_on_fetch_with_client!(
         client,
@@ -1599,7 +1590,7 @@ async fn test_decimals() {
         decimal128_38_12: Decimal128,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "
@@ -1670,7 +1661,7 @@ async fn test_different_struct_field_order_same_types() {
         a: String,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query("SELECT 'foo' AS a, 'bar' :: String AS c")
         .fetch_one::<Data>()
@@ -1694,7 +1685,7 @@ async fn test_different_struct_field_order_different_types() {
         c: Vec<bool>,
     }
 
-    let client = get_client().with_validation_mode(ValidationMode::Each);
+    let client = get_client();
     let result = client
         .query(
             "

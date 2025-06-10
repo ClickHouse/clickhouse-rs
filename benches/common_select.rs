@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use clickhouse::query::RowCursor;
-use clickhouse::validation_mode::ValidationMode;
 use clickhouse::{Client, Compression, Row};
 use criterion::black_box;
 use serde::Deserialize;
@@ -57,7 +56,7 @@ pub(crate) fn print_header(add: Option<&str>) {
 pub(crate) fn print_results<'a, T: BenchmarkRow<'a>>(
     stats: &BenchmarkStats<u64>,
     compression: Compression,
-    validation_mode: ValidationMode,
+    validation: bool,
 ) {
     let BenchmarkStats {
         throughput_mbytes_sec,
@@ -65,11 +64,7 @@ pub(crate) fn print_results<'a, T: BenchmarkRow<'a>>(
         elapsed,
         ..
     } = stats;
-    let validation_mode = match validation_mode {
-        ValidationMode::First(n) => format!("First({})", n),
-        ValidationMode::Each => "Each".to_string(),
-        _ => panic!("Unexpected validation mode"),
-    };
+    let validation_mode = if validation { "enabled" } else { "disabled" };
     let compression = match compression {
         Compression::None => "none",
         #[cfg(feature = "lz4")]
@@ -87,23 +82,25 @@ pub(crate) fn print_results<'a, T: BenchmarkRow<'a>>(
 
 pub(crate) async fn fetch_cursor<'a, T: BenchmarkRow<'a>>(
     compression: Compression,
-    validation_mode: ValidationMode,
+    validation: bool,
     query: &str,
 ) -> RowCursor<T> {
-    let client = Client::default()
+    let mut client = Client::default()
         .with_compression(compression)
-        .with_validation_mode(validation_mode)
         .with_url("http://localhost:8123");
+    if !validation {
+        client = client.with_disabled_validation();
+    }
     client.query(query).fetch::<T>().unwrap()
 }
 
 pub(crate) async fn do_select_bench<'a, T: BenchmarkRow<'a>>(
     query: &str,
     compression: Compression,
-    validation_mode: ValidationMode,
+    validation: bool,
 ) -> BenchmarkStats<u64> {
     let start = Instant::now();
-    let mut cursor = fetch_cursor::<T>(compression, validation_mode, query).await;
+    let mut cursor = fetch_cursor::<T>(compression, validation, query).await;
 
     let mut sum = 0;
     while let Some(row) = cursor.next().await.unwrap() {
