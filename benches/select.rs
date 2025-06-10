@@ -33,12 +33,15 @@ async fn serve(
 }
 
 fn prepare_chunk() -> Bytes {
-    use rand::{distributions::Standard, rngs::SmallRng, Rng, SeedableRng};
+    use rand::{distr::StandardUniform, rngs::SmallRng, Rng, SeedableRng};
 
     // Generate random data to avoid _real_ compression.
     // TODO: It would be more useful to generate real data.
     let mut rng = SmallRng::seed_from_u64(0xBA5E_FEED);
-    let raw: Vec<_> = (&mut rng).sample_iter(Standard).take(128 * 1024).collect();
+    let raw: Vec<_> = (&mut rng)
+        .sample_iter(StandardUniform)
+        .take(128 * 1024)
+        .collect();
 
     // If the feature is enabled, compress the data even if we use the `None`
     // compression. The compression ratio is low anyway due to random data.

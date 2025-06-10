@@ -141,4 +141,4 @@ serde_repr = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 time = { version = "0.3", features = ["macros", "rand"] }
 fixnum = { version = "0.9", features = ["serde", "i32", "i64", "i128"] }
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { version = "0.9", features = ["small_rng"] }
