@@ -5,10 +5,11 @@ use std::{
 };
 
 use bytes::Bytes;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use http_body_util::Empty;
 use hyper::{body::Incoming, Request, Response};
 use serde::Serialize;
+use std::hint::black_box;
 
 use clickhouse::{error::Result, Client, Compression, Row};
 

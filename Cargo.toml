@@ -131,7 +131,7 @@ quanta = { version = "0.12", optional = true }
 replace_with = { version = "0.1" }
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.6"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 hyper = { version = "1", features = ["server"] }

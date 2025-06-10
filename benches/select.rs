@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use futures::stream::{self, StreamExt as _};
 use http_body_util::StreamBody;
 use hyper::{
@@ -13,6 +13,7 @@ use hyper::{
     Request, Response,
 };
 use serde::Deserialize;
+use std::hint::black_box;
 
 use clickhouse::{
     error::{Error, Result},
