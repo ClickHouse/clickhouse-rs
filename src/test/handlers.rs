@@ -7,7 +7,7 @@ use sealed::sealed;
 use serde::{Deserialize, Serialize};
 
 use super::{Handler, HandlerFn};
-use crate::rowbinary;
+use crate::{rowbinary, Row};
 
 const BUFFER_INITIAL_CAPACITY: usize = 1024;
 
@@ -82,7 +82,7 @@ pub struct RecordControl<T> {
 
 impl<T> RecordControl<T>
 where
-    T: for<'a> Deserialize<'a>,
+    T: for<'a> Deserialize<'a> + Row,
 {
     pub async fn collect<C>(self) -> C
     where

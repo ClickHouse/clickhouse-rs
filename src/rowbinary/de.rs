@@ -3,6 +3,7 @@ use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::SerdeType;
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator};
+use crate::Row;
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
@@ -10,9 +11,11 @@ use serde::{
     de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
     Deserialize,
 };
+use std::marker::PhantomData;
 use std::{convert::TryFrom, str};
 
-/// Deserializes a value from `input` with a row encoded in `RowBinary(WithNamesAndTypes)`.
+/// Deserializes a value from `input` with a row encoded in `RowBinary`,
+/// i.e. only when [`crate::Row`] validation is disabled in the client.
 ///
 /// It accepts _a reference to_ a byte slice because it somehow leads to a more
 /// performant generated code than `(&[u8]) -> Result<(T, usize)>` and even
@@ -24,39 +27,47 @@ use std::{convert::TryFrom, str};
 /// It expects a slice of [`Column`] objects parsed
 /// from the beginning of `RowBinaryWithNamesAndTypes` data stream.
 /// After the header, the rows format is the same as `RowBinary`.
-pub(crate) fn deserialize_row_binary<'data, 'cursor, T: Deserialize<'data>>(
+pub(crate) fn deserialize_row_binary<'data, 'cursor, T: Deserialize<'data> + Row>(
     input: &mut &'data [u8],
 ) -> Result<T> {
-    let mut deserializer = RowBinaryDeserializer::new(input, ());
+    let mut deserializer = RowBinaryDeserializer::<T, _>::new(input, ());
     T::deserialize(&mut deserializer)
 }
 
-pub(crate) fn deserialize_rbwnat<'data, 'cursor, T: Deserialize<'data>>(
+/// Similar to [`deserialize_row_binary`], but uses [`RowMetadata`]
+/// parsed from `RowBinaryWithNamesAndTypes` header to validate the data types.
+/// This is used when [`crate::Row`] validation is enabled in the client (default).
+pub(crate) fn deserialize_rbwnat<'data, 'cursor, T: Deserialize<'data> + Row>(
     input: &mut &'data [u8],
     metadata: Option<&'cursor RowMetadata>,
 ) -> Result<T> {
     let validator = DataTypeValidator::new(metadata.unwrap());
-    let mut deserializer = RowBinaryDeserializer::new(input, validator);
+    let mut deserializer = RowBinaryDeserializer::<T, _>::new(input, validator);
     T::deserialize(&mut deserializer)
 }
 
 /// A deserializer for the `RowBinary(WithNamesAndTypes)` format.
 ///
 /// See https://clickhouse.com/docs/en/interfaces/formats#rowbinary for details.
-struct RowBinaryDeserializer<'cursor, 'data, Validator = ()>
+struct RowBinaryDeserializer<'cursor, 'data, R: Row, Validator = ()>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
     validator: Validator,
     input: &'cursor mut &'data [u8],
+    _marker: PhantomData<R>,
 }
 
-impl<'cursor, 'data, Validator> RowBinaryDeserializer<'cursor, 'data, Validator>
+impl<'cursor, 'data, R: Row, Validator> RowBinaryDeserializer<'cursor, 'data, R, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
     fn new(input: &'cursor mut &'data [u8], validator: Validator) -> Self {
-        Self { input, validator }
+        Self {
+            input,
+            validator,
+            _marker: PhantomData::<R>,
+        }
     }
 
     fn read_vec(&mut self, size: usize) -> Result<Vec<u8>> {
@@ -109,9 +120,10 @@ macro_rules! impl_num_or_enum {
     };
 }
 
-impl<'data, Validator> Deserializer<'data> for &mut RowBinaryDeserializer<'_, 'data, Validator>
+impl<'data, R: Row, Validator> Deserializer<'data>
+    for &mut RowBinaryDeserializer<'_, 'data, R, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
     type Error = Error;
 
@@ -120,19 +132,18 @@ where
 
     impl_num!(i32, deserialize_i32, visit_i32, get_i32_le, SerdeType::I32);
     impl_num!(i64, deserialize_i64, visit_i64, get_i64_le, SerdeType::I64);
+    #[rustfmt::skip]
+    impl_num!(i128, deserialize_i128, visit_i128, get_i128_le, SerdeType::I128);
 
     impl_num!(u8, deserialize_u8, visit_u8, get_u8, SerdeType::U8);
     impl_num!(u16, deserialize_u16, visit_u16, get_u16_le, SerdeType::U16);
     impl_num!(u32, deserialize_u32, visit_u32, get_u32_le, SerdeType::U32);
     impl_num!(u64, deserialize_u64, visit_u64, get_u64_le, SerdeType::U64);
+    #[rustfmt::skip]
+    impl_num!(u128, deserialize_u128, visit_u128, get_u128_le, SerdeType::U128);
 
     impl_num!(f32, deserialize_f32, visit_f32, get_f32_le, SerdeType::F32);
     impl_num!(f64, deserialize_f64, visit_f64, get_f64_le, SerdeType::F64);
-
-    #[rustfmt::skip]
-    impl_num!(i128, deserialize_i128, visit_i128, get_i128_le, SerdeType::I128);
-    #[rustfmt::skip]
-    impl_num!(u128, deserialize_u128, visit_u128, get_u128_le, SerdeType::U128);
 
     #[inline(always)]
     fn deserialize_any<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
@@ -228,6 +239,7 @@ where
                 deserializer: &mut RowBinaryDeserializer {
                     input: self.input,
                     validator: self.validator.validate(SerdeType::Enum),
+                    _marker: PhantomData::<R>,
                 },
             })
         } else {
@@ -242,6 +254,7 @@ where
                 deserializer: &mut RowBinaryDeserializer {
                     input: self.input,
                     validator: self.validator.validate(SerdeType::Tuple(len)),
+                    _marker: PhantomData::<R>,
                 },
                 len,
             })
@@ -263,6 +276,7 @@ where
                 0 => visitor.visit_some(&mut RowBinaryDeserializer {
                     input: self.input,
                     validator: inner_validator,
+                    _marker: PhantomData::<R>,
                 }),
                 1 => visitor.visit_none(),
                 v => Err(Error::InvalidTagEncoding(v as usize)),
@@ -285,6 +299,7 @@ where
                 deserializer: &mut RowBinaryDeserializer {
                     input: self.input,
                     validator: self.validator.validate(SerdeType::Seq(len)),
+                    _marker: PhantomData::<R>,
                 },
                 len,
             })
@@ -304,6 +319,7 @@ where
                 deserializer: &mut RowBinaryDeserializer {
                     input: self.input,
                     validator: self.validator.validate(SerdeType::Map(len)),
+                    _marker: PhantomData::<R>,
                 },
                 entries_visited: 0,
                 len,
@@ -394,17 +410,17 @@ where
 /// Used in [`Deserializer::deserialize_seq`], [`Deserializer::deserialize_tuple`],
 /// and it could be used in [`Deserializer::deserialize_struct`],
 /// if we detect that the field order matches the database schema.
-struct RowBinarySeqAccess<'de, 'cursor, 'data, Validator>
+struct RowBinarySeqAccess<'de, 'cursor, 'data, R: Row, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
-    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, R, Validator>,
     len: usize,
 }
 
-impl<'data, Validator> SeqAccess<'data> for RowBinarySeqAccess<'_, '_, 'data, Validator>
+impl<'data, R: Row, Validator> SeqAccess<'data> for RowBinarySeqAccess<'_, '_, 'data, R, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
     type Error = Error;
 
@@ -427,18 +443,18 @@ where
 }
 
 /// Used in [`Deserializer::deserialize_map`].
-struct RowBinaryMapAccess<'de, 'cursor, 'data, Validator>
+struct RowBinaryMapAccess<'de, 'cursor, 'data, R: Row, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
-    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, R, Validator>,
     entries_visited: usize,
     len: usize,
 }
 
-impl<'data, Validator> MapAccess<'data> for RowBinaryMapAccess<'_, '_, 'data, Validator>
+impl<'data, R: Row, Validator> MapAccess<'data> for RowBinaryMapAccess<'_, '_, 'data, R, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
     type Error = Error;
 
@@ -467,11 +483,11 @@ where
 
 /// Used in [`Deserializer::deserialize_struct`] to support wrong struct field order
 /// as long as the data types and field names are exactly matching the database schema.
-struct RowBinaryStructAsMapAccess<'de, 'cursor, 'data, Validator>
+struct RowBinaryStructAsMapAccess<'de, 'cursor, 'data, R: Row, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
-    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, R, Validator>,
     current_field_idx: usize,
     fields: &'static [&'static str],
 }
@@ -520,9 +536,10 @@ impl<'de> Deserializer<'de> for StructFieldIdentifier {
 ///
 /// If we just use [`RowBinarySeqAccess`] here, `c` will be deserialized into the `a` field,
 /// and `a` will be deserialized into the `c` field, which is a classic case of data corruption.
-impl<'data, Validator> MapAccess<'data> for RowBinaryStructAsMapAccess<'_, '_, 'data, Validator>
+impl<'data, R: Row, Validator> MapAccess<'data>
+    for RowBinaryStructAsMapAccess<'_, '_, 'data, R, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
     type Error = Error;
 
@@ -555,23 +572,24 @@ where
 }
 
 /// Used in [`Deserializer::deserialize_enum`].
-struct RowBinaryEnumAccess<'de, 'cursor, 'data, Validator>
+struct RowBinaryEnumAccess<'de, 'cursor, 'data, R: Row, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
-    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, R, Validator>,
 }
 
-struct VariantDeserializer<'de, 'cursor, 'data, Validator>
+struct VariantDeserializer<'de, 'cursor, 'data, R: Row, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
-    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, Validator>,
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, R, Validator>,
 }
 
-impl<'data, Validator> VariantAccess<'data> for VariantDeserializer<'_, '_, 'data, Validator>
+impl<'data, R: Row, Validator> VariantAccess<'data>
+    for VariantDeserializer<'_, '_, 'data, R, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
     type Error = Error;
 
@@ -601,13 +619,13 @@ where
     }
 }
 
-impl<'de, 'cursor, 'data, Validator> EnumAccess<'data>
-    for RowBinaryEnumAccess<'de, 'cursor, 'data, Validator>
+impl<'de, 'cursor, 'data, R: Row, Validator> EnumAccess<'data>
+    for RowBinaryEnumAccess<'de, 'cursor, 'data, R, Validator>
 where
-    Validator: SchemaValidator,
+    Validator: SchemaValidator<R>,
 {
     type Error = Error;
-    type Variant = VariantDeserializer<'de, 'cursor, 'data, Validator>;
+    type Variant = VariantDeserializer<'de, 'cursor, 'data, R, Validator>;
 
     fn variant_seed<T>(self, seed: T) -> Result<(T::Value, Self::Variant), Self::Error>
     where

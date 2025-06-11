@@ -1,20 +1,21 @@
 use crate::row_metadata::RowMetadata;
-use crate::RowKind;
+use crate::{Row, RowKind};
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::marker::PhantomData;
 
 /// This trait is used to validate the schema of a [`crate::Row`] against the parsed RBWNAT schema.
 /// Note that [`SchemaValidator`] is also implemented for `()`,
 /// which is used to skip validation if the user disabled it.
-pub(crate) trait SchemaValidator: Sized {
+pub(crate) trait SchemaValidator<R: Row>: Sized {
     /// Ensures that the branching is completely optimized out based on the validation settings.
     const VALIDATION: bool;
     /// The main entry point. The validation flow based on the [`crate::Row::KIND`].
     /// For container types (nullable, array, map, tuple, variant, etc.),
     /// it will return an [`InnerDataTypeValidator`] instance (see [`InnerDataTypeValidatorKind`]),
     /// which has its own implementation of this method, allowing recursive validation.
-    fn validate(&'_ mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_>>;
+    fn validate(&'_ mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_, R>>;
     /// Validates that an identifier exists in the values map for enums,
     /// or stores the variant identifier for the next serde call.
     fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, value: T);
@@ -29,16 +30,18 @@ pub(crate) trait SchemaValidator: Sized {
     fn get_schema_index(&self, struct_idx: usize) -> usize;
 }
 
-pub(crate) struct DataTypeValidator<'cursor> {
+pub(crate) struct DataTypeValidator<'cursor, R: Row> {
     metadata: &'cursor RowMetadata,
     current_column_idx: usize,
+    _marker: PhantomData<R>,
 }
 
-impl<'cursor> DataTypeValidator<'cursor> {
+impl<'cursor, R: Row> DataTypeValidator<'cursor, R> {
     pub(crate) fn new(metadata: &'cursor RowMetadata) -> Self {
         Self {
-            current_column_idx: 0,
             metadata,
+            current_column_idx: 0,
+            _marker: PhantomData::<R>,
         }
     }
 
@@ -54,7 +57,7 @@ impl<'cursor> DataTypeValidator<'cursor> {
 
     fn get_current_column_name_and_type(&self) -> (String, &DataTypeNode) {
         self.get_current_column()
-            .map(|c| (format!("{}.{}", self.metadata.name, c.name), &c.data_type))
+            .map(|c| (format!("{}.{}", R::NAME, c.name), &c.data_type))
             // both should be defined at this point
             .unwrap_or(("Struct".to_string(), &DataTypeNode::Bool))
     }
@@ -64,8 +67,8 @@ impl<'cursor> DataTypeValidator<'cursor> {
         data_type: &DataTypeNode,
         serde_type: &SerdeType,
         is_inner: bool,
-    ) -> Option<InnerDataTypeValidator<'de, 'cursor>> {
-        match self.metadata.kind {
+    ) -> Option<InnerDataTypeValidator<'de, 'cursor, R>> {
+        match R::KIND {
             RowKind::Primitive => {
                 panic!(
                     "While processing row as a primitive: attempting to deserialize \
@@ -109,12 +112,12 @@ impl<'cursor> DataTypeValidator<'cursor> {
     }
 }
 
-impl SchemaValidator for DataTypeValidator<'_> {
+impl<R: Row> SchemaValidator<R> for DataTypeValidator<'_, R> {
     const VALIDATION: bool = true;
 
     #[inline]
-    fn validate(&'_ mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_>> {
-        match self.metadata.kind {
+    fn validate(&'_ mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_, R>> {
+        match R::KIND {
             // `fetch::<i32>` for a "primitive row" type
             RowKind::Primitive => {
                 if self.current_column_idx == 0 && self.metadata.columns.len() == 1 {
@@ -166,7 +169,7 @@ impl SchemaValidator for DataTypeValidator<'_> {
                 } else {
                     panic!(
                         "Struct {} has more fields than columns in the database schema",
-                        self.metadata.name
+                        R::NAME
                     )
                 }
             }
@@ -211,8 +214,8 @@ pub(crate) enum MapAsSequenceValidatorState {
     Value,
 }
 
-pub(crate) struct InnerDataTypeValidator<'de, 'cursor> {
-    root: &'de DataTypeValidator<'cursor>,
+pub(crate) struct InnerDataTypeValidator<'de, 'cursor, R: Row> {
+    root: &'de DataTypeValidator<'cursor, R>,
     kind: InnerDataTypeValidatorKind<'cursor>,
 }
 
@@ -238,11 +241,14 @@ pub(crate) enum VariantValidationState {
     Identifier(u8),
 }
 
-impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'cursor>> {
+impl<'de, 'cursor, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'de, 'cursor, R>> {
     const VALIDATION: bool = true;
 
     #[inline]
-    fn validate(&mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'de, 'cursor>> {
+    fn validate(
+        &mut self,
+        serde_type: SerdeType,
+    ) -> Option<InnerDataTypeValidator<'de, 'cursor, R>> {
         match self {
             None => None,
             Some(inner) => match &mut inner.kind {
@@ -396,7 +402,7 @@ impl<'de, 'cursor> SchemaValidator for Option<InnerDataTypeValidator<'de, 'curso
     }
 }
 
-impl Drop for InnerDataTypeValidator<'_, '_> {
+impl<R: Row> Drop for InnerDataTypeValidator<'_, '_, R> {
     fn drop(&mut self) {
         if let InnerDataTypeValidatorKind::Tuple(elements_types) = self.kind {
             if !elements_types.is_empty() {
@@ -421,12 +427,12 @@ impl Drop for InnerDataTypeValidator<'_, '_> {
 //  static/const dispatch?
 //  separate smaller inline functions?
 #[inline]
-fn validate_impl<'de, 'cursor>(
-    root: &'de DataTypeValidator<'cursor>,
+fn validate_impl<'de, 'cursor, R: Row>(
+    root: &'de DataTypeValidator<'cursor, R>,
     column_data_type: &'cursor DataTypeNode,
     serde_type: &SerdeType,
     is_inner: bool,
-) -> Option<InnerDataTypeValidator<'de, 'cursor>> {
+) -> Option<InnerDataTypeValidator<'de, 'cursor, R>> {
     let data_type = column_data_type.remove_low_cardinality();
     match serde_type {
         SerdeType::Bool
@@ -624,11 +630,11 @@ fn validate_impl<'de, 'cursor>(
     }
 }
 
-impl SchemaValidator for () {
+impl<R: Row> SchemaValidator<R> for () {
     const VALIDATION: bool = false;
 
     #[inline(always)]
-    fn validate(&mut self, _serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_>> {
+    fn validate(&mut self, _serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_, R>> {
         None
     }
 

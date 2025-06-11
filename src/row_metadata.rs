@@ -29,10 +29,6 @@ pub(crate) enum AccessType {
 /// as it is calculated only once per struct. It does not have lifetimes,
 /// so it does not introduce a breaking change to [`crate::cursors::RowCursor`].
 pub(crate) struct RowMetadata {
-    /// See [`Row::NAME`]
-    pub(crate) name: &'static str,
-    /// See [`Row::TYPE`]
-    pub(crate) kind: RowKind,
     /// Database schema, or columns, are parsed before the first call to (de)serializer.
     pub(crate) columns: Vec<Column>,
     /// This determines whether we can just use [`crate::rowbinary::de::RowBinarySeqAccess`]
@@ -128,8 +124,6 @@ impl RowMetadata {
         Self {
             columns,
             access_type,
-            kind: T::KIND,
-            name: T::NAME,
         }
     }
 
@@ -140,10 +134,8 @@ impl RowMetadata {
                 if struct_idx < mapping.len() {
                     mapping[struct_idx]
                 } else {
-                    panic!(
-                        "Struct {} has more fields than columns in the database schema",
-                        self.name
-                    )
+                    // unreachable
+                    panic!("Struct has more fields than columns in the database schema",)
                 }
             }
             AccessType::WithSeqAccess => struct_idx, // should be unreachable
