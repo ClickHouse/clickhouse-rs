@@ -75,21 +75,21 @@ pub(crate) fn join_column_names<R: Row>() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    // XXX: need for `derive(Row)`. Provide `row(crate = ..)` instead.
-    use crate as clickhouse;
-    use clickhouse::Row;
+    use crate::Row;
 
     use super::*;
 
     #[test]
     fn it_grabs_simple_struct() {
         #[derive(Row)]
+        #[row(crate = crate)]
         #[allow(dead_code)]
         struct Simple1 {
             one: u32,
         }
 
         #[derive(Row)]
+        #[row(crate = crate)]
         #[allow(dead_code)]
         struct Simple2 {
             one: u32,
@@ -103,6 +103,7 @@ mod tests {
     #[test]
     fn it_grabs_mix() {
         #[derive(Row)]
+        #[row(crate = crate)]
         struct SomeRow {
             _a: u32,
         }
@@ -115,6 +116,7 @@ mod tests {
         use serde::Serialize;
 
         #[derive(Row, Serialize)]
+        #[row(crate = crate)]
         #[allow(dead_code)]
         struct TopLevel {
             #[serde(rename = "two")]
@@ -129,6 +131,7 @@ mod tests {
         use serde::Serialize;
 
         #[derive(Row, Serialize)]
+        #[row(crate = crate)]
         #[allow(dead_code)]
         struct TopLevel {
             one: u32,
@@ -144,6 +147,7 @@ mod tests {
         use serde::Deserialize;
 
         #[derive(Row, Deserialize)]
+        #[row(crate = crate)]
         #[allow(dead_code)]
         struct TopLevel {
             one: u32,
@@ -158,6 +162,7 @@ mod tests {
     fn it_rejects_other() {
         #[allow(dead_code)]
         #[derive(Row)]
+        #[row(crate = crate)]
         struct NamedTuple(u32, u32);
 
         assert_eq!(join_column_names::<u32>(), None);
@@ -170,6 +175,7 @@ mod tests {
         use serde::Serialize;
 
         #[derive(Row, Serialize)]
+        #[row(crate = crate)]
         #[allow(dead_code)]
         struct MyRow {
             r#type: u32,
