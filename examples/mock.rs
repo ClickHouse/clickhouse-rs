@@ -46,7 +46,9 @@ async fn make_watch_only_events(client: &Client) -> Result<u64> {
 #[tokio::main]
 async fn main() {
     let mock = test::Mock::new();
-    let client = Client::default().with_url(mock.url());
+    let client = Client::default()
+        .with_url(mock.url())
+        .with_disabled_validation();
     let list = vec![SomeRow { no: 1 }, SomeRow { no: 2 }];
 
     // How to test DDL.

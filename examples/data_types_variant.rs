@@ -140,7 +140,7 @@ fn get_rows() -> Vec<MyRow> {
 // This enum represents Variant(Array(UInt16), Bool, Date, FixedString(6), Float32, Float64, Int128, Int16, Int32, Int64, Int8, String, UInt128, UInt16, UInt32, UInt64, UInt8)
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 enum MyRowVariant {
-    Array(Vec<i16>),
+    Array(Vec<u16>),
     Boolean(bool),
     // attributes should work in this case, too
     #[serde(with = "clickhouse::serde::time::date")]

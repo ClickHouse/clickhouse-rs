@@ -5,11 +5,10 @@
 #[macro_use]
 extern crate static_assertions;
 
+pub use self::{compression::Compression, row::Row, row::RowKind};
 use self::{error::Result, http_client::HttpClient};
-use std::{collections::HashMap, fmt::Display, sync::Arc};
-
-pub use self::{compression::Compression, row::Row};
 pub use clickhouse_derive::Row;
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub mod error;
 pub mod insert;
@@ -31,6 +30,7 @@ mod http_client;
 mod request_body;
 mod response;
 mod row;
+mod row_metadata;
 mod rowbinary;
 #[cfg(feature = "inserter")]
 mod ticks;
@@ -47,6 +47,7 @@ pub struct Client {
     options: HashMap<String, String>,
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
+    validation: bool,
 }
 
 #[derive(Clone)]
@@ -101,6 +102,7 @@ impl Client {
             options: HashMap::new(),
             headers: HashMap::new(),
             products_info: Vec::default(),
+            validation: true,
         }
     }
 
@@ -322,6 +324,22 @@ impl Client {
         watch::Watch::new(self, query)
     }
 
+    /// Disables [`Row`] types validation against the database schema.
+    /// Validation is enabled by default.
+    ///
+    /// # Warning
+    ///
+    /// While disabled validation will result in increased performance,
+    /// this mode is intended to be used for testing purposes only,
+    /// and only in scenarios where schema mismatch issues are irrelevant.
+    ///
+    /// ***DO NOT*** disable validation in your production code or tests
+    /// unless you are 100% sure why you are doing it.
+    pub fn with_disabled_validation(mut self) -> Self {
+        self.validation = false;
+        self
+    }
+
     /// Used internally to modify the options map of an _already cloned_
     /// [`Client`] instance.
     pub(crate) fn add_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
@@ -457,5 +475,15 @@ mod client_tests {
         let _ = Client::default()
             .with_access_token("my_jwt")
             .with_password("secret");
+    }
+
+    #[test]
+    fn it_sets_validation_mode() {
+        let client = Client::default();
+        assert!(client.validation);
+        let client = client.with_disabled_validation();
+        assert!(!client.validation);
+        let client = client.with_disabled_validation();
+        assert!(!client.validation);
     }
 }
