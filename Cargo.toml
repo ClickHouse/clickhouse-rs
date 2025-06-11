@@ -122,7 +122,7 @@ serde_json = { version = "1", optional = true }
 lz4_flex = { version = "0.11", default-features = false, features = [
     "std",
 ], optional = true }
-cityhash-rs = { version = "1.0.1", optional = true } # exact version for safety
+cityhash-rs = { version = ">=1.0.1", optional = true } # 1.0.1+ is Apache/MIT, earlier was GPL-3
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
 chrono = { version = "0.4", optional = true, features = ["serde"] }
