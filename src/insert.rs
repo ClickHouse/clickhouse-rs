@@ -92,13 +92,14 @@ impl RowsBuilder {
 }
 
 /// inserted rows sender
-pub struct RowsSender {
+pub struct RowsSender<T> {
     state: RowsSenderState,
     send_timeout: Option<Duration>,
     end_timeout: Option<Duration>,
     // Use boxed `Sleep` to reuse a timer entry, it improves performance.
     // Also, `tokio::time::timeout()` significantly increases a future's size.
     sleep: Pin<Box<Sleep>>,
+    _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
 }
 
 // It should be a regular function, but it decreases performance.
@@ -115,7 +116,30 @@ macro_rules! timeout {
     }};
 }
 
-impl RowsSender {
+impl<T> RowsSender<T> {
+    pub fn new(client: &Client, table: &str) -> Self
+    where
+        T: Row,
+    {
+        let fields = row::join_column_names::<T>()
+            .expect("the row type must be a struct or a wrapper around it");
+
+        // TODO: what about escaping a table name?
+        // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
+        let sql = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields);
+
+        Self {
+            state: RowsSenderState::NotStarted {
+                client: Box::new(client.clone()),
+                sql,
+            },
+            send_timeout: None,
+            end_timeout: None,
+            sleep: Box::pin(tokio::time::sleep(Duration::new(0, 0))),
+            _marker: PhantomData,
+        }
+    }
+
     /// Send one chunk and keep sender active
     pub async fn send_chunk(&mut self, chunk: Bytes) -> Result<()> {
         debug_assert!(matches!(self.state, RowsSenderState::Active { .. }));
@@ -279,7 +303,7 @@ impl RowsSender {
     }
 }
 
-pub enum RowsSenderState {
+pub(crate) enum RowsSenderState {
     NotStarted {
         client: Box<Client>,
         sql: String,
@@ -347,8 +371,7 @@ impl RowsSenderState {
 #[must_use]
 pub struct Insert<T> {
     builder: RowsBuilder,
-    sender: RowsSender,
-    _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
+    sender: RowsSender<T>,
 }
 
 impl<T> Insert<T> {
@@ -357,33 +380,14 @@ impl<T> Insert<T> {
     where
         T: Row,
     {
-        let fields = row::join_column_names::<T>()
-            .expect("the row type must be a struct or a wrapper around it");
-
-        // TODO: what about escaping a table name?
-        // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
-        let sql = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields);
+        let sender = RowsSender::new(client, table);
 
         #[cfg(feature = "lz4")]
         let builder = RowsBuilder::new(client.compression);
         #[cfg(not(feature = "lz4"))]
         let builder = RowsBuilder::new();
 
-        let sender = RowsSender {
-            state: RowsSenderState::NotStarted {
-                client: Box::new(client.clone()),
-                sql,
-            },
-            send_timeout: None,
-            end_timeout: None,
-            sleep: Box::pin(tokio::time::sleep(Duration::new(0, 0))),
-        };
-
-        Ok(Self {
-            sender,
-            builder,
-            _marker: PhantomData,
-        })
+        Ok(Self { sender, builder })
     }
 
     /// Sets timeouts for different operations.
@@ -405,8 +409,16 @@ impl<T> Insert<T> {
         send_timeout: Option<Duration>,
         end_timeout: Option<Duration>,
     ) -> Self {
-        self.sender.set_timeouts(send_timeout, end_timeout);
+        self.set_timeouts(send_timeout, end_timeout);
         self
+    }
+
+    pub(crate) fn set_timeouts(
+        &mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) {
+        self.sender.set_timeouts(send_timeout, end_timeout);
     }
 
     /// Similar to [`Client::with_option`], but for this particular INSERT
