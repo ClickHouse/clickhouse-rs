@@ -64,6 +64,16 @@ impl RowsBuilder {
         self.take_and_prepare_chunk()
     }
 
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
     #[cfg(feature = "lz4")]
     fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
         Ok(if self.compression.is_lz4() {
@@ -78,16 +88,6 @@ impl RowsBuilder {
     #[cfg(not(feature = "lz4"))]
     fn take_and_prepare_chunk(mut self) -> Result<Bytes> {
         Ok(mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze())
-    }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.buffer.len()
-    }
-
-    #[inline]
-    fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
     }
 }
 
@@ -303,6 +303,12 @@ impl<T> RowsSender<T> {
     }
 }
 
+impl<T> Drop for RowsSender<T> {
+    fn drop(&mut self) {
+        self.abort();
+    }
+}
+
 pub(crate) enum RowsSenderState {
     NotStarted {
         client: Box<Client>,
@@ -492,11 +498,5 @@ impl<T> Insert<T> {
             self.sender.send_chunk(chunk).await?;
         }
         self.sender.terminate().await
-    }
-}
-
-impl<T> Drop for Insert<T> {
-    fn drop(&mut self) {
-        self.sender.abort();
     }
 }
