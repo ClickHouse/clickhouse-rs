@@ -1,4 +1,4 @@
-use rand::distr::Alphanumeric;
+use rand::distributions::Alphanumeric;
 use rand::Rng;
 
 use clickhouse::sql::Identifier;
@@ -83,7 +83,7 @@ pub struct Row {
 
 impl Row {
     pub fn new() -> Self {
-        let mut rng = rand::rng();
+        let mut rng = rand::thread_rng();
         Row {
             arr: vec![random_str()],
             arr2: vec![vec![random_str()]],
@@ -92,7 +92,7 @@ impl Row {
             // Nested
             // NB: the length of all vectors/slices representing Nested columns must be the same
             nested_name: vec![random_str(), random_str()],
-            nested_count: vec![rng.random(), rng.random()],
+            nested_count: vec![rng.gen(), rng.gen()],
             // Geo
             point: random_point(),
             ring: random_ring(),
@@ -111,7 +111,7 @@ impl Default for Row {
 }
 
 fn random_str() -> String {
-    rand::rng()
+    rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(3)
         .map(char::from)
@@ -119,8 +119,8 @@ fn random_str() -> String {
 }
 
 fn random_point() -> Point {
-    let mut rng = rand::rng();
-    (rng.random(), rng.random())
+    let mut rng = rand::thread_rng();
+    (rng.gen(), rng.gen())
 }
 
 fn random_ring() -> Ring {

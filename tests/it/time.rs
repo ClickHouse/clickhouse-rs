@@ -1,8 +1,8 @@
 #![cfg(feature = "time")]
 
-use std::ops::Range;
+use std::ops::RangeBounds;
 
-use rand::Rng;
+use rand::{distributions::Standard, Rng};
 use serde::{Deserialize, Serialize};
 use time::{macros::datetime, Date, OffsetDateTime};
 
@@ -219,16 +219,12 @@ async fn date32() {
     }
 }
 
-fn generate_dates(years: Range<i32>, count: usize) -> Vec<Date> {
-    let mut rng = rand::rng();
-    let mut dates: Vec<_> = (0..count)
-        .map(|_| {
-            let year = rng.random_range(years.clone());
-            let month = rng.random_range(1..=12);
-            let day = rng.random_range(1..=28); // Safe for all months
-            Date::from_calendar_date(year, time::Month::try_from(month).unwrap(), day as u8)
-                .unwrap()
-        })
+fn generate_dates(years: impl RangeBounds<i32>, count: usize) -> Vec<Date> {
+    let mut rng = rand::thread_rng();
+    let mut dates: Vec<_> = (&mut rng)
+        .sample_iter(Standard)
+        .filter(|date: &Date| years.contains(&date.year()))
+        .take(count)
         .collect();
 
     dates.sort_unstable();
