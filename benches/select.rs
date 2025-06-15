@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use futures::stream::{self, StreamExt as _};
 use http_body_util::StreamBody;
 use hyper::{
@@ -13,7 +13,6 @@ use hyper::{
     Request, Response,
 };
 use serde::Deserialize;
-use std::hint::black_box;
 
 use clickhouse::{
     error::{Error, Result},
@@ -33,15 +32,12 @@ async fn serve(
 }
 
 fn prepare_chunk() -> Bytes {
-    use rand::{distr::StandardUniform, rngs::SmallRng, Rng, SeedableRng};
+    use rand::{distributions::Standard, rngs::SmallRng, Rng, SeedableRng};
 
     // Generate random data to avoid _real_ compression.
     // TODO: It would be more useful to generate real data.
     let mut rng = SmallRng::seed_from_u64(0xBA5E_FEED);
-    let raw: Vec<_> = (&mut rng)
-        .sample_iter(StandardUniform)
-        .take(128 * 1024)
-        .collect();
+    let raw: Vec<_> = (&mut rng).sample_iter(Standard).take(128 * 1024).collect();
 
     // If the feature is enabled, compress the data even if we use the `None`
     // compression. The compression ratio is low anyway due to random data.
