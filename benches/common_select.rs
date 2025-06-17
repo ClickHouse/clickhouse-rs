@@ -85,12 +85,10 @@ pub(crate) async fn fetch_cursor<'a, T: BenchmarkRow<'a>>(
     validation: bool,
     query: &str,
 ) -> RowCursor<T> {
-    let mut client = Client::default()
+    let client = Client::default()
         .with_compression(compression)
-        .with_url("http://localhost:8123");
-    if !validation {
-        client = client.with_disabled_validation();
-    }
+        .with_url("http://localhost:8123")
+        .with_validation(validation);
     client.query(query).fetch::<T>().unwrap()
 }
 

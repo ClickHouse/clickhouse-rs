@@ -329,14 +329,15 @@ impl Client {
     ///
     /// # Warning
     ///
-    /// While disabled validation will result in increased performance,
+    /// While disabled validation will result in increased performance
+    /// (between 1.1x and 3x, depending on the data),
     /// this mode is intended to be used for testing purposes only,
     /// and only in scenarios where schema mismatch issues are irrelevant.
     ///
     /// ***DO NOT*** disable validation in your production code or tests
     /// unless you are 100% sure why you are doing it.
-    pub fn with_disabled_validation(mut self) -> Self {
-        self.validation = false;
+    pub fn with_validation(mut self, enabled: bool) -> Self {
+        self.validation = enabled;
         self
     }
 
@@ -481,9 +482,9 @@ mod client_tests {
     fn it_sets_validation_mode() {
         let client = Client::default();
         assert!(client.validation);
-        let client = client.with_disabled_validation();
+        let client = client.with_validation(false);
         assert!(!client.validation);
-        let client = client.with_disabled_validation();
+        let client = client.with_validation(true);
         assert!(!client.validation);
     }
 }

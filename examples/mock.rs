@@ -48,7 +48,9 @@ async fn main() {
     let mock = test::Mock::new();
     let client = Client::default()
         .with_url(mock.url())
-        .with_disabled_validation();
+        // disabled schema validation is required for mocks to work;
+        // it is pointless for mocked tests anyway
+        .with_validation(false);
     let list = vec![SomeRow { no: 1 }, SomeRow { no: 2 }];
 
     // How to test DDL.

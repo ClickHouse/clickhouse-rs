@@ -1,15 +1,11 @@
-// FIXME: better errors
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+#[doc(hidden)]
 pub enum TypesError {
-    #[error("Not enough data: {0}")]
+    #[error("not enough data: {0}")]
     NotEnoughData(String),
-
-    #[error("Header parsing error: {0}")]
-    HeaderParsingError(String),
-
-    #[error("Type parsing error: {0}")]
+    #[error("type parsing error: {0}")]
     TypeParsingError(String),
-
-    #[error("Unexpected empty list of columns")]
+    #[error("unexpected empty list of columns")]
     EmptyColumns,
 }

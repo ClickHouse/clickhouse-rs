@@ -94,10 +94,6 @@ impl Query {
         }
 
         let response = self.do_execute(true)?;
-
-        // #[cfg(feature = "test_util")]
-        // if response.headers
-
         Ok(RowCursor::new(response, validation))
     }
 

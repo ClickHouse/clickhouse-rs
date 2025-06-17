@@ -2,13 +2,18 @@ use crate::error::TypesError;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
+/// A definition of a column in the result set,
+/// taken out of the `RowBinaryWithNamesAndTypes` header.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Column {
+    /// The name of the column.
     pub name: String,
+    /// The data type of the column.
     pub data_type: DataTypeNode,
 }
 
 impl Column {
+    #[allow(missing_docs)]
     pub fn new(name: String, data_type: DataTypeNode) -> Self {
         Self { name, data_type }
     }
@@ -20,8 +25,11 @@ impl Display for Column {
     }
 }
 
+/// Represents a data type in ClickHouse.
+/// See https://clickhouse.com/docs/sql-reference/data-types
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
+#[allow(missing_docs)]
 pub enum DataTypeNode {
     Bool,
 
@@ -42,7 +50,9 @@ pub enum DataTypeNode {
     Float32,
     Float64,
     BFloat16,
-    Decimal(u8, u8, DecimalType), // Scale, Precision, 32 | 64 | 128 | 256
+
+    /// Scale, Precision, 32 | 64 | 128 | 256
+    Decimal(u8, u8, DecimalType),
 
     String,
     FixedString(usize),
@@ -50,8 +60,11 @@ pub enum DataTypeNode {
 
     Date,
     Date32,
-    DateTime(Option<String>),                      // Optional timezone
-    DateTime64(DateTimePrecision, Option<String>), // Precision and optional timezone
+
+    /// Optional timezone
+    DateTime(Option<String>),
+    /// Precision and optional timezone
+    DateTime64(DateTimePrecision, Option<String>),
 
     IPv4,
     IPv6,
@@ -63,12 +76,15 @@ pub enum DataTypeNode {
     Tuple(Vec<DataTypeNode>),
     Enum(EnumType, HashMap<i16, String>),
 
-    // key-value pair is defined as an array, so we can also use it as a slice
+    /// Key-Value pairs are defined as an array, so it can be used as a slice
     Map([Box<DataTypeNode>; 2]),
 
+    /// Function name and its arguments
     AggregateFunction(String, Vec<DataTypeNode>),
 
+    /// Contains all possible types for this variant
     Variant(Vec<DataTypeNode>),
+
     Dynamic,
     JSON,
 
@@ -81,6 +97,9 @@ pub enum DataTypeNode {
 }
 
 impl DataTypeNode {
+    /// Parses a data type from a string that is received
+    /// in the `RowBinaryWithNamesAndTypes` and `Native` formats headers.
+    /// See also: https://clickhouse.com/docs/interfaces/formats/RowBinaryWithNamesAndTypes#description
     pub fn new(name: &str) -> Result<Self, TypesError> {
         match name {
             "UInt8" => Ok(Self::UInt8),
@@ -136,6 +155,7 @@ impl DataTypeNode {
         }
     }
 
+    /// LowCardinality(T) -> T
     pub fn remove_low_cardinality(&self) -> &DataTypeNode {
         match self {
             DataTypeNode::LowCardinality(inner) => inner,
@@ -229,9 +249,12 @@ impl Display for DataTypeNode {
     }
 }
 
+/// Represents the underlying integer size of an Enum type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnumType {
+    /// Stored as an `Int8`
     Enum8,
+    /// Stored as an `Int16`
     Enum16,
 }
 
@@ -244,7 +267,11 @@ impl Display for EnumType {
     }
 }
 
+/// DateTime64 precision.
+/// Defined as an enum, as it is valid only in the range from 0 to 9.
+/// See also: https://clickhouse.com/docs/sql-reference/data-types/datetime64
 #[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
 pub enum DateTimePrecision {
     Precision0,
     Precision1,
@@ -279,11 +306,17 @@ impl DateTimePrecision {
     }
 }
 
+/// Represents the underlying integer type for a Decimal.
+/// See also: https://clickhouse.com/docs/sql-reference/data-types/decimal
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecimalType {
+    /// Stored as an `Int32`
     Decimal32,
+    /// Stored as an `Int64`
     Decimal64,
+    /// Stored as an `Int128`
     Decimal128,
+    /// Stored as an `Int256`
     Decimal256,
 }
 

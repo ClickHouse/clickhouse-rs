@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 #[tokio::test]
-async fn test_header_parsing() {
+async fn header_parsing() {
     let client = prepare_database!();
     client
         .query(
@@ -103,7 +103,7 @@ async fn test_header_parsing() {
 }
 
 #[tokio::test]
-async fn test_fetch_primitive_row() {
+async fn fetch_primitive_row() {
     let client = get_client();
     let result = client
         .query("SELECT count() FROM (SELECT * FROM system.numbers LIMIT 3)")
@@ -113,7 +113,7 @@ async fn test_fetch_primitive_row() {
 }
 
 #[tokio::test]
-async fn test_fetch_primitive_row_schema_mismatch() {
+async fn fetch_primitive_row_schema_mismatch() {
     type Data = i32; // expected type is UInt64
     assert_panic_on_fetch!(
         &["primitive", "UInt64", "i32"],
@@ -122,7 +122,7 @@ async fn test_fetch_primitive_row_schema_mismatch() {
 }
 
 #[tokio::test]
-async fn test_fetch_vector_row() {
+async fn fetch_vector_row() {
     let client = get_client();
     let result = client
         .query("SELECT [1, 2, 3] :: Array(UInt32)")
@@ -132,7 +132,7 @@ async fn test_fetch_vector_row() {
 }
 
 #[tokio::test]
-async fn test_fetch_vector_row_schema_mismatch_nested_type() {
+async fn fetch_vector_row_schema_mismatch_nested_type() {
     type Data = Vec<i128>; // expected type for Array(UInt32) is Vec<u32>
     assert_panic_on_fetch!(
         &["vector", "UInt32", "i128"],
@@ -141,7 +141,7 @@ async fn test_fetch_vector_row_schema_mismatch_nested_type() {
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row() {
+async fn fetch_tuple_row() {
     let client = get_client();
     let result = client
         .query("SELECT 42 :: UInt32 AS a, 'foo' :: String AS b")
@@ -151,7 +151,7 @@ async fn test_fetch_tuple_row() {
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row_schema_mismatch_first_element() {
+async fn fetch_tuple_row_schema_mismatch_first_element() {
     type Data = (i128, String); // expected u32 instead of i128
     assert_panic_on_fetch!(
         &["tuple", "UInt32", "i128"],
@@ -160,7 +160,7 @@ async fn test_fetch_tuple_row_schema_mismatch_first_element() {
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row_schema_mismatch_second_element() {
+async fn fetch_tuple_row_schema_mismatch_second_element() {
     type Data = (u32, i64); // expected String instead of i64
     assert_panic_on_fetch!(
         &["tuple", "String", "i64"],
@@ -169,7 +169,7 @@ async fn test_fetch_tuple_row_schema_mismatch_second_element() {
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row_schema_mismatch_missing_element() {
+async fn fetch_tuple_row_schema_mismatch_missing_element() {
     type Data = (u32, String); // expected to have the third element as i64
     assert_panic_on_fetch!(
         &[
@@ -181,7 +181,7 @@ async fn test_fetch_tuple_row_schema_mismatch_missing_element() {
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row_schema_mismatch_too_many_elements() {
+async fn fetch_tuple_row_schema_mismatch_too_many_elements() {
     type Data = (u32, String, i128); // i128 should not be there
     assert_panic_on_fetch!(
         &[
@@ -193,7 +193,7 @@ async fn test_fetch_tuple_row_schema_mismatch_too_many_elements() {
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row_with_struct() {
+async fn fetch_tuple_row_with_struct() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: u32,
@@ -218,7 +218,7 @@ async fn test_fetch_tuple_row_with_struct() {
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row_with_struct_schema_mismatch() {
+async fn fetch_tuple_row_with_struct_schema_mismatch() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct _Data {
         a: u64, // expected type is u32
@@ -232,7 +232,7 @@ async fn test_fetch_tuple_row_with_struct_schema_mismatch() {
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_many_struct_fields() {
+async fn fetch_tuple_row_with_struct_schema_mismatch_too_many_struct_fields() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct _Data {
         a: u32,
@@ -247,7 +247,7 @@ async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_many_struct_fields
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_many_fields() {
+async fn fetch_tuple_row_with_struct_schema_mismatch_too_many_fields() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct _Data {
         a: u32,
@@ -261,7 +261,7 @@ async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_many_fields() {
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_few_struct_fields() {
+async fn fetch_tuple_row_with_struct_schema_mismatch_too_few_struct_fields() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct _Data {
         a: u32, // the second field is missing now
@@ -274,7 +274,7 @@ async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_few_struct_fields(
 }
 
 #[tokio::test]
-async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_few_fields() {
+async fn fetch_tuple_row_with_struct_schema_mismatch_too_few_fields() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct _Data {
         a: u32,
@@ -288,7 +288,7 @@ async fn test_fetch_tuple_row_with_struct_schema_mismatch_too_few_fields() {
 }
 
 #[tokio::test]
-async fn test_basic_types() {
+async fn basic_types() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         uint8_val: u8,
@@ -352,7 +352,7 @@ async fn test_basic_types() {
 // FIXME: somehow this test breaks `cargo test`, but works from RustRover
 #[ignore]
 #[tokio::test]
-async fn test_borrowed_data() {
+async fn borrowed_data() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data<'a> {
         str: &'a str,
@@ -446,7 +446,7 @@ async fn test_borrowed_data() {
 }
 
 #[tokio::test]
-async fn test_several_simple_rows() {
+async fn several_simple_rows() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         num: u64,
@@ -479,7 +479,7 @@ async fn test_several_simple_rows() {
 }
 
 #[tokio::test]
-async fn test_many_numbers() {
+async fn many_numbers() {
     #[derive(Row, Deserialize)]
     struct Data {
         number: u64,
@@ -499,7 +499,7 @@ async fn test_many_numbers() {
 }
 
 #[tokio::test]
-async fn test_blob_string_with_serde_bytes() {
+async fn blob_string_with_serde_bytes() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         #[serde(with = "serde_bytes")]
@@ -521,7 +521,7 @@ async fn test_blob_string_with_serde_bytes() {
 }
 
 #[tokio::test]
-async fn test_arrays() {
+async fn arrays() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         id: u16,
@@ -563,7 +563,7 @@ async fn test_arrays() {
 }
 
 #[tokio::test]
-async fn test_maps() {
+async fn maps() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         m1: HashMap<String, String>,
@@ -613,7 +613,7 @@ async fn test_maps() {
 }
 
 #[tokio::test]
-async fn test_map_as_vec_of_tuples() {
+async fn map_as_vec_of_tuples() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         m1: Vec<(i128, String)>,
@@ -656,7 +656,7 @@ async fn test_map_as_vec_of_tuples() {
 }
 
 #[tokio::test]
-async fn test_map_as_vec_of_tuples_schema_mismatch() {
+async fn map_as_vec_of_tuples_schema_mismatch() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         m: Vec<(u16, Vec<(String, i32)>)>,
@@ -669,7 +669,7 @@ async fn test_map_as_vec_of_tuples_schema_mismatch() {
 }
 
 #[tokio::test]
-async fn test_map_as_vec_of_tuples_schema_mismatch_nested() {
+async fn map_as_vec_of_tuples_schema_mismatch_nested() {
     type Inner = Vec<(i32, i64)>; // the value should be i128 instead of i64
 
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
@@ -690,7 +690,7 @@ async fn test_map_as_vec_of_tuples_schema_mismatch_nested() {
 }
 
 #[tokio::test]
-async fn test_enum() {
+async fn enums() {
     #[derive(Debug, PartialEq, Serialize_repr, Deserialize_repr)]
     #[repr(i8)]
     enum MyEnum8 {
@@ -775,7 +775,7 @@ async fn test_enum() {
 }
 
 #[tokio::test]
-async fn test_nullable() {
+async fn nullable() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: u32,
@@ -810,7 +810,7 @@ async fn test_nullable() {
 }
 
 #[tokio::test]
-async fn test_invalid_nullable() {
+async fn invalid_nullable() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         n: Option<u32>,
@@ -822,7 +822,7 @@ async fn test_invalid_nullable() {
 }
 
 #[tokio::test]
-async fn test_low_cardinality() {
+async fn low_cardinality() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: u32,
@@ -858,7 +858,7 @@ async fn test_low_cardinality() {
 }
 
 #[tokio::test]
-async fn test_invalid_low_cardinality() {
+async fn invalid_low_cardinality() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: u32,
@@ -872,7 +872,7 @@ async fn test_invalid_low_cardinality() {
 }
 
 #[tokio::test]
-async fn test_invalid_nullable_low_cardinality() {
+async fn invalid_nullable_low_cardinality() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: Option<u32>,
@@ -887,7 +887,7 @@ async fn test_invalid_nullable_low_cardinality() {
 
 #[tokio::test]
 #[cfg(feature = "time")]
-async fn test_invalid_serde_with() {
+async fn invalid_serde_with() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         #[serde(with = "clickhouse::serde::time::datetime64::millis")]
@@ -897,7 +897,7 @@ async fn test_invalid_serde_with() {
 }
 
 #[tokio::test]
-async fn test_too_many_struct_fields() {
+async fn too_many_struct_fields() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: u32,
@@ -911,7 +911,7 @@ async fn test_too_many_struct_fields() {
 }
 
 #[tokio::test]
-async fn test_serde_skip_deserializing() {
+async fn serde_skip_deserializing() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: u32,
@@ -938,7 +938,7 @@ async fn test_serde_skip_deserializing() {
 
 #[tokio::test]
 #[cfg(feature = "time")]
-async fn test_date_and_time() {
+async fn date_and_time() {
     use time::format_description::well_known::Iso8601;
     use time::Month::{February, January};
     use time::OffsetDateTime;
@@ -1001,7 +1001,7 @@ async fn test_date_and_time() {
 
 #[tokio::test]
 #[cfg(feature = "uuid")]
-async fn test_uuid() {
+async fn uuid() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         id: u16,
@@ -1031,7 +1031,7 @@ async fn test_uuid() {
 }
 
 #[tokio::test]
-async fn test_ipv4_ipv6() {
+async fn ipv4_ipv6() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         id: u16,
@@ -1064,7 +1064,7 @@ async fn test_ipv4_ipv6() {
 }
 
 #[tokio::test]
-async fn test_fixed_str() {
+async fn fixed_str() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: [u8; 4],
@@ -1083,7 +1083,7 @@ async fn test_fixed_str() {
 }
 
 #[tokio::test]
-async fn test_fixed_str_too_long() {
+async fn fixed_str_too_long() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: [u8; 4],
@@ -1096,7 +1096,7 @@ async fn test_fixed_str_too_long() {
 }
 
 #[tokio::test]
-async fn test_tuple() {
+async fn tuple() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: (u32, String),
@@ -1125,7 +1125,7 @@ async fn test_tuple() {
 }
 
 #[tokio::test]
-async fn test_tuple_invalid_definition() {
+async fn tuple_invalid_definition() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: (u32, String),
@@ -1147,7 +1147,7 @@ async fn test_tuple_invalid_definition() {
 }
 
 #[tokio::test]
-async fn test_tuple_too_many_elements_in_the_schema() {
+async fn tuple_too_many_elements_in_the_schema() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: (u32, String),
@@ -1169,7 +1169,7 @@ async fn test_tuple_too_many_elements_in_the_schema() {
 }
 
 #[tokio::test]
-async fn test_tuple_too_many_elements_in_the_struct() {
+async fn tuple_too_many_elements_in_the_struct() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: (u32, String, bool),
@@ -1187,7 +1187,7 @@ async fn test_tuple_too_many_elements_in_the_struct() {
 }
 
 #[tokio::test]
-async fn test_deeply_nested_validation_incorrect_fixed_string() {
+async fn deeply_nested_validation_incorrect_fixed_string() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         id: u32,
@@ -1205,7 +1205,7 @@ async fn test_deeply_nested_validation_incorrect_fixed_string() {
 }
 
 #[tokio::test]
-async fn test_geo() {
+async fn geo() {
     #[derive(Clone, Debug, PartialEq)]
     #[derive(Row, serde::Serialize, serde::Deserialize)]
     struct Data {
@@ -1254,7 +1254,7 @@ async fn test_geo() {
 //  not easy to assert, same applies to the other Geo types
 #[ignore]
 #[tokio::test]
-async fn test_geo_invalid_point() {
+async fn geo_invalid_point() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         id: u32,
@@ -1272,7 +1272,7 @@ async fn test_geo_invalid_point() {
 
 #[tokio::test]
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/100
-async fn test_issue_100() {
+async fn issue_100() {
     {
         #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
         struct Data {
@@ -1311,7 +1311,7 @@ async fn test_issue_100() {
 #[ignore]
 #[tokio::test]
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/109#issuecomment-2243197221
-async fn test_issue_109_1() {
+async fn issue_109_1() {
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct Data {
         #[serde(skip_deserializing)]
@@ -1363,7 +1363,7 @@ async fn test_issue_109_1() {
 }
 
 #[tokio::test]
-async fn test_issue_112() {
+async fn issue_112() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: bool,
@@ -1378,7 +1378,7 @@ async fn test_issue_112() {
 
 #[tokio::test]
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/113
-async fn test_issue_113() {
+async fn issue_113() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         a: u64,
@@ -1423,7 +1423,7 @@ async fn test_issue_113() {
 #[tokio::test]
 #[cfg(feature = "time")]
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/114
-async fn test_issue_114() {
+async fn issue_114() {
     #[derive(Row, Deserialize, Debug, PartialEq)]
     struct Data {
         #[serde(with = "clickhouse::serde::time::date")]
@@ -1458,7 +1458,7 @@ async fn test_issue_114() {
 #[tokio::test]
 #[cfg(feature = "time")]
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/173
-async fn test_issue_173() {
+async fn issue_173() {
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct Data {
         log_id: String,
@@ -1492,7 +1492,7 @@ async fn test_issue_173() {
 
 #[tokio::test]
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/185
-async fn test_issue_185() {
+async fn issue_185() {
     #[derive(Row, Deserialize, Debug, PartialEq)]
     struct Data {
         pk: u32,
@@ -1524,7 +1524,7 @@ async fn test_issue_185() {
 
 #[tokio::test]
 #[cfg(feature = "chrono")]
-async fn test_issue_218() {
+async fn issue_218() {
     #[derive(Row, Serialize, Deserialize, Debug)]
     struct Data {
         max_time: chrono::DateTime<chrono::Utc>,
@@ -1553,7 +1553,7 @@ async fn test_issue_218() {
 }
 
 #[tokio::test]
-async fn test_variant_wrong_definition() {
+async fn variant_wrong_definition() {
     #[derive(Debug, Deserialize, PartialEq)]
     enum MyVariant {
         Str(String),
@@ -1582,7 +1582,7 @@ async fn test_variant_wrong_definition() {
 }
 
 #[tokio::test]
-async fn test_decimals() {
+async fn decimals() {
     #[derive(Row, Deserialize, Debug, PartialEq)]
     struct Data {
         decimal32_9_4: Decimal32,
@@ -1615,7 +1615,7 @@ async fn test_decimals() {
 }
 
 #[tokio::test]
-async fn test_decimal32_wrong_size() {
+async fn decimal32_wrong_size() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         decimal32: i16,
@@ -1628,7 +1628,7 @@ async fn test_decimal32_wrong_size() {
 }
 
 #[tokio::test]
-async fn test_decimal64_wrong_size() {
+async fn decimal64_wrong_size() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         decimal64: i32,
@@ -1641,7 +1641,7 @@ async fn test_decimal64_wrong_size() {
 }
 
 #[tokio::test]
-async fn test_decimal128_wrong_size() {
+async fn decimal128_wrong_size() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         decimal128: i64,
@@ -1654,7 +1654,7 @@ async fn test_decimal128_wrong_size() {
 }
 
 #[tokio::test]
-async fn test_different_struct_field_order_same_types() {
+async fn different_struct_field_order_same_types() {
     #[derive(Debug, Row, Deserialize, PartialEq)]
     struct Data {
         c: String,
@@ -1677,7 +1677,7 @@ async fn test_different_struct_field_order_same_types() {
 }
 
 #[tokio::test]
-async fn test_different_struct_field_order_different_types() {
+async fn different_struct_field_order_different_types() {
     #[derive(Debug, Row, Deserialize, PartialEq)]
     struct Data {
         b: u32,
