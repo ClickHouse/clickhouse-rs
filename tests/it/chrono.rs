@@ -4,7 +4,7 @@ use std::ops::RangeBounds;
 
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use rand::{
-    distributions::{Distribution, Standard},
+    distr::{Distribution, StandardUniform},
     Rng,
 };
 use serde::{Deserialize, Serialize};
@@ -230,23 +230,21 @@ async fn date32() {
 // Distribution isn't implemented for `chrono` types, but we can lift the implementation from the `time` crate: https://docs.rs/time/latest/src/time/rand.rs.html#14-20
 struct NaiveDateWrapper(NaiveDate);
 
-impl Distribution<NaiveDateWrapper> for Standard {
+impl Distribution<NaiveDateWrapper> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NaiveDateWrapper {
         NaiveDateWrapper(
-            NaiveDate::from_num_days_from_ce_opt(
-                rng.gen_range(
-                    NaiveDate::MIN.num_days_from_ce()..=NaiveDate::MAX.num_days_from_ce(),
-                ),
-            )
+            NaiveDate::from_num_days_from_ce_opt(rng.random_range(
+                NaiveDate::MIN.num_days_from_ce()..=NaiveDate::MAX.num_days_from_ce(),
+            ))
             .unwrap(),
         )
     }
 }
 
 fn generate_dates(years: impl RangeBounds<i32>, count: usize) -> Vec<NaiveDate> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut dates: Vec<_> = (&mut rng)
-        .sample_iter(Standard)
+        .sample_iter(StandardUniform)
         .filter_map(|date: NaiveDateWrapper| {
             if years.contains(&date.0.year()) {
                 Some(date.0)

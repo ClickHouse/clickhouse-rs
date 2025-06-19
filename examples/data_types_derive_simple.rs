@@ -1,11 +1,11 @@
-use std::str::FromStr;
-
 use chrono::{DateTime, NaiveDate, Utc};
 use fixnum::{
     typenum::{U12, U4, U8},
     FixedPoint,
 };
-use rand::{distributions::Alphanumeric, seq::SliceRandom, Rng};
+use rand::prelude::IndexedRandom;
+use rand::{distr::Alphanumeric, Rng};
+use std::str::FromStr;
 use time::{Date, Month, OffsetDateTime, Time};
 
 use clickhouse::{error::Result, sql::Identifier, Client};
@@ -193,27 +193,27 @@ pub enum Enum16 {
 
 impl Row {
     pub fn new() -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         Row {
-            int8: rng.gen(),
-            int16: rng.gen(),
-            int32: rng.gen(),
-            int64: rng.gen(),
-            int128: rng.gen(),
-            uint8: rng.gen(),
-            uint16: rng.gen(),
-            uint32: rng.gen(),
-            uint64: rng.gen(),
-            uint128: rng.gen(),
-            float32: rng.gen(),
-            float64: rng.gen(),
-            boolean: rng.gen(),
+            int8: rng.random(),
+            int16: rng.random(),
+            int32: rng.random(),
+            int64: rng.random(),
+            int128: rng.random(),
+            uint8: rng.random(),
+            uint16: rng.random(),
+            uint32: rng.random(),
+            uint64: rng.random(),
+            uint128: rng.random(),
+            float32: rng.random(),
+            float64: rng.random(),
+            boolean: rng.random(),
             str: random_str(),
-            blob_str: rng.gen::<[u8; 3]>().to_vec(),
+            blob_str: rng.random::<[u8; 3]>().to_vec(),
             nullable_str: Some(random_str()),
             low_car_str: random_str(),
             nullable_low_car_str: Some(random_str()),
-            fixed_str: rng.gen(),
+            fixed_str: rng.random(),
             uuid: uuid::Uuid::new_v4(),
             ipv4: std::net::Ipv4Addr::from_str("172.195.0.1").unwrap(),
             ipv6: std::net::Ipv6Addr::from_str("::ffff:acc3:1").unwrap(),
@@ -266,7 +266,7 @@ impl Default for Row {
 }
 
 fn random_str() -> String {
-    rand::thread_rng()
+    rand::rng()
         .sample_iter(&Alphanumeric)
         .take(3)
         .map(char::from)

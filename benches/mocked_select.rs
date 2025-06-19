@@ -12,12 +12,9 @@ use hyper::{
     Request, Response,
 };
 use serde::Deserialize;
+use std::convert::Infallible;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::{
-    convert::Infallible,
-    mem,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 mod common;
 
@@ -55,12 +52,15 @@ async fn serve(
 }
 
 fn prepare_chunk() -> Bytes {
-    use rand::{distributions::Standard, rngs::SmallRng, Rng, SeedableRng};
+    use rand::{distr::StandardUniform, rngs::SmallRng, Rng, SeedableRng};
 
     // Generate random data to avoid _real_ compression.
     // TODO: It would be more useful to generate real data.
     let mut rng = SmallRng::seed_from_u64(0xBA5E_FEED);
-    let raw: Vec<_> = (&mut rng).sample_iter(Standard).take(128 * 1024).collect();
+    let raw: Vec<_> = (&mut rng)
+        .sample_iter(StandardUniform)
+        .take(128 * 1024)
+        .collect();
 
     // If the feature is enabled, compress the data even if we use the `None`
     // compression. The compression ratio is low anyway due to random data.
@@ -136,7 +136,7 @@ fn select(c: &mut Criterion) {
     }
 
     let mut group = c.benchmark_group("rows");
-    group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
+    group.throughput(Throughput::Bytes(size_of::<SomeRow>() as u64));
     group.bench_function("uncompressed", |b| {
         b.iter_custom(|iters| {
             let compression = Compression::None;
