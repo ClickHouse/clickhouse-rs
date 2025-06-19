@@ -27,81 +27,79 @@ const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 2048;
 
 const_assert!(BUFFER_SIZE.is_power_of_two()); // to use the whole buffer's capacity
 
-/// Performs one `INSERT`.
-///
-/// The [`Insert::end`] must be called to finalize the `INSERT`.
-/// Otherwise, the whole `INSERT` will be aborted.
-///
-/// Rows are being sent progressively to spread network load.
-#[must_use]
-pub struct Insert<T> {
-    state: InsertState,
+/// Inserted rows builder
+pub struct RowsBuilder {
     buffer: BytesMut,
     #[cfg(feature = "lz4")]
     compression: Compression,
+}
+
+impl RowsBuilder {
+    #[cfg(feature = "lz4")]
+    pub fn new(compression: Compression) -> Self {
+        Self {
+            buffer: BytesMut::with_capacity(BUFFER_SIZE),
+            compression,
+        }
+    }
+
+    #[cfg(not(feature = "lz4"))]
+    pub fn new() -> Self {
+        Self {
+            buffer: BytesMut::with_capacity(BUFFER_SIZE),
+        }
+    }
+
+    pub fn add_row<T: Serialize>(&mut self, row: &T) -> Result<usize> {
+        let old_buf_size = self.buffer.len();
+        rowbinary::serialize_into(&mut self.buffer, row)?;
+        let written = self.buffer.len() - old_buf_size;
+        Ok(written)
+    }
+
+    pub fn build(mut self) -> Result<Bytes> {
+        // Hyper uses non-trivial and inefficient schema of buffering chunks.
+        // It's difficult to determine when allocations occur.
+        // So, instead we control it manually here and rely on the system allocator.
+        self.take_and_prepare_chunk()
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
+    #[cfg(feature = "lz4")]
+    fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
+        Ok(if self.compression.is_lz4() {
+            let compressed = crate::compression::lz4::compress(&self.buffer)?;
+            self.buffer.clear();
+            compressed
+        } else {
+            mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze()
+        })
+    }
+
+    #[cfg(not(feature = "lz4"))]
+    fn take_and_prepare_chunk(mut self) -> Result<Bytes> {
+        Ok(mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze())
+    }
+}
+
+/// inserted rows sender
+pub struct RowsSender<T> {
+    state: RowsSenderState,
     send_timeout: Option<Duration>,
     end_timeout: Option<Duration>,
     // Use boxed `Sleep` to reuse a timer entry, it improves performance.
     // Also, `tokio::time::timeout()` significantly increases a future's size.
     sleep: Pin<Box<Sleep>>,
     _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
-}
-
-enum InsertState {
-    NotStarted {
-        client: Box<Client>,
-        sql: String,
-    },
-    Active {
-        sender: ChunkSender,
-        handle: JoinHandle<Result<()>>,
-    },
-    Terminated {
-        handle: JoinHandle<Result<()>>,
-    },
-    Completed,
-}
-
-impl InsertState {
-    fn sender(&mut self) -> Option<&mut ChunkSender> {
-        match self {
-            InsertState::Active { sender, .. } => Some(sender),
-            _ => None,
-        }
-    }
-
-    fn handle(&mut self) -> Option<&mut JoinHandle<Result<()>>> {
-        match self {
-            InsertState::Active { handle, .. } | InsertState::Terminated { handle } => Some(handle),
-            _ => None,
-        }
-    }
-
-    fn client_with_sql(&self) -> Option<(&Client, &str)> {
-        match self {
-            InsertState::NotStarted { client, sql } => Some((client, sql)),
-            _ => None,
-        }
-    }
-
-    fn terminated(&mut self) {
-        replace_with_or_abort(self, |_self| match _self {
-            InsertState::NotStarted { .. } => InsertState::Completed, // empty insert
-            InsertState::Active { handle, .. } => InsertState::Terminated { handle },
-            _ => unreachable!(),
-        });
-    }
-
-    fn with_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        assert!(matches!(self, InsertState::NotStarted { .. }));
-        replace_with_or_abort(self, |_self| match _self {
-            InsertState::NotStarted { mut client, sql } => {
-                client.add_option(name, value);
-                InsertState::NotStarted { client, sql }
-            }
-            _ => unreachable!(),
-        });
-    }
 }
 
 // It should be a regular function, but it decreases performance.
@@ -118,9 +116,8 @@ macro_rules! timeout {
     }};
 }
 
-impl<T> Insert<T> {
-    // TODO: remove Result
-    pub(crate) fn new(client: &Client, table: &str) -> Result<Self>
+impl<T> RowsSender<T> {
+    pub fn new(client: &Client, table: &str) -> Self
     where
         T: Row,
     {
@@ -131,139 +128,21 @@ impl<T> Insert<T> {
         // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
         let sql = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields);
 
-        Ok(Self {
-            state: InsertState::NotStarted {
+        Self {
+            state: RowsSenderState::NotStarted {
                 client: Box::new(client.clone()),
                 sql,
             },
-            buffer: BytesMut::with_capacity(BUFFER_SIZE),
-            #[cfg(feature = "lz4")]
-            compression: client.compression,
             send_timeout: None,
             end_timeout: None,
             sleep: Box::pin(tokio::time::sleep(Duration::new(0, 0))),
             _marker: PhantomData,
-        })
-    }
-
-    /// Sets timeouts for different operations.
-    ///
-    /// `send_timeout` restricts time on sending a data chunk to a socket.
-    /// `None` disables the timeout, it's a default.
-    /// It's roughly equivalent to `tokio::time::timeout(insert.write(...))`.
-    ///
-    /// `end_timeout` restricts time on waiting for a response from the CH
-    /// server. Thus, it includes all work needed to handle `INSERT` by the
-    /// CH server, e.g. handling all materialized views and so on.
-    /// `None` disables the timeout, it's a default.
-    /// It's roughly equivalent to `tokio::time::timeout(insert.end(...))`.
-    ///
-    /// These timeouts are much more performant (~x10) than wrapping `write()`
-    /// and `end()` calls into `tokio::time::timeout()`.
-    pub fn with_timeouts(
-        mut self,
-        send_timeout: Option<Duration>,
-        end_timeout: Option<Duration>,
-    ) -> Self {
-        self.set_timeouts(send_timeout, end_timeout);
-        self
-    }
-
-    /// Similar to [`Client::with_option`], but for this particular INSERT
-    /// statement only.
-    ///
-    /// # Panics
-    /// If called after the request is started, e.g., after [`Insert::write`].
-    #[track_caller]
-    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.state.with_option(name, value);
-        self
-    }
-
-    pub(crate) fn set_timeouts(
-        &mut self,
-        send_timeout: Option<Duration>,
-        end_timeout: Option<Duration>,
-    ) {
-        self.send_timeout = send_timeout;
-        self.end_timeout = end_timeout;
-    }
-
-    /// Serializes the provided row into an internal buffer.
-    /// Once the buffer is full, it's sent to a background task writing to the
-    /// socket.
-    ///
-    /// Close to:
-    /// ```ignore
-    /// async fn write<T>(&self, row: &T) -> Result<usize>;
-    /// ```
-    ///
-    /// A returned future doesn't depend on the row's lifetime.
-    ///
-    /// Returns an error if the row cannot be serialized or the background task
-    /// failed. Once failed, the whole `INSERT` is aborted and cannot be
-    /// used anymore.
-    ///
-    /// # Panics
-    /// If called after the previous call that returned an error.
-    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
-    where
-        T: Serialize,
-    {
-        let result = self.do_write(row);
-
-        async move {
-            result?;
-            if self.buffer.len() >= MIN_CHUNK_SIZE {
-                self.send_chunk().await?;
-            }
-            Ok(())
         }
     }
 
-    #[inline(always)]
-    pub(crate) fn do_write(&mut self, row: &T) -> Result<usize>
-    where
-        T: Serialize,
-    {
-        match self.state {
-            InsertState::NotStarted { .. } => self.init_request(),
-            InsertState::Active { .. } => Ok(()),
-            _ => panic!("write() after error"),
-        }?;
-
-        let old_buf_size = self.buffer.len();
-        let result = rowbinary::serialize_into(&mut self.buffer, row);
-        let written = self.buffer.len() - old_buf_size;
-
-        if result.is_err() {
-            self.abort();
-        }
-
-        result.and(Ok(written))
-    }
-
-    /// Ends `INSERT`, the server starts processing the data.
-    ///
-    /// Succeeds if the server returns 200, that means the `INSERT` was handled
-    /// successfully, including all materialized views and quorum writes.
-    ///
-    /// NOTE: If it isn't called, the whole `INSERT` is aborted.
-    pub async fn end(mut self) -> Result<()> {
-        if !self.buffer.is_empty() {
-            self.send_chunk().await?;
-        }
-        self.state.terminated();
-        self.wait_handle().await
-    }
-
-    async fn send_chunk(&mut self) -> Result<()> {
-        debug_assert!(matches!(self.state, InsertState::Active { .. }));
-
-        // Hyper uses non-trivial and inefficient schema of buffering chunks.
-        // It's difficult to determine when allocations occur.
-        // So, instead we control it manually here and rely on the system allocator.
-        let chunk = self.take_and_prepare_chunk()?;
+    /// Send one chunk and keep sender active
+    pub async fn send_chunk(&mut self, chunk: Bytes) -> Result<()> {
+        debug_assert!(matches!(self.state, RowsSenderState::Active { .. }));
 
         let sender = self.state.sender().unwrap(); // checked above
 
@@ -274,7 +153,6 @@ impl<T> Insert<T> {
         };
 
         // Error handling.
-
         self.abort();
 
         // TODO: is it required to wait the handle in the case of timeout?
@@ -288,47 +166,28 @@ impl<T> Insert<T> {
         }
     }
 
-    async fn wait_handle(&mut self) -> Result<()> {
-        match self.state.handle() {
-            Some(handle) => {
-                let result = match timeout!(self, end_timeout, &mut *handle) {
-                    Some(Ok(res)) => res,
-                    Some(Err(err)) if err.is_panic() => panic::resume_unwind(err.into_panic()),
-                    Some(Err(err)) => Err(Error::Custom(format!("unexpected error: {err}"))),
-                    None => {
-                        // We can do nothing useful here, so just shut down the background task.
-                        handle.abort();
-                        Err(Error::TimedOut)
-                    }
-                };
-                self.state = InsertState::Completed;
-                result
-            }
-            _ => Ok(()),
-        }
+    /// Wait and terminate the sender
+    pub async fn terminate(&mut self) -> Result<()> {
+        self.state.terminated();
+        self.wait_handle().await
     }
 
-    #[cfg(feature = "lz4")]
-    fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
-        Ok(if self.compression.is_lz4() {
-            let compressed = crate::compression::lz4::compress(&self.buffer)?;
-            self.buffer.clear();
-            compressed
-        } else {
-            mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze()
-        })
-    }
-
-    #[cfg(not(feature = "lz4"))]
-    fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
-        Ok(mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze())
+    /// Send all in once, and terminate sender after
+    pub async fn send_all(mut self, chunk: Bytes) -> Result<()> {
+        self.send_chunk(chunk).await?;
+        self.terminate().await
     }
 
     #[cold]
     #[track_caller]
     #[inline(never)]
-    fn init_request(&mut self) -> Result<()> {
-        debug_assert!(matches!(self.state, InsertState::NotStarted { .. }));
+    pub fn init(&mut self) -> Result<()> {
+        match self.state {
+            RowsSenderState::Active { .. } => return Ok(()),
+            RowsSenderState::NotStarted { .. } => {}
+            _ => panic!("write() after error"),
+        };
+
         let (client, sql) = self.state.client_with_sql().unwrap(); // checked above
 
         let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
@@ -366,8 +225,75 @@ impl<T> Insert<T> {
         let handle =
             tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
 
-        self.state = InsertState::Active { handle, sender };
+        self.state = RowsSenderState::Active { handle, sender };
         Ok(())
+    }
+
+    /// Sets timeouts for different operations.
+    ///
+    /// `send_timeout` restricts time on sending a data chunk to a socket.
+    /// `None` disables the timeout, it's a default.
+    /// It's roughly equivalent to `tokio::time::timeout(insert.write(...))`.
+    ///
+    /// `end_timeout` restricts time on waiting for a response from the CH
+    /// server. Thus, it includes all work needed to handle `INSERT` by the
+    /// CH server, e.g. handling all materialized views and so on.
+    /// `None` disables the timeout, it's a default.
+    /// It's roughly equivalent to `tokio::time::timeout(insert.end(...))`.
+    ///
+    /// These timeouts are much more performant (~x10) than wrapping `write()`
+    /// and `end()` calls into `tokio::time::timeout()`.
+    pub fn with_timeouts(
+        mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) -> Self {
+        self.set_timeouts(send_timeout, end_timeout);
+        self
+    }
+
+    /// Similar to [`Client::with_option`], but for this particular INSERT
+    /// statement only.
+    ///
+    /// # Panics
+    /// If called after the request is started, e.g., after [`Insert::write`].
+    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.set_option(name, value);
+        self
+    }
+
+    #[track_caller]
+    pub(crate) fn set_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.state.set_option(name, value);
+    }
+
+    pub(crate) fn set_timeouts(
+        &mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) {
+        self.send_timeout = send_timeout;
+        self.end_timeout = end_timeout;
+    }
+
+    async fn wait_handle(&mut self) -> Result<()> {
+        match self.state.handle() {
+            Some(handle) => {
+                let result = match timeout!(self, end_timeout, &mut *handle) {
+                    Some(Ok(res)) => res,
+                    Some(Err(err)) if err.is_panic() => panic::resume_unwind(err.into_panic()),
+                    Some(Err(err)) => Err(Error::Custom(format!("unexpected error: {err}"))),
+                    None => {
+                        // We can do nothing useful here, so just shut down the background task.
+                        handle.abort();
+                        Err(Error::TimedOut)
+                    }
+                };
+                self.state = RowsSenderState::Completed;
+                result
+            }
+            _ => Ok(()),
+        }
     }
 
     fn abort(&mut self) {
@@ -377,8 +303,200 @@ impl<T> Insert<T> {
     }
 }
 
-impl<T> Drop for Insert<T> {
+impl<T> Drop for RowsSender<T> {
     fn drop(&mut self) {
         self.abort();
+    }
+}
+
+pub(crate) enum RowsSenderState {
+    NotStarted {
+        client: Box<Client>,
+        sql: String,
+    },
+    Active {
+        sender: ChunkSender,
+        handle: JoinHandle<Result<()>>,
+    },
+    Terminated {
+        handle: JoinHandle<Result<()>>,
+    },
+    Completed,
+}
+
+impl RowsSenderState {
+    fn sender(&mut self) -> Option<&mut ChunkSender> {
+        match self {
+            RowsSenderState::Active { sender, .. } => Some(sender),
+            _ => None,
+        }
+    }
+
+    fn handle(&mut self) -> Option<&mut JoinHandle<Result<()>>> {
+        match self {
+            RowsSenderState::Active { handle, .. } | RowsSenderState::Terminated { handle } => {
+                Some(handle)
+            }
+            _ => None,
+        }
+    }
+
+    fn client_with_sql(&self) -> Option<(&Client, &str)> {
+        match self {
+            RowsSenderState::NotStarted { client, sql } => Some((client, sql)),
+            _ => None,
+        }
+    }
+
+    fn terminated(&mut self) {
+        replace_with_or_abort(self, |_self| match _self {
+            RowsSenderState::NotStarted { .. } => RowsSenderState::Completed, // empty insert
+            RowsSenderState::Active { handle, .. } => RowsSenderState::Terminated { handle },
+            _ => unreachable!(),
+        });
+    }
+
+    fn set_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        assert!(matches!(self, RowsSenderState::NotStarted { .. }));
+        replace_with_or_abort(self, |_self| match _self {
+            RowsSenderState::NotStarted { mut client, sql } => {
+                client.add_option(name, value);
+                RowsSenderState::NotStarted { client, sql }
+            }
+            _ => unreachable!(),
+        });
+    }
+}
+
+/// Performs one `INSERT`.
+///
+/// The [`Insert::end`] must be called to finalize the `INSERT`.
+/// Otherwise, the whole `INSERT` will be aborted.
+///
+/// Rows are being sent progressively to spread network load.
+#[must_use]
+pub struct Insert<T> {
+    builder: RowsBuilder,
+    sender: RowsSender<T>,
+}
+
+impl<T> Insert<T> {
+    // TODO: remove Result
+    pub(crate) fn new(client: &Client, table: &str) -> Result<Self>
+    where
+        T: Row,
+    {
+        let sender = RowsSender::new(client, table);
+
+        #[cfg(feature = "lz4")]
+        let builder = RowsBuilder::new(client.compression);
+        #[cfg(not(feature = "lz4"))]
+        let builder = RowsBuilder::new();
+
+        Ok(Self { sender, builder })
+    }
+
+    /// Sets timeouts for different operations.
+    ///
+    /// `send_timeout` restricts time on sending a data chunk to a socket.
+    /// `None` disables the timeout, it's a default.
+    /// It's roughly equivalent to `tokio::time::timeout(insert.write(...))`.
+    ///
+    /// `end_timeout` restricts time on waiting for a response from the CH
+    /// server. Thus, it includes all work needed to handle `INSERT` by the
+    /// CH server, e.g. handling all materialized views and so on.
+    /// `None` disables the timeout, it's a default.
+    /// It's roughly equivalent to `tokio::time::timeout(insert.end(...))`.
+    ///
+    /// These timeouts are much more performant (~x10) than wrapping `write()`
+    /// and `end()` calls into `tokio::time::timeout()`.
+    pub fn with_timeouts(
+        mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) -> Self {
+        self.set_timeouts(send_timeout, end_timeout);
+        self
+    }
+
+    pub(crate) fn set_timeouts(
+        &mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) {
+        self.sender.set_timeouts(send_timeout, end_timeout);
+    }
+
+    /// Similar to [`Client::with_option`], but for this particular INSERT
+    /// statement only.
+    ///
+    /// # Panics
+    /// If called after the request is started, e.g., after [`Insert::write`].
+    #[track_caller]
+    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.sender.set_option(name, value);
+        self
+    }
+
+    /// Serializes the provided row into an internal buffer.
+    /// Once the buffer is full, it's sent to a background task writing to the
+    /// socket.
+    ///
+    /// Close to:
+    /// ```ignore
+    /// async fn write<T>(&self, row: &T) -> Result<usize>;
+    /// ```
+    ///
+    /// A returned future doesn't depend on the row's lifetime.
+    ///
+    /// Returns an error if the row cannot be serialized or the background task
+    /// failed. Once failed, the whole `INSERT` is aborted and cannot be
+    /// used anymore.
+    ///
+    /// # Panics
+    /// If called after the previous call that returned an error.
+    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
+    where
+        T: Serialize,
+    {
+        let result = self.do_write(row);
+
+        async move {
+            result?;
+            if self.builder.len() >= MIN_CHUNK_SIZE {
+                let chunk = self.builder.take_and_prepare_chunk()?;
+                self.sender.send_chunk(chunk).await?;
+            }
+            Ok(())
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn do_write(&mut self, row: &T) -> Result<usize>
+    where
+        T: Serialize,
+    {
+        // Lazily init sender after first
+        self.sender.init()?;
+
+        let result = self.builder.add_row(row);
+        if result.is_err() {
+            self.sender.abort();
+        }
+        result
+    }
+
+    /// Ends `INSERT`, the server starts processing the data.
+    ///
+    /// Succeeds if the server returns 200, that means the `INSERT` was handled
+    /// successfully, including all materialized views and quorum writes.
+    ///
+    /// NOTE: If it isn't called, the whole `INSERT` is aborted.
+    pub async fn end(mut self) -> Result<()> {
+        if !self.builder.is_empty() {
+            let chunk = self.builder.take_and_prepare_chunk()?;
+            self.sender.send_chunk(chunk).await?;
+        }
+        self.sender.terminate().await
     }
 }
