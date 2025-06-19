@@ -99,46 +99,46 @@ rustls-tls-native-roots = [
 [dependencies]
 clickhouse-derive = { version = "0.2.0", path = "derive" }
 
-thiserror = "2"
-serde = "1"
-bytes = "1"
-tokio = { version = "1", features = ["rt", "macros"] }
-http-body-util = "0.1"
-hyper = "1"
-hyper-util = { version = "0.1", features = ["client-legacy", "http1"] }
-hyper-tls = { version = "0.6", optional = true }
+thiserror = "2.0"
+serde = "1.0.106"
+bytes = "1.5.0"
+tokio = { version = "1.0.1", features = ["rt", "macros"] }
+http-body-util = "0.1.2"
+hyper = "1.4"
+hyper-util = { version = "0.1.6", features = ["client-legacy", "http1"] }
+hyper-tls = { version = "0.6.0", optional = true }
 rustls = { version = "0.23", default-features = false, optional = true }
-hyper-rustls = { version = "0.27", default-features = false, features = [
+hyper-rustls = { version = "0.27.3", default-features = false, features = [
     "http1",
     "tls12",
 ], optional = true }
-url = "2"
-futures = "0.3"
-futures-channel = "0.3"
-static_assertions = "1"
+url = "2.1.1"
+futures = "0.3.5"
+futures-channel = "0.3.30"
+static_assertions = "1.1"
 sealed = "0.6"
 sha-1 = { version = "0.10", optional = true }
-serde_json = { version = "1", optional = true }
-lz4_flex = { version = "0.11", default-features = false, features = [
+serde_json = { version = "1.0.68", optional = true }
+lz4_flex = { version = "0.11.3", default-features = false, features = [
     "std",
 ], optional = true }
-cityhash-rs = { version = ">=1.0.1", optional = true } # 1.0.1+ is Apache/MIT, earlier was GPL-3
+cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety, this package has been stable for years
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
 chrono = { version = "0.4", optional = true, features = ["serde"] }
-bstr = { version = "1", default-features = false }
+bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
-replace_with = { version = "0.1" }
+replace_with = { version = "0.1.7" }
 
 [dev-dependencies]
 criterion = "0.6"
-serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["full", "test-util"] }
-hyper = { version = "1", features = ["server"] }
-serde_bytes = "0.11"
+serde = { version = "1.0.106", features = ["derive"] }
+tokio = { version = "1.0.1", features = ["full", "test-util"] }
+hyper = { version = "1.1", features = ["server"] }
+serde_bytes = "0.11.4"
 serde_json = "1"
-serde_repr = "0.1"
+serde_repr = "0.1.7"
 uuid = { version = "1", features = ["v4", "serde"] }
-time = { version = "0.3", features = ["macros", "rand"] }
-fixnum = { version = "0.9", features = ["serde", "i32", "i64", "i128"] }
+time = { version = "0.3.17", features = ["macros", "rand"] }
+fixnum = { version = "0.9.2", features = ["serde", "i32", "i64", "i128"] }
 rand = { version = "0.9", features = ["small_rng"] }
