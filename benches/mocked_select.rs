@@ -4,7 +4,7 @@ use clickhouse::{
     Client, Compression, Row,
 };
 use clickhouse_types::{Column, DataTypeNode};
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use futures::stream::{self, StreamExt as _};
 use http_body_util::StreamBody;
 use hyper::{
@@ -108,7 +108,7 @@ fn select(c: &mut Criterion) {
             sum.d = sum.d.wrapping_add(row.d);
         }
 
-        black_box(sum);
+        std::hint::black_box(sum);
 
         let elapsed = start.elapsed();
         Ok(elapsed)
@@ -128,7 +128,7 @@ fn select(c: &mut Criterion) {
 
         let mut size = 0;
         while size < min_size {
-            let buf = black_box(cursor.next().await?);
+            let buf = std::hint::black_box(cursor.next().await?);
             size += buf.unwrap().len() as u64;
         }
 

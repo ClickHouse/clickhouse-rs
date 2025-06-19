@@ -2,7 +2,6 @@
 
 use clickhouse::query::RowCursor;
 use clickhouse::{Client, Compression, Row};
-use criterion::black_box;
 use serde::Deserialize;
 use std::time::{Duration, Instant};
 
@@ -103,7 +102,7 @@ pub(crate) async fn do_select_bench<'a, T: BenchmarkRow<'a>>(
     let mut sum = 0;
     while let Some(row) = cursor.next().await.unwrap() {
         sum += row.id();
-        black_box(&row);
+        std::hint::black_box(&row);
     }
 
     BenchmarkStats::new(&cursor, &start, sum)
