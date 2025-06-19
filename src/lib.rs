@@ -485,6 +485,6 @@ mod client_tests {
         let client = client.with_validation(false);
         assert!(!client.validation);
         let client = client.with_validation(true);
-        assert!(!client.validation);
+        assert!(client.validation);
     }
 }

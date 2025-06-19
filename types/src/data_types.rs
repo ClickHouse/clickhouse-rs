@@ -26,7 +26,7 @@ impl Display for Column {
 }
 
 /// Represents a data type in ClickHouse.
-/// See https://clickhouse.com/docs/sql-reference/data-types
+/// See <https://clickhouse.com/docs/sql-reference/data-types>
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
@@ -99,7 +99,7 @@ pub enum DataTypeNode {
 impl DataTypeNode {
     /// Parses a data type from a string that is received
     /// in the `RowBinaryWithNamesAndTypes` and `Native` formats headers.
-    /// See also: https://clickhouse.com/docs/interfaces/formats/RowBinaryWithNamesAndTypes#description
+    /// See also: <https://clickhouse.com/docs/interfaces/formats/RowBinaryWithNamesAndTypes#description>
     pub fn new(name: &str) -> Result<Self, TypesError> {
         match name {
             "UInt8" => Ok(Self::UInt8),
@@ -269,7 +269,7 @@ impl Display for EnumType {
 
 /// DateTime64 precision.
 /// Defined as an enum, as it is valid only in the range from 0 to 9.
-/// See also: https://clickhouse.com/docs/sql-reference/data-types/datetime64
+/// See also: <https://clickhouse.com/docs/sql-reference/data-types/datetime64>
 #[derive(Debug, Clone, PartialEq)]
 #[allow(missing_docs)]
 pub enum DateTimePrecision {
@@ -307,7 +307,7 @@ impl DateTimePrecision {
 }
 
 /// Represents the underlying integer type for a Decimal.
-/// See also: https://clickhouse.com/docs/sql-reference/data-types/decimal
+/// See also: <https://clickhouse.com/docs/sql-reference/data-types/decimal>
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecimalType {
     /// Stored as an `Int32`
