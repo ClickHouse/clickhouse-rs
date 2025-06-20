@@ -313,6 +313,11 @@ impl Client {
         query::Query::new(self, query)
     }
 
+    /// Starts a new SELECT/DDL query that will be used as-is without any processing.
+    pub fn query_raw(&self, query: &str) -> query::Query {
+        query::Query::raw(self, query)
+    }
+
     /// Starts a new WATCH query.
     ///
     /// The `query` can be either the table name or a SELECT query.
