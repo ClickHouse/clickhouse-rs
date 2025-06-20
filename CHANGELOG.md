@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - client: added `Client::with_validation` builder method. Validation is enabled by default, meaning that `RowBinaryWithNamesAndTypes` format will be used to fetch rows from the database. If validation is disabled, `RowBinary` format will be used, similarly to the previous versions. ([#221]).
-- types: a new crate `clickhouse-types` was added to the project workspace. This crate is required for `RowBinaryWithNamesAndTypes` struct definition validation, as it contains ClickHouse data types AST, as well as functions and utilities to parse the types out of the ClickHouse server response. Note that this crate is not intended for public usage, as it might introduce internal breaking changes not following semver. ([#221]).
+- types: a new crate `clickhouse-types` was added to the project workspace. This crate is required for `RowBinaryWithNamesAndTypes` struct definition validation, as it contains ClickHouse data types AST, as well as functions and utilities to parse the types out of the ClickHouse server response. ([#221]).
 
 [#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
 
