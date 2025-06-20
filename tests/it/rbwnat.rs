@@ -758,7 +758,7 @@ async fn enums() {
         },
     ];
 
-    let mut insert = client.insert(table_name).unwrap();
+    let mut insert = client.insert(table_name).await.unwrap();
     for row in &expected {
         insert.write(row).await.unwrap()
     }
@@ -1349,7 +1349,7 @@ async fn issue_109_1() {
         .fetch_all::<Data>()
         .await
         .unwrap();
-    let mut insert = client.insert("issue_109").unwrap();
+    let mut insert = client.insert("issue_109").await.unwrap();
     for (id, elem) in data.iter().enumerate() {
         let elem = Data {
             en_id: format!("ABC-{}", id),

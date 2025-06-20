@@ -37,7 +37,7 @@ pub(crate) fn deserialize_row_binary<'data, 'cursor, T: Deserialize<'data> + Row
 /// Similar to [`deserialize_row_binary`], but uses [`RowMetadata`]
 /// parsed from `RowBinaryWithNamesAndTypes` header to validate the data types.
 /// This is used when [`crate::Row`] validation is enabled in the client (default).
-pub(crate) fn deserialize_rbwnat<'data, 'cursor, T: Deserialize<'data> + Row>(
+pub(crate) fn deserialize_with_validation<'data, 'cursor, T: Deserialize<'data> + Row>(
     input: &mut &'data [u8],
     metadata: Option<&'cursor RowMetadata>,
 ) -> Result<T> {

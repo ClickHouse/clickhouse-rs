@@ -51,7 +51,7 @@ async fn run_insert(client: Client, addr: SocketAddr, iters: u64) -> Result<Dura
     let _server = common::start_server(addr, serve).await;
 
     let start = Instant::now();
-    let mut insert = client.insert("table")?;
+    let mut insert = client.insert("table").await?;
 
     for _ in 0..iters {
         insert.write(&SomeRow::sample()).await?;
@@ -70,7 +70,7 @@ async fn run_inserter<const WITH_PERIOD: bool>(
     let _server = common::start_server(addr, serve).await;
 
     let start = Instant::now();
-    let mut inserter = client.inserter("table")?.with_max_rows(iters);
+    let mut inserter = client.inserter("table").with_max_rows(iters);
 
     if WITH_PERIOD {
         // Just to measure overhead, not to actually use it.
@@ -78,7 +78,7 @@ async fn run_inserter<const WITH_PERIOD: bool>(
     }
 
     for _ in 0..iters {
-        inserter.write(&SomeRow::sample())?;
+        inserter.write(&SomeRow::sample()).await?;
         inserter.commit().await?;
     }
 

@@ -46,7 +46,7 @@ where
 {
     let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
     for row in rows {
-        rowbinary::serialize_into(&mut buffer, &row).expect("failed to serialize");
+        rowbinary::serialize_row_binary(&mut buffer, &row).expect("failed to serialize");
     }
     Thunk(Response::new(buffer.into()))
 }

@@ -99,7 +99,10 @@ impl<T> RowCursor<T> {
                         }
                     }
                     slice = super::workaround_51132(self.bytes.slice());
-                    rowbinary::deserialize_rbwnat::<T>(&mut slice, self.row_metadata.as_ref())
+                    rowbinary::deserialize_with_validation::<T>(
+                        &mut slice,
+                        self.row_metadata.as_ref(),
+                    )
                 } else {
                     slice = super::workaround_51132(self.bytes.slice());
                     rowbinary::deserialize_row_binary::<T>(&mut slice)

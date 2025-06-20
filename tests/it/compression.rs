@@ -5,7 +5,7 @@ use crate::{create_simple_table, SimpleRow};
 async fn check(client: Client) {
     create_simple_table(&client, "test").await;
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert("test").await.unwrap();
     for i in 0..200_000 {
         insert.write(&SimpleRow::new(i, "foo")).await.unwrap();
     }
