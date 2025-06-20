@@ -34,11 +34,11 @@ async fn force_commit() {
     let client = prepare_database!();
     create_table(&client).await;
 
-    let mut inserter = client.inserter("test").unwrap();
+    let mut inserter = client.inserter("test");
     let rows = 100;
 
     for i in 1..=rows {
-        inserter.write(&MyRow::new(i)).unwrap();
+        inserter.write(&MyRow::new(i)).await.unwrap();
         assert_eq!(inserter.commit().await.unwrap(), Quantities::ZERO);
 
         if i % 10 == 0 {
@@ -63,14 +63,14 @@ async fn limited_by_rows() {
     let client = prepare_database!();
     create_table(&client).await;
 
-    let mut inserter = client.inserter("test").unwrap().with_max_rows(10);
+    let mut inserter = client.inserter("test").with_max_rows(10);
     let rows = 100;
 
     for i in (2..=rows).step_by(2) {
         let row = MyRow::new(i - 1);
-        inserter.write(&row).unwrap();
+        inserter.write(&row).await.unwrap();
         let row = MyRow::new(i);
-        inserter.write(&row).unwrap();
+        inserter.write(&row).await.unwrap();
 
         let inserted = inserter.commit().await.unwrap();
         let pending = inserter.pending();
@@ -105,13 +105,13 @@ async fn limited_by_bytes() {
     let client = prepare_database!();
     create_table(&client).await;
 
-    let mut inserter = client.inserter("test").unwrap().with_max_bytes(100);
+    let mut inserter = client.inserter("test").with_max_bytes(100);
     let rows = 100;
 
     let row = MyRow::new("x".repeat(9));
 
     for i in 1..=rows {
-        inserter.write(&row).unwrap();
+        inserter.write(&row).await.unwrap();
 
         let inserted = inserter.commit().await.unwrap();
         let pending = inserter.pending();
@@ -149,12 +149,12 @@ async fn limited_by_time() {
     create_table(&client).await;
 
     let period = Duration::from_secs(1);
-    let mut inserter = client.inserter("test").unwrap().with_period(Some(period));
+    let mut inserter = client.inserter("test").with_period(Some(period));
     let rows = 100;
 
     for i in 1..=rows {
         let row = MyRow::new(i);
-        inserter.write(&row).unwrap();
+        inserter.write(&row).await.unwrap();
 
         tokio::time::sleep(period / 10).await;
 
@@ -201,11 +201,10 @@ async fn keeps_client_options() {
 
     let mut inserter = client
         .inserter(table_name)
-        .unwrap()
         .with_option("async_insert", "1")
         .with_option("query_id", &query_id);
 
-    inserter.write(&row).unwrap();
+    inserter.write(&row).await.unwrap();
     inserter.end().await.unwrap();
 
     flush_query_log(&client).await;
@@ -254,11 +253,10 @@ async fn overrides_client_options() {
 
     let mut inserter = client
         .inserter(table_name)
-        .unwrap()
         .with_option("async_insert", override_value)
         .with_option("query_id", &query_id);
 
-    inserter.write(&row).unwrap();
+    inserter.write(&row).await.unwrap();
     inserter.end().await.unwrap();
 
     flush_query_log(&client).await;

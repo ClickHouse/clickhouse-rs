@@ -16,6 +16,7 @@ async fn keeps_client_options() {
 
     let mut insert = client
         .insert(table_name)
+        .await
         .unwrap()
         .with_option(insert_setting_name, insert_setting_value)
         .with_option("query_id", &query_id);
@@ -68,6 +69,7 @@ async fn overrides_client_options() {
 
     let mut insert = client
         .insert(table_name)
+        .await
         .unwrap()
         .with_option(setting_name, override_value)
         .with_option("query_id", &query_id);
@@ -112,8 +114,9 @@ async fn empty_insert() {
     let client = prepare_database!();
     create_simple_table(&client, table_name).await;
 
-    let insert = client
+    let mut insert = client
         .insert::<SimpleRow>(table_name)
+        .await
         .unwrap()
         .with_option("query_id", &query_id);
 
@@ -164,6 +167,7 @@ async fn rename_insert() {
 
     let mut insert = client
         .insert(table_name)
+        .await
         .unwrap()
         .with_option("query_id", &query_id);
 

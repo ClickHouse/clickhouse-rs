@@ -139,7 +139,7 @@ fn sample_serialized() -> Vec<u8> {
 #[test]
 fn it_serializes() {
     let mut actual = Vec::new();
-    super::serialize_into(&mut actual, &sample()).unwrap();
+    super::serialize_row_binary(&mut actual, &sample()).unwrap();
     assert_eq!(actual, sample_serialized());
 }
 

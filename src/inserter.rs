@@ -53,9 +53,8 @@ impl<T> Inserter<T>
 where
     T: Row,
 {
-    // TODO: (breaking change) remove `Result`.
-    pub(crate) fn new(client: &Client, table: &str) -> Result<Self> {
-        Ok(Self {
+    pub(crate) fn new(client: &Client, table: &str) -> Self {
+        Self {
             client: client.clone(),
             table: table.into(),
             max_bytes: u64::MAX,
@@ -66,7 +65,7 @@ where
             ticks: Ticks::default(),
             pending: Quantities::ZERO,
             in_transaction: false,
-        })
+        }
     }
 
     /// See [`Insert::with_timeouts()`].
@@ -215,12 +214,12 @@ where
     /// # Panics
     /// If called after the previous call that returned an error.
     #[inline]
-    pub fn write(&mut self, row: &T) -> Result<()>
+    pub async fn write(&mut self, row: &T) -> Result<()>
     where
         T: Serialize,
     {
         if self.insert.is_none() {
-            self.init_insert()?;
+            self.init_insert().await?;
         }
 
         match self.insert.as_mut().unwrap().do_write(row) {
@@ -278,7 +277,7 @@ where
     }
 
     async fn insert(&mut self) -> Result<()> {
-        if let Some(insert) = self.insert.take() {
+        if let Some(mut insert) = self.insert.take() {
             insert.end().await?;
         }
         Ok(())
@@ -286,11 +285,11 @@ where
 
     #[cold]
     #[inline(never)]
-    fn init_insert(&mut self) -> Result<()> {
+    async fn init_insert(&mut self) -> Result<()> {
         debug_assert!(self.insert.is_none());
         debug_assert_eq!(self.pending, Quantities::ZERO);
 
-        let mut new_insert: Insert<T> = self.client.insert(&self.table)?;
+        let mut new_insert: Insert<T> = self.client.insert(&self.table).await?;
         new_insert.set_timeouts(self.send_timeout, self.end_timeout);
         self.insert = Some(new_insert);
         Ok(())

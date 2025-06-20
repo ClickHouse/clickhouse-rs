@@ -1,9 +1,3 @@
-// FIXME: this is allowed only temporarily,
-//  before the insert RBWNAT implementation is ready,
-//  cause otherwise the caches are never used.
-#![allow(dead_code)]
-#![allow(unreachable_pub)]
-
 use crate::row::RowKind;
 use crate::sql::Identifier;
 use crate::Result;
@@ -12,12 +6,17 @@ use clickhouse_types::{parse_rbwnat_columns_header, Column};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-use tokio::sync::{OnceCell, RwLock};
+use tokio::sync::RwLock;
 
 /// Cache for [`RowMetadata`] to avoid allocating it for the same struct more than once
 /// during the application lifecycle. Key: fully qualified table name (e.g. `database.table`).
-type LockedRowMetadataCache = RwLock<HashMap<String, Arc<RowMetadata>>>;
-static ROW_METADATA_CACHE: OnceCell<LockedRowMetadataCache> = OnceCell::const_new();
+pub(crate) struct RowMetadataCache(RwLock<HashMap<String, Arc<RowMetadata>>>);
+
+impl Default for RowMetadataCache {
+    fn default() -> Self {
+        RowMetadataCache(RwLock::new(HashMap::default()))
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum AccessType {
@@ -152,36 +151,27 @@ pub(crate) async fn get_row_metadata<T: Row>(
     client: &crate::Client,
     table_name: &str,
 ) -> Result<Arc<RowMetadata>> {
-    let locked_cache = ROW_METADATA_CACHE
-        .get_or_init(|| async { RwLock::new(HashMap::new()) })
-        .await;
-    let cache_guard = locked_cache.read().await;
-    match cache_guard.get(table_name) {
+    let read_lock = client.row_metadata_cache.0.read().await;
+    match read_lock.get(table_name) {
         Some(metadata) => Ok(metadata.clone()),
-        None => cache_row_metadata::<T>(client, table_name, locked_cache).await,
+        None => {
+            drop(read_lock);
+            // TODO: should it be moved to a cold function?
+            let mut write_lock = client.row_metadata_cache.0.write().await;
+            let mut bytes_cursor = client
+                .query("SELECT * FROM ? LIMIT 0")
+                .bind(Identifier(table_name))
+                .fetch_bytes("RowBinaryWithNamesAndTypes")?;
+            let mut buffer = Vec::<u8>::new();
+            while let Some(chunk) = bytes_cursor.next().await? {
+                buffer.extend_from_slice(&chunk);
+            }
+            let columns = parse_rbwnat_columns_header(&mut buffer.as_slice())?;
+            let metadata = Arc::new(RowMetadata::new::<T>(columns));
+            write_lock.insert(table_name.to_string(), metadata.clone());
+            Ok(metadata)
+        }
     }
-}
-
-/// Used internally to introspect and cache the table structure to allow validation
-/// of serialized rows before submitting the first [`insert::Insert::write`].
-async fn cache_row_metadata<T: Row>(
-    client: &crate::Client,
-    table_name: &str,
-    locked_cache: &LockedRowMetadataCache,
-) -> Result<Arc<RowMetadata>> {
-    let mut bytes_cursor = client
-        .query("SELECT * FROM ? LIMIT 0")
-        .bind(Identifier(table_name))
-        .fetch_bytes("RowBinaryWithNamesAndTypes")?;
-    let mut buffer = Vec::<u8>::new();
-    while let Some(chunk) = bytes_cursor.next().await? {
-        buffer.extend_from_slice(&chunk);
-    }
-    let columns = parse_rbwnat_columns_header(&mut buffer.as_slice())?;
-    let mut cache = locked_cache.write().await;
-    let metadata = Arc::new(RowMetadata::new::<T>(columns));
-    cache.insert(table_name.to_string(), metadata.clone());
-    Ok(metadata)
 }
 
 fn join_panic_schema_hint<T: Display>(col: &[T]) -> String {
@@ -192,4 +182,78 @@ fn join_panic_schema_hint<T: Display>(col: &[T]) -> String {
         .map(|c| format!("- {}", c))
         .collect::<Vec<String>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::Client;
+    use clickhouse_types::{Column, DataTypeNode};
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct SystemRolesRow {
+        name: String,
+        id: uuid::Uuid,
+        storage: String,
+    }
+
+    impl SystemRolesRow {
+        fn columns() -> Vec<Column> {
+            vec![
+                Column::new("name".to_string(), DataTypeNode::String),
+                Column::new("id".to_string(), DataTypeNode::UUID),
+                Column::new("storage".to_string(), DataTypeNode::String),
+            ]
+        }
+    }
+
+    impl Row for SystemRolesRow {
+        const NAME: &'static str = "SystemRolesRow";
+        const KIND: RowKind = RowKind::Struct;
+        const COLUMN_COUNT: usize = 3;
+        const COLUMN_NAMES: &'static [&'static str] = &["name", "id", "storage"];
+    }
+
+    #[test]
+    fn get_row_metadata() {
+        let metadata = RowMetadata::new::<SystemRolesRow>(SystemRolesRow::columns());
+        assert_eq!(metadata.columns, SystemRolesRow::columns());
+        assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
+
+        // the order is shuffled => map access
+        let columns = vec![
+            Column::new("id".to_string(), DataTypeNode::UUID),
+            Column::new("storage".to_string(), DataTypeNode::String),
+            Column::new("name".to_string(), DataTypeNode::String),
+        ];
+        let metadata = RowMetadata::new::<SystemRolesRow>(columns.clone());
+        assert_eq!(metadata.columns, columns);
+        assert_eq!(
+            metadata.access_type,
+            AccessType::WithMapAccess(vec![1, 2, 0]) // see COLUMN_NAMES above
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_row_metadata() {
+        let client = Client::default()
+            .with_url("http://localhost:8123")
+            .with_database("system");
+
+        let metadata = super::get_row_metadata::<SystemRolesRow>(&client, "roles")
+            .await
+            .unwrap();
+
+        assert_eq!(metadata.columns, SystemRolesRow::columns());
+        assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
+
+        // we can now use a dummy client, cause the metadata is cached,
+        // and no calls to the database will be made
+        super::get_row_metadata::<SystemRolesRow>(&client.with_url("whatever"), "roles")
+            .await
+            .unwrap();
+
+        assert_eq!(metadata.columns, SystemRolesRow::columns());
+        assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
+    }
 }
