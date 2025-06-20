@@ -123,6 +123,7 @@ mod ip;
 mod mock;
 mod nested;
 mod query;
+mod query_raw;
 mod time;
 mod user_agent;
 mod uuid;

@@ -23,6 +23,7 @@ use crate::headers::with_authentication;
 pub struct Query {
     client: Client,
     sql: SqlBuilder,
+    raw: bool,
 }
 
 impl Query {
@@ -30,6 +31,15 @@ impl Query {
         Self {
             client: client.clone(),
             sql: SqlBuilder::new(template),
+            raw: false,
+        }
+    }
+    /// Creates a new query that will be used as-is without any processing.
+    pub(crate) fn raw(client: &Client, query: &str) -> Self {
+        Self {
+            client: client.clone(),
+            sql: SqlBuilder::raw(query),
+            raw: true,
         }
     }
 
@@ -53,6 +63,9 @@ impl Query {
     /// [`Identifier`]: crate::sql::Identifier
     #[track_caller]
     pub fn bind(mut self, value: impl Bind) -> Self {
+        if self.raw {
+            panic!("bind() cannot be used with raw queries");
+        }
         self.sql.bind_arg(value);
         self
     }
@@ -84,9 +97,10 @@ impl Query {
     /// # Ok(()) }
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
-        self.sql.bind_fields::<T>();
+        if !self.raw {
+            self.sql.bind_fields::<T>();
+        }
         self.sql.set_output_format("RowBinary");
-
         let response = self.do_execute(true)?;
         Ok(RowCursor::new(response))
     }
