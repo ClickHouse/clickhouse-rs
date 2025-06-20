@@ -86,7 +86,7 @@ impl Query {
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
 
-        let validation = self.client.validation;
+        let validation = self.client.get_validation();
         if validation {
             self.sql.set_output_format("RowBinaryWithNamesAndTypes");
         } else {

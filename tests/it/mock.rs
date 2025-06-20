@@ -6,9 +6,7 @@ use std::time::Duration;
 
 async fn test_provide() {
     let mock = test::Mock::new();
-    let client = Client::default()
-        .with_url(mock.url())
-        .with_validation(false);
+    let client = Client::default().with_mock(&mock);
     let expected = vec![SimpleRow::new(1, "one"), SimpleRow::new(2, "two")];
 
     mock.add(test::handlers::provide(&expected));

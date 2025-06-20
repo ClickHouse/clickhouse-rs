@@ -46,11 +46,9 @@ async fn make_watch_only_events(client: &Client) -> Result<u64> {
 #[tokio::main]
 async fn main() {
     let mock = test::Mock::new();
-    let client = Client::default()
-        .with_url(mock.url())
-        // disabled schema validation is required for mocks to work;
-        // it is pointless for mocked tests anyway
-        .with_validation(false);
+    // Note that an explicit `with_url` call is not required,
+    // it will be set automatically to the mock server URL.
+    let client = Client::default().with_mock(&mock);
     let list = vec![SomeRow { no: 1 }, SomeRow { no: 2 }];
 
     // How to test DDL.

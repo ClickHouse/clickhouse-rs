@@ -48,6 +48,9 @@ pub struct Client {
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
     validation: bool,
+
+    #[cfg(feature = "test-util")]
+    mocked: bool,
 }
 
 #[derive(Clone)]
@@ -103,6 +106,8 @@ impl Client {
             headers: HashMap::new(),
             products_info: Vec::default(),
             validation: true,
+            #[cfg(feature = "test-util")]
+            mocked: false,
         }
     }
 
@@ -341,10 +346,35 @@ impl Client {
         self
     }
 
+    /// Used internally to check if the validation mode is enabled,
+    /// as it takes into account the `test-util` feature flag.
+    #[inline]
+    pub(crate) fn get_validation(&self) -> bool {
+        #[cfg(feature = "test-util")]
+        if self.mocked {
+            return false;
+        }
+        self.validation
+    }
+
     /// Used internally to modify the options map of an _already cloned_
     /// [`Client`] instance.
     pub(crate) fn add_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
         self.options.insert(name.into(), value.into());
+    }
+
+    /// Use a mock server for testing purposes.
+    ///
+    /// # Note
+    ///
+    /// The client will always use `RowBinary` format instead of `RowBinaryWithNamesAndTypes`,
+    /// as otherwise it'd be required to provide RBWNAT header in the mocks,
+    /// which is pointless in that kind of tests.
+    #[cfg(feature = "test-util")]
+    pub fn with_mock(mut self, mock: &test::Mock) -> Self {
+        self.url = mock.url().to_string();
+        self.mocked = true;
+        self
     }
 }
 
