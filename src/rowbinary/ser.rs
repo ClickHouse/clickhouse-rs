@@ -6,9 +6,24 @@ use serde::{
 };
 
 use crate::error::{Error, Result};
+use crate::row_metadata::RowMetadata;
 
-/// Serializes `value` using the RowBinary format and writes to `buffer`.
-pub(crate) fn serialize_into(buffer: impl BufMut, value: &impl Serialize) -> Result<()> {
+/// Serializes `value` using the `RowBinary` format and writes to `buffer`.
+pub(crate) fn serialize_row_binary(buffer: impl BufMut, value: &impl Serialize) -> Result<()> {
+    let mut serializer = RowBinarySerializer { buffer };
+    value.serialize(&mut serializer)?;
+    Ok(())
+}
+
+/// Serializes `value` using the `RowBinary` format and writes to `buffer`.
+/// Additionally, it will perform validation against the provided `row_metadata`,
+/// similarly to how [`crate::rowbinary::deserialize_with_validation`] works.
+/// `RowBinaryWithNamesAndTypes` header is expected to be written by [`crate::insert::Insert`].
+pub(crate) fn serialize_with_validation(
+    buffer: impl BufMut,
+    value: &impl Serialize,
+    _row_metadata: &'_ RowMetadata,
+) -> Result<()> {
     let mut serializer = RowBinarySerializer { buffer };
     value.serialize(&mut serializer)?;
     Ok(())
