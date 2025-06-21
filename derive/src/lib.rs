@@ -50,7 +50,7 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     };
 
     // TODO: do something more clever?
-    let _ = cx.check().expect("derive context error");
+    cx.check().expect("derive context error");
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -58,7 +58,10 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let expanded = quote! {
         #[automatically_derived]
         impl #impl_generics clickhouse::Row for #name #ty_generics #where_clause {
+            const NAME: &'static str = stringify!(#name);
             const COLUMN_NAMES: &'static [&'static str] = #column_names;
+            const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
+            const KIND: clickhouse::RowKind = clickhouse::RowKind::Struct;
         }
     };
 

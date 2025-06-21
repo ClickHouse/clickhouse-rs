@@ -44,7 +44,7 @@ impl Query {
     /// [`Identifier`], will be appropriately escaped.
     ///
     /// All possible errors will be returned as [`Error::InvalidParams`]
-    /// during query execution (`execute()`, `fetch()` etc).
+    /// during query execution (`execute()`, `fetch()`, etc.).
     ///
     /// WARNING: This means that the query must not have any extra `?`, even if
     /// they are in a string literal! Use `??` to have plain `?` in query.
@@ -85,10 +85,16 @@ impl Query {
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
-        self.sql.set_output_format("RowBinary");
+
+        let validation = self.client.get_validation();
+        if validation {
+            self.sql.set_output_format("RowBinaryWithNamesAndTypes");
+        } else {
+            self.sql.set_output_format("RowBinary");
+        }
 
         let response = self.do_execute(true)?;
-        Ok(RowCursor::new(response))
+        Ok(RowCursor::new(response, validation))
     }
 
     /// Executes the query and returns just a single row.

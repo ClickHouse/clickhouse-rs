@@ -5,11 +5,10 @@
 #[macro_use]
 extern crate static_assertions;
 
+pub use self::{compression::Compression, row::Row, row::RowKind};
 use self::{error::Result, http_client::HttpClient};
-use std::{collections::HashMap, fmt::Display, sync::Arc};
-
-pub use self::{compression::Compression, row::Row};
 pub use clickhouse_derive::Row;
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub mod error;
 pub mod insert;
@@ -31,6 +30,7 @@ mod http_client;
 mod request_body;
 mod response;
 mod row;
+mod row_metadata;
 mod rowbinary;
 #[cfg(feature = "inserter")]
 mod ticks;
@@ -47,6 +47,10 @@ pub struct Client {
     options: HashMap<String, String>,
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
+    validation: bool,
+
+    #[cfg(feature = "test-util")]
+    mocked: bool,
 }
 
 #[derive(Clone)]
@@ -101,6 +105,9 @@ impl Client {
             options: HashMap::new(),
             headers: HashMap::new(),
             products_info: Vec::default(),
+            validation: true,
+            #[cfg(feature = "test-util")]
+            mocked: false,
         }
     }
 
@@ -322,10 +329,52 @@ impl Client {
         watch::Watch::new(self, query)
     }
 
+    /// Disables [`Row`] types validation against the database schema.
+    /// Validation is enabled by default.
+    ///
+    /// # Warning
+    ///
+    /// While disabled validation will result in increased performance
+    /// (between 1.1x and 3x, depending on the data),
+    /// this mode is intended to be used for testing purposes only,
+    /// and only in scenarios where schema mismatch issues are irrelevant.
+    ///
+    /// ***DO NOT*** disable validation in your production code or tests
+    /// unless you are 100% sure why you are doing it.
+    pub fn with_validation(mut self, enabled: bool) -> Self {
+        self.validation = enabled;
+        self
+    }
+
+    /// Used internally to check if the validation mode is enabled,
+    /// as it takes into account the `test-util` feature flag.
+    #[inline]
+    pub(crate) fn get_validation(&self) -> bool {
+        #[cfg(feature = "test-util")]
+        if self.mocked {
+            return false;
+        }
+        self.validation
+    }
+
     /// Used internally to modify the options map of an _already cloned_
     /// [`Client`] instance.
     pub(crate) fn add_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
         self.options.insert(name.into(), value.into());
+    }
+
+    /// Use a mock server for testing purposes.
+    ///
+    /// # Note
+    ///
+    /// The client will always use `RowBinary` format instead of `RowBinaryWithNamesAndTypes`,
+    /// as otherwise it'd be required to provide RBWNAT header in the mocks,
+    /// which is pointless in that kind of tests.
+    #[cfg(feature = "test-util")]
+    pub fn with_mock(mut self, mock: &test::Mock) -> Self {
+        self.url = mock.url().to_string();
+        self.mocked = true;
+        self
     }
 }
 
@@ -457,5 +506,15 @@ mod client_tests {
         let _ = Client::default()
             .with_access_token("my_jwt")
             .with_password("secret");
+    }
+
+    #[test]
+    fn it_sets_validation_mode() {
+        let client = Client::default();
+        assert!(client.validation);
+        let client = client.with_validation(false);
+        assert!(!client.validation);
+        let client = client.with_validation(true);
+        assert!(client.validation);
     }
 }

@@ -66,7 +66,7 @@ async fn main() -> clickhouse::error::Result<()> {
 
 #[derive(Debug, Serialize, Deserialize, Row)]
 struct Data {
-    id: u32,
+    id: i32,
     name: String,
 }
 

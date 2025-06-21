@@ -1,6 +1,2 @@
 edition = "2021"
 merge_derives = false
-imports_granularity = "Crate"
-normalize_comments = true
-reorder_impl_items = true
-wrap_comments = true
