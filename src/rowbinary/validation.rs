@@ -9,13 +9,15 @@ use std::marker::PhantomData;
 /// Note that [`SchemaValidator`] is also implemented for `()`,
 /// which is used to skip validation if the user disabled it.
 pub(crate) trait SchemaValidator<R: Row>: Sized {
-    /// Ensures that the branching is completely optimized out based on the validation settings.
-    const VALIDATION: bool;
+    type Inner<'de>: SchemaValidator<R>
+    where
+        Self: 'de;
+
     /// The main entry point. The validation flow based on the [`crate::Row::KIND`].
     /// For container types (nullable, array, map, tuple, variant, etc.),
     /// it will return an [`InnerDataTypeValidator`] instance (see [`InnerDataTypeValidatorKind`]),
     /// which has its own implementation of this method, allowing recursive validation.
-    fn validate(&'_ mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_, R>>;
+    fn validate(&mut self, serde_type: SerdeType) -> Self::Inner<'_>;
     /// Validates that an identifier exists in the values map for enums,
     /// or stores the variant identifier for the next serde call.
     fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, value: T);
@@ -112,11 +114,14 @@ impl<'cursor, R: Row> DataTypeValidator<'cursor, R> {
     }
 }
 
-impl<R: Row> SchemaValidator<R> for DataTypeValidator<'_, R> {
-    const VALIDATION: bool = true;
+impl<'cursor, R: Row> SchemaValidator<R> for DataTypeValidator<'cursor, R> {
+    type Inner<'de>
+        = Option<InnerDataTypeValidator<'de, 'cursor, R>>
+    where
+        Self: 'de;
 
     #[inline]
-    fn validate(&'_ mut self, serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_, R>> {
+    fn validate(&'_ mut self, serde_type: SerdeType) -> Self::Inner<'_> {
         match R::KIND {
             // `fetch::<i32>` for a "primitive row" type
             RowKind::Primitive => {
@@ -241,14 +246,14 @@ pub(crate) enum VariantValidationState {
     Identifier(u8),
 }
 
-impl<'de, 'cursor, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'de, 'cursor, R>> {
-    const VALIDATION: bool = true;
+impl<'cursor, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, 'cursor, R>> {
+    type Inner<'de>
+        = Self
+    where
+        Self: 'de;
 
     #[inline]
-    fn validate(
-        &mut self,
-        serde_type: SerdeType,
-    ) -> Option<InnerDataTypeValidator<'de, 'cursor, R>> {
+    fn validate(&mut self, serde_type: SerdeType) -> Self {
         match self {
             None => None,
             Some(inner) => match &mut inner.kind {
@@ -631,15 +636,14 @@ fn validate_impl<'de, 'cursor, R: Row>(
 }
 
 impl<R: Row> SchemaValidator<R> for () {
-    const VALIDATION: bool = false;
+    type Inner<'de> = ();
 
     #[inline(always)]
-    fn validate(&mut self, _serde_type: SerdeType) -> Option<InnerDataTypeValidator<'_, '_, R>> {
-        None
-    }
+    fn validate(&mut self, _serde_type: SerdeType) {}
 
     #[inline(always)]
     fn is_field_order_wrong(&self) -> bool {
+        // We can't detect incorrect field order with just plain `RowBinary` format
         false
     }
 
