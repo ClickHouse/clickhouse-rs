@@ -4,21 +4,25 @@
 //!   We will get the response only when the DDL is executed on every cluster node.
 //!   See also: https://clickhouse.com/docs/en/interfaces/http/#response-buffering
 //!
-//! - When tests are executed against ClickHouse Cloud, `ENGINE = MergeTree`
-//!   is automatically replaced with `ENGINE = SharedMergeTree` by the server.
-//!   In this case, no modifications to the DDLs are required, unlike on-premise clusters.
+//! - When tests are executed against ClickHouse Cloud, `ENGINE = MergeTree` is
+//!   automatically replaced with `ENGINE = SharedMergeTree` by the server. In
+//!   this case, no modifications to the DDLs are required, unlike on-premise
+//!   clusters.
 //!
-//! - `CLICKHOUSE_TEST_ENVIRONMENT` env variable determines whether we are going to use
-//!   a local ClickHouse instance in Docker (`local`, default value) or ClickHouse Cloud (`cloud`).
-//!   NB: `cloud` will require one of the TLS features to be enabled.
+//! - `CLICKHOUSE_TEST_ENVIRONMENT` env variable determines whether we are going
+//!   to use a local ClickHouse instance in Docker (`local`, default value) or
+//!   ClickHouse Cloud (`cloud`). NB: `cloud` will require one of the TLS
+//!   features to be enabled.
 //!
-//! - ClickHouse server credentials are set via `CLICKHOUSE_CLOUD_HOST`, `CLICKHOUSE_CLOUD_USER`,
-//!   and `CLICKHOUSE_CLOUD_PASSWORD`. Specific Cloud-only tests might also require JWT access token,
-//!   which should be provided via `CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN`.
+//! - ClickHouse server credentials are set via `CLICKHOUSE_CLOUD_HOST`,
+//!   `CLICKHOUSE_CLOUD_USER`, and `CLICKHOUSE_CLOUD_PASSWORD`. Specific
+//!   Cloud-only tests might also require JWT access token, which should be
+//!   provided via `CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN`.
 //!
-//! - Created database names should match the following template: `chrs__{...}__{unix_millis}`.
-//!   This allows to simply clean up the databases from the Cloud instance based on its creation time.
-//!   See [`_priv::make_db_name`].
+//! - Created database names should match the following template:
+//!   `chrs__{...}__{unix_millis}`. This allows to simply clean up the databases
+//!   from the Cloud instance based on its creation time. See
+//!   [`_priv::make_db_name`].
 
 use clickhouse::{sql::Identifier, Client, Row};
 use serde::{Deserialize, Serialize};
@@ -127,7 +131,6 @@ mod time;
 mod user_agent;
 mod uuid;
 mod variant;
-mod watch;
 
 mod _priv {
     use super::*;
@@ -157,7 +160,8 @@ mod _priv {
         client.with_database(db_name)
     }
 
-    // `it::compression::lz4::{{closure}}::f` -> `chrs__compression__lz4__{unix_millis}`
+    // `it::compression::lz4::{{closure}}::f` ->
+    // `chrs__compression__lz4__{unix_millis}`
     fn make_db_name(fn_path: &str) -> String {
         assert!(fn_path.starts_with("it::"));
         let mut iter = fn_path.split("::").skip(1);

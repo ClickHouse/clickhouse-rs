@@ -29,7 +29,7 @@ impl BytesExt {
         self.cursor = self.bytes.len() - n;
     }
 
-    #[cfg(any(test, feature = "lz4", feature = "watch"))]
+    #[cfg(any(test, feature = "lz4"))]
     #[inline(always)]
     pub(crate) fn advance(&mut self, n: usize) {
         debug_assert!(n <= self.remaining());

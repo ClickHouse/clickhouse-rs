@@ -107,39 +107,6 @@ async fn select_count(client: &Client) -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "watch")]
-async fn watch(client: &Client) -> Result<()> {
-    let mut cursor = client
-        .watch("SELECT max(no) no, argMax(name, some.no) name FROM some")
-        .fetch::<MyRow<'_>>()?;
-
-    let (version, row) = cursor.next().await?.unwrap();
-    println!("version={version}, row={row:?}");
-
-    let mut insert = client.insert("some")?;
-    let row = MyRow {
-        no: row.no + 1,
-        name: "bar",
-    };
-    insert.write(&row).await?;
-    insert.end().await?;
-
-    let (version, row) = cursor.next().await?.unwrap();
-    println!("version={version}, row={row:?}");
-
-    // Or you can request only events without data.
-    let mut cursor = client
-        // It's possible to specify a view name.
-        .watch("lv_f2ac5347c013c5b9a6c1aab7192dd97c2748daa0")
-        .limit(10)
-        .only_events()
-        .fetch()?;
-
-    println!("{:?}", cursor.next().await);
-
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let client = Client::default().with_url("http://localhost:8123");
@@ -153,8 +120,6 @@ async fn main() -> Result<()> {
     fetch_all(&client).await?;
     delete(&client).await?;
     select_count(&client).await?;
-    #[cfg(feature = "watch")]
-    watch(&client).await?;
 
     Ok(())
 }
