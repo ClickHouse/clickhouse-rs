@@ -1,3 +1,4 @@
+use crate::Row;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -34,6 +35,34 @@ struct Sample<'a> {
     fixed_string: [u8; 4],
     array: Vec<i8>,
     boolean: bool,
+}
+
+// clickhouse_derive is not working here
+impl Row for Sample<'_> {
+    const NAME: &'static str = "Sample";
+    const COLUMN_NAMES: &'static [&'static str] = &[
+        "int8",
+        "int32",
+        "int64",
+        "uint8",
+        "uint32",
+        "uint64",
+        "float32",
+        "float64",
+        "datetime",
+        "datetime64",
+        "decimal64",
+        "decimal128",
+        "string",
+        "blob",
+        "optional_decimal64",
+        "optional_datetime",
+        "fixed_string",
+        "array",
+        "boolean",
+    ];
+    const COLUMN_COUNT: usize = 19;
+    const KIND: crate::RowKind = crate::RowKind::Struct;
 }
 
 fn sample() -> Sample<'static> {
@@ -122,10 +151,10 @@ fn it_deserializes() {
         let (mut left, mut right) = input.split_at(i);
 
         // It shouldn't panic.
-        let _: Result<Sample<'_>, _> = super::deserialize_from(&mut left);
-        let _: Result<Sample<'_>, _> = super::deserialize_from(&mut right);
+        let _: Result<Sample<'_>, _> = super::deserialize_row(&mut left);
+        let _: Result<Sample<'_>, _> = super::deserialize_row(&mut right);
 
-        let actual: Sample<'_> = super::deserialize_from(&mut input.as_slice()).unwrap();
+        let actual: Sample<'_> = super::deserialize_row(&mut input.as_slice()).unwrap();
         assert_eq!(actual, sample());
     }
 }

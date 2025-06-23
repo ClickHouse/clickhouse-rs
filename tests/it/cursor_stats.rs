@@ -28,7 +28,7 @@ async fn check(client: Client, expected_ratio: f64) {
         decoded = cursor.decoded_bytes();
     }
 
-    assert_eq!(decoded, 15000);
+    assert_eq!(decoded, 15000 + 23); // 23 extra bytes for the RBWNAT header.
     assert_eq!(cursor.received_bytes(), dbg!(received));
     assert_eq!(cursor.decoded_bytes(), dbg!(decoded));
     assert_eq!(

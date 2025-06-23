@@ -1,3 +1,4 @@
+name: clickhouse-rs
 services:
   clickhouse:
     image: 'clickhouse/clickhouse-server:${CLICKHOUSE_VERSION-latest-alpine}'

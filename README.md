@@ -18,8 +18,10 @@ Official pure Rust typed client for ClickHouse DB.
 
 * Uses `serde` for encoding/decoding rows.
 * Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
-* Uses `RowBinary` encoding over HTTP transport.
-    * There are plans to switch to `Native` over TCP.
+* Uses `RowBinaryWithNamesAndTypes` or `RowBinary` formats over HTTP transport.
+    * By default, `RowBinaryWithNamesAndTypes` with database schema validation is used.
+    * It is possible to switch to `RowBinary`, which can potentially lead to increased performance ([see below](#validation)).
+    * There are plans to implement `Native` format over TCP.
 * Supports TLS (see `native-tls` and `rustls-tls` features below).
 * Supports compression and decompression (LZ4 and LZ4HC).
 * Provides API for selecting.
@@ -29,9 +31,30 @@ Official pure Rust typed client for ClickHouse DB.
 
 Note: [ch2rs](https://github.com/ClickHouse/ch2rs) is useful to generate a row type from ClickHouse.
 
+## Validation
+
+Starting from 0.14.0, the crate uses `RowBinaryWithNamesAndTypes` format by default, which allows row types validation
+against the ClickHouse schema. This enables clearer error messages in case of schema mismatch at the cost of
+performance. Additionally, with enabled validation, the crate supports structs with correct field names and matching
+types, but incorrect order of the fields, with an additional slight (5-10%) performance penalty.
+
+If you are looking to maximize performance, you could disable validation using `Client::with_validation(false)`. When
+validation is disabled, the client switches to `RowBinary` format usage instead.
+
+The downside with plain `RowBinary` is that instead of clearer error messages, a mismatch between `Row` and database
+schema will result in a `NotEnoughData` error without specific details.
+
+However, depending on the dataset, there might be x1.1 to x3 performance improvement, but that highly depends on the
+shape and volume of the dataset.
+
+It is always recommended to measure the performance impact of validation in your specific use case. Additionally,
+writing smoke tests to ensure that the row types match the ClickHouse schema is highly recommended, if you plan to
+disable validation in your application.
+
 ## Usage
 
 To use the crate, add this to your `Cargo.toml`:
+
 ```toml
 [dependencies]
 clickhouse = "0.13.3"
@@ -40,16 +63,6 @@ clickhouse = "0.13.3"
 clickhouse = { version = "0.13.3", features = ["test-util"] }
 ```
 
-<details>
-<summary>
-
-### Note about ClickHouse prior to v22.6
-
-</summary>
-
-CH server older than v22.6 (2022-06-16) handles `RowBinary` [incorrectly](https://github.com/ClickHouse/ClickHouse/issues/37420) in some rare cases. Use 0.11 and enable `wa-37420` feature to solve this problem. Don't use it for newer versions.
-
-</details>
 <details>
 <summary>
 
@@ -249,7 +262,8 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/).
+* `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/). You could use
+  `#[repr(i8)]` for `Enum8` and `#[repr(i16)]` for `Enum16`.
     <details>
     <summary>Example</summary>
 
@@ -262,7 +276,7 @@ How to choose between all these features? Here are some considerations:
     }
 
     #[derive(Debug, Serialize_repr, Deserialize_repr)]
-    #[repr(u8)]
+    #[repr(i8)]
     enum Level {
         Debug = 1,
         Info = 2,
@@ -387,7 +401,7 @@ How to choose between all these features? Here are some considerations:
     </details>
 * `Tuple(A, B, ...)` maps to/from `(A, B, ...)` or a newtype around it.
 * `Array(_)` maps to/from any slice, e.g. `Vec<_>`, `&[_]`. Newtypes are also supported.
-* `Map(K, V)` behaves like `Array((K, V))`.
+* `Map(K, V)` can be deserialized as `HashMap<K, V>` or `Vec<(K, V)>`.
 * `LowCardinality(_)` is supported seamlessly.
 * `Nullable(_)` maps to/from `Option<_>`. For `clickhouse::serde::*` helpers add `::option`.
     <details>
@@ -416,7 +430,8 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* `Geo` types are supported. `Point` behaves like a tuple `(f64, f64)`, and the rest of the types are just slices of points. 
+* `Geo` types are supported. `Point` behaves like a tuple `(f64, f64)`, and the rest of the types are just slices of
+  points.
     <details>
     <summary>Example</summary>
 

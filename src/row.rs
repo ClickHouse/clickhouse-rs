@@ -1,7 +1,18 @@
 use crate::sql;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum RowKind {
+    Primitive,
+    Struct,
+    Tuple,
+    Vec,
+}
+
 pub trait Row {
+    const NAME: &'static str;
     const COLUMN_NAMES: &'static [&'static str];
+    const COLUMN_COUNT: usize;
+    const KIND: RowKind;
 
     // TODO: count
     // TODO: different list for SELECT/INSERT (de/ser)
@@ -23,16 +34,24 @@ impl_primitive_for![
     bool, String, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64,
 ];
 
+macro_rules! count_tokens {
+    () => { 0 };
+    ($head:tt $($tail:tt)*) => { 1 + count_tokens!($($tail)*) };
+}
+
+/// Two forms are supported:
+/// * (P1, P2, ...)
+/// * (SomeRow, P1, P2, ...)
+///
+/// The second one is useful for queries like
+/// `SELECT ?fields, count() FROM ... GROUP BY ?fields`.
 macro_rules! impl_row_for_tuple {
     ($i:ident $($other:ident)+) => {
-        /// Two forms are supported:
-        /// * (P1, P2, ...)
-        /// * (SomeRow, P1, P2, ...)
-        ///
-        /// The second one is useful for queries like
-        /// `SELECT ?fields, count() FROM .. GROUP BY ?fields`.
         impl<$i: Row, $($other: Primitive),+> Row for ($i, $($other),+) {
+            const NAME: &'static str = $i::NAME;
             const COLUMN_NAMES: &'static [&'static str] = $i::COLUMN_NAMES;
+            const COLUMN_COUNT: usize = $i::COLUMN_COUNT + count_tokens!($($other)*);
+            const KIND: RowKind = RowKind::Tuple;
         }
 
         impl_row_for_tuple!($($other)+);
@@ -44,13 +63,19 @@ macro_rules! impl_row_for_tuple {
 impl Primitive for () {}
 
 impl<P: Primitive> Row for P {
+    const NAME: &'static str = stringify!(P);
     const COLUMN_NAMES: &'static [&'static str] = &[];
+    const COLUMN_COUNT: usize = 1;
+    const KIND: RowKind = RowKind::Primitive;
 }
 
 impl_row_for_tuple!(T0 T1 T2 T3 T4 T5 T6 T7 T8);
 
 impl<T> Row for Vec<T> {
+    const NAME: &'static str = "Vec";
     const COLUMN_NAMES: &'static [&'static str] = &[];
+    const COLUMN_COUNT: usize = 1;
+    const KIND: RowKind = RowKind::Vec;
 }
 
 /// Collects all field names in depth and joins them with comma.

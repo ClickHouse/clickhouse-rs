@@ -1,14 +1,14 @@
 [package]
 name = "clickhouse-derive"
-version = "0.2.0"
 description = "A macro for deriving clickhouse::Row"
-authors = ["ClickHouse Contributors", "Paul Loyd <pavelko95@gmail.com>"]
-repository = "https://github.com/ClickHouse/clickhouse-rs"
-homepage = "https://clickhouse.com"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-# update `Cargo.toml` and CI if changed
-rust-version = "1.73.0"
+version = "0.2.0"
+
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
 
 [lib]
 proc-macro = true

@@ -27,6 +27,45 @@
 use clickhouse::{sql::Identifier, Client, Row};
 use serde::{Deserialize, Serialize};
 
+macro_rules! assert_panic_on_fetch_with_client {
+    ($client:ident, $msg_parts:expr, $query:expr) => {
+        use futures::FutureExt;
+        let async_panic =
+            std::panic::AssertUnwindSafe(async { $client.query($query).fetch_all::<Data>().await });
+        let result = async_panic.catch_unwind().await;
+        assert!(result.is_err());
+        let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
+        for &msg in $msg_parts {
+            assert!(
+                panic_msg.contains(msg),
+                "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
+            );
+        }
+    };
+}
+
+macro_rules! assert_panic_on_fetch {
+    ($msg_parts:expr, $query:expr) => {
+        use futures::FutureExt;
+        let client = get_client();
+        let async_panic =
+            std::panic::AssertUnwindSafe(async { client.query($query).fetch_all::<Data>().await });
+        let result = async_panic.catch_unwind().await;
+        assert!(
+            result.is_err(),
+            "expected a panic, but got a result instead: {:?}",
+            result.unwrap()
+        );
+        let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
+        for &msg in $msg_parts {
+            assert!(
+                panic_msg.contains(msg),
+                "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
+            );
+        }
+    };
+}
+
 macro_rules! prepare_database {
     () => {
         crate::_priv::prepare_database({
@@ -87,7 +126,7 @@ impl SimpleRow {
     }
 }
 
-async fn create_simple_table(client: &Client, table_name: &str) {
+pub(crate) async fn create_simple_table(client: &Client, table_name: &str) {
     client
         .query("CREATE TABLE ?(id UInt64, data String) ENGINE = MergeTree ORDER BY id")
         .with_option("wait_end_of_query", "1")
@@ -97,7 +136,7 @@ async fn create_simple_table(client: &Client, table_name: &str) {
         .unwrap();
 }
 
-async fn fetch_rows<T>(client: &Client, table_name: &str) -> Vec<T>
+pub(crate) async fn fetch_rows<T>(client: &Client, table_name: &str) -> Vec<T>
 where
     T: Row + for<'b> Deserialize<'b>,
 {
@@ -109,8 +148,19 @@ where
         .unwrap()
 }
 
-async fn flush_query_log(client: &Client) {
+pub(crate) async fn flush_query_log(client: &Client) {
     client.query("SYSTEM FLUSH LOGS").execute().await.unwrap();
+}
+
+pub(crate) async fn execute_statements(client: &Client, statements: &[&str]) {
+    for statement in statements {
+        client
+            .query(statement)
+            .with_option("wait_end_of_query", "1")
+            .execute()
+            .await
+            .unwrap_or_else(|err| panic!("cannot execute statement '{statement}', cause: {err}"));
+    }
 }
 
 mod chrono;
@@ -127,6 +177,7 @@ mod ip;
 mod mock;
 mod nested;
 mod query;
+mod rbwnat;
 mod time;
 mod user_agent;
 mod uuid;

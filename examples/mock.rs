@@ -29,7 +29,9 @@ async fn make_insert(client: &Client, data: &[SomeRow]) -> Result<()> {
 #[tokio::main]
 async fn main() {
     let mock = test::Mock::new();
-    let client = Client::default().with_url(mock.url());
+    // Note that an explicit `with_url` call is not required,
+    // it will be set automatically to the mock server URL.
+    let client = Client::default().with_mock(&mock);
     let list = vec![SomeRow { no: 1 }, SomeRow { no: 2 }];
 
     // How to test DDL.

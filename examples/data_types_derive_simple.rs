@@ -53,15 +53,26 @@ async fn main() -> Result<()> {
                 decimal64_18_8       Decimal(18, 8),
                 decimal128_38_12     Decimal(38, 12),
                 -- decimal256_76_20           Decimal(76, 20),
-                date                 Date,
-                date32               Date32,
-                datetime             DateTime,
-                datetime_tz          DateTime('UTC'),
-                datetime64_0         DateTime64(0),
-                datetime64_3         DateTime64(3),
-                datetime64_6         DateTime64(6),
-                datetime64_9         DateTime64(9),
-                datetime64_9_tz      DateTime64(9, 'UTC')
+
+                time_date              Date,
+                time_date32            Date32,
+                time_datetime          DateTime,
+                time_datetime_tz       DateTime('UTC'),
+                time_datetime64_0      DateTime64(0),
+                time_datetime64_3      DateTime64(3),
+                time_datetime64_6      DateTime64(6),
+                time_datetime64_9      DateTime64(9),
+                time_datetime64_9_tz   DateTime64(9, 'UTC'),
+
+                chrono_date            Date,
+                chrono_date32          Date32,
+                chrono_datetime        DateTime,
+                chrono_datetime_tz     DateTime('UTC'),
+                chrono_datetime64_0    DateTime64(0),
+                chrono_datetime64_3    DateTime64(3),
+                chrono_datetime64_6    DateTime64(6),
+                chrono_datetime64_9    DateTime64(9),
+                chrono_datetime64_9_tz DateTime64(9, 'UTC'),
             ) ENGINE MergeTree ORDER BY ();
         ",
         )
@@ -166,7 +177,7 @@ type Decimal128 = FixedPoint<i128, U12>; // Decimal(38, 12) = Decimal128(12)
 
 #[derive(Clone, Debug, PartialEq)]
 #[derive(serde_repr::Serialize_repr, serde_repr::Deserialize_repr)]
-#[repr(u8)]
+#[repr(i8)]
 pub enum Enum8 {
     Foo = 1,
     Bar = 2,
@@ -174,7 +185,7 @@ pub enum Enum8 {
 
 #[derive(Clone, Debug, PartialEq)]
 #[derive(serde_repr::Serialize_repr, serde_repr::Deserialize_repr)]
-#[repr(u16)]
+#[repr(i16)]
 pub enum Enum16 {
     Qaz = 42,
     Qux = 255,

@@ -1,8 +1,7 @@
 //! Contains [`Error`] and corresponding [`Result`].
 
-use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
-
 use serde::{de, ser};
+use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
 
 /// A result with a specified [`Error`] type.
 pub type Result<T, E = Error> = result::Result<T, E>;
@@ -42,6 +41,8 @@ pub enum Error {
     BadResponse(String),
     #[error("timeout expired")]
     TimedOut,
+    #[error("error while parsing columns header from the response: {0}")]
+    InvalidColumnsHeader(#[source] BoxedError),
     #[error("unsupported: {0}")]
     Unsupported(String),
     #[error("{0}")]
@@ -49,6 +50,12 @@ pub enum Error {
 }
 
 assert_impl_all!(Error: StdError, Send, Sync);
+
+impl From<clickhouse_types::error::TypesError> for Error {
+    fn from(err: clickhouse_types::error::TypesError) -> Self {
+        Self::InvalidColumnsHeader(Box::new(err))
+    }
+}
 
 impl From<hyper::Error> for Error {
     fn from(error: hyper::Error) -> Self {

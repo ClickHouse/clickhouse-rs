@@ -1,10 +1,9 @@
-use std::{
-    convert::Infallible,
-    mem,
-    time::{Duration, Instant},
-};
-
 use bytes::Bytes;
+use clickhouse::{
+    error::{Error, Result},
+    Client, Compression, Row,
+};
+use clickhouse_types::{Column, DataTypeNode};
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use futures::stream::{self, StreamExt as _};
 use http_body_util::StreamBody;
@@ -13,22 +12,42 @@ use hyper::{
     Request, Response,
 };
 use serde::Deserialize;
-use std::hint::black_box;
-
-use clickhouse::{
-    error::{Error, Result},
-    Client, Compression, Row,
-};
+use std::convert::Infallible;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::time::{Duration, Instant};
 
 mod common;
 
 async fn serve(
     request: Request<Incoming>,
-    chunk: Bytes,
+    compression: Compression,
 ) -> Response<impl Body<Data = Bytes, Error = Infallible>> {
     common::skip_incoming(request).await;
 
-    let stream = stream::repeat(chunk).map(|chunk| Ok(Frame::data(chunk)));
+    let write_schema = async move {
+        let schema = vec![
+            Column::new("a".to_string(), DataTypeNode::UInt64),
+            Column::new("b".to_string(), DataTypeNode::Int64),
+            Column::new("c".to_string(), DataTypeNode::Int32),
+            Column::new("d".to_string(), DataTypeNode::UInt32),
+        ];
+
+        let mut buffer = Vec::new();
+        clickhouse_types::put_rbwnat_columns_header(&schema, &mut buffer).unwrap();
+
+        let buffer = match compression {
+            Compression::None => Bytes::from(buffer),
+            #[cfg(feature = "lz4")]
+            Compression::Lz4 => clickhouse::_priv::lz4_compress(&buffer).unwrap(),
+            _ => unreachable!(),
+        };
+
+        Ok(Frame::data(buffer))
+    };
+
+    let chunk = prepare_chunk();
+    let stream =
+        stream::once(write_schema).chain(stream::repeat(chunk).map(|chunk| Ok(Frame::data(chunk))));
     Response::new(StreamBody::new(stream))
 }
 
@@ -53,10 +72,13 @@ fn prepare_chunk() -> Bytes {
     chunk
 }
 
+const ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 6523));
+
 fn select(c: &mut Criterion) {
-    let addr = "127.0.0.1:6543".parse().unwrap();
-    let chunk = prepare_chunk();
-    let _server = common::start_server(addr, move |req| serve(req, chunk.clone()));
+    async fn start_server(compression: Compression) -> common::ServerHandle {
+        common::start_server(ADDR, move |req| serve(req, compression)).await
+    }
+
     let runner = common::start_runner();
 
     #[derive(Default, Debug, Row, Deserialize)]
@@ -67,7 +89,9 @@ fn select(c: &mut Criterion) {
         d: u32,
     }
 
-    async fn select_rows(client: Client, iters: u64) -> Result<Duration> {
+    async fn select_rows(client: Client, iters: u64, compression: Compression) -> Result<Duration> {
+        let _server = start_server(compression).await;
+
         let mut sum = SomeRow::default();
         let start = Instant::now();
         let mut cursor = client
@@ -84,11 +108,19 @@ fn select(c: &mut Criterion) {
             sum.d = sum.d.wrapping_add(row.d);
         }
 
-        black_box(sum);
-        Ok(start.elapsed())
+        std::hint::black_box(sum);
+
+        let elapsed = start.elapsed();
+        Ok(elapsed)
     }
 
-    async fn select_bytes(client: Client, min_size: u64) -> Result<Duration> {
+    async fn select_bytes(
+        client: Client,
+        min_size: u64,
+        compression: Compression,
+    ) -> Result<Duration> {
+        let _server = start_server(compression).await;
+
         let start = Instant::now();
         let mut cursor = client
             .query("SELECT value FROM some")
@@ -96,7 +128,7 @@ fn select(c: &mut Criterion) {
 
         let mut size = 0;
         while size < min_size {
-            let buf = black_box(cursor.next().await?);
+            let buf = std::hint::black_box(cursor.next().await?);
             size += buf.unwrap().len() as u64;
         }
 
@@ -104,22 +136,24 @@ fn select(c: &mut Criterion) {
     }
 
     let mut group = c.benchmark_group("rows");
-    group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
+    group.throughput(Throughput::Bytes(size_of::<SomeRow>() as u64));
     group.bench_function("uncompressed", |b| {
         b.iter_custom(|iters| {
+            let compression = Compression::None;
             let client = Client::default()
-                .with_url(format!("http://{addr}"))
-                .with_compression(Compression::None);
-            runner.run(select_rows(client, iters))
+                .with_url(format!("http://{ADDR}"))
+                .with_compression(compression);
+            runner.run(select_rows(client, iters, compression))
         })
     });
     #[cfg(feature = "lz4")]
     group.bench_function("lz4", |b| {
         b.iter_custom(|iters| {
+            let compression = Compression::Lz4;
             let client = Client::default()
-                .with_url(format!("http://{addr}"))
-                .with_compression(Compression::Lz4);
-            runner.run(select_rows(client, iters))
+                .with_url(format!("http://{ADDR}"))
+                .with_compression(compression);
+            runner.run(select_rows(client, iters, compression))
         })
     });
     group.finish();
@@ -129,19 +163,21 @@ fn select(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(MIB));
     group.bench_function("uncompressed", |b| {
         b.iter_custom(|iters| {
+            let compression = Compression::None;
             let client = Client::default()
-                .with_url(format!("http://{addr}"))
-                .with_compression(Compression::None);
-            runner.run(select_bytes(client, iters * MIB))
+                .with_url(format!("http://{ADDR}"))
+                .with_compression(compression);
+            runner.run(select_bytes(client, iters * MIB, compression))
         })
     });
     #[cfg(feature = "lz4")]
     group.bench_function("lz4", |b| {
         b.iter_custom(|iters| {
+            let compression = Compression::None;
             let client = Client::default()
-                .with_url(format!("http://{addr}"))
-                .with_compression(Compression::Lz4);
-            runner.run(select_bytes(client, iters * MIB))
+                .with_url(format!("http://{ADDR}"))
+                .with_compression(compression);
+            runner.run(select_bytes(client, iters * MIB, compression))
         })
     });
     group.finish();

@@ -101,11 +101,11 @@ async fn datetime() {
     let row_str = client
         .query(
             "
-            SELECT toString(dt),
-                   toString(dt64s),
-                   toString(dt64ms),
-                   toString(dt64us),
-                   toString(dt64ns)
+            SELECT toString(dt)     AS dt,
+                   toString(dt64s)  AS dt64s,
+                   toString(dt64ms) AS dt64ms,
+                   toString(dt64us) AS dt64us,
+                   toString(dt64ns) AS dt64ns
               FROM test
         ",
         )
