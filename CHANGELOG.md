@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Removed
+- **BREAKING** watch: `Client::watch()` API is removed ([#245]).
+- **BREAKING** mock: `watch()` and `watch_only_events()` are removed ([#245]).
+
+[#245]: https://github.com/ClickHouse/clickhouse-rs/pull/245
+
 ## [0.13.3] - 2025-05-29
 ### Added
 - client: added `Client::with_access_token` to support JWT authentication ClickHouse Cloud feature ([#215]).

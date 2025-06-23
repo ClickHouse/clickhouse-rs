@@ -25,7 +25,6 @@ Official pure Rust typed client for ClickHouse DB.
 * Provides API for selecting.
 * Provides API for inserting.
 * Provides API for infinite transactional (see below) inserting.
-* Provides API for watching live views.
 * Provides mocks for unit testing.
 
 Note: [ch2rs](https://github.com/ClickHouse/ch2rs) is useful to generate a row type from ClickHouse.
@@ -185,43 +184,11 @@ client.query("DROP TABLE IF EXISTS some").execute().await?;
 ```
 
 </details>
-<details>
-<summary>
-
-### Live views
-
-</summary>
-
-Requires the `watch` feature.
-
-```rust,ignore
-let mut cursor = client
-    .watch("SELECT max(no), argMax(name, no) FROM some")
-    .fetch::<Row<'_>>()?;
-
-let (version, row) = cursor.next().await?.unwrap();
-println!("live view updated: version={}, row={:?}", version, row);
-
-// Use `only_events()` to iterate over versions only.
-let mut cursor = client.watch("some_live_view").limit(20).only_events().fetch()?;
-println!("live view updated: version={:?}", cursor.next().await?);
-```
-
-* Use [carefully](https://github.com/ClickHouse/ClickHouse/issues/28309#issuecomment-908666042).
-* This code uses or creates if not exists a temporary live view named `lv_{sha1(query)}` to reuse the same live view by parallel watchers.
-* You can specify a name instead of a query.
-* This API uses `JSONEachRowWithProgress` under the hood because of [the issue](https://github.com/ClickHouse/ClickHouse/issues/22996).
-* Only struct rows can be used. Avoid `fetch::<u64>()` and other without specified names.
-
-</details>
-
-See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples).
 
 ## Feature Flags
-* `lz4` (enabled by default) — enables `Compression::Lz4`. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
+* `lz4` (enabled by default) — enables `Compression::Lz4`. If enabled, `Compression::Lz4` is used by default for all queries.
 * `inserter` — enables `client.inserter()`.
 * `test-util` — adds mocks. See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs). Use it only in `dev-dependencies`.
-* `watch` — enables `client.watch` functionality. See the corresponding section for details.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
 * `chrono` — adds `serde::chrono` to work with [chrono](https://docs.rs/chrono) crate.
@@ -504,7 +471,7 @@ See also the additional examples:
 * [Variant data type](examples/data_types_variant.rs)
 
 ## Mocking
-The crate provides utils for mocking CH server and testing DDL, `SELECT`, `INSERT` and `WATCH` queries.
+The crate provides utils for mocking CH server and testing DDL, `SELECT` and `INSERT` queries.
 
 The functionality can be enabled with the `test-util` feature. Use it **only** in dev-dependencies.
 
