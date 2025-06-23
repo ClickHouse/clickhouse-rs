@@ -20,28 +20,25 @@ use std::{convert::TryFrom, str};
 /// It accepts _a reference to_ a byte slice because it somehow leads to a more
 /// performant generated code than `(&[u8]) -> Result<(T, usize)>` and even
 /// `(&[u8], &mut Option<T>) -> Result<usize>`.
-///
-/// Additionally, having a single function speeds up [`crate::cursors::RowCursor::next`] x2.
-/// A hint about the [`Error::NotEnoughData`] gives another 20% performance boost.
-///
-/// It expects a slice of [`Column`] objects parsed
-/// from the beginning of `RowBinaryWithNamesAndTypes` data stream.
-/// After the header, the rows format is the same as `RowBinary`.
-pub(crate) fn deserialize_row_binary<'data, 'cursor, T: Deserialize<'data> + Row>(
+pub(crate) fn deserialize_row<'data, 'cursor, T: Deserialize<'data> + Row>(
     input: &mut &'data [u8],
 ) -> Result<T> {
     let mut deserializer = RowBinaryDeserializer::<T, _>::new(input, ());
     T::deserialize(&mut deserializer)
 }
 
-/// Similar to [`deserialize_row_binary`], but uses [`RowMetadata`]
+/// Similar to [`deserialize_row`], but uses [`RowMetadata`]
 /// parsed from `RowBinaryWithNamesAndTypes` header to validate the data types.
 /// This is used when [`crate::Row`] validation is enabled in the client (default).
-pub(crate) fn deserialize_rbwnat<'data, 'cursor, T: Deserialize<'data> + Row>(
+///
+/// It expects a slice of [`Column`] objects parsed from the beginning
+/// of `RowBinaryWithNamesAndTypes` data stream. After the header,
+/// the rows format is the same as `RowBinary`.
+pub(crate) fn deserialize_row_with_validation<'data, 'cursor, T: Deserialize<'data> + Row>(
     input: &mut &'data [u8],
-    metadata: Option<&'cursor RowMetadata>,
+    metadata: &'cursor RowMetadata,
 ) -> Result<T> {
-    let validator = DataTypeValidator::new(metadata.unwrap());
+    let validator = DataTypeValidator::new(metadata);
     let mut deserializer = RowBinaryDeserializer::<T, _>::new(input, validator);
     T::deserialize(&mut deserializer)
 }
@@ -261,8 +258,7 @@ where
         let deserializer = &mut self.inner(SerdeType::Map(len));
         visitor.visit_map(RowBinaryMapAccess {
             deserializer,
-            entries_visited: 0,
-            len,
+            remaining: len,
         })
     }
 
@@ -293,7 +289,6 @@ where
         _name: &str,
         visitor: V,
     ) -> Result<V::Value> {
-        // TODO - skip validation?
         visitor.visit_newtype_struct(self)
     }
 
@@ -373,8 +368,7 @@ where
     Validator: SchemaValidator<R>,
 {
     deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, R, Validator>,
-    entries_visited: usize,
-    len: usize,
+    remaining: usize,
 }
 
 impl<'data, R: Row, Validator> MapAccess<'data> for RowBinaryMapAccess<'_, '_, 'data, R, Validator>
@@ -387,10 +381,10 @@ where
     where
         K: DeserializeSeed<'data>,
     {
-        if self.entries_visited >= self.len {
+        if self.remaining == 0 {
             return Ok(None);
         }
-        self.entries_visited += 1;
+        self.remaining -= 1;
         seed.deserialize(&mut *self.deserializer).map(Some)
     }
 
@@ -402,7 +396,7 @@ where
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.len)
+        Some(self.remaining)
     }
 }
 

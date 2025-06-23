@@ -93,7 +93,7 @@ where
         let mut result = C::default();
 
         while !slice.is_empty() {
-            let res = rowbinary::deserialize_row_binary(slice);
+            let res = rowbinary::deserialize_row(slice);
             let row: T = res.expect("failed to deserialize");
             result.extend(std::iter::once(row));
         }

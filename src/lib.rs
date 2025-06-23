@@ -329,18 +329,24 @@ impl Client {
         watch::Watch::new(self, query)
     }
 
-    /// Disables [`Row`] types validation against the database schema.
-    /// Validation is enabled by default.
+    /// Enables or disables [`Row`] data types validation against the database schema
+    /// at the cost of performance. Validation is enabled by default, and in this mode,
+    /// the client will use `RowBinaryWithNamesAndTypes` format.
     ///
-    /// # Warning
+    /// If you are looking to maximize performance, you could disable validation using this method.
+    /// When validation is disabled, the client switches to `RowBinary` format usage instead.
     ///
-    /// While disabled validation will result in increased performance
-    /// (between 1.1x and 3x, depending on the data),
-    /// this mode is intended to be used for testing purposes only,
-    /// and only in scenarios where schema mismatch issues are irrelevant.
+    /// The downside with plain `RowBinary` is that instead of clearer error messages,
+    /// a mismatch between [`Row`] and database schema will result
+    /// in a [`error::Error::NotEnoughData`] error without specific details.
     ///
-    /// ***DO NOT*** disable validation in your production code or tests
-    /// unless you are 100% sure why you are doing it.
+    /// However, depending on the dataset, there might be x1.1 to x3 performance improvement,
+    /// but that highly depends on the shape and volume of the dataset.
+    ///
+    /// It is always recommended to measure the performance impact of validation
+    /// in your specific use case. Additionally, writing smoke tests to ensure that
+    /// the row types match the ClickHouse schema is highly recommended,
+    /// if you plan to disable validation in your application.
     pub fn with_validation(mut self, enabled: bool) -> Self {
         self.validation = enabled;
         self

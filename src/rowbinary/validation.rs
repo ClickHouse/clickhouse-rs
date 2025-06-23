@@ -12,7 +12,6 @@ pub(crate) trait SchemaValidator<R: Row>: Sized {
     type Inner<'de>: SchemaValidator<R>
     where
         Self: 'de;
-
     /// The main entry point. The validation flow based on the [`crate::Row::KIND`].
     /// For container types (nullable, array, map, tuple, variant, etc.),
     /// it will return an [`InnerDataTypeValidator`] instance (see [`InnerDataTypeValidatorKind`]),
@@ -254,109 +253,106 @@ impl<'cursor, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
 
     #[inline]
     fn validate(&mut self, serde_type: SerdeType) -> Self {
-        match self {
-            None => None,
-            Some(inner) => match &mut inner.kind {
-                InnerDataTypeValidatorKind::Map(kv, state) => match state {
-                    MapValidatorState::Key => {
+        let inner = self.as_mut()?;
+        match &mut inner.kind {
+            InnerDataTypeValidatorKind::Map(kv, state) => match state {
+                MapValidatorState::Key => {
+                    let result = validate_impl(inner.root, &kv[0], &serde_type, true);
+                    *state = MapValidatorState::Value;
+                    result
+                }
+                MapValidatorState::Value => {
+                    let result = validate_impl(inner.root, &kv[1], &serde_type, true);
+                    *state = MapValidatorState::Key;
+                    result
+                }
+            },
+            InnerDataTypeValidatorKind::MapAsSequence(kv, state) => {
+                match state {
+                    // the first state is simply skipped, as the same validator
+                    // will be called again for the Key and then the Value types
+                    MapAsSequenceValidatorState::Tuple => {
+                        *state = MapAsSequenceValidatorState::Key;
+                        self.take()
+                    }
+                    MapAsSequenceValidatorState::Key => {
                         let result = validate_impl(inner.root, &kv[0], &serde_type, true);
-                        *state = MapValidatorState::Value;
+                        *state = MapAsSequenceValidatorState::Value;
                         result
                     }
-                    MapValidatorState::Value => {
+                    MapAsSequenceValidatorState::Value => {
                         let result = validate_impl(inner.root, &kv[1], &serde_type, true);
-                        *state = MapValidatorState::Key;
+                        *state = MapAsSequenceValidatorState::Tuple;
                         result
                     }
-                },
-                InnerDataTypeValidatorKind::MapAsSequence(kv, state) => {
-                    match state {
-                        // the first state is simply skipped, as the same validator
-                        // will be called again for the Key and then the Value types
-                        MapAsSequenceValidatorState::Tuple => {
-                            *state = MapAsSequenceValidatorState::Key;
-                            self.take()
-                        }
-                        MapAsSequenceValidatorState::Key => {
-                            let result = validate_impl(inner.root, &kv[0], &serde_type, true);
-                            *state = MapAsSequenceValidatorState::Value;
-                            result
-                        }
-                        MapAsSequenceValidatorState::Value => {
-                            let result = validate_impl(inner.root, &kv[1], &serde_type, true);
-                            *state = MapAsSequenceValidatorState::Tuple;
-                            result
-                        }
+                }
+            }
+            InnerDataTypeValidatorKind::Array(inner_type) => {
+                validate_impl(inner.root, inner_type, &serde_type, true)
+            }
+            InnerDataTypeValidatorKind::Nullable(inner_type) => {
+                validate_impl(inner.root, inner_type, &serde_type, true)
+            }
+            InnerDataTypeValidatorKind::Tuple(elements_types) => {
+                match elements_types.split_first() {
+                    Some((first, rest)) => {
+                        *elements_types = rest;
+                        validate_impl(inner.root, first, &serde_type, true)
                     }
-                }
-                InnerDataTypeValidatorKind::Array(inner_type) => {
-                    validate_impl(inner.root, inner_type, &serde_type, true)
-                }
-                InnerDataTypeValidatorKind::Nullable(inner_type) => {
-                    validate_impl(inner.root, inner_type, &serde_type, true)
-                }
-                InnerDataTypeValidatorKind::Tuple(elements_types) => {
-                    match elements_types.split_first() {
-                        Some((first, rest)) => {
-                            *elements_types = rest;
-                            validate_impl(inner.root, first, &serde_type, true)
-                        }
-                        None => {
-                            let (full_name, full_data_type) =
-                                inner.root.get_current_column_name_and_type();
-                            panic!(
-                                "While processing column {} defined as {}: \
-                                attempting to deserialize {} while no more elements are allowed",
-                                full_name, full_data_type, serde_type
-                            )
-                        }
-                    }
-                }
-                InnerDataTypeValidatorKind::FixedString(_len) => {
-                    None // actually unreachable
-                }
-                InnerDataTypeValidatorKind::RootTuple(columns, current_index) => {
-                    if *current_index < columns.len() {
-                        let data_type = &columns[*current_index].data_type;
-                        *current_index += 1;
-                        validate_impl(inner.root, data_type, &serde_type, true)
-                    } else {
+                    None => {
                         let (full_name, full_data_type) =
                             inner.root.get_current_column_name_and_type();
                         panic!(
-                            "While processing root tuple element {} defined as {}: \
-                             attempting to deserialize {} while no more elements are allowed",
+                            "While processing column {} defined as {}: \
+                                attempting to deserialize {} while no more elements are allowed",
                             full_name, full_data_type, serde_type
                         )
                     }
                 }
-                InnerDataTypeValidatorKind::RootArray(inner_data_type) => {
-                    validate_impl(inner.root, inner_data_type, &serde_type, true)
+            }
+            InnerDataTypeValidatorKind::FixedString(_len) => {
+                None // actually unreachable
+            }
+            InnerDataTypeValidatorKind::RootTuple(columns, current_index) => {
+                if *current_index < columns.len() {
+                    let data_type = &columns[*current_index].data_type;
+                    *current_index += 1;
+                    validate_impl(inner.root, data_type, &serde_type, true)
+                } else {
+                    let (full_name, full_data_type) = inner.root.get_current_column_name_and_type();
+                    panic!(
+                        "While processing root tuple element {} defined as {}: \
+                             attempting to deserialize {} while no more elements are allowed",
+                        full_name, full_data_type, serde_type
+                    )
                 }
-                InnerDataTypeValidatorKind::Variant(possible_types, state) => match state {
-                    VariantValidationState::Pending => {
-                        unreachable!()
-                    }
-                    VariantValidationState::Identifier(value) => {
-                        if *value as usize >= possible_types.len() {
-                            let (full_name, full_data_type) =
-                                inner.root.get_current_column_name_and_type();
-                            panic!(
+            }
+            InnerDataTypeValidatorKind::RootArray(inner_data_type) => {
+                validate_impl(inner.root, inner_data_type, &serde_type, true)
+            }
+            InnerDataTypeValidatorKind::Variant(possible_types, state) => match state {
+                VariantValidationState::Pending => {
+                    unreachable!()
+                }
+                VariantValidationState::Identifier(value) => {
+                    if *value as usize >= possible_types.len() {
+                        let (full_name, full_data_type) =
+                            inner.root.get_current_column_name_and_type();
+                        panic!(
                                 "While processing column {full_name} defined as {full_data_type}: \
                                  Variant identifier {value} is out of bounds, max allowed index is {}",
                                 possible_types.len() - 1
                             );
-                        }
-                        let data_type = &possible_types[*value as usize];
-                        validate_impl(inner.root, data_type, &serde_type, true)
                     }
-                },
-                // TODO - check enum string value correctness in the hashmap?
-                //  is this even possible?
-                InnerDataTypeValidatorKind::Enum(_values_map) => {
-                    unreachable!()
+                    let data_type = &possible_types[*value as usize];
+                    validate_impl(inner.root, data_type, &serde_type, true)
                 }
             },
+            // TODO - check enum string value correctness in the hashmap?
+            //  is this even possible?
+            InnerDataTypeValidatorKind::Enum(_values_map) => {
+                unreachable!()
+            }
         }
     }
 

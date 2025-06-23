@@ -18,9 +18,10 @@ Official pure Rust typed client for ClickHouse DB.
 
 * Uses `serde` for encoding/decoding rows.
 * Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
-* Uses `RowBinaryWithNamesAndTypes` format over HTTP transport with struct definition validation against the database schema.
-    * It is possible to use `RowBinary` instead, disabling the validation, which can potentially lead to increased performance ([see below](#validation)).
-    * There are plans to switch to `Native` over TCP.
+* Uses `RowBinaryWithNamesAndTypes` or `RowBinary` formats over HTTP transport.
+    * By default, `RowBinaryWithNamesAndTypes` with database schema validation is used.
+    * It is possible to switch to `RowBinary`, which can potentially lead to increased performance ([see below](#validation)).
+    * There are plans to implement `Native` format over TCP.
 * Supports TLS (see `native-tls` and `rustls-tls` features below).
 * Supports compression and decompression (LZ4 and LZ4HC).
 * Provides API for selecting.
@@ -33,17 +34,23 @@ Note: [ch2rs](https://github.com/ClickHouse/ch2rs) is useful to generate a row t
 
 ## Validation
 
-Starting from 0.14.0, the crate supports validation of the row types against the ClickHouse schema, as
-`RowBinaryWithNamesAndTypes` format is used by default instead of `RowBinary`. Additionally, with enabled validation, 
-the crate supports structs with correct field names and matching types, but incorrect order of the fields, 
-with a slight (5-10%) performance penalty.
+Starting from 0.14.0, the crate uses `RowBinaryWithNamesAndTypes` format by default, which allows row types validation
+against the ClickHouse schema. This enables clearer error messages in case of schema mismatch at the cost of
+performance. Additionally, with enabled validation, the crate supports structs with correct field names and matching
+types, but incorrect order of the fields, with an additional slight (5-10%) performance penalty.
 
-If you want to disable validation entirely, essentially reverting the client behavior to pre-0.14.0, you can use
-`Client::with_validation(false)`, which will switch the fetch format to `RowBinary` instead.
+If you are looking to maximize performance, you could disable validation using `Client::with_validation(false)`. When
+validation is disabled, the client switches to `RowBinary` format usage instead.
 
-Depending on the dataset, disabling validation can yield from x1.1 to x3 performance improvement, 
-but it is not recommended to use it in production, as it can lead to unclear runtime errors 
-if the row types do not match the ClickHouse schema.
+The downside with plain `RowBinary` is that instead of clearer error messages, a mismatch between `Row` and database
+schema will result in a `NotEnoughData` error without specific details.
+
+However, depending on the dataset, there might be x1.1 to x3 performance improvement, but that highly depends on the
+shape and volume of the dataset.
+
+It is always recommended to measure the performance impact of validation in your specific use case. Additionally,
+writing smoke tests to ensure that the row types match the ClickHouse schema is highly recommended, if you plan to
+disable validation in your application.
 
 ## Usage
 
