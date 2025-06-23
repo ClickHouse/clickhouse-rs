@@ -8,15 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
-### Breaking Changes
+### Removed
+- **BREAKING** watch: `Client::watch()` API is removed ([#245]).
+- **BREAKING** mock: `watch()` and `watch_only_events()` are removed ([#245]).
 
-- query: `RowBinaryWithNamesAndTypes` is now used by default for query results. This may cause panics if the row struct
+### Changed
+
+- **BREAKING** query: `RowBinaryWithNamesAndTypes` is now used by default for query results. This may cause panics if the row struct
   definition does not match the database schema. Use `Client::with_validation(false)` to revert to the previous behavior
   which uses plain `RowBinary` format for fetching rows. ([#221])
 - query: due to `RowBinaryWithNamesAndTypes` format usage, there might be an impact on fetch performance, which largely
   depends on how the dataset is defined. If you experience performance issues, consider disabling validation by using
   `Client::with_validation(false)`.
-- mock: when using `test-util` feature, it is now required to use `Client::with_mock(&mock)` to set up the mock server,
+- **BREAKING** mock: when using `test-util` feature, it is now required to use `Client::with_mock(&mock)` to set up the mock server,
   so it properly handles the response format and automatically disables parsing `RowBinaryWithNamesAndTypes` header
   parsing and validation. Additionally, it is not required to call `with_url` explicitly.
   See the [updated example](./examples/mock.rs).
@@ -31,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   functions and utilities to parse the types out of the ClickHouse server response. ([#221]).
 
 [#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
+[#245]: https://github.com/ClickHouse/clickhouse-rs/pull/245
 
 ## [0.13.3] - 2025-05-29
 ### Added

@@ -1,11 +1,7 @@
-#[cfg(feature = "watch")]
-pub(crate) use self::json::JsonCursor;
 pub(crate) use self::raw::RawCursor;
 pub use self::{bytes::BytesCursor, row::RowCursor};
 
 mod bytes;
-#[cfg(feature = "watch")]
-mod json;
 mod raw;
 mod row;
 

@@ -19,8 +19,6 @@ pub mod serde;
 pub mod sql;
 #[cfg(feature = "test-util")]
 pub mod test;
-#[cfg(feature = "watch")]
-pub mod watch;
 
 mod bytes_ext;
 mod compression;
@@ -187,7 +185,8 @@ impl Client {
 
     /// A JWT access token to authenticate with ClickHouse.
     /// JWT token authentication is supported in ClickHouse Cloud only.
-    /// Should not be called after [`Client::with_user`] or [`Client::with_password`].
+    /// Should not be called after [`Client::with_user`] or
+    /// [`Client::with_password`].
     ///
     /// # Panics
     /// If called after [`Client::with_user`] or [`Client::with_password`].
@@ -318,15 +317,6 @@ impl Client {
     /// Starts a new SELECT/DDL query.
     pub fn query(&self, query: &str) -> query::Query {
         query::Query::new(self, query)
-    }
-
-    /// Starts a new WATCH query.
-    ///
-    /// The `query` can be either the table name or a SELECT query.
-    /// In the second case, a new LV table is created.
-    #[cfg(feature = "watch")]
-    pub fn watch(&self, query: &str) -> watch::Watch {
-        watch::Watch::new(self, query)
     }
 
     /// Enables or disables [`Row`] data types validation against the database schema

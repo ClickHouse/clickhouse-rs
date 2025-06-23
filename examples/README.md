@@ -8,7 +8,7 @@ If something is missing, or you found a mistake in one of these examples, please
 
 ### General usage
 
-- [usage.rs](usage.rs) - creating tables, executing other DDLs, inserting the data, and selecting it back. Additionally, it covers `WATCH` queries. Optional cargo features: `inserter`, `watch`.
+- [usage.rs](usage.rs) - creating tables, executing other DDLs, inserting the data, and selecting it back. Optional cargo features: `inserter`.
 - [mock.rs](mock.rs) - writing tests with `mock` feature. Cargo features: requires `test-util`.
 - [inserter.rs](inserter.rs) - using the client-side batching via the `inserter` feature. Cargo features: requires `inserter`.
 - [async_insert.rs](async_insert.rs) - using the server-side batching via the [asynchronous inserts](https://clickhouse.com/docs/en/optimize/asynchronous-inserts) ClickHouse feature
@@ -57,7 +57,7 @@ cargo run --package clickhouse --example async_insert
 If a particular example requires a cargo feature, you could run it as follows:
 
 ```sh
-cargo run --package clickhouse --example usage --features inserter watch
+cargo run --package clickhouse --example usage --features inserter
 ```
 
 Additionally, the individual examples should be runnable via the IDE such as CLion or RustRover.
