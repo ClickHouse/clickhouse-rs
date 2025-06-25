@@ -349,8 +349,6 @@ async fn basic_types() {
     );
 }
 
-// FIXME: somehow this test breaks `cargo test`, but works from RustRover
-#[ignore]
 #[tokio::test]
 async fn borrowed_data() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
@@ -403,46 +401,45 @@ async fn borrowed_data() {
         .fetch::<Data<'_>>()
         .unwrap();
 
-    let mut result = Vec::new();
-    while let Some(row) = cursor.next().await.unwrap() {
-        result.push(row);
-    }
+    assert_eq!(
+        cursor.next().await.unwrap().unwrap(),
+        Data {
+            str: "a",
+            array: vec!["b", "c"],
+            tuple: ("d", "e"),
+            str_opt: None,
+            vec_map_str: vec![("key1", "value1"), ("key2", "value2")],
+            vec_map_f32: vec![("key3", 100.0), ("key4", 200.0)],
+            vec_map_nested: vec![("n1", vec![("key1", "value1"), ("key2", "value2")])],
+            hash_map_str: HashMap::from([("key1", "value1"), ("key2", "value2")]),
+            hash_map_f32: HashMap::from([("key3", 100.0), ("key4", 200.0)]),
+            hash_map_nested: HashMap::from([(
+                "n1",
+                HashMap::from([("key1", "value1"), ("key2", "value2")]),
+            )]),
+        }
+    );
 
     assert_eq!(
-        result,
-        vec![
-            Data {
-                str: "a",
-                array: vec!["b", "c"],
-                tuple: ("d", "e"),
-                str_opt: None,
-                vec_map_str: vec![("key1", "value1"), ("key2", "value2")],
-                vec_map_f32: vec![("key3", 100.0), ("key4", 200.0)],
-                vec_map_nested: vec![("n1", vec![("key1", "value1"), ("key2", "value2")])],
-                hash_map_str: HashMap::from([("key1", "value1"), ("key2", "value2"),]),
-                hash_map_f32: HashMap::from([("key3", 100.0), ("key4", 200.0),]),
-                hash_map_nested: HashMap::from([(
-                    "n1",
-                    HashMap::from([("key1", "value1"), ("key2", "value2"),]),
-                )]),
-            },
-            Data {
-                str: "f",
-                array: vec!["g", "h"],
-                tuple: ("i", "j"),
-                str_opt: Some("k"),
-                vec_map_str: vec![("key4", "value4"), ("key5", "value5")],
-                vec_map_f32: vec![("key6", 300.0), ("key7", 400.0)],
-                vec_map_nested: vec![("n2", vec![("key4", "value4"), ("key5", "value5")])],
-                hash_map_str: HashMap::from([("key4", "value4"), ("key5", "value5"),]),
-                hash_map_f32: HashMap::from([("key6", 300.0), ("key7", 400.0),]),
-                hash_map_nested: HashMap::from([(
-                    "n2",
-                    HashMap::from([("key4", "value4"), ("key5", "value5"),]),
-                )]),
-            },
-        ]
+        cursor.next().await.unwrap().unwrap(),
+        Data {
+            str: "f",
+            array: vec!["g", "h"],
+            tuple: ("i", "j"),
+            str_opt: Some("k"),
+            vec_map_str: vec![("key4", "value4"), ("key5", "value5")],
+            vec_map_f32: vec![("key6", 300.0), ("key7", 400.0)],
+            vec_map_nested: vec![("n2", vec![("key4", "value4"), ("key5", "value5")])],
+            hash_map_str: HashMap::from([("key4", "value4"), ("key5", "value5")]),
+            hash_map_f32: HashMap::from([("key6", 300.0), ("key7", 400.0)]),
+            hash_map_nested: HashMap::from([(
+                "n2",
+                HashMap::from([("key4", "value4"), ("key5", "value5")]),
+            )]),
+        },
     );
+
+    assert!(cursor.next().await.unwrap().is_none());
 }
 
 #[tokio::test]

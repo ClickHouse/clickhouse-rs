@@ -14,6 +14,17 @@ use serde::{
 use std::marker::PhantomData;
 use std::{convert::TryFrom, str};
 
+// TODO: doc + remove below?
+pub(crate) fn deserialize_row_from<'data, 'cursor, T: Deserialize<'data> + Row>(
+    input: &mut &'data [u8],
+    metadata: Option<&'cursor RowMetadata>,
+) -> Result<T> {
+    match metadata {
+        Some(metadata) => deserialize_row_with_validation(input, metadata),
+        None => deserialize_row(input),
+    }
+}
+
 /// Deserializes a value from `input` with a row encoded in `RowBinary`,
 /// i.e. only when [`crate::Row`] validation is disabled in the client.
 ///

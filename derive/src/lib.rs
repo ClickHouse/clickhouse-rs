@@ -1,10 +1,10 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use serde_derive_internals::{
     attr::{Container, Default as SerdeDefault, Field},
     Ctxt,
 };
-use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields};
+use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields, Lifetime};
 
 fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> TokenStream {
     match &data.fields {
@@ -52,6 +52,17 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // TODO: do something more clever?
     cx.check().expect("derive context error");
 
+    let is_borrowed = input.generics.lifetimes().next().is_some();
+    let value = if is_borrowed {
+        let mut cloned = input.generics.clone();
+        let param = cloned.lifetimes_mut().next().unwrap();
+        param.lifetime = Lifetime::new("'__v", Span::call_site());
+        let ty_generics = cloned.split_for_impl().1;
+        quote! { #name #ty_generics }
+    } else {
+        quote! { Self }
+    };
+
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     // TODO: replace `clickhouse` with `::clickhouse` here.
@@ -62,6 +73,8 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             const COLUMN_NAMES: &'static [&'static str] = #column_names;
             const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
             const KIND: clickhouse::RowKind = clickhouse::RowKind::Struct;
+
+            type Value<'__v> = #value;
         }
     };
 
