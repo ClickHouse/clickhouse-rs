@@ -84,42 +84,45 @@ impl<T> RowCursor<T> {
     /// # Cancel safety
     ///
     /// This method is cancellation safe.
-    pub async fn next<'cursor, 'data: 'cursor>(&'cursor mut self) -> Result<Option<T>>
+    pub async fn next<'cursor>(&'cursor mut self) -> Result<Option<T::Value<'cursor>>>
     where
-        T: Deserialize<'data> + Row,
+        T: Row,
+        T::Value<'cursor>: Deserialize<'cursor>,
     {
+        if self.validation && self.row_metadata.is_none() {
+            self.read_columns().await?;
+            debug_assert!(self.row_metadata.is_some());
+        }
+
         loop {
             if self.bytes.remaining() > 0 {
-                let mut slice: &[u8];
-                let result = if self.validation {
-                    if self.row_metadata.is_none() {
-                        self.read_columns().await?;
-                        if self.bytes.remaining() == 0 {
-                            continue;
-                        }
-                    }
-                    slice = super::workaround_51132(self.bytes.slice());
-                    rowbinary::deserialize_row_with_validation::<T>(
-                        &mut slice,
-                        // handled above
-                        self.row_metadata.as_ref().unwrap(),
-                    )
-                } else {
-                    slice = super::workaround_51132(self.bytes.slice());
-                    rowbinary::deserialize_row::<T>(&mut slice)
-                };
+                let mut slice = self.bytes.slice();
+                let result = rowbinary::deserialize_row_from::<T::Value<'_>>(
+                    &mut slice,
+                    self.row_metadata.as_ref(),
+                );
+
                 match result {
-                    Err(Error::NotEnoughData) => {}
                     Ok(value) => {
                         self.bytes.set_remaining(slice.len());
                         return Ok(Some(value));
                     }
+                    Err(Error::NotEnoughData) => {}
                     Err(err) => return Err(err),
                 }
             }
 
             match self.raw.next().await? {
-                Some(chunk) => self.bytes.extend(chunk),
+                Some(chunk) => {
+                    // SAFETY: we actually don't have active immutable references at this point.
+                    //
+                    // The borrow checker prior to polonius thinks we still have ones.
+                    // This is pretty common restriction that can be fixed by using
+                    // the polonius-the-crab crate, which cannot be used in async code.
+                    //
+                    // See https://github.com/rust-lang/rust/issues/51132
+                    unsafe { self.bytes.extend_by_ref(chunk) }
+                }
                 None if self.bytes.remaining() > 0 => {
                     // If some data is left, we have an incomplete row in the buffer.
                     // This is usually a schema mismatch on the client side.

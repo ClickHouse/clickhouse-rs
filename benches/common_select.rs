@@ -1,8 +1,7 @@
 #![allow(dead_code)]
 
 use clickhouse::query::RowCursor;
-use clickhouse::{Client, Compression, Row};
-use serde::Deserialize;
+use clickhouse::{Client, Compression, ReadRow, Row};
 use std::time::{Duration, Instant};
 
 pub(crate) trait WithId {
@@ -11,7 +10,7 @@ pub(crate) trait WithId {
 pub(crate) trait WithAccessType {
     const ACCESS_TYPE: &'static str;
 }
-pub(crate) trait BenchmarkRow<'a>: Row + Deserialize<'a> + WithId + WithAccessType {}
+pub(crate) trait BenchmarkRow: for<'a> ReadRow<Value<'a>: WithId> + WithAccessType {}
 
 #[macro_export]
 macro_rules! impl_benchmark_row {
@@ -26,7 +25,7 @@ macro_rules! impl_benchmark_row {
             const ACCESS_TYPE: &'static str = $access_type;
         }
 
-        impl<'a> BenchmarkRow<'a> for $type {}
+        impl BenchmarkRow for $type {}
     };
 }
 
@@ -43,7 +42,7 @@ macro_rules! impl_benchmark_row_no_access_type {
             const ACCESS_TYPE: &'static str = "";
         }
 
-        impl<'a> BenchmarkRow<'a> for $type {}
+        impl BenchmarkRow for $type {}
     };
 }
 
@@ -52,7 +51,7 @@ pub(crate) fn print_header(add: Option<&str>) {
     println!("compress  validation    elapsed  throughput  received{add}");
 }
 
-pub(crate) fn print_results<'a, T: BenchmarkRow<'a>>(
+pub(crate) fn print_results<T: WithAccessType>(
     stats: &BenchmarkStats<u64>,
     compression: Compression,
     validation: bool,
@@ -79,19 +78,21 @@ pub(crate) fn print_results<'a, T: BenchmarkRow<'a>>(
     println!("{compression:>8}  {validation_mode:>10}  {elapsed:>9.3?}  {throughput_mbytes_sec:>4.0} MiB/s  {received_mbytes:>4.0} MiB{access}");
 }
 
-pub(crate) async fn fetch_cursor<'a, T: BenchmarkRow<'a>>(
+pub(crate) async fn fetch_cursor<T: Row>(
     compression: Compression,
     validation: bool,
     query: &str,
 ) -> RowCursor<T> {
-    let client = Client::default()
+    Client::default()
         .with_compression(compression)
         .with_url("http://localhost:8123")
-        .with_validation(validation);
-    client.query(query).fetch::<T>().unwrap()
+        .with_validation(validation)
+        .query(query)
+        .fetch::<T>()
+        .unwrap()
 }
 
-pub(crate) async fn do_select_bench<'a, T: BenchmarkRow<'a>>(
+pub(crate) async fn do_select_bench<T: BenchmarkRow>(
     query: &str,
     compression: Compression,
     validation: bool,

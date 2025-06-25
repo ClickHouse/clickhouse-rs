@@ -63,6 +63,8 @@ impl Row for Sample<'_> {
     ];
     const COLUMN_COUNT: usize = 19;
     const KIND: crate::RowKind = crate::RowKind::Struct;
+
+    type Value<'a> = Sample<'a>;
 }
 
 fn sample() -> Sample<'static> {

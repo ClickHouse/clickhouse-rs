@@ -1,4 +1,5 @@
 use crate::sql;
+use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RowKind {
@@ -14,9 +15,17 @@ pub trait Row {
     const COLUMN_COUNT: usize;
     const KIND: RowKind;
 
+    type Value<'a>: Row;
+
     // TODO: count
     // TODO: different list for SELECT/INSERT (de/ser)
 }
+
+pub trait ReadRow: for<'a> Row<Value<'a>: Deserialize<'a>> {}
+impl<R> ReadRow for R where R: for<'a> Row<Value<'a>: Deserialize<'a>> {}
+
+pub trait RowOwned: 'static + for<'a> Row<Value<'a> = Self> {}
+impl<R> RowOwned for R where R: 'static + for<'a> Row<Value<'a> = R> {}
 
 // Actually, it's not public now.
 pub trait Primitive {}
@@ -52,6 +61,8 @@ macro_rules! impl_row_for_tuple {
             const COLUMN_NAMES: &'static [&'static str] = $i::COLUMN_NAMES;
             const COLUMN_COUNT: usize = $i::COLUMN_COUNT + count_tokens!($($other)*);
             const KIND: RowKind = RowKind::Tuple;
+
+            type Value<'a> = Self;
         }
 
         impl_row_for_tuple!($($other)+);
@@ -67,6 +78,8 @@ impl<P: Primitive> Row for P {
     const COLUMN_NAMES: &'static [&'static str] = &[];
     const COLUMN_COUNT: usize = 1;
     const KIND: RowKind = RowKind::Primitive;
+
+    type Value<'a> = Self;
 }
 
 impl_row_for_tuple!(T0 T1 T2 T3 T4 T5 T6 T7 T8);
@@ -76,6 +89,8 @@ impl<T> Row for Vec<T> {
     const COLUMN_NAMES: &'static [&'static str] = &[];
     const COLUMN_COUNT: usize = 1;
     const KIND: RowKind = RowKind::Vec;
+
+    type Value<'a> = Self;
 }
 
 /// Collects all field names in depth and joins them with comma.

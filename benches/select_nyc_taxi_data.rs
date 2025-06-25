@@ -74,7 +74,7 @@ struct TripSmallMapAccess {
 impl_benchmark_row!(TripSmallSeqAccess, trip_id, "seq");
 impl_benchmark_row!(TripSmallMapAccess, trip_id, "map");
 
-async fn bench<'a, T: BenchmarkRow<'a>>(compression: Compression, validation: bool) {
+async fn bench<T: BenchmarkRow>(compression: Compression, validation: bool) {
     let stats = do_select_bench::<T>(
         "SELECT * FROM nyc_taxi.trips_small ORDER BY trip_id DESC",
         compression,
