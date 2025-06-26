@@ -331,7 +331,7 @@ impl Client {
     /// # Parameters
     ///
     /// - **Input**: `&str` - the raw SQL query to be executed
-    /// - **Output**: [`Query`] - the query builder that executes the query
+    /// - **Output**: [`query::Query`] - the query builder that executes the query
     ///
     pub fn query_raw(&self, query: &str) -> query::Query {
         query::Query::raw(self, query)

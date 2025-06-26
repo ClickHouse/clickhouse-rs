@@ -9,7 +9,7 @@ If something is missing, or you found a mistake in one of these examples, please
 ### General usage
 
 - [usage.rs](usage.rs) - creating tables, executing other DDLs, inserting the data, and selecting it back. Additionally, it covers `WATCH` queries. Optional cargo features: `inserter`, `watch`.
-- [query_raw.rs](query_raw.rs) - raw queries without parameter binding, with question mark escaping. FORMAT is the RowBinary by default
+- [query_raw.rs](query_raw.rs) - raw queries executes SQL queries exactly as written, without parameter binding or preprocessing. This allows queries containing literal question marks that would otherwise be treated as bind parameters. FORMAT is the RowBinary by default
 - [mock.rs](mock.rs) - writing tests with `mock` feature. Cargo features: requires `test-util`.
 - [inserter.rs](inserter.rs) - using the client-side batching via the `inserter` feature. Cargo features: requires `inserter`.
 - [async_insert.rs](async_insert.rs) - using the server-side batching via the [asynchronous inserts](https://clickhouse.com/docs/en/optimize/asynchronous-inserts) ClickHouse feature
