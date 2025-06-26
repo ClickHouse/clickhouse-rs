@@ -95,7 +95,7 @@ where
 
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
-    group.bench_function("no compression", |b| {
+    group.bench_function("uncompressed", |b| {
         b.iter_custom(|iters| {
             let client = Client::default()
                 .with_url(format!("http://{addr}"))
