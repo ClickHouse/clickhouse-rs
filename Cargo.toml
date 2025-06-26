@@ -38,6 +38,10 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [[bench]]
+name = "select_market_data"
+harness = false
+
+[[bench]]
 name = "select_nyc_taxi_data"
 harness = false
 required-features = ["time"]

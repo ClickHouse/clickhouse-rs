@@ -21,10 +21,11 @@ mod common;
 async fn serve(
     request: Request<Incoming>,
     compression: Compression,
+    use_rbwnat: bool,
 ) -> Response<impl Body<Data = Bytes, Error = Infallible>> {
     common::skip_incoming(request).await;
 
-    let write_schema = async move {
+    let maybe_schema = if use_rbwnat {
         let schema = vec![
             Column::new("a".to_string(), DataTypeNode::UInt64),
             Column::new("b".to_string(), DataTypeNode::Int64),
@@ -42,12 +43,15 @@ async fn serve(
             _ => unreachable!(),
         };
 
-        Ok(Frame::data(buffer))
+        Some(buffer)
+    } else {
+        None
     };
 
-    let chunk = prepare_chunk();
-    let stream =
-        stream::once(write_schema).chain(stream::repeat(chunk).map(|chunk| Ok(Frame::data(chunk))));
+    let stream = stream::iter(maybe_schema)
+        .chain(stream::repeat(prepare_chunk()))
+        .map(|chunk| Ok(Frame::data(chunk)));
+
     Response::new(StreamBody::new(stream))
 }
 
@@ -75,8 +79,8 @@ fn prepare_chunk() -> Bytes {
 const ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 6523));
 
 fn select(c: &mut Criterion) {
-    async fn start_server(compression: Compression) -> common::ServerHandle {
-        common::start_server(ADDR, move |req| serve(req, compression)).await
+    async fn start_server(compression: Compression, use_rbwnat: bool) -> common::ServerHandle {
+        common::start_server(ADDR, move |req| serve(req, compression, use_rbwnat)).await
     }
 
     let runner = common::start_runner();
@@ -89,8 +93,16 @@ fn select(c: &mut Criterion) {
         d: u32,
     }
 
-    async fn select_rows(client: Client, iters: u64, compression: Compression) -> Result<Duration> {
-        let _server = start_server(compression).await;
+    async fn select_rows(
+        client: Client,
+        iters: u64,
+        compression: Compression,
+        validation: bool,
+    ) -> Result<Duration> {
+        let client = client
+            .with_compression(compression)
+            .with_validation(validation);
+        let _server = start_server(compression, validation).await;
 
         let mut sum = SomeRow::default();
         let start = Instant::now();
@@ -119,7 +131,8 @@ fn select(c: &mut Criterion) {
         min_size: u64,
         compression: Compression,
     ) -> Result<Duration> {
-        let _server = start_server(compression).await;
+        let client = client.with_compression(compression);
+        let _server = start_server(compression, false).await;
 
         let start = Instant::now();
         let mut cursor = client
@@ -137,23 +150,30 @@ fn select(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("rows");
     group.throughput(Throughput::Bytes(size_of::<SomeRow>() as u64));
-    group.bench_function("uncompressed", |b| {
+    group.bench_function("validation=off/uncompressed", |b| {
         b.iter_custom(|iters| {
-            let compression = Compression::None;
-            let client = Client::default()
-                .with_url(format!("http://{ADDR}"))
-                .with_compression(compression);
-            runner.run(select_rows(client, iters, compression))
+            let client = Client::default().with_url(format!("http://{ADDR}"));
+            runner.run(select_rows(client, iters, Compression::None, false))
         })
     });
     #[cfg(feature = "lz4")]
-    group.bench_function("lz4", |b| {
+    group.bench_function("validation=off/lz4", |b| {
         b.iter_custom(|iters| {
-            let compression = Compression::Lz4;
-            let client = Client::default()
-                .with_url(format!("http://{ADDR}"))
-                .with_compression(compression);
-            runner.run(select_rows(client, iters, compression))
+            let client = Client::default().with_url(format!("http://{ADDR}"));
+            runner.run(select_rows(client, iters, Compression::Lz4, false))
+        })
+    });
+    group.bench_function("validation=on/uncompressed", |b| {
+        b.iter_custom(|iters| {
+            let client = Client::default().with_url(format!("http://{ADDR}"));
+            runner.run(select_rows(client, iters, Compression::None, true))
+        })
+    });
+    #[cfg(feature = "lz4")]
+    group.bench_function("validation=on/lz4", |b| {
+        b.iter_custom(|iters| {
+            let client = Client::default().with_url(format!("http://{ADDR}"));
+            runner.run(select_rows(client, iters, Compression::Lz4, true))
         })
     });
     group.finish();
@@ -163,21 +183,15 @@ fn select(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(MIB));
     group.bench_function("uncompressed", |b| {
         b.iter_custom(|iters| {
-            let compression = Compression::None;
-            let client = Client::default()
-                .with_url(format!("http://{ADDR}"))
-                .with_compression(compression);
-            runner.run(select_bytes(client, iters * MIB, compression))
+            let client = Client::default().with_url(format!("http://{ADDR}"));
+            runner.run(select_bytes(client, iters * MIB, Compression::None))
         })
     });
     #[cfg(feature = "lz4")]
     group.bench_function("lz4", |b| {
         b.iter_custom(|iters| {
-            let compression = Compression::None;
-            let client = Client::default()
-                .with_url(format!("http://{ADDR}"))
-                .with_compression(compression);
-            runner.run(select_bytes(client, iters * MIB, compression))
+            let client = Client::default().with_url(format!("http://{ADDR}"));
+            runner.run(select_bytes(client, iters * MIB, Compression::Lz4))
         })
     });
     group.finish();
