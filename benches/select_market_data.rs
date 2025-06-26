@@ -104,7 +104,9 @@ async fn bench(compression: Compression, validation: bool) {
 async fn main() {
     prepare_data().await;
     print_header(None);
+    #[cfg(feature = "lz4")]
     bench(Compression::Lz4, false).await;
+    #[cfg(feature = "lz4")]
     bench(Compression::Lz4, true).await;
     bench(Compression::None, false).await;
     bench(Compression::None, true).await;
