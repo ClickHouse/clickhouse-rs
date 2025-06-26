@@ -61,7 +61,7 @@ async fn fetch_with_single_field_struct() {
         .await
         .unwrap();
 
-    // Test raw query with struct fetching 
+    // Test raw query with struct fetching
     let sql = "SELECT name FROM test_users ORDER BY name";
 
     let mut cursor = client.query_raw(sql).fetch::<PersonName<'_>>().unwrap();
@@ -92,7 +92,7 @@ async fn fetch_with_multi_field_struct() {
         .await
         .unwrap();
 
-    // Test raw query with multi-field struct 
+    // Test raw query with multi-field struct
     let sql = "SELECT name, age FROM test_persons ORDER BY age";
 
     let mut cursor = client.query_raw(sql).fetch::<PersonInfo>().unwrap();
@@ -279,21 +279,42 @@ async fn complex_sql_with_question_marks() {
 }
 
 #[tokio::test]
-async fn query_raw_preserves_exact_sql() {
+async fn query_matches_log() {
+    use uuid::Uuid;
+
+    // setup
     let client = prepare_database!();
-//check client
+    let query_id = Uuid::new_v4().to_string(); // unique per run
+    let sql = "SELECT 1 WHERE 'x?' = 'x?'"; // raw statement to verify
 
-    // Test that raw query preserves the exact SQL including whitespace and formatting
-    let sql = "SELECT   1   WHERE   'test?'   =   'test?'   ";
+    // execute with explicit query_id
+    client
+        .query_raw(sql)
+        .with_option("query_id", &query_id)
+        .execute()
+        .await
+        .expect("executing raw SQL failed");
 
-    let result = client.query_raw(sql).fetch_bytes("TSV").unwrap();
+    crate::flush_query_log(&client).await;
 
-    let mut data = Vec::new();
-    let mut cursor = result;
-    while let Some(chunk) = cursor.next().await.unwrap() {
-        data.extend_from_slice(&chunk);
-    }
-    let response = String::from_utf8(data).unwrap();
+    // read log row *inline*
+    let log_sql = format!(
+        "SELECT query \
+         FROM system.query_log \
+         WHERE query_id = '{}' LIMIT 1",
+        query_id
+    );
 
-    assert_eq!(response.trim(), "1");
+    let logged_sql: String = client
+        .query_raw(&log_sql)
+        .fetch_one()
+        .await
+        .expect("log entry not found");
+
+    // assertion
+    assert_eq!(
+        logged_sql.trim(),
+        sql.trim(),
+        "Logged SQL differs from the statement sent"
+    );
 }
