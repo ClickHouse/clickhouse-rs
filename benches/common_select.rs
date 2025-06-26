@@ -35,7 +35,7 @@ macro_rules! impl_benchmark_row_no_access_type {
     ($type:ty, $id_field:ident) => {
         impl WithId for $type {
             fn id(&self) -> u64 {
-                self.$id_field
+                self.$id_field as u64
             }
         }
 
