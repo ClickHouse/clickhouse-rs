@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert(table_name)?;
+    let mut insert = client.insert(table_name).await?;
     insert
         .write(&Event {
             timestamp: now(),

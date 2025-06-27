@@ -9,7 +9,8 @@ async fn test_provide() {
     let client = Client::default().with_mock(&mock);
     let expected = vec![SimpleRow::new(1, "one"), SimpleRow::new(2, "two")];
 
-    mock.add(test::handlers::provide(&expected));
+    // FIXME: &expected is not allowed due to new trait bounds
+    mock.add(test::handlers::provide(expected.clone()));
 
     let actual = crate::fetch_rows::<SimpleRow>(&client, "doesn't matter").await;
     assert_eq!(actual, expected);

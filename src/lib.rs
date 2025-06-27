@@ -7,6 +7,7 @@ extern crate static_assertions;
 
 pub use self::{compression::Compression, row::Row, row::RowKind};
 use self::{error::Result, http_client::HttpClient};
+use crate::row_metadata::{get_row_metadata, RowMetadataCache};
 pub use clickhouse_derive::Row;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
@@ -46,6 +47,7 @@ pub struct Client {
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
     validation: bool,
+    row_metadata_cache: Arc<RowMetadataCache>,
 
     #[cfg(feature = "test-util")]
     mocked: bool,
@@ -104,6 +106,7 @@ impl Client {
             headers: HashMap::new(),
             products_info: Vec::default(),
             validation: true,
+            row_metadata_cache: Arc::new(RowMetadataCache::default()),
             #[cfg(feature = "test-util")]
             mocked: false,
         }
@@ -302,15 +305,33 @@ impl Client {
 
     /// Starts a new INSERT statement.
     ///
+    /// # Validation
+    ///
+    /// If validation is enabled (default), `RowBinaryWithNamesAndTypes` input format is used.
+    /// When [`Client::insert`] method is called for this `table` for the first time,
+    /// it will fetch the table schema from the server, allowing to validate the serialized rows,
+    /// as well as write the names and types of the columns in the request header.
+    ///
+    /// Fetching the schema will happen only once per `table`,
+    /// as the schema is cached by the client internally.
+    ///
+    /// With disabled validation, the schema is not fetched,
+    /// and the rows serialized with `RowBinary` input format.
+    ///
     /// # Panics
+    ///
     /// If `T` has unnamed fields, e.g. tuples.
-    pub fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
-        insert::Insert::new(self, table)
+    pub async fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
+        if self.get_validation() {
+            let metadata = get_row_metadata::<T>(self, table).await?;
+            return Ok(insert::Insert::new(self, table, Some(metadata)));
+        }
+        Ok(insert::Insert::new(self, table, None))
     }
 
-    /// Creates an inserter to perform multiple INSERTs.
+    /// Creates an inserter to perform multiple INSERT statements.
     #[cfg(feature = "inserter")]
-    pub fn inserter<T: Row>(&self, table: &str) -> Result<inserter::Inserter<T>> {
+    pub fn inserter<T: Row>(&self, table: &str) -> inserter::Inserter<T> {
         inserter::Inserter::new(self, table)
     }
 

@@ -42,7 +42,7 @@ async fn main() -> clickhouse::error::Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert(table_name)?;
+    let mut insert = client.insert(table_name).await?;
     insert
         .write(&Data {
             id: 42,
