@@ -81,25 +81,27 @@ macro_rules! prepare_database {
 
 macro_rules! check_cloud_test_env {
     () => {
-        match std::env::var("CLICKHOUSE_TEST_ENVIRONMENT") {
-            Ok(test_env) if test_env == "cloud" => (),
-            _ => {
-                eprintln!("Skipping test as it is Cloud only");
-                return;
-            }
+        if !crate::is_cloud_test_env() {
+            eprintln!("Skipping test as it is not Cloud only");
+            return;
         }
     };
 }
 
 pub(crate) fn get_client() -> Client {
     let client = Client::default();
-    match std::env::var("CLICKHOUSE_TEST_ENVIRONMENT") {
-        Ok(test_env) if test_env == "cloud" => client
+    if is_cloud_test_env() {
+        client
             .with_url(get_cloud_url())
             .with_user("default")
-            .with_password(require_env_var("CLICKHOUSE_CLOUD_PASSWORD")),
-        _ => client.with_url("http://localhost:8123"),
+            .with_password(require_env_var("CLICKHOUSE_CLOUD_PASSWORD"))
+    } else {
+        client.with_url("http://localhost:8123")
     }
+}
+
+pub(crate) fn is_cloud_test_env() -> bool {
+    matches!(std::env::var("CLICKHOUSE_TEST_ENVIRONMENT"), Ok(test_env) if test_env == "cloud")
 }
 
 pub(crate) fn require_env_var(name: &str) -> String {
@@ -163,6 +165,48 @@ pub(crate) async fn execute_statements(client: &Client, statements: &[&str]) {
     }
 }
 
+pub(crate) async fn insert_and_select<T>(
+    client: &Client,
+    table_name: &str,
+    data: impl IntoIterator<Item = T>,
+) -> Vec<T>
+where
+    T: Row + Serialize + for<'de> Deserialize<'de>,
+{
+    let mut insert = client.insert(table_name).await.unwrap();
+    for row in data.into_iter() {
+        insert.write(&row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    client
+        .query("SELECT ?fields FROM ? ORDER BY () ASC")
+        .bind(Identifier(table_name))
+        .fetch_all::<T>()
+        .await
+        .unwrap()
+}
+
+pub(crate) mod geo_types {
+    // See https://clickhouse.com/docs/en/sql-reference/data-types/geo
+    pub(crate) type Point = (f64, f64);
+    pub(crate) type Ring = Vec<Point>;
+    pub(crate) type Polygon = Vec<Ring>;
+    pub(crate) type MultiPolygon = Vec<Polygon>;
+    pub(crate) type LineString = Vec<Point>;
+    pub(crate) type MultiLineString = Vec<LineString>;
+}
+
+pub(crate) mod decimals {
+    use fixnum::typenum::{U12, U4, U8};
+    use fixnum::FixedPoint;
+
+    // See ClickHouse decimal sizes: https://clickhouse.com/docs/en/sql-reference/data-types/decimal
+    pub(crate) type Decimal32 = FixedPoint<i32, U4>; // Decimal(9, 4) = Decimal32(4)
+    pub(crate) type Decimal64 = FixedPoint<i64, U8>; // Decimal(18, 8) = Decimal64(8)
+    pub(crate) type Decimal128 = FixedPoint<i128, U12>; // Decimal(38, 12) = Decimal128(12)
+}
+
 mod chrono;
 mod cloud_jwt;
 mod compression;
@@ -177,7 +221,9 @@ mod ip;
 mod mock;
 mod nested;
 mod query;
-mod rbwnat;
+mod rbwnat_header;
+mod rbwnat_smoke;
+mod rbwnat_validation;
 mod time;
 mod user_agent;
 mod uuid;
@@ -211,17 +257,22 @@ mod _priv {
         client.with_database(db_name)
     }
 
-    // `it::compression::lz4::{{closure}}::f` ->
-    // `chrs__compression__lz4__{unix_millis}`
+    /// `it::compression::lz4::{{closure}}::f` is transformed to:
+    /// * For tests that use local CH instance: `chrs__compression__lz4`
+    /// * For Cloud tests (e.g., JWT):          `chrs__compression__lz4__{unix_millis}`
     fn make_db_name(fn_path: &str) -> String {
         assert!(fn_path.starts_with("it::"));
         let mut iter = fn_path.split("::").skip(1);
         let module = iter.next().unwrap();
         let test = iter.next().unwrap();
-        let now_unix_millis = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        format!("chrs__{module}__{test}__{now_unix_millis}")
+        if is_cloud_test_env() {
+            let now_unix_millis = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            format!("chrs__{module}__{test}__{now_unix_millis}")
+        } else {
+            format!("chrs__{module}__{test}")
+        }
     }
 }

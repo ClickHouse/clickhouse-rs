@@ -24,7 +24,7 @@ pub(crate) fn serialize_row_binary<B: BufMut, R: Row + Serialize>(
 
 /// Serializes `row` using the `RowBinary` format and writes to `buffer`.
 /// Additionally, it will perform validation against the provided `row_metadata`,
-/// similarly to how [`crate::rowbinary::deserialize_with_validation`] works.
+/// similarly to how [`crate::rowbinary::de::deserialize_row_with_validation`] works.
 /// `RowBinaryWithNamesAndTypes` header is expected to be written by [`crate::insert::Insert`].
 pub(crate) fn serialize_with_validation<B: BufMut, R: Row + Serialize>(
     buffer: B,
@@ -247,6 +247,7 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
     #[inline]
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap> {
         let len = len.ok_or(SequenceMustHaveLength)?;
+        put_leb128(&mut self.buffer, len as u64);
         Ok(RowBinarySerializer::new(
             &mut self.buffer,
             self.validator.validate(SerdeType::Map(len)),
@@ -288,6 +289,7 @@ impl<B: BufMut, R: Row, V: SchemaValidator<R>> SerializeStruct
 
     #[inline]
     fn serialize_field<T: Serialize + ?Sized>(&mut self, _: &'static str, value: &T) -> Result<()> {
+        // TODO: validation, field order
         value.serialize(&mut **self)
     }
 
