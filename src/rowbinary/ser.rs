@@ -1,30 +1,38 @@
+use crate::error::Error::SequenceMustHaveLength;
+use crate::error::{Error, Result};
+use crate::row_metadata::RowMetadata;
+use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
+use crate::Row;
 use bytes::BufMut;
 use clickhouse_types::put_leb128;
+use serde::ser::SerializeMap;
 use serde::{
     ser::{Impossible, SerializeSeq, SerializeStruct, SerializeTuple, Serializer},
     Serialize,
 };
+use std::marker::PhantomData;
 
-use crate::error::{Error, Result};
-use crate::row_metadata::RowMetadata;
-
-/// Serializes `value` using the `RowBinary` format and writes to `buffer`.
-pub(crate) fn serialize_row_binary(buffer: impl BufMut, value: &impl Serialize) -> Result<()> {
-    let mut serializer = RowBinarySerializer { buffer };
-    value.serialize(&mut serializer)?;
+/// Serializes `row` using the `RowBinary` format and writes to `buffer`.
+pub(crate) fn serialize_row_binary<B: BufMut, R: Row + Serialize>(
+    buffer: B,
+    row: &R,
+) -> Result<()> {
+    let mut serializer = RowBinarySerializer::<B, R>::new(buffer, ());
+    row.serialize(&mut serializer)?;
     Ok(())
 }
 
-/// Serializes `value` using the `RowBinary` format and writes to `buffer`.
+/// Serializes `row` using the `RowBinary` format and writes to `buffer`.
 /// Additionally, it will perform validation against the provided `row_metadata`,
 /// similarly to how [`crate::rowbinary::deserialize_with_validation`] works.
 /// `RowBinaryWithNamesAndTypes` header is expected to be written by [`crate::insert::Insert`].
-pub(crate) fn serialize_with_validation(
-    buffer: impl BufMut,
-    value: &impl Serialize,
-    _row_metadata: &'_ RowMetadata,
+pub(crate) fn serialize_with_validation<B: BufMut, R: Row + Serialize>(
+    buffer: B,
+    value: &R,
+    metadata: &RowMetadata,
 ) -> Result<()> {
-    let mut serializer = RowBinarySerializer { buffer };
+    let validator = DataTypeValidator::<R>::new(metadata);
+    let mut serializer = RowBinarySerializer::new(buffer, validator);
     value.serialize(&mut serializer)?;
     Ok(())
 }
@@ -32,46 +40,81 @@ pub(crate) fn serialize_with_validation(
 /// A serializer for the RowBinary format.
 ///
 /// See https://clickhouse.com/docs/en/interfaces/formats#rowbinary for details.
-struct RowBinarySerializer<B> {
+struct RowBinarySerializer<B: BufMut, R: Row, V: SchemaValidator<R> = ()> {
     buffer: B,
+    validator: V,
+    _marker: PhantomData<R>,
+}
+
+type RowBinaryInnerTypeSerializer<'ser, B, R, V> = RowBinarySerializer<&'ser mut B, R, V>;
+
+impl<B: BufMut, R: Row, V: SchemaValidator<R>> RowBinarySerializer<B, R, V> {
+    fn new(buffer: B, validator: V) -> Self {
+        Self {
+            buffer,
+            validator,
+            _marker: PhantomData,
+        }
+    }
 }
 
 macro_rules! impl_num {
-    ($ty:ty, $ser_method:ident, $writer_method:ident) => {
+    ($ty:ty, $ser_method:ident, $writer_method:ident, $serde_type:expr) => {
         #[inline]
         fn $ser_method(self, v: $ty) -> Result<()> {
+            self.validator.validate($serde_type);
             self.buffer.$writer_method(v);
             Ok(())
         }
     };
 }
 
-impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
+macro_rules! impl_num_or_enum {
+    ($ty:ty, $ser_method:ident, $writer_method:ident, $serde_type:expr) => {
+        #[inline]
+        fn $ser_method(self, v: $ty) -> Result<()> {
+            self.validator
+                .validate($serde_type)
+                .validate_identifier::<$ty>(v);
+            self.buffer.$writer_method(v);
+            Ok(())
+        }
+    };
+}
+
+impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
+    for &'ser mut RowBinarySerializer<B, R, V>
+{
     type Error = Error;
     type Ok = ();
-    type SerializeMap = Impossible<(), Error>;
-    type SerializeSeq = Self;
+
     type SerializeStruct = Self;
+
+    type SerializeSeq = RowBinaryInnerTypeSerializer<'ser, B, R, V::Inner<'ser>>;
+    type SerializeTuple = Self::SerializeSeq;
+    type SerializeMap = Self::SerializeSeq;
+
     type SerializeStructVariant = Impossible<(), Error>;
-    type SerializeTuple = Self;
     type SerializeTupleStruct = Impossible<(), Error>;
     type SerializeTupleVariant = Impossible<(), Error>;
 
-    impl_num!(i8, serialize_i8, put_i8);
-    impl_num!(i16, serialize_i16, put_i16_le);
-    impl_num!(i32, serialize_i32, put_i32_le);
-    impl_num!(i64, serialize_i64, put_i64_le);
-    impl_num!(i128, serialize_i128, put_i128_le);
-    impl_num!(u8, serialize_u8, put_u8);
-    impl_num!(u16, serialize_u16, put_u16_le);
-    impl_num!(u32, serialize_u32, put_u32_le);
-    impl_num!(u64, serialize_u64, put_u64_le);
-    impl_num!(u128, serialize_u128, put_u128_le);
-    impl_num!(f32, serialize_f32, put_f32_le);
-    impl_num!(f64, serialize_f64, put_f64_le);
+    impl_num_or_enum!(i8, serialize_i8, put_i8, SerdeType::I8);
+    impl_num_or_enum!(i16, serialize_i16, put_i16_le, SerdeType::I16);
+
+    impl_num!(i32, serialize_i32, put_i32_le, SerdeType::I32);
+    impl_num!(i64, serialize_i64, put_i64_le, SerdeType::I64);
+    impl_num!(i128, serialize_i128, put_i128_le, SerdeType::I128);
+    impl_num!(u8, serialize_u8, put_u8, SerdeType::U8);
+    impl_num!(u16, serialize_u16, put_u16_le, SerdeType::U16);
+    impl_num!(u32, serialize_u32, put_u32_le, SerdeType::U32);
+    impl_num!(u64, serialize_u64, put_u64_le, SerdeType::U64);
+    impl_num!(u128, serialize_u128, put_u128_le, SerdeType::U128);
+    impl_num!(f32, serialize_f32, put_f32_le, SerdeType::F32);
+    impl_num!(f64, serialize_f64, put_f64_le, SerdeType::F64);
 
     #[inline]
     fn serialize_bool(self, v: bool) -> Result<()> {
+        self.validator.validate(SerdeType::Bool);
         self.buffer.put_u8(v as _);
         Ok(())
     }
@@ -83,6 +126,7 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
 
     #[inline]
     fn serialize_str(self, v: &str) -> Result<()> {
+        self.validator.validate(SerdeType::Str);
         put_leb128(&mut self.buffer, v.len() as u64);
         self.buffer.put_slice(v.as_bytes());
         Ok(())
@@ -90,21 +134,26 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
 
     #[inline]
     fn serialize_bytes(self, v: &[u8]) -> Result<()> {
-        put_leb128(&mut self.buffer, v.len() as u64);
+        let size = v.len();
+        self.validator.validate(SerdeType::Bytes(size));
+        put_leb128(&mut self.buffer, size as u64);
         self.buffer.put_slice(v);
         Ok(())
     }
 
     #[inline]
     fn serialize_none(self) -> Result<()> {
+        self.validator.validate(SerdeType::Option);
         self.buffer.put_u8(1);
         Ok(())
     }
 
     #[inline]
     fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<()> {
-        self.buffer.put_u8(0);
-        value.serialize(self)
+        let mut inner =
+            RowBinarySerializer::new(&mut self.buffer, self.validator.validate(SerdeType::Option));
+        inner.buffer.put_u8(0);
+        value.serialize(&mut inner)
     }
 
     #[inline]
@@ -139,36 +188,40 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
     #[inline]
     fn serialize_newtype_variant<T: Serialize + ?Sized>(
         self,
-        _name: &'static str,
+        name: &'static str,
         variant_index: u32,
-        _variant: &'static str,
+        variant: &'static str,
         value: &T,
     ) -> Result<()> {
-        // TODO:
-        //  - Now this code implicitly allows using enums at the top level.
-        //    However, instead of a more descriptive panic, it ends with a "not enough data." error.
-        //  - Also, it produces an unclear message for a forgotten `serde_repr` (Enum8 and Enum16).
-        //  See https://github.com/ClickHouse/clickhouse-rs/pull/170#discussion_r1848549636
-
         // Max number of types in the Variant data type is 255
         // See also: https://github.com/ClickHouse/ClickHouse/issues/54864
         if variant_index > 255 {
-            panic!("max number of types in the Variant data type is 255, got {variant_index}")
+            panic!(
+                "max number of types in the Variant data type is 255, \
+                 got {variant_index} for {name}::{variant}"
+            );
         }
-        self.buffer.put_u8(variant_index as u8);
-        value.serialize(self)
+        let idx = variant_index as u8; // safe cast due to the check above
+        let mut inner = self.validator.validate(SerdeType::Variant);
+        inner.validate_identifier(idx);
+        self.buffer.put_u8(idx);
+        value.serialize(&mut RowBinarySerializer::new(&mut self.buffer, inner))
     }
 
     #[inline]
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
-        let len = len.ok_or(Error::SequenceMustHaveLength)?;
+        let len = len.ok_or(SequenceMustHaveLength)?;
+        let inner = self.validator.validate(SerdeType::Seq(len));
         put_leb128(&mut self.buffer, len as u64);
-        Ok(self)
+        Ok(RowBinarySerializer::new(&mut self.buffer, inner))
     }
 
     #[inline]
-    fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple> {
-        Ok(self)
+    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
+        Ok(RowBinarySerializer::new(
+            &mut self.buffer,
+            self.validator.validate(SerdeType::Tuple(len)),
+        ))
     }
 
     #[inline]
@@ -192,8 +245,12 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
     }
 
     #[inline]
-    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
-        panic!("maps are unsupported, use `Vec<(A, B)>` instead");
+    fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap> {
+        let len = len.ok_or(SequenceMustHaveLength)?;
+        Ok(RowBinarySerializer::new(
+            &mut self.buffer,
+            self.validator.validate(SerdeType::Map(len)),
+        ))
     }
 
     #[inline]
@@ -218,7 +275,14 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
     }
 }
 
-impl<B: BufMut> SerializeStruct for &mut RowBinarySerializer<B> {
+/// Unlike [`SerializeSeq`], [`SerializeTuple`] and [`SerializeMap`],
+/// this is supposed to be the main entry point of serialization.
+/// The impl here uses the _reference_ to the serializer with B: BufMut,
+/// while the others are implemented over the concrete type,
+/// but with [`&mut B: BufMut`] inside.
+impl<B: BufMut, R: Row, V: SchemaValidator<R>> SerializeStruct
+    for &'_ mut RowBinarySerializer<B, R, V>
+{
     type Error = Error;
     type Ok = ();
 
@@ -233,20 +297,29 @@ impl<B: BufMut> SerializeStruct for &mut RowBinarySerializer<B> {
     }
 }
 
-impl<B: BufMut> SerializeSeq for &'_ mut RowBinarySerializer<B> {
+impl<B: BufMut, R: Row, V: SchemaValidator<R>> SerializeSeq
+    for RowBinaryInnerTypeSerializer<'_, B, R, V>
+{
     type Error = Error;
     type Ok = ();
 
-    fn serialize_element<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<()> {
-        value.serialize(&mut **self)
+    #[inline]
+    fn serialize_element<T>(&mut self, value: &T) -> std::result::Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        value.serialize(self)
     }
 
+    #[inline]
     fn end(self) -> Result<()> {
         Ok(())
     }
 }
 
-impl<B: BufMut> SerializeTuple for &'_ mut RowBinarySerializer<B> {
+impl<B: BufMut, R: Row, V: SchemaValidator<R>> SerializeTuple
+    for RowBinaryInnerTypeSerializer<'_, B, R, V>
+{
     type Error = Error;
     type Ok = ();
 
@@ -255,7 +328,36 @@ impl<B: BufMut> SerializeTuple for &'_ mut RowBinarySerializer<B> {
     where
         T: ?Sized + Serialize,
     {
-        value.serialize(&mut **self)
+        value.serialize(self)
+    }
+
+    #[inline]
+    fn end(self) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// TODO: usage of [`SerializeMap::serialize_entry`] implies some borrow checker issues.
+impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> SerializeMap
+    for RowBinaryInnerTypeSerializer<'ser, B, R, V>
+{
+    type Error = Error;
+    type Ok = ();
+
+    #[inline]
+    fn serialize_key<T>(&mut self, key: &T) -> Result<()>
+    where
+        T: ?Sized + Serialize,
+    {
+        key.serialize(self)
+    }
+
+    #[inline]
+    fn serialize_value<T>(&mut self, value: &T) -> Result<()>
+    where
+        T: ?Sized + Serialize,
+    {
+        value.serialize(self)
     }
 
     #[inline]

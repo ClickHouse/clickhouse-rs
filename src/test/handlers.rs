@@ -42,7 +42,7 @@ pub fn failure(status: StatusCode) -> impl Handler {
 #[track_caller]
 pub fn provide<T>(rows: impl IntoIterator<Item = T>) -> impl Handler
 where
-    T: Serialize,
+    T: Serialize + Row,
 {
     let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
     for row in rows {

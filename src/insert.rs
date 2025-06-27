@@ -218,7 +218,7 @@ impl<T> Insert<T> {
     /// If called after the previous call that returned an error.
     pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
     where
-        T: Serialize,
+        T: Serialize + Row,
     {
         let result = self.do_write(row);
 
@@ -234,7 +234,7 @@ impl<T> Insert<T> {
     #[inline(always)]
     pub(crate) fn do_write(&mut self, row: &T) -> Result<usize>
     where
-        T: Serialize,
+        T: Serialize + Row,
     {
         match self.state {
             InsertState::NotStarted { .. } => self.init_request(),

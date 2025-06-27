@@ -111,7 +111,7 @@ pub(crate) fn get_cloud_url() -> String {
     format!("https://{hostname}:8443")
 }
 
-#[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
 struct SimpleRow {
     id: u64,
     data: String,

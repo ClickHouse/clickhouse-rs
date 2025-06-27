@@ -223,7 +223,7 @@ where
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        let deserializer = &mut self.inner(SerdeType::Enum);
+        let deserializer = &mut self.inner(SerdeType::Variant);
         visitor.visit_enum(RowBinaryEnumAccess { deserializer })
     }
 

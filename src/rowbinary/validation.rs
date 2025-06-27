@@ -9,10 +9,10 @@ use std::marker::PhantomData;
 /// Note that [`SchemaValidator`] is also implemented for `()`,
 /// which is used to skip validation if the user disabled it.
 pub(crate) trait SchemaValidator<R: Row>: Sized {
-    type Inner<'de>: SchemaValidator<R>
+    type Inner<'serde>: SchemaValidator<R>
     where
-        Self: 'de;
-    /// The main entry point. The validation flow based on the [`crate::Row::KIND`].
+        Self: 'serde;
+    /// The main entry point. The validation flow based on the [`Row::KIND`].
     /// For container types (nullable, array, map, tuple, variant, etc.),
     /// it will return an [`InnerDataTypeValidator`] instance (see [`InnerDataTypeValidatorKind`]),
     /// which has its own implementation of this method, allowing recursive validation.
@@ -31,14 +31,14 @@ pub(crate) trait SchemaValidator<R: Row>: Sized {
     fn get_schema_index(&self, struct_idx: usize) -> usize;
 }
 
-pub(crate) struct DataTypeValidator<'cursor, R: Row> {
-    metadata: &'cursor RowMetadata,
+pub(crate) struct DataTypeValidator<'caller, R: Row> {
+    metadata: &'caller RowMetadata,
     current_column_idx: usize,
     _marker: PhantomData<R>,
 }
 
-impl<'cursor, R: Row> DataTypeValidator<'cursor, R> {
-    pub(crate) fn new(metadata: &'cursor RowMetadata) -> Self {
+impl<'caller, R: Row> DataTypeValidator<'caller, R> {
+    pub(crate) fn new(metadata: &'caller RowMetadata) -> Self {
         Self {
             metadata,
             current_column_idx: 0,
@@ -63,12 +63,12 @@ impl<'cursor, R: Row> DataTypeValidator<'cursor, R> {
             .unwrap_or(("Struct".to_string(), &DataTypeNode::Bool))
     }
 
-    fn panic_on_schema_mismatch<'de>(
-        &'de self,
+    fn panic_on_schema_mismatch<'serde>(
+        &'serde self,
         data_type: &DataTypeNode,
         serde_type: &SerdeType,
         is_inner: bool,
-    ) -> Option<InnerDataTypeValidator<'de, 'cursor, R>> {
+    ) -> Option<InnerDataTypeValidator<'serde, 'caller, R>> {
         match R::KIND {
             RowKind::Primitive => {
                 panic!(
@@ -113,11 +113,11 @@ impl<'cursor, R: Row> DataTypeValidator<'cursor, R> {
     }
 }
 
-impl<'cursor, R: Row> SchemaValidator<R> for DataTypeValidator<'cursor, R> {
-    type Inner<'de>
-        = Option<InnerDataTypeValidator<'de, 'cursor, R>>
+impl<'caller, R: Row> SchemaValidator<R> for DataTypeValidator<'caller, R> {
+    type Inner<'serde>
+        = Option<InnerDataTypeValidator<'serde, 'caller, R>>
     where
-        Self: 'de;
+        Self: 'serde;
 
     #[inline]
     fn validate(&'_ mut self, serde_type: SerdeType) -> Self::Inner<'_> {
@@ -218,25 +218,25 @@ pub(crate) enum MapAsSequenceValidatorState {
     Value,
 }
 
-pub(crate) struct InnerDataTypeValidator<'de, 'cursor, R: Row> {
-    root: &'de DataTypeValidator<'cursor, R>,
-    kind: InnerDataTypeValidatorKind<'cursor>,
+pub(crate) struct InnerDataTypeValidator<'serde, 'caller, R: Row> {
+    root: &'serde DataTypeValidator<'caller, R>,
+    kind: InnerDataTypeValidatorKind<'caller>,
 }
 
 #[derive(Debug)]
-pub(crate) enum InnerDataTypeValidatorKind<'cursor> {
-    Array(&'cursor DataTypeNode),
+pub(crate) enum InnerDataTypeValidatorKind<'caller> {
+    Array(&'caller DataTypeNode),
     FixedString(usize),
-    Map(&'cursor [Box<DataTypeNode>; 2], MapValidatorState),
+    Map(&'caller [Box<DataTypeNode>; 2], MapValidatorState),
     /// Allows supporting ClickHouse `Map<K, V>` defined as `Vec<(K, V)>` in Rust
-    MapAsSequence(&'cursor [Box<DataTypeNode>; 2], MapAsSequenceValidatorState),
-    Tuple(&'cursor [DataTypeNode]),
+    MapAsSequence(&'caller [Box<DataTypeNode>; 2], MapAsSequenceValidatorState),
+    Tuple(&'caller [DataTypeNode]),
     /// This is a hack to support deserializing tuples/arrays (and not structs) from fetch calls
-    RootTuple(&'cursor [Column], usize),
-    RootArray(&'cursor DataTypeNode),
-    Enum(&'cursor HashMap<i16, String>),
-    Variant(&'cursor [DataTypeNode], VariantValidationState),
-    Nullable(&'cursor DataTypeNode),
+    RootTuple(&'caller [Column], usize),
+    RootArray(&'caller DataTypeNode),
+    Enum(&'caller HashMap<i16, String>),
+    Variant(&'caller [DataTypeNode], VariantValidationState),
+    Nullable(&'caller DataTypeNode),
 }
 
 #[derive(Debug)]
@@ -245,11 +245,11 @@ pub(crate) enum VariantValidationState {
     Identifier(u8),
 }
 
-impl<'cursor, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, 'cursor, R>> {
-    type Inner<'de>
+impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, 'caller, R>> {
+    type Inner<'serde>
         = Self
     where
-        Self: 'de;
+        Self: 'serde;
 
     #[inline]
     fn validate(&mut self, serde_type: SerdeType) -> Self {
@@ -428,12 +428,12 @@ impl<R: Row> Drop for InnerDataTypeValidator<'_, '_, R> {
 //  static/const dispatch?
 //  separate smaller inline functions?
 #[inline]
-fn validate_impl<'de, 'cursor, R: Row>(
-    root: &'de DataTypeValidator<'cursor, R>,
-    column_data_type: &'cursor DataTypeNode,
+fn validate_impl<'serde, 'caller, R: Row>(
+    root: &'serde DataTypeValidator<'caller, R>,
+    column_data_type: &'caller DataTypeNode,
     serde_type: &SerdeType,
     is_inner: bool,
-) -> Option<InnerDataTypeValidator<'de, 'cursor, R>> {
+) -> Option<InnerDataTypeValidator<'serde, 'caller, R>> {
     let data_type = column_data_type.remove_low_cardinality();
     match serde_type {
         SerdeType::Bool
@@ -606,7 +606,7 @@ fn validate_impl<'de, 'cursor, R: Row>(
                 )
             }
         }
-        SerdeType::Enum => {
+        SerdeType::Variant => {
             if let DataTypeNode::Variant(possible_types) = data_type {
                 Some(InnerDataTypeValidator {
                     root,
@@ -632,7 +632,7 @@ fn validate_impl<'de, 'cursor, R: Row>(
 }
 
 impl<R: Row> SchemaValidator<R> for () {
-    type Inner<'de> = ();
+    type Inner<'serde> = ();
 
     #[inline(always)]
     fn validate(&mut self, _serde_type: SerdeType) {}
@@ -673,7 +673,7 @@ pub(crate) enum SerdeType {
     Str,
     String,
     Option,
-    Enum,
+    Variant,
     Bytes(usize),
     ByteBuf(usize),
     Tuple(usize),
@@ -710,7 +710,7 @@ impl Display for SerdeType {
             SerdeType::Bytes(len) => write!(f, "&[u8; {len}]"),
             SerdeType::ByteBuf(_len) => write!(f, "Vec<u8>"),
             SerdeType::Option => write!(f, "Option<T>"),
-            SerdeType::Enum => write!(f, "enum"),
+            SerdeType::Variant => write!(f, "enum"),
             SerdeType::Seq(_len) => write!(f, "Vec<T>"),
             SerdeType::Tuple(len) => write!(f, "a tuple or sequence with length {len}"),
             SerdeType::Map(_len) => write!(f, "Map<K, V>"),
