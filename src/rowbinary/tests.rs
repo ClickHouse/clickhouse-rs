@@ -62,7 +62,7 @@ impl Row for Sample<'_> {
         "boolean",
     ];
     const COLUMN_COUNT: usize = 19;
-    const KIND: crate::RowKind = crate::RowKind::Struct;
+    const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
 
     type Value<'a> = Sample<'a>;
 }

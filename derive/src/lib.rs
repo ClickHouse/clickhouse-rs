@@ -96,7 +96,7 @@ fn row_impl(input: DeriveInput) -> Result<TokenStream> {
             const NAME: &'static str = stringify!(#name);
             const COLUMN_NAMES: &'static [&'static str] = #column_names;
             const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
-            const KIND: clickhouse::RowKind = clickhouse::RowKind::Struct;
+            const KIND: clickhouse::_priv::RowKind = clickhouse::_priv::RowKind::Struct;
 
             type Value<'__v> = #value;
         }
