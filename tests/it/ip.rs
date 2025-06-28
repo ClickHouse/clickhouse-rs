@@ -40,7 +40,7 @@ async fn smoke() {
         ipv6_opt: Some(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0xafc8, 0x10, 0x1)),
     };
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").unwrap();
     insert.write(&original_row).await.unwrap();
     insert.end().await.unwrap();
 

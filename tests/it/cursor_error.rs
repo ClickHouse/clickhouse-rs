@@ -67,7 +67,7 @@ async fn deferred_lz4() {
 
     // Due to compression we need more complex test here: write a lot of big parts.
     for i in 0..part_count {
-        let mut insert = client.insert("test").unwrap();
+        let mut insert = client.insert::<Row>("test").unwrap();
 
         for j in 0..part_size {
             let row = Row {
