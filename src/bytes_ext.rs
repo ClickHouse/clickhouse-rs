@@ -58,10 +58,10 @@ impl BytesExt {
     #[inline(always)]
     pub(crate) unsafe fn extend_by_ref(&self, chunk: Bytes) {
         let new_bytes = merge_bytes(self.slice(), chunk);
-        self.cursor.set(0);
 
         // No active references to `bytes` are held at this point (ensured by the caller).
         *self.bytes.get() = new_bytes;
+        self.cursor.set(0);
     }
 
     fn bytes(&self) -> &Bytes {
@@ -92,25 +92,83 @@ fn merge_bytes_slow(lhs: &[u8], rhs: Bytes) -> Bytes {
     new_bytes.freeze()
 }
 
-#[test]
-fn it_works() {
-    let mut bytes = BytesExt::default();
-    assert!(bytes.slice().is_empty());
-    assert_eq!(bytes.remaining(), 0);
+#[cfg(test)]
+mod tests_miri {
+    use super::*;
 
-    bytes.extend(Bytes::from_static(b"hello"));
-    assert_eq!(bytes.slice(), b"hello");
-    assert_eq!(bytes.remaining(), 5);
+    #[test]
+    fn smoke() {
+        let mut bytes = BytesExt::default();
+        assert!(bytes.slice().is_empty());
+        assert_eq!(bytes.remaining(), 0);
 
-    bytes.advance(3);
-    assert_eq!(bytes.slice(), b"lo");
-    assert_eq!(bytes.remaining(), 2);
+        // zero cursor, fast path
+        bytes.extend(Bytes::from_static(b"hello"));
+        assert_eq!(bytes.slice(), b"hello");
+        assert_eq!(bytes.remaining(), 5);
 
-    bytes.extend(Bytes::from_static(b"l"));
-    assert_eq!(bytes.slice(), b"lol");
-    assert_eq!(bytes.remaining(), 3);
+        bytes.advance(3);
+        assert_eq!(bytes.slice(), b"lo");
+        assert_eq!(bytes.remaining(), 2);
 
-    bytes.set_remaining(1);
-    assert_eq!(bytes.slice(), b"l");
-    assert_eq!(bytes.remaining(), 1);
+        // non-zero cursor, slow path
+        bytes.extend(Bytes::from_static(b"l"));
+        assert_eq!(bytes.slice(), b"lol");
+        assert_eq!(bytes.remaining(), 3);
+
+        bytes.set_remaining(1);
+        assert_eq!(bytes.slice(), b"l");
+        assert_eq!(bytes.remaining(), 1);
+
+        bytes.advance(1);
+        assert_eq!(bytes.remaining(), 0);
+        assert_ne!(bytes.cursor.get(), 0);
+
+        // non-zero cursor, but fast path
+        bytes.extend(Bytes::from_static(b"l"));
+        assert_eq!(bytes.slice(), b"l");
+        assert_eq!(bytes.remaining(), 1);
+    }
+
+    // Unfortunately, we cannot run miri against async code in order to check
+    // the unsafe code in `RowCursor::next()`. However, we can at least
+    // check that the valid usage of `extend_by_ref()` is free of UB.
+    #[test]
+    fn extend_by_ref() {
+        fn next(buffer: &mut BytesExt) -> &[u8] {
+            loop {
+                if let Some(slice) = decode(buffer.slice()) {
+                    buffer.set_remaining(buffer.remaining() - 3);
+                    return slice;
+                }
+
+                let more = read_more();
+
+                // Compilation error:
+                /*
+                buffer.extend(more);
+                */
+
+                // SAFETY: we're checking it right now in miri =)
+                unsafe { buffer.extend_by_ref(more) };
+            }
+        }
+
+        fn decode(buffer: &[u8]) -> Option<&[u8]> {
+            if buffer.len() > 3 {
+                Some(&buffer[..3])
+            } else {
+                None
+            }
+        }
+
+        fn read_more() -> Bytes {
+            Bytes::from_static(b"aaaa")
+        }
+
+        let mut buffer = BytesExt::default();
+        for _ in 0..10 {
+            assert_eq!(next(&mut buffer), b"aaa");
+        }
+    }
 }

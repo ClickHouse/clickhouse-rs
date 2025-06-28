@@ -113,3 +113,14 @@ jobs:
         run: |
           cargo test cloud_ --features rustls-tls -- --nocapture
           cargo test https_errors -- --nocapture
+
+  miri:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly --component miri
+      - run: rustup override set nightly
+      - run: rustup show active-toolchain -v
+      - run: cargo miri setup
+      - run: cargo miri test --all-features -- _miri
