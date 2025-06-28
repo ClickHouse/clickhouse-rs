@@ -4,11 +4,10 @@ use crate::{
     cursors::RawCursor,
     error::{Error, Result},
     response::Response,
-    rowbinary, Row,
+    rowbinary, ReadRow,
 };
 use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
-use serde::Deserialize;
 use std::marker::PhantomData;
 
 /// A cursor that emits rows deserialized as structures from RowBinary.
@@ -38,7 +37,7 @@ impl<T> RowCursor<T> {
     #[inline(never)]
     async fn read_columns(&mut self) -> Result<()>
     where
-        T: Row,
+        T: ReadRow,
     {
         loop {
             if self.bytes.remaining() > 0 {
@@ -84,10 +83,9 @@ impl<T> RowCursor<T> {
     /// # Cancel safety
     ///
     /// This method is cancellation safe.
-    pub async fn next<'cursor>(&'cursor mut self) -> Result<Option<T::Value<'cursor>>>
+    pub async fn next(&mut self) -> Result<Option<T::Value<'_>>>
     where
-        T: Row,
-        T::Value<'cursor>: Deserialize<'cursor>,
+        T: ReadRow,
     {
         if self.validation && self.row_metadata.is_none() {
             self.read_columns().await?;

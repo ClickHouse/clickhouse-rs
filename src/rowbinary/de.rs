@@ -1,8 +1,7 @@
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
-use crate::rowbinary::validation::SerdeType;
-use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator};
+use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
 use crate::Row;
 use bytes::Buf;
 use core::mem::size_of;
