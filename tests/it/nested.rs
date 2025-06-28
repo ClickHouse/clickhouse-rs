@@ -38,7 +38,7 @@ async fn smoke() {
         items_count: vec![1, 5],
     };
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").unwrap();
     insert.write(&original_row).await.unwrap();
     insert.end().await.unwrap();
 

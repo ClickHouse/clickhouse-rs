@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
         .to_string(),
     };
 
-    let mut insert = client.insert(table_name)?;
+    let mut insert = client.insert::<Row>(table_name)?;
     insert.write(&row).await?;
     insert.end().await?;
 

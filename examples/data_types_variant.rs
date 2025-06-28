@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert(table_name)?;
+    let mut insert = client.insert::<MyRow>(table_name)?;
     let rows_to_insert = get_rows();
     for row in rows_to_insert {
         insert.write(&row).await?;

@@ -3,7 +3,6 @@ use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Durat
 use bytes::{Bytes, BytesMut};
 use hyper::{self, Request};
 use replace_with::replace_with_or_abort;
-use serde::Serialize;
 use tokio::{
     task::JoinHandle,
     time::{Instant, Sleep},
@@ -15,7 +14,7 @@ use crate::{
     error::{Error, Result},
     request_body::{ChunkSender, RequestBody},
     response::Response,
-    row::{self, Row},
+    row::{self, Row, WriteRow},
     rowbinary, Client, Compression,
 };
 
@@ -206,9 +205,12 @@ impl<T> Insert<T> {
     ///
     /// # Panics
     /// If called after the previous call that returned an error.
-    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
+    pub fn write<'a>(
+        &'a mut self,
+        row: &T::Value<'_>,
+    ) -> impl Future<Output = Result<()>> + 'a + Send
     where
-        T: Serialize,
+        T: WriteRow,
     {
         let result = self.do_write(row);
 
@@ -222,9 +224,9 @@ impl<T> Insert<T> {
     }
 
     #[inline(always)]
-    pub(crate) fn do_write(&mut self, row: &T) -> Result<usize>
+    pub(crate) fn do_write(&mut self, row: &T::Value<'_>) -> Result<usize>
     where
-        T: Serialize,
+        T: WriteRow,
     {
         match self.state {
             InsertState::NotStarted { .. } => self.init_request(),

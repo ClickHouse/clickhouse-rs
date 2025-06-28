@@ -1,5 +1,5 @@
 use crate::sql;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +40,9 @@ pub trait Row {
 /// This trait is implemented automatically and useful for writing generic code.
 pub trait ReadRow: for<'a> Row<Value<'a>: Deserialize<'a>> {}
 impl<R> ReadRow for R where R: for<'a> Row<Value<'a>: Deserialize<'a>> {}
+
+pub trait WriteRow: for<'a> Row<Value<'a>: Serialize> {}
+impl<R> WriteRow for R where R: for<'a> Row<Value<'a>: Serialize> {}
 
 /// Represents a row not holding any references.
 ///

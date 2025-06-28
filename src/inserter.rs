@@ -1,9 +1,14 @@
 use std::mem;
 
-use serde::Serialize;
 use tokio::time::Duration;
 
-use crate::{error::Result, insert::Insert, row::Row, ticks::Ticks, Client};
+use crate::{
+    error::Result,
+    insert::Insert,
+    row::{Row, WriteRow},
+    ticks::Ticks,
+    Client,
+};
 
 /// Performs multiple consecutive `INSERT`s.
 ///
@@ -215,9 +220,9 @@ where
     /// # Panics
     /// If called after the previous call that returned an error.
     #[inline]
-    pub fn write(&mut self, row: &T) -> Result<()>
+    pub fn write(&mut self, row: &T::Value<'_>) -> Result<()>
     where
-        T: Serialize,
+        T: WriteRow,
     {
         if self.insert.is_none() {
             self.init_insert()?;

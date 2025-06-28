@@ -19,7 +19,7 @@ async fn make_select(client: &Client) -> Result<Vec<SomeRow>> {
 }
 
 async fn make_insert(client: &Client, data: &[SomeRow]) -> Result<()> {
-    let mut insert = client.insert("who cares")?;
+    let mut insert = client.insert::<SomeRow>("who cares")?;
     for row in data {
         insert.write(row).await?;
     }
