@@ -1,6 +1,7 @@
 use crate::sql;
 use serde::Deserialize;
 
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum RowKind {
     Primitive,

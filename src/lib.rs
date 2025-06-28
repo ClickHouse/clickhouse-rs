@@ -7,7 +7,7 @@ extern crate static_assertions;
 
 pub use self::{
     compression::Compression,
-    row::{ReadRow, Row, RowKind, RowOwned},
+    row::{ReadRow, Row, RowOwned},
 };
 use self::{error::Result, http_client::HttpClient};
 pub use clickhouse_derive::Row;
@@ -381,6 +381,8 @@ impl Client {
 /// Do not use it in your code directly, it doesn't follow semver.
 #[doc(hidden)]
 pub mod _priv {
+    pub use crate::row::RowKind;
+
     #[cfg(feature = "lz4")]
     pub fn lz4_compress(uncompressed: &[u8]) -> super::Result<bytes::Bytes> {
         crate::compression::lz4::compress(uncompressed)
