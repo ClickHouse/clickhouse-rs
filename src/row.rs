@@ -9,21 +9,40 @@ pub enum RowKind {
     Vec,
 }
 
+/// Represents a row that can be used in queries.
+///
+/// Implemented for:
+/// * All `#[derive(Row)]` items
+/// * `(P1, P2, ...)` where P* is a primitive type or string
+///
+/// Do not implement this trait directly, use `#[derive(Row)]` instead.
+///
+/// In order to write a generic code over rows, see `ReadRow`.
 pub trait Row {
+    // NOTE: all properties are unstable and, hence, not following semver.
+
+    #[doc(hidden)]
     const NAME: &'static str;
-    const COLUMN_NAMES: &'static [&'static str];
-    const COLUMN_COUNT: usize;
-    const KIND: RowKind;
-
-    type Value<'a>: Row;
-
-    // TODO: count
     // TODO: different list for SELECT/INSERT (de/ser)
+    #[doc(hidden)]
+    const COLUMN_NAMES: &'static [&'static str];
+    #[doc(hidden)]
+    const COLUMN_COUNT: usize;
+    #[doc(hidden)]
+    const KIND: RowKind;
+    #[doc(hidden)]
+    type Value<'a>: Row;
 }
 
+/// Represents a row that can be read from the database.
+///
+/// This trait is implemented automatically and useful for writing generic code.
 pub trait ReadRow: for<'a> Row<Value<'a>: Deserialize<'a>> {}
 impl<R> ReadRow for R where R: for<'a> Row<Value<'a>: Deserialize<'a>> {}
 
+/// Represents a row not holding any references.
+///
+/// This trait is implemented automatically and useful for writing generic code.
 pub trait RowOwned: 'static + for<'a> Row<Value<'a> = Self> {}
 impl<R> RowOwned for R where R: 'static + for<'a> Row<Value<'a> = R> {}
 

@@ -24,8 +24,8 @@
 //!   from the Cloud instance based on its creation time. See
 //!   [`_priv::make_db_name`].
 
-use clickhouse::{sql::Identifier, Client, Row, RowOwned};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use clickhouse::{sql::Identifier, Client, ReadRow, Row, RowOwned};
+use serde::{Deserialize, Serialize};
 
 macro_rules! assert_panic_on_fetch_with_client {
     ($client:ident, $msg_parts:expr, $query:expr) => {
@@ -138,7 +138,7 @@ pub(crate) async fn create_simple_table(client: &Client, table_name: &str) {
 
 pub(crate) async fn fetch_rows<T>(client: &Client, table_name: &str) -> Vec<T>
 where
-    T: RowOwned + DeserializeOwned,
+    T: RowOwned + ReadRow,
 {
     client
         .query("SELECT ?fields FROM ?")

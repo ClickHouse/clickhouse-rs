@@ -4,10 +4,10 @@ use bytes::Bytes;
 use futures::channel::oneshot;
 use hyper::{Request, Response, StatusCode};
 use sealed::sealed;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use super::{Handler, HandlerFn};
-use crate::{rowbinary, Row};
+use crate::{rowbinary, ReadRow, RowOwned};
 
 const BUFFER_INITIAL_CAPACITY: usize = 1024;
 
@@ -82,7 +82,7 @@ pub struct RecordControl<T> {
 
 impl<T> RecordControl<T>
 where
-    T: for<'a> Deserialize<'a> + Row,
+    T: RowOwned + ReadRow,
 {
     pub async fn collect<C>(self) -> C
     where

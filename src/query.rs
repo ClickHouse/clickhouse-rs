@@ -1,5 +1,5 @@
 use hyper::{header::CONTENT_LENGTH, Method, Request};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::Serialize;
 use std::fmt::Display;
 use url::Url;
 
@@ -8,7 +8,7 @@ use crate::{
     headers::with_request_headers,
     request_body::RequestBody,
     response::Response,
-    row::{Row, RowOwned},
+    row::{ReadRow, Row, RowOwned},
     sql::{ser, Bind, SqlBuilder},
     Client,
 };
@@ -102,7 +102,7 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_one<T>(self) -> Result<T>
     where
-        T: RowOwned + DeserializeOwned,
+        T: RowOwned + ReadRow,
     {
         match self.fetch::<T>()?.next().await {
             Ok(Some(row)) => Ok(row),
@@ -116,7 +116,7 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_optional<T>(self) -> Result<Option<T>>
     where
-        T: RowOwned + DeserializeOwned,
+        T: RowOwned + ReadRow,
     {
         self.fetch::<T>()?.next().await
     }
@@ -127,7 +127,7 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_all<T>(self) -> Result<Vec<T>>
     where
-        T: RowOwned + DeserializeOwned,
+        T: RowOwned + ReadRow,
     {
         let mut result = Vec::new();
         let mut cursor = self.fetch::<T>()?;
