@@ -1,4 +1,4 @@
-//! ## Integration tests
+//! # Integration tests
 //!
 //! - The `wait_end_of_query` setting that is used for all DDLs forces HTTP response buffering.
 //!   We will get the response only when the DDL is executed on every cluster node.
