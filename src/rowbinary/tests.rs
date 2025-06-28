@@ -153,10 +153,10 @@ fn it_deserializes() {
         let (mut left, mut right) = input.split_at(i);
 
         // It shouldn't panic.
-        let _: Result<Sample<'_>, _> = super::deserialize_row(&mut left);
-        let _: Result<Sample<'_>, _> = super::deserialize_row(&mut right);
+        let _: Result<Sample<'_>, _> = super::deserialize_row(&mut left, None);
+        let _: Result<Sample<'_>, _> = super::deserialize_row(&mut right, None);
 
-        let actual: Sample<'_> = super::deserialize_row(&mut input.as_slice()).unwrap();
+        let actual: Sample<'_> = super::deserialize_row(&mut input.as_slice(), None).unwrap();
         assert_eq!(actual, sample());
     }
 }

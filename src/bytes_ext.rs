@@ -3,24 +3,34 @@ use std::cell::{Cell, UnsafeCell};
 
 #[derive(Default)]
 pub(crate) struct BytesExt {
+    // The only reason we use `UnsafeCell` here is to provide `extend_by_ref` method
+    // in the sound way. After stabilization of the polonius borrow checker, it
+    // will be replaced with simple `Bytes`. See `RowCursor::next()` for details.
     bytes: UnsafeCell<Bytes>,
+
+    // Points to the real start of the remaining slice.
+    // `Cell` allows us to mutate this value while keeping references to `bytes`.
+    // Also, the dedicated counter is faster than using `Bytes::advance()`.
     cursor: Cell<usize>,
 }
 
 impl BytesExt {
+    /// Returns a remaining slice of bytes.
     #[inline(always)]
     pub(crate) fn slice(&self) -> &[u8] {
         &self.bytes()[self.cursor.get()..]
     }
 
+    /// Returns the number of remaining bytes.
     #[inline(always)]
     pub(crate) fn remaining(&self) -> usize {
         self.bytes().len() - self.cursor.get()
     }
 
+    /// Overrides the number of remaining bytes by moving the cursor.
+    /// Note: it's valid to call this method while holding `slice()` reference.
     #[inline(always)]
     pub(crate) fn set_remaining(&self, n: usize) {
-        // We can use `bytes.advance()` here, but it's slower.
         self.cursor.set(self.bytes().len() - n);
     }
 
@@ -28,25 +38,34 @@ impl BytesExt {
     #[inline(always)]
     pub(crate) fn advance(&mut self, n: usize) {
         debug_assert!(n <= self.remaining());
-
-        // We can use `bytes.advance()` here, but it's slower.
-        self.cursor.set(self.cursor.get() + n);
+        *self.cursor.get_mut() += n;
     }
 
+    /// Adds the provided chunk into available bytes.
     #[inline(always)]
     pub(crate) fn extend(&mut self, chunk: Bytes) {
         *self.bytes.get_mut() = merge_bytes(self.slice(), chunk);
         self.cursor.set(0);
     }
 
+    /// Adds the provided chunk into available bytes.
+    ///
+    /// See `RowCursor::next()` for details on why this method exists.
+    ///
+    /// # Safety
+    ///
+    /// The caller MUST ensure that there are no active references from `slice()` calls.
     #[inline(always)]
     pub(crate) unsafe fn extend_by_ref(&self, chunk: Bytes) {
-        let bytes = &mut *self.bytes.get();
-        *bytes = merge_bytes(self.slice(), chunk);
+        let new_bytes = merge_bytes(self.slice(), chunk);
         self.cursor.set(0);
+
+        // No active references to `bytes` are held at this point (ensured by the caller).
+        *self.bytes.get() = new_bytes;
     }
 
     fn bytes(&self) -> &Bytes {
+        // SAFETY: all possible incorrect accesses are ensured by caller's of `extend_by_ref()`.
         unsafe { &*self.bytes.get() }
     }
 }

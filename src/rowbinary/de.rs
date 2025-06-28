@@ -14,38 +14,37 @@ use serde::{
 use std::marker::PhantomData;
 use std::{convert::TryFrom, str};
 
-// TODO: doc + remove below?
-pub(crate) fn deserialize_row_from<'data, 'cursor, T: Deserialize<'data> + Row>(
-    input: &mut &'data [u8],
-    metadata: Option<&'cursor RowMetadata>,
-) -> Result<T> {
-    match metadata {
-        Some(metadata) => deserialize_row_with_validation(input, metadata),
-        None => deserialize_row(input),
-    }
-}
-
-/// Deserializes a value from `input` with a row encoded in `RowBinary`,
-/// i.e. only when [`crate::Row`] validation is disabled in the client.
+/// Deserializes a row from `input` with a row encoded in `RowBinary`.
+///
+/// If the optional metadata ([`RowMetadata`]) parsed from `RowBinaryWithNamesAndTypes` header
+/// is provided, the deserializer performs validation of the parsed row against that meta.
 ///
 /// It accepts _a reference to_ a byte slice because it somehow leads to a more
 /// performant generated code than `(&[u8]) -> Result<(T, usize)>` and even
 /// `(&[u8], &mut Option<T>) -> Result<usize>`.
 pub(crate) fn deserialize_row<'data, 'cursor, T: Deserialize<'data> + Row>(
     input: &mut &'data [u8],
+    metadata: Option<&'cursor RowMetadata>,
+) -> Result<T> {
+    match metadata {
+        Some(metadata) => deserialize_row_with_validation(input, metadata),
+        None => deserialize_row_without_validation(input),
+    }
+}
+
+/// Deserializes a value from `input` with a row encoded in `RowBinary`,
+/// i.e. only when validation is disabled in the client.
+fn deserialize_row_without_validation<'data, 'cursor, T: Deserialize<'data> + Row>(
+    input: &mut &'data [u8],
 ) -> Result<T> {
     let mut deserializer = RowBinaryDeserializer::<T, _>::new(input, ());
     T::deserialize(&mut deserializer)
 }
 
-/// Similar to [`deserialize_row`], but uses [`RowMetadata`]
+/// Deserializes a value from `input` using metadata ([`RowMetadata`])
 /// parsed from `RowBinaryWithNamesAndTypes` header to validate the data types.
 /// This is used when [`crate::Row`] validation is enabled in the client (default).
-///
-/// It expects a slice of [`Column`] objects parsed from the beginning
-/// of `RowBinaryWithNamesAndTypes` data stream. After the header,
-/// the rows format is the same as `RowBinary`.
-pub(crate) fn deserialize_row_with_validation<'data, 'cursor, T: Deserialize<'data> + Row>(
+fn deserialize_row_with_validation<'data, 'cursor, T: Deserialize<'data> + Row>(
     input: &mut &'data [u8],
     metadata: &'cursor RowMetadata,
 ) -> Result<T> {
