@@ -19,13 +19,15 @@
 //!   Cloud-only tests might also require JWT access token, which should be
 //!   provided via `CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN`.
 //!
-//! - Created database names should match the following template:
-//!   `chrs__{...}__{unix_millis}`. This allows to simply clean up the databases
-//!   from the Cloud instance based on its creation time. See
-//!   [`_priv::make_db_name`].
+//! - All tests must use `prepare_database!()` macro if custom tables are
+//!   created. This macro will create a new database for each test with
+//!   a name suitable for specified test environment. For instance, for
+//!   the "cloud" environment, it appends the current timestamp to allow
+//!   clean up outdated databases based on its creation time.
 
 use clickhouse::{sql::Identifier, Client, ReadRow, Row, RowOwned};
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 macro_rules! assert_panic_on_fetch_with_client {
     ($client:ident, $msg_parts:expr, $query:expr) => {
@@ -81,24 +83,22 @@ macro_rules! prepare_database {
 
 macro_rules! check_cloud_test_env {
     () => {
-        match std::env::var("CLICKHOUSE_TEST_ENVIRONMENT") {
-            Ok(test_env) if test_env == "cloud" => (),
-            _ => {
-                eprintln!("Skipping test as it is Cloud only");
-                return;
-            }
+        if $crate::test_env() != $crate::TestEnv::Cloud {
+            eprintln!("Skipping test as it is not Cloud only");
+            return;
         }
     };
 }
 
 pub(crate) fn get_client() -> Client {
     let client = Client::default();
-    match std::env::var("CLICKHOUSE_TEST_ENVIRONMENT") {
-        Ok(test_env) if test_env == "cloud" => client
+
+    match test_env() {
+        TestEnv::Local => client.with_url("http://localhost:8123"),
+        TestEnv::Cloud => client
             .with_url(get_cloud_url())
             .with_user("default")
             .with_password(require_env_var("CLICKHOUSE_CLOUD_PASSWORD")),
-        _ => client.with_url("http://localhost:8123"),
     }
 }
 
@@ -183,6 +183,30 @@ mod user_agent;
 mod uuid;
 mod variant;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TestEnv {
+    Local,
+    Cloud,
+}
+
+#[allow(clippy::incompatible_msrv)]
+fn test_env() -> TestEnv {
+    use std::env::{var, VarError};
+
+    static TEST_ENV: LazyLock<TestEnv> =
+        LazyLock::new(|| match var("CLICKHOUSE_TEST_ENVIRONMENT") {
+            Ok(env) if env == "local" => TestEnv::Local,
+            Ok(env) if env == "cloud" => TestEnv::Cloud,
+            Ok(env) => panic!("Unknown CLICKHOUSE_TEST_ENVIRONMENT: {env}"),
+            Err(VarError::NotPresent) => TestEnv::Local,
+            Err(VarError::NotUnicode(_)) => {
+                panic!("CLICKHOUSE_TEST_ENVIRONMENT must be a valid UTF-8 string")
+            }
+        });
+
+    *TEST_ENV
+}
+
 mod _priv {
     use super::*;
     use std::time::SystemTime;
@@ -212,16 +236,23 @@ mod _priv {
     }
 
     // `it::compression::lz4::{{closure}}::f` ->
-    // `chrs__compression__lz4__{unix_millis}`
+    // - "local" env: `chrs__compression__lz4`
+    // - "cloud" env: `chrs__compression__lz4__{unix_millis}`
     fn make_db_name(fn_path: &str) -> String {
         assert!(fn_path.starts_with("it::"));
         let mut iter = fn_path.split("::").skip(1);
         let module = iter.next().unwrap();
         let test = iter.next().unwrap();
-        let now_unix_millis = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        format!("chrs__{module}__{test}__{now_unix_millis}")
+
+        match test_env() {
+            TestEnv::Local => format!("chrs__{module}__{test}"),
+            TestEnv::Cloud => {
+                let now_unix_millis = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis();
+                format!("chrs__{module}__{test}__{now_unix_millis}")
+            }
+        }
     }
 }
