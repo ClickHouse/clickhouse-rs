@@ -97,7 +97,7 @@ impl<T> RowCursor<T> {
         loop {
             if self.bytes.remaining() > 0 {
                 let mut slice = self.bytes.slice();
-                let result = rowbinary::deserialize_row_from::<T::Value<'_>>(
+                let result = rowbinary::deserialize_row::<T::Value<'_>>(
                     &mut slice,
                     self.row_metadata.as_ref(),
                 );
@@ -117,7 +117,7 @@ impl<T> RowCursor<T> {
                     // SAFETY: we actually don't have active immutable references at this point.
                     //
                     // The borrow checker prior to polonius thinks we still have ones.
-                    // This is pretty common restriction that can be fixed by using
+                    // This is a pretty common restriction that can be fixed by using
                     // the polonius-the-crab crate, which cannot be used in async code.
                     //
                     // See https://github.com/rust-lang/rust/issues/51132
