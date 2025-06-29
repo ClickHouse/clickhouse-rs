@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use clickhouse::query::RowCursor;
-use clickhouse::{Client, Compression, ReadRow, Row};
+use clickhouse::{Client, Compression, Row, RowRead};
 use std::time::{Duration, Instant};
 
 pub(crate) trait WithId {
@@ -10,7 +10,7 @@ pub(crate) trait WithId {
 pub(crate) trait WithAccessType {
     const ACCESS_TYPE: &'static str;
 }
-pub(crate) trait BenchmarkRow: for<'a> ReadRow<Value<'a>: WithId> + WithAccessType {}
+pub(crate) trait BenchmarkRow: for<'a> RowRead<Value<'a>: WithId> + WithAccessType {}
 
 #[macro_export]
 macro_rules! impl_benchmark_row {

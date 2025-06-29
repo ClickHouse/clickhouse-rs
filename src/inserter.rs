@@ -5,7 +5,7 @@ use tokio::time::Duration;
 use crate::{
     error::Result,
     insert::Insert,
-    row::{Row, WriteRow},
+    row::{Row, RowWrite},
     ticks::Ticks,
     Client,
 };
@@ -222,7 +222,7 @@ where
     #[inline]
     pub fn write(&mut self, row: &T::Value<'_>) -> Result<()>
     where
-        T: WriteRow,
+        T: RowWrite,
     {
         if self.insert.is_none() {
             self.init_insert()?;

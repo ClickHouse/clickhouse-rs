@@ -18,7 +18,10 @@ pub enum RowKind {
 ///
 /// Do not implement this trait directly, use `#[derive(Row)]` instead.
 ///
-/// In order to write a generic code over rows, see `ReadRow`.
+/// In order to write a generic code over rows, check
+/// * [`RowRead`] for reading queries.
+/// * [`RowWrite`] for writing queries.
+/// * [`RowOwned`] for rows that do not hold any references.
 pub trait Row {
     // NOTE: all properties are unstable and, hence, not following semver.
 
@@ -37,20 +40,156 @@ pub trait Row {
 
 /// Represents a row that can be read from the database.
 ///
-/// This trait is implemented automatically and useful for writing generic code.
-pub trait ReadRow: for<'a> Row<Value<'a>: Deserialize<'a>> {}
-impl<R> ReadRow for R where R: for<'a> Row<Value<'a>: Deserialize<'a>> {}
+/// This trait is implemented automatically for all `Row + Deserialize` types.
+///
+/// The main purpose of this trait is to simplify writing generic code.
+///
+/// # Examples
+/// Let's say we want to iterate over rows of a provided table in a generic way
+/// and apply a function to each row:
+/// ```
+/// use clickhouse::{Client, RowOwned, RowRead, sql::Identifier, error::Result};
+///
+/// async fn iterate<R: RowOwned + RowRead>(
+///     table: &str,
+///     client: Client,
+///     f: impl Fn(R),
+/// ) -> Result<()> {
+///     let mut cursor = client
+///         .query("SELECT ?fields FROM ?")
+///         .bind(Identifier(table))
+///         .fetch::<R>()?;
+///
+///     while let Some(row) = cursor.next().await? {
+///         f(row);
+///     }
+///
+///     Ok(())
+/// }
+///
+/// // Usage
+///
+/// #[derive(clickhouse::Row, serde::Deserialize)]
+/// struct SomeRow { a: u32, b: String }
+/// fn callback(row: SomeRow) {}
+///
+/// # async fn usage(client: Client) -> Result<()> {
+/// iterate::<SomeRow>("table", client, callback).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// However, this code works only for rows that do not hold any references.
+/// To support also rows that borrows data from cursor (avoiding extra allocations),
+/// the signature should be changed to less intuitive one:
+/// ```
+/// # use clickhouse::{Client, Row, RowRead, sql::Identifier, error::Result};
+/// async fn iterate<R: Row + RowRead>(  //<<< Row instead of RowOwned
+///     table: &str,
+///     client: Client,
+///     f: impl Fn(R::Value<'_>),        //<<< R::Value instead of R
+/// ) -> Result<()> {
+///     /* same code */
+/// #   let mut cursor = client.query("SELECT ?fields FROM ?").bind(Identifier(table)).fetch::<R>()?;
+/// #   while let Some(row) = cursor.next().await? { f(row); }
+/// #   Ok(())
+/// }
+///
+/// // Usage
+///
+/// #[derive(Row, serde::Deserialize)]
+/// struct SomeRow<'a> { a: u32, b: &'a str }
+/// fn callback(row: SomeRow<'_>) {}
+///
+/// # async fn usage(client: Client) -> Result<()> {
+/// iterate::<SomeRow<'_>>("table", client, callback).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// We use [`Row`] instead of [`RowOwned`] and `R::Value<'_>` instead of `R` here.
+/// The last one is actually the same `R` but with a changed lifetime restricted
+/// to the cursor.
+pub trait RowRead: for<'a> Row<Value<'a>: Deserialize<'a>> {}
+impl<R> RowRead for R where R: for<'a> Row<Value<'a>: Deserialize<'a>> {}
 
-pub trait WriteRow: for<'a> Row<Value<'a>: Serialize> {}
-impl<R> WriteRow for R where R: for<'a> Row<Value<'a>: Serialize> {}
+/// Represents a row that can be writted into the database.
+///
+/// This trait is implemented automatically for all `Row + Serialize` types.
+///
+/// The main purpose of this trait is to simplify writing generic code.
+///
+/// # Examples
+/// Let's say we want to write a function that insert the provided batch of rows:
+/// ```
+/// use clickhouse::{Client, RowOwned, RowWrite, error::Result};
+///
+/// async fn write_batch<R: RowOwned + RowWrite>(
+///     table: &str,
+///     client: Client,
+///     data: &[R],
+/// ) -> Result<()> {
+///     let mut insert = client.insert::<R>(table)?;
+///     for row in data {
+///         insert.write(row).await?;
+///     }
+///     insert.end().await
+/// }
+///
+/// // Usage
+///
+/// #[derive(clickhouse::Row, serde::Serialize)]
+/// struct SomeRow { a: u32, b: String }
+///
+/// # async fn usage(client: Client) -> Result<()> {
+/// write_batch::<SomeRow>("table", client, &[/* ... */]).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// However, this code works only for rows that do not hold any references.
+/// To support also rows that borrows data avoiding extra allocations,
+/// the signature should be changed to less intuitive one:
+/// ```
+/// # use clickhouse::{Client, Row, RowWrite, error::Result};
+/// async fn write_batch<R: Row + RowWrite>(  //<<< Row instead of RowOwned
+///     table: &str,
+///     client: Client,
+///     data: &[R::Value<'_>],                //<<< R::Value instead of R
+/// ) -> Result<()> {
+///     /* same code */
+/// #   let mut insert = client.insert::<R>(table)?;
+/// #   for row in data { insert.write(row).await?; }
+/// #   insert.end().await
+/// }
+///
+/// // Usage
+///
+/// #[derive(Row, serde::Serialize)]
+/// struct SomeRow<'a> { a: u32, b: &'a str }
+///
+/// # async fn usage(client: Client) -> Result<()> {
+/// let (first_b, second_b) = ("first", "second");
+/// let rows = [SomeRow { a: 0, b: first_b }, SomeRow { a: 1, b: second_b }];
+/// write_batch::<SomeRow>("table", client, &rows).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// We use [`Row`] instead of [`RowOwned`] and `R::Value<'_>` instead of `R` here.
+/// The last one is actually the same `R` but with a changed lifetime restricted to data.
+pub trait RowWrite: for<'a> Row<Value<'a>: Serialize> {}
+impl<R> RowWrite for R where R: for<'a> Row<Value<'a>: Serialize> {}
 
 /// Represents a row not holding any references.
 ///
 /// This trait is implemented automatically and useful for writing generic code.
+/// Usually used with [`RowRead`] and [`RowWrite`].
 pub trait RowOwned: 'static + for<'a> Row<Value<'a> = Self> {}
 impl<R> RowOwned for R where R: 'static + for<'a> Row<Value<'a> = R> {}
 
 // Actually, it's not public now.
+#[doc(hidden)]
 pub trait Primitive {}
 
 macro_rules! impl_primitive_for {

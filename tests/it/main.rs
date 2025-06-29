@@ -25,7 +25,7 @@
 //!   the "cloud" environment, it appends the current timestamp to allow
 //!   clean up outdated databases based on its creation time.
 
-use clickhouse::{sql::Identifier, Client, ReadRow, Row, RowOwned};
+use clickhouse::{sql::Identifier, Client, Row, RowOwned, RowRead};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
@@ -138,7 +138,7 @@ pub(crate) async fn create_simple_table(client: &Client, table_name: &str) {
 
 pub(crate) async fn fetch_rows<T>(client: &Client, table_name: &str) -> Vec<T>
 where
-    T: RowOwned + ReadRow,
+    T: RowOwned + RowRead,
 {
     client
         .query("SELECT ?fields FROM ?")

@@ -8,7 +8,7 @@ use crate::{
     headers::with_request_headers,
     request_body::RequestBody,
     response::Response,
-    row::{ReadRow, Row, RowOwned},
+    row::{Row, RowOwned, RowRead},
     sql::{ser, Bind, SqlBuilder},
     Client,
 };
@@ -102,7 +102,7 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_one<T>(self) -> Result<T>
     where
-        T: RowOwned + ReadRow,
+        T: RowOwned + RowRead,
     {
         match self.fetch::<T>()?.next().await {
             Ok(Some(row)) => Ok(row),
@@ -116,7 +116,7 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_optional<T>(self) -> Result<Option<T>>
     where
-        T: RowOwned + ReadRow,
+        T: RowOwned + RowRead,
     {
         self.fetch::<T>()?.next().await
     }
@@ -127,7 +127,7 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_all<T>(self) -> Result<Vec<T>>
     where
-        T: RowOwned + ReadRow,
+        T: RowOwned + RowRead,
     {
         let mut result = Vec::new();
         let mut cursor = self.fetch::<T>()?;
