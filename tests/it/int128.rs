@@ -44,7 +44,7 @@ async fn u128() {
         },
     ];
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").unwrap();
     for row in &original_rows {
         insert.write(row).await.unwrap();
     }
@@ -103,7 +103,7 @@ async fn i128() {
         },
     ];
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").unwrap();
     for row in &original_rows {
         insert.write(row).await.unwrap();
     }

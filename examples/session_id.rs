@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
         i: i32,
     }
 
-    let mut insert = client.insert(table_name)?;
+    let mut insert = client.insert::<MyRow>(table_name)?;
     insert.write(&MyRow { i: 42 }).await?;
     insert.end().await?;
 

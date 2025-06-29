@@ -90,7 +90,7 @@ async fn variant_data_type() {
     let rows = vars.map(|var| MyRow { var });
 
     // Write to the table.
-    let mut insert = client.insert("test_var").unwrap();
+    let mut insert = client.insert::<MyRow>("test_var").unwrap();
     for row in &rows {
         insert.write(row).await.unwrap();
     }

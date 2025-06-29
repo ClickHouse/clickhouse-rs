@@ -97,7 +97,7 @@ impl de::Error for Error {
 
 impl From<Error> for io::Error {
     fn from(error: Error) -> Self {
-        io::Error::new(io::ErrorKind::Other, error)
+        io::Error::other(error)
     }
 }
 

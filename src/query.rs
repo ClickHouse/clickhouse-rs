@@ -1,5 +1,5 @@
 use hyper::{header::CONTENT_LENGTH, Method, Request};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fmt::Display;
 use url::Url;
 
@@ -8,7 +8,7 @@ use crate::{
     headers::with_request_headers,
     request_body::RequestBody,
     response::Response,
-    row::Row,
+    row::{Row, RowOwned, RowRead},
     sql::{ser, Bind, SqlBuilder},
     Client,
 };
@@ -102,9 +102,9 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_one<T>(self) -> Result<T>
     where
-        T: Row + for<'b> Deserialize<'b>,
+        T: RowOwned + RowRead,
     {
-        match self.fetch()?.next().await {
+        match self.fetch::<T>()?.next().await {
             Ok(Some(row)) => Ok(row),
             Ok(None) => Err(Error::RowNotFound),
             Err(err) => Err(err),
@@ -116,9 +116,9 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_optional<T>(self) -> Result<Option<T>>
     where
-        T: Row + for<'b> Deserialize<'b>,
+        T: RowOwned + RowRead,
     {
-        self.fetch()?.next().await
+        self.fetch::<T>()?.next().await
     }
 
     /// Executes the query and returns all the generated results,
@@ -127,7 +127,7 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_all<T>(self) -> Result<Vec<T>>
     where
-        T: Row + for<'b> Deserialize<'b>,
+        T: RowOwned + RowRead,
     {
         let mut result = Vec::new();
         let mut cursor = self.fetch::<T>()?;

@@ -18,3 +18,7 @@ proc-macro2 = "1.0"
 syn = "2.0"
 quote = "1.0"
 serde_derive_internals = "0.29.1"
+
+[dev-dependencies]
+insta = "1.43.1"
+prettyplease = "0.2.35"

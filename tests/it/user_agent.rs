@@ -40,7 +40,7 @@ async fn assert_queries_user_agents(client: &Client, table_name: &str, expected_
 
     create_simple_table(client, table_name).await;
 
-    let mut insert = client.insert(table_name).unwrap();
+    let mut insert = client.insert::<SimpleRow>(table_name).unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 
