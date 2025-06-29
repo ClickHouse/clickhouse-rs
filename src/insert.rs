@@ -14,7 +14,7 @@ use crate::{
     error::{Error, Result},
     request_body::{ChunkSender, RequestBody},
     response::Response,
-    row::{self, Row, WriteRow},
+    row::{self, Row, RowWrite},
     rowbinary, Client, Compression,
 };
 
@@ -210,7 +210,7 @@ impl<T> Insert<T> {
         row: &T::Value<'_>,
     ) -> impl Future<Output = Result<()>> + 'a + Send
     where
-        T: WriteRow,
+        T: RowWrite,
     {
         let result = self.do_write(row);
 
@@ -226,7 +226,7 @@ impl<T> Insert<T> {
     #[inline(always)]
     pub(crate) fn do_write(&mut self, row: &T::Value<'_>) -> Result<usize>
     where
-        T: WriteRow,
+        T: RowWrite,
     {
         match self.state {
             InsertState::NotStarted { .. } => self.init_request(),

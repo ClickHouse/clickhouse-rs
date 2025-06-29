@@ -4,7 +4,7 @@ use crate::{
     cursors::RawCursor,
     error::{Error, Result},
     response::Response,
-    rowbinary, ReadRow,
+    rowbinary, RowRead,
 };
 use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
@@ -37,7 +37,7 @@ impl<T> RowCursor<T> {
     #[inline(never)]
     async fn read_columns(&mut self) -> Result<()>
     where
-        T: ReadRow,
+        T: RowRead,
     {
         loop {
             if self.bytes.remaining() > 0 {
@@ -85,7 +85,7 @@ impl<T> RowCursor<T> {
     /// This method is cancellation safe.
     pub async fn next(&mut self) -> Result<Option<T::Value<'_>>>
     where
-        T: ReadRow,
+        T: RowRead,
     {
         if self.validation && self.row_metadata.is_none() {
             self.read_columns().await?;
