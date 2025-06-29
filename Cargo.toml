@@ -11,7 +11,7 @@ readme = "README.md"
 edition = "2021"
 # update `workspace.package.rust-version` below and CI if changed
 # TODO: after bumping to v1.80, remove `--precise` in the "msrv" CI job
-rust-version = "1.73.0"
+rust-version = "1.79.0"
 
 [workspace]
 members = ["derive", "types"]
@@ -22,7 +22,7 @@ repository = "https://github.com/ClickHouse/clickhouse-rs"
 homepage = "https://clickhouse.com"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-rust-version = "1.73.0"
+rust-version = "1.79.0"
 
 [lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
