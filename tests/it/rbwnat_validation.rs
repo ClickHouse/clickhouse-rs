@@ -1,9 +1,9 @@
 use crate::{execute_statements, geo_types::*, get_client};
+use clickhouse::sql::Identifier;
 use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use clickhouse::sql::Identifier;
+use std::collections::HashMap;
 
 #[tokio::test]
 async fn fetch_primitive_row() {

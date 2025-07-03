@@ -149,9 +149,7 @@ async fn limited_by_time() {
     create_table(&client).await;
 
     let period = Duration::from_secs(1);
-    let mut inserter = client
-        .inserter::<MyRow>("test")
-        .with_period(Some(period));
+    let mut inserter = client.inserter::<MyRow>("test").with_period(Some(period));
     let rows = 100;
 
     for i in 1..=rows {
