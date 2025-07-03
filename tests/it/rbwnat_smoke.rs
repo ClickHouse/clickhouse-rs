@@ -2,6 +2,9 @@ use crate::decimals::*;
 use crate::{create_simple_table, insert_and_select, SimpleRow};
 use clickhouse::sql::Identifier;
 use clickhouse::Row;
+use fxhash::FxHashMap;
+use indexmap::IndexMap;
+use linked_hash_map::LinkedHashMap;
 use serde::__private::from_utf8_lossy;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -233,6 +236,51 @@ async fn map_as_vec_of_tuples() {
 
     let result = insert_and_select(&client, "test", rows.clone()).await;
     assert_eq!(result, rows)
+}
+
+#[tokio::test]
+async fn maps_third_party() {
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        im: IndexMap<u16, String>,
+        lhm: LinkedHashMap<u32, String>,
+        fx: FxHashMap<u64, String>,
+        weird_but_ok: LinkedHashMap<u128, IndexMap<i8, FxHashMap<i16, Vec<bool>>>>,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS test (
+                im           Map(UInt16,  String),
+                lhm          Map(UInt32,  String),
+                fx           Map(UInt64,  String),
+                weird_but_ok Map(UInt128, Map(Int8, Map(Int16, Array(Bool))))
+            )
+            ENGINE = MergeTree
+            ORDER BY ()
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = vec![Data {
+        im: IndexMap::from_iter(vec![(1, "one".to_string()), (2, "two".to_string())]),
+        lhm: LinkedHashMap::from_iter(vec![(3, "three".to_string()), (4, "four".to_string())]),
+        fx: FxHashMap::from_iter(vec![(5, "five".to_string()), (6, "six".to_string())]),
+        weird_but_ok: LinkedHashMap::from_iter(vec![(
+            7u128,
+            IndexMap::from_iter(vec![(
+                -8i8,
+                FxHashMap::from_iter(vec![(9i16, vec![true, false]), (10i16, vec![false])]),
+            )]),
+        )]),
+    }];
+
+    let result = insert_and_select(&client, "test", rows.clone()).await;
+    assert_eq!(result, rows);
 }
 
 #[tokio::test]
