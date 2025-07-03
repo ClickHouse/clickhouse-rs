@@ -380,10 +380,12 @@ impl<T> Insert<T> {
         let handle =
             tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
 
-        put_rbwnat_columns_header(
-            &self.row_metadata.as_ref().unwrap().columns,
-            &mut self.buffer,
-        )?;
+        match self.row_metadata {
+            None => (), // RowBinary is used, no header is required.
+            Some(ref metadata) => {
+                put_rbwnat_columns_header(&metadata.columns, &mut self.buffer)?;
+            }
+        }
 
         self.state = InsertState::Active { handle, sender };
         Ok(())
