@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
         Error = 4,
     }
 
-    let mut insert = client.insert::<Event>("event_log")?;
+    let mut insert = client.insert::<Event>("event_log").await?;
     insert
         .write(&Event {
             timestamp: now(),

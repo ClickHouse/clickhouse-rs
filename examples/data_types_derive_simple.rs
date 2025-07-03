@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert::<Row>(table_name)?;
+    let mut insert = client.insert::<Row>(table_name).await?;
     insert.write(&Row::new()).await?;
     insert.end().await?;
 
