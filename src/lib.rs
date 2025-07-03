@@ -339,7 +339,7 @@ impl Client {
     /// If `T` has unnamed fields, e.g. tuples.
     pub async fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
         if self.get_validation() {
-            let metadata = self.get_row_metadata::<T>(table).await?;
+            let metadata = self.get_row_metadata_for_insert::<T>(table).await?;
             return Ok(insert::Insert::new(self, table, Some(metadata)));
         }
         Ok(insert::Insert::new(self, table, None))
@@ -410,7 +410,10 @@ impl Client {
         self
     }
 
-    async fn get_row_metadata<T: Row>(&self, table_name: &str) -> Result<Arc<RowMetadata>> {
+    async fn get_row_metadata_for_insert<T: Row>(
+        &self,
+        table_name: &str,
+    ) -> Result<Arc<RowMetadata>> {
         let read_lock = self.row_metadata_cache.0.read().await;
         match read_lock.get(table_name) {
             Some(metadata) => Ok(metadata.clone()),
@@ -434,7 +437,7 @@ impl Client {
                     buffer.extend_from_slice(&chunk);
                 }
                 let columns = parse_rbwnat_columns_header(&mut buffer.as_slice())?;
-                let metadata = Arc::new(RowMetadata::new::<T>(columns));
+                let metadata = Arc::new(RowMetadata::new_for_insert::<T>(columns));
                 write_lock.insert(table_name.to_string(), metadata.clone());
                 Ok(metadata)
             }
@@ -614,7 +617,7 @@ mod client_tests {
 
     #[test]
     fn get_row_metadata() {
-        let metadata = RowMetadata::new::<SystemRolesRow>(SystemRolesRow::columns());
+        let metadata = RowMetadata::new_for_cursor::<SystemRolesRow>(SystemRolesRow::columns());
         assert_eq!(metadata.columns, SystemRolesRow::columns());
         assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
 
@@ -624,7 +627,7 @@ mod client_tests {
             Column::new("storage".to_string(), DataTypeNode::String),
             Column::new("name".to_string(), DataTypeNode::String),
         ];
-        let metadata = RowMetadata::new::<SystemRolesRow>(columns.clone());
+        let metadata = RowMetadata::new_for_cursor::<SystemRolesRow>(columns.clone());
         assert_eq!(metadata.columns, columns);
         assert_eq!(
             metadata.access_type,
@@ -639,7 +642,7 @@ mod client_tests {
             .with_database("system");
 
         let metadata = client
-            .get_row_metadata::<SystemRolesRow>("roles")
+            .get_row_metadata_for_insert::<SystemRolesRow>("roles")
             .await
             .unwrap();
 
@@ -650,7 +653,7 @@ mod client_tests {
         // and no calls to the database will be made
         client
             .with_url("whatever")
-            .get_row_metadata::<SystemRolesRow>("roles")
+            .get_row_metadata_for_insert::<SystemRolesRow>("roles")
             .await
             .unwrap();
 

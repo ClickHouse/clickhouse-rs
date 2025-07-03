@@ -1,6 +1,7 @@
 use crate::row::RowKind;
 use crate::Row;
 use clickhouse_types::Column;
+use std::collections::HashMap;
 use std::fmt::Display;
 
 #[derive(Debug, PartialEq)]
@@ -16,17 +17,23 @@ pub(crate) enum AccessType {
 /// as it is calculated only once per struct. It does not have lifetimes,
 /// so it does not introduce a breaking change to [`crate::cursors::RowCursor`].
 pub(crate) struct RowMetadata {
-    /// Database schema, or columns, are parsed before the first call to (de)serializer.
+    /// Database schema, or table columns, are parsed before the first call to deserializer.
+    /// However, the order here depends on the usage context:
+    /// * For selects, it is defined in the same order as in the database schema.
+    /// * For inserts, it is adjusted to the order of fields in the struct definition.
     pub(crate) columns: Vec<Column>,
     /// This determines whether we can just use [`crate::rowbinary::de::RowBinarySeqAccess`]
     /// or a more sophisticated approach with [`crate::rowbinary::de::RowBinaryStructAsMapAccess`]
     /// to support structs defined with different fields order than in the schema.
-    /// (De)serializing a struct as a map will be approximately 40% slower than as a sequence.
+    ///
+    /// Deserializing a struct as a map can be significantly slower, but that depends
+    /// on the shape of the data. In some cases, there is no noticeable difference,
+    /// in others, it could be up to 2-3x slower.
     pub(crate) access_type: AccessType,
 }
 
 impl RowMetadata {
-    pub(crate) fn new<T: Row>(columns: Vec<Column>) -> Self {
+    pub(crate) fn new_for_cursor<T: Row>(columns: Vec<Column>) -> Self {
         let access_type = match T::KIND {
             RowKind::Primitive => {
                 if columns.len() != 1 {
@@ -114,6 +121,60 @@ impl RowMetadata {
         }
     }
 
+    pub(crate) fn new_for_insert<T: Row>(columns: Vec<Column>) -> Self {
+        if T::KIND != RowKind::Struct {
+            panic!(
+                "SerializerRowMetadata can only be created for structs, \
+                but got {:?} instead.\n#### All schema columns:\n{}",
+                T::KIND,
+                join_panic_schema_hint(&columns),
+            );
+        }
+        if columns.len() != T::COLUMN_NAMES.len() {
+            panic!(
+                "While processing struct {}: database schema has {} columns, \
+                but the struct definition has {} fields.\
+                \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
+                T::NAME,
+                columns.len(),
+                T::COLUMN_NAMES.len(),
+                join_panic_schema_hint(T::COLUMN_NAMES),
+                join_panic_schema_hint(&columns),
+            );
+        }
+
+        let mut result_columns: Vec<Column> = Vec::with_capacity(columns.len());
+        let db_columns_lookup: HashMap<&str, &Column> =
+            columns.iter().map(|col| (col.name.as_str(), col)).collect();
+
+        for struct_column_name in T::COLUMN_NAMES {
+            match db_columns_lookup.get(*struct_column_name) {
+                Some(col) => result_columns.push((*col).clone()),
+                None => {
+                    panic!(
+                        "While processing struct {}: database schema has no column named {}.\
+                        \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
+                        T::NAME,
+                        struct_column_name,
+                        join_panic_schema_hint(T::COLUMN_NAMES),
+                        join_panic_schema_hint(&db_columns_lookup.values().collect::<Vec<_>>()),
+                    );
+                }
+            }
+        }
+
+        Self {
+            columns: result_columns,
+            access_type: AccessType::WithSeqAccess, // ignored
+        }
+    }
+
+    /// Returns the index of the column in the database schema
+    /// that corresponds to the field with the given index in the struct.
+    ///
+    /// Only makes sense for selects; for inserts, it is always the same as `struct_idx`,
+    /// since we write the header with the field order defined in the struct,
+    /// and ClickHouse server figures out the rest on its own.
     #[inline]
     pub(crate) fn get_schema_index(&self, struct_idx: usize) -> usize {
         match &self.access_type {
@@ -129,6 +190,9 @@ impl RowMetadata {
         }
     }
 
+    /// Returns `true` if the field order in the struct is different from the database schema.
+    ///
+    /// Only makes sense for selects; for inserts, it is always `false`.
     #[inline]
     pub(crate) fn is_field_order_wrong(&self) -> bool {
         matches!(self.access_type, AccessType::WithMapAccess(_))

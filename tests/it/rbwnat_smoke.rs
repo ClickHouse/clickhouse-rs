@@ -693,3 +693,156 @@ async fn decimals() {
     let result = insert_and_select(&client, "test", rows.clone()).await;
     assert_eq!(result, rows);
 }
+
+#[tokio::test]
+async fn different_struct_field_order_same_types() {
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        c: String,
+        a: String,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE OR REPLACE TABLE test (
+                a String,
+                c String
+            ) ENGINE MergeTree ORDER BY a
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = vec![
+        Data {
+            c: "foo".to_string(),
+            a: "bar".to_string(),
+        },
+        Data {
+            c: "baz".to_string(),
+            a: "qux".to_string(),
+        },
+    ];
+
+    let result = insert_and_select(&client, "test", rows.clone()).await;
+    assert_eq!(result, rows);
+}
+
+#[tokio::test]
+async fn different_struct_field_order_different_types() {
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        b: u32,
+        a: String,
+        c: Vec<bool>,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE OR REPLACE TABLE test (
+                a String,
+                b UInt32,
+                c Array(Bool)
+            ) ENGINE MergeTree ORDER BY a
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = vec![
+        Data {
+            b: 42,
+            a: "bar".to_string(),
+            c: vec![false, true],
+        },
+        Data {
+            b: 144,
+            a: "foo".to_string(),
+            c: vec![true, false, true],
+        },
+    ];
+
+    let result = insert_and_select(&client, "test", rows.clone()).await;
+    assert_eq!(result, rows);
+}
+
+#[tokio::test]
+async fn different_struct_field_order_mixed_usage() {
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        c: String,
+        a: String,
+        sku: u32,
+        id: u32,
+        #[serde(skip_serializing)]
+        #[serde(skip_deserializing)]
+        ignored: u64,
+        #[serde(rename = "b")]
+        x: u64,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE OR REPLACE TABLE test (
+                id UInt32,
+                a String,
+                b UInt64,
+                c String,
+                sku UInt32
+            ) ENGINE MergeTree ORDER BY id
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = vec![
+        Data {
+            c: "foo".to_string(),
+            a: "bar".to_string(),
+            sku: 42,
+            id: 1,
+            ignored: 123, // skipped
+            x: 100,       // serialized as 'b'
+        },
+        Data {
+            c: "baz".to_string(),
+            a: "qux".to_string(),
+            sku: 144,
+            id: 2,
+            ignored: 777, // skipped
+            x: 200,       // serialized as 'b'
+        },
+    ];
+
+    let result = insert_and_select(&client, "test", rows.clone()).await;
+    assert_eq!(
+        result,
+        vec![
+            Data {
+                c: "foo".to_string(),
+                a: "bar".to_string(),
+                sku: 42,
+                id: 1,
+                ignored: 0, // not deserialized, default value
+                x: 100,     // deserialized from the db field 'b'
+            },
+            Data {
+                c: "baz".to_string(),
+                a: "qux".to_string(),
+                sku: 144,
+                id: 2,
+                ignored: 0, // not deserialized, default value
+                x: 200,     // deserialized from the db field 'b'
+            },
+        ]
+    );
+}
