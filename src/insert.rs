@@ -1,12 +1,17 @@
 use crate::headers::{with_authentication, with_request_headers};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::{serialize_row_binary, serialize_with_validation};
-use crate::{error::{Error, Result}, request_body::{ChunkSender, RequestBody}, response::Response, row::{self, Row}, Client, Compression, RowWrite};
+use crate::{
+    error::{Error, Result},
+    request_body::{ChunkSender, RequestBody},
+    response::Response,
+    row::{self, Row},
+    Client, Compression, RowWrite,
+};
 use bytes::{Bytes, BytesMut};
 use clickhouse_types::put_rbwnat_columns_header;
 use hyper::{self, Request};
 use replace_with::replace_with_or_abort;
-use serde::Serialize;
 use std::sync::Arc;
 use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Duration};
 use tokio::{
@@ -215,7 +220,6 @@ impl<T> Insert<T> {
         row: &T::Value<'_>,
     ) -> impl Future<Output = Result<()>> + 'a + Send
     where
-        T: Serialize + Row,
         T: RowWrite,
     {
         let result = self.do_write(row);

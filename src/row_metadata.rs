@@ -161,9 +161,16 @@ pub(crate) async fn get_row_metadata<T: Row>(
             drop(read_lock);
             // TODO: should it be moved to a cold function?
             let mut write_lock = client.row_metadata_cache.0.write().await;
+            let db = match client.database {
+                Some(ref db) => db,
+                None => "default",
+            };
             let mut bytes_cursor = client
                 .query("SELECT * FROM ? LIMIT 0")
                 .bind(Identifier(table_name))
+                // don't allow to override the client database set in the client instance
+                // with a `.with_option("database", "some_other_db")` call on the app side
+                .with_option("database", db)
                 .fetch_bytes("RowBinaryWithNamesAndTypes")?;
             let mut buffer = Vec::<u8>::new();
             while let Some(chunk) = bytes_cursor.next().await? {
