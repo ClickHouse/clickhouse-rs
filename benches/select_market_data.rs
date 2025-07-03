@@ -71,7 +71,7 @@ async fn prepare_data() {
         return;
     }
 
-    let mut insert = client.insert("l2_book_log").await.unwrap();
+    let mut insert = client.insert::<L2Update>("l2_book_log").await.unwrap();
 
     for i in 0..10_000_000 {
         insert

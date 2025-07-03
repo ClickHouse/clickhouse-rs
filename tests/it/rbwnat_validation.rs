@@ -2,6 +2,8 @@ use crate::{execute_statements, geo_types::*, get_client};
 use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use serde_repr::{Deserialize_repr, Serialize_repr};
+use clickhouse::sql::Identifier;
 
 #[tokio::test]
 async fn fetch_primitive_row() {
@@ -188,8 +190,68 @@ async fn fetch_tuple_row_with_struct_schema_mismatch_too_few_fields() {
     );
 }
 
-// FIXME: somehow this test breaks `cargo test`, but works from RustRover
-#[ignore]
+#[tokio::test]
+async fn basic_types() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        uint8_val: u8,
+        uint16_val: u16,
+        uint32_val: u32,
+        uint64_val: u64,
+        uint128_val: u128,
+        int8_val: i8,
+        int16_val: i16,
+        int32_val: i32,
+        int64_val: i64,
+        int128_val: i128,
+        float32_val: f32,
+        float64_val: f64,
+        string_val: String,
+    }
+
+    let client = get_client();
+    let result = client
+        .query(
+            "
+            SELECT
+                255                                      :: UInt8   AS uint8_val,
+                65535                                    :: UInt16  AS uint16_val,
+                4294967295                               :: UInt32  AS uint32_val,
+                18446744073709551615                     :: UInt64  AS uint64_val,
+                340282366920938463463374607431768211455  :: UInt128 AS uint128_val,
+                -128                                     :: Int8    AS int8_val,
+                -32768                                   :: Int16   AS int16_val,
+                -2147483648                              :: Int32   AS int32_val,
+                -9223372036854775808                     :: Int64   AS int64_val,
+                -170141183460469231731687303715884105728 :: Int128  AS int128_val,
+                42.0                                     :: Float32 AS float32_val,
+                144.0                                    :: Float64 AS float64_val,
+                'test'                                   :: String  AS string_val
+            ",
+        )
+        .fetch_one::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        Data {
+            uint8_val: 255,
+            uint16_val: 65535,
+            uint32_val: 4294967295,
+            uint64_val: 18446744073709551615,
+            uint128_val: 340282366920938463463374607431768211455,
+            int8_val: -128,
+            int16_val: -32768,
+            int32_val: -2147483648,
+            int64_val: -9223372036854775808,
+            int128_val: -170141183460469231731687303715884105728,
+            float32_val: 42.0,
+            float64_val: 144.0,
+            string_val: "test".to_string(),
+        }
+    );
+}
+
 #[tokio::test]
 async fn borrowed_data() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
@@ -242,46 +304,45 @@ async fn borrowed_data() {
         .fetch::<Data<'_>>()
         .unwrap();
 
-    let mut result = Vec::new();
-    while let Some(row) = cursor.next().await.unwrap() {
-        result.push(row);
-    }
+    assert_eq!(
+        cursor.next().await.unwrap().unwrap(),
+        Data {
+            str: "a",
+            array: vec!["b", "c"],
+            tuple: ("d", "e"),
+            str_opt: None,
+            vec_map_str: vec![("key1", "value1"), ("key2", "value2")],
+            vec_map_f32: vec![("key3", 100.0), ("key4", 200.0)],
+            vec_map_nested: vec![("n1", vec![("key1", "value1"), ("key2", "value2")])],
+            hash_map_str: HashMap::from([("key1", "value1"), ("key2", "value2")]),
+            hash_map_f32: HashMap::from([("key3", 100.0), ("key4", 200.0)]),
+            hash_map_nested: HashMap::from([(
+                "n1",
+                HashMap::from([("key1", "value1"), ("key2", "value2")]),
+            )]),
+        }
+    );
 
     assert_eq!(
-        result,
-        vec![
-            Data {
-                str: "a",
-                array: vec!["b", "c"],
-                tuple: ("d", "e"),
-                str_opt: None,
-                vec_map_str: vec![("key1", "value1"), ("key2", "value2")],
-                vec_map_f32: vec![("key3", 100.0), ("key4", 200.0)],
-                vec_map_nested: vec![("n1", vec![("key1", "value1"), ("key2", "value2")])],
-                hash_map_str: HashMap::from([("key1", "value1"), ("key2", "value2"),]),
-                hash_map_f32: HashMap::from([("key3", 100.0), ("key4", 200.0),]),
-                hash_map_nested: HashMap::from([(
-                    "n1",
-                    HashMap::from([("key1", "value1"), ("key2", "value2"),]),
-                )]),
-            },
-            Data {
-                str: "f",
-                array: vec!["g", "h"],
-                tuple: ("i", "j"),
-                str_opt: Some("k"),
-                vec_map_str: vec![("key4", "value4"), ("key5", "value5")],
-                vec_map_f32: vec![("key6", 300.0), ("key7", 400.0)],
-                vec_map_nested: vec![("n2", vec![("key4", "value4"), ("key5", "value5")])],
-                hash_map_str: HashMap::from([("key4", "value4"), ("key5", "value5"),]),
-                hash_map_f32: HashMap::from([("key6", 300.0), ("key7", 400.0),]),
-                hash_map_nested: HashMap::from([(
-                    "n2",
-                    HashMap::from([("key4", "value4"), ("key5", "value5"),]),
-                )]),
-            },
-        ]
+        cursor.next().await.unwrap().unwrap(),
+        Data {
+            str: "f",
+            array: vec!["g", "h"],
+            tuple: ("i", "j"),
+            str_opt: Some("k"),
+            vec_map_str: vec![("key4", "value4"), ("key5", "value5")],
+            vec_map_f32: vec![("key6", 300.0), ("key7", 400.0)],
+            vec_map_nested: vec![("n2", vec![("key4", "value4"), ("key5", "value5")])],
+            hash_map_str: HashMap::from([("key4", "value4"), ("key5", "value5")]),
+            hash_map_f32: HashMap::from([("key6", 300.0), ("key7", 400.0)]),
+            hash_map_nested: HashMap::from([(
+                "n2",
+                HashMap::from([("key4", "value4"), ("key5", "value5")]),
+            )]),
+        },
     );
+
+    assert!(cursor.next().await.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -335,6 +396,126 @@ async fn map_as_vec_of_tuples_schema_mismatch_nested() {
         ],
         "SELECT map(42, map('foo', map(144, 255)))
                 :: Map(UInt16, Map(String, Map(Int32, Int128))) AS m"
+    );
+}
+
+#[tokio::test]
+async fn enums() {
+    #[derive(Debug, PartialEq, Serialize_repr, Deserialize_repr)]
+    #[repr(i8)]
+    enum MyEnum8 {
+        Winter = -128,
+        Spring = 0,
+        Summer = 100,
+        Autumn = 127,
+    }
+
+    #[derive(Debug, PartialEq, Serialize_repr, Deserialize_repr)]
+    #[repr(i16)]
+    enum MyEnum16 {
+        North = -32768,
+        East = 0,
+        South = 144,
+        West = 32767,
+    }
+
+    #[derive(Debug, PartialEq, Row, Serialize, Deserialize)]
+    struct Data {
+        id: u16,
+        enum8: MyEnum8,
+        enum16: MyEnum16,
+    }
+
+    let table_name = "test_rbwnat_enum";
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE OR REPLACE TABLE ?
+            (
+                id     UInt16,
+                enum8  Enum8 ('Winter' = -128,   'Spring' = 0, 'Summer' = 100, 'Autumn' = 127),
+                enum16 Enum16('North'  = -32768, 'East'   = 0, 'South'  = 144, 'West'   = 32767)
+            ) ENGINE MergeTree ORDER BY id
+            ",
+        )
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+
+    let expected = vec![
+        Data {
+            id: 1,
+            enum8: MyEnum8::Spring,
+            enum16: MyEnum16::East,
+        },
+        Data {
+            id: 2,
+            enum8: MyEnum8::Autumn,
+            enum16: MyEnum16::North,
+        },
+        Data {
+            id: 3,
+            enum8: MyEnum8::Winter,
+            enum16: MyEnum16::South,
+        },
+        Data {
+            id: 4,
+            enum8: MyEnum8::Summer,
+            enum16: MyEnum16::West,
+        },
+    ];
+
+    let mut insert = client.insert::<Data>(table_name).await.unwrap();
+    for row in &expected {
+        insert.write(row).await.unwrap()
+    }
+    insert.end().await.unwrap();
+
+    let result = client
+        .query("SELECT * FROM ? ORDER BY id ASC")
+        .bind(Identifier(table_name))
+        .fetch_all::<Data>()
+        .await
+        .unwrap();
+
+    assert_eq!(result, expected);
+}
+
+#[tokio::test]
+async fn nullable() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: u32,
+        b: Option<i64>,
+    }
+
+    let client = get_client();
+    let result = client
+        .query(
+            "
+            SELECT * FROM (
+                SELECT 1 :: UInt32 AS a, 2    :: Nullable(Int64) AS b
+                UNION ALL
+                SELECT 3 :: UInt32 AS a, NULL :: Nullable(Int64) AS b
+                UNION ALL
+                SELECT 4 :: UInt32 AS a, 5    :: Nullable(Int64) AS b
+            )
+            ORDER BY a ASC
+            ",
+        )
+        .fetch_all::<Data>()
+        .await;
+
+    assert_eq!(
+        result.unwrap(),
+        vec![
+            Data { a: 1, b: Some(2) },
+            Data { a: 3, b: None },
+            Data { a: 4, b: Some(5) },
+        ]
     );
 }
 
@@ -670,7 +851,7 @@ async fn issue_109_1() {
         .fetch_all::<Data>()
         .await
         .unwrap();
-    let mut insert = client.insert("issue_109").await.unwrap();
+    let mut insert = client.insert::<Data>("issue_109").await.unwrap();
     for (id, elem) in data.iter().enumerate() {
         let elem = Data {
             en_id: format!("ABC-{}", id),

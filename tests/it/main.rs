@@ -1,4 +1,4 @@
-//! ## Integration tests
+//! # Integration tests
 //!
 //! - The `wait_end_of_query` setting that is used for all DDLs forces HTTP response buffering.
 //!   We will get the response only when the DDL is executed on every cluster node.
@@ -19,13 +19,15 @@
 //!   Cloud-only tests might also require JWT access token, which should be
 //!   provided via `CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN`.
 //!
-//! - Created database names should match the following template:
-//!   `chrs__{...}__{unix_millis}`. This allows to simply clean up the databases
-//!   from the Cloud instance based on its creation time. See
-//!   [`_priv::make_db_name`].
+//! - All tests must use `prepare_database!()` macro if custom tables are
+//!   created. This macro will create a new database for each test with
+//!   a name suitable for specified test environment. For instance, for
+//!   the "cloud" environment, it appends the current timestamp to allow
+//!   clean up outdated databases based on its creation time.
 
-use clickhouse::{sql::Identifier, Client, Row};
+use clickhouse::{sql::Identifier, Client, Row, RowOwned, RowRead, RowWrite};
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 macro_rules! assert_panic_on_fetch_with_client {
     ($client:ident, $msg_parts:expr, $query:expr) => {
@@ -81,7 +83,7 @@ macro_rules! prepare_database {
 
 macro_rules! check_cloud_test_env {
     () => {
-        if !crate::is_cloud_test_env() {
+        if $crate::test_env() != $crate::TestEnv::Cloud {
             eprintln!("Skipping test as it is not Cloud only");
             return;
         }
@@ -90,18 +92,14 @@ macro_rules! check_cloud_test_env {
 
 pub(crate) fn get_client() -> Client {
     let client = Client::default();
-    if is_cloud_test_env() {
-        client
+
+    match test_env() {
+        TestEnv::Local => client.with_url("http://localhost:8123"),
+        TestEnv::Cloud => client
             .with_url(get_cloud_url())
             .with_user("default")
-            .with_password(require_env_var("CLICKHOUSE_CLOUD_PASSWORD"))
-    } else {
-        client.with_url("http://localhost:8123")
+            .with_password(require_env_var("CLICKHOUSE_CLOUD_PASSWORD")),
     }
-}
-
-pub(crate) fn is_cloud_test_env() -> bool {
-    matches!(std::env::var("CLICKHOUSE_TEST_ENVIRONMENT"), Ok(test_env) if test_env == "cloud")
 }
 
 pub(crate) fn require_env_var(name: &str) -> String {
@@ -140,7 +138,7 @@ pub(crate) async fn create_simple_table(client: &Client, table_name: &str) {
 
 pub(crate) async fn fetch_rows<T>(client: &Client, table_name: &str) -> Vec<T>
 where
-    T: Row + for<'b> Deserialize<'b>,
+    T: RowOwned + RowRead,
 {
     client
         .query("SELECT ?fields FROM ?")
@@ -171,9 +169,9 @@ pub(crate) async fn insert_and_select<T>(
     data: impl IntoIterator<Item = T>,
 ) -> Vec<T>
 where
-    T: Row + Serialize + for<'de> Deserialize<'de>,
+    T: RowOwned + RowRead + RowWrite,
 {
-    let mut insert = client.insert(table_name).await.unwrap();
+    let mut insert = client.insert::<T>(table_name).await.unwrap();
     for row in data.into_iter() {
         insert.write(&row).await.unwrap();
     }
@@ -229,6 +227,30 @@ mod user_agent;
 mod uuid;
 mod variant;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TestEnv {
+    Local,
+    Cloud,
+}
+
+#[allow(clippy::incompatible_msrv)]
+fn test_env() -> TestEnv {
+    use std::env::{var, VarError};
+
+    static TEST_ENV: LazyLock<TestEnv> =
+        LazyLock::new(|| match var("CLICKHOUSE_TEST_ENVIRONMENT") {
+            Ok(env) if env == "local" => TestEnv::Local,
+            Ok(env) if env == "cloud" => TestEnv::Cloud,
+            Ok(env) => panic!("Unknown CLICKHOUSE_TEST_ENVIRONMENT: {env}"),
+            Err(VarError::NotPresent) => TestEnv::Local,
+            Err(VarError::NotUnicode(_)) => {
+                panic!("CLICKHOUSE_TEST_ENVIRONMENT must be a valid UTF-8 string")
+            }
+        });
+
+    *TEST_ENV
+}
+
 mod _priv {
     use super::*;
     use std::time::SystemTime;
@@ -257,22 +279,24 @@ mod _priv {
         client.with_database(db_name)
     }
 
-    /// `it::compression::lz4::{{closure}}::f` is transformed to:
-    /// * For tests that use local CH instance: `chrs__compression__lz4`
-    /// * For Cloud tests (e.g., JWT):          `chrs__compression__lz4__{unix_millis}`
+    // `it::compression::lz4::{{closure}}::f` ->
+    // - "local" env: `chrs__compression__lz4`
+    // - "cloud" env: `chrs__compression__lz4__{unix_millis}`
     fn make_db_name(fn_path: &str) -> String {
         assert!(fn_path.starts_with("it::"));
         let mut iter = fn_path.split("::").skip(1);
         let module = iter.next().unwrap();
         let test = iter.next().unwrap();
-        if is_cloud_test_env() {
-            let now_unix_millis = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_millis();
-            format!("chrs__{module}__{test}__{now_unix_millis}")
-        } else {
-            format!("chrs__{module}__{test}")
+
+        match test_env() {
+            TestEnv::Local => format!("chrs__{module}__{test}"),
+            TestEnv::Cloud => {
+                let now_unix_millis = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis();
+                format!("chrs__{module}__{test}__{now_unix_millis}")
+            }
         }
     }
 }

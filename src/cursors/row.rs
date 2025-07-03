@@ -4,11 +4,10 @@ use crate::{
     cursors::RawCursor,
     error::{Error, Result},
     response::Response,
-    rowbinary, Row,
+    rowbinary, RowRead,
 };
 use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
-use serde::Deserialize;
 use std::marker::PhantomData;
 
 /// A cursor that emits rows deserialized as structures from RowBinary.
@@ -38,7 +37,7 @@ impl<T> RowCursor<T> {
     #[inline(never)]
     async fn read_columns(&mut self) -> Result<()>
     where
-        T: Row,
+        T: RowRead,
     {
         loop {
             if self.bytes.remaining() > 0 {
@@ -84,42 +83,44 @@ impl<T> RowCursor<T> {
     /// # Cancel safety
     ///
     /// This method is cancellation safe.
-    pub async fn next<'cursor, 'data: 'cursor>(&'cursor mut self) -> Result<Option<T>>
+    pub async fn next(&mut self) -> Result<Option<T::Value<'_>>>
     where
-        T: Deserialize<'data> + Row,
+        T: RowRead,
     {
+        if self.validation && self.row_metadata.is_none() {
+            self.read_columns().await?;
+            debug_assert!(self.row_metadata.is_some());
+        }
+
         loop {
             if self.bytes.remaining() > 0 {
-                let mut slice: &[u8];
-                let result = if self.validation {
-                    if self.row_metadata.is_none() {
-                        self.read_columns().await?;
-                        if self.bytes.remaining() == 0 {
-                            continue;
-                        }
-                    }
-                    slice = super::workaround_51132(self.bytes.slice());
-                    rowbinary::deserialize_row_with_validation::<T>(
-                        &mut slice,
-                        // handled above
-                        self.row_metadata.as_ref().unwrap(),
-                    )
-                } else {
-                    slice = super::workaround_51132(self.bytes.slice());
-                    rowbinary::deserialize_row::<T>(&mut slice)
-                };
+                let mut slice = self.bytes.slice();
+                let result = rowbinary::deserialize_row::<T::Value<'_>>(
+                    &mut slice,
+                    self.row_metadata.as_ref(),
+                );
+
                 match result {
-                    Err(Error::NotEnoughData) => {}
                     Ok(value) => {
                         self.bytes.set_remaining(slice.len());
                         return Ok(Some(value));
                     }
+                    Err(Error::NotEnoughData) => {}
                     Err(err) => return Err(err),
                 }
             }
 
             match self.raw.next().await? {
-                Some(chunk) => self.bytes.extend(chunk),
+                Some(chunk) => {
+                    // SAFETY: we actually don't have active immutable references at this point.
+                    //
+                    // The borrow checker prior to polonius thinks we still have ones.
+                    // This is a pretty common restriction that can be fixed by using
+                    // the polonius-the-crab crate, which cannot be used in async code.
+                    //
+                    // See https://github.com/rust-lang/rust/issues/51132
+                    unsafe { self.bytes.extend_by_ref(chunk) }
+                }
                 None if self.bytes.remaining() > 0 => {
                     // If some data is left, we have an incomplete row in the buffer.
                     // This is usually a schema mismatch on the client side.

@@ -1,13 +1,7 @@
 use crate::headers::{with_authentication, with_request_headers};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::{serialize_row_binary, serialize_with_validation};
-use crate::{
-    error::{Error, Result},
-    request_body::{ChunkSender, RequestBody},
-    response::Response,
-    row::{self, Row},
-    Client, Compression,
-};
+use crate::{error::{Error, Result}, request_body::{ChunkSender, RequestBody}, response::Response, row::{self, Row}, Client, Compression, RowWrite};
 use bytes::{Bytes, BytesMut};
 use clickhouse_types::put_rbwnat_columns_header;
 use hyper::{self, Request};
@@ -216,9 +210,13 @@ impl<T> Insert<T> {
     /// # Panics
     ///
     /// If called after the previous call that returned an error.
-    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
+    pub fn write<'a>(
+        &'a mut self,
+        row: &T::Value<'_>,
+    ) -> impl Future<Output = Result<()>> + 'a + Send
     where
         T: Serialize + Row,
+        T: RowWrite,
     {
         let result = self.do_write(row);
 
@@ -232,9 +230,9 @@ impl<T> Insert<T> {
     }
 
     #[inline(always)]
-    pub(crate) fn do_write(&mut self, row: &T) -> Result<usize>
+    pub(crate) fn do_write(&mut self, row: &T::Value<'_>) -> Result<usize>
     where
-        T: Serialize + Row,
+        T: RowWrite,
     {
         match self.state {
             InsertState::NotStarted { .. } => self.init_request(),

@@ -34,7 +34,7 @@ async fn force_commit() {
     let client = prepare_database!();
     create_table(&client).await;
 
-    let mut inserter = client.inserter("test");
+    let mut inserter = client.inserter::<MyRow>("test");
     let rows = 100;
 
     for i in 1..=rows {
@@ -63,7 +63,7 @@ async fn limited_by_rows() {
     let client = prepare_database!();
     create_table(&client).await;
 
-    let mut inserter = client.inserter("test").with_max_rows(10);
+    let mut inserter = client.inserter::<MyRow>("test").with_max_rows(10);
     let rows = 100;
 
     for i in (2..=rows).step_by(2) {
@@ -105,7 +105,7 @@ async fn limited_by_bytes() {
     let client = prepare_database!();
     create_table(&client).await;
 
-    let mut inserter = client.inserter("test").with_max_bytes(100);
+    let mut inserter = client.inserter::<MyRow>("test").with_max_bytes(100);
     let rows = 100;
 
     let row = MyRow::new("x".repeat(9));
@@ -149,7 +149,9 @@ async fn limited_by_time() {
     create_table(&client).await;
 
     let period = Duration::from_secs(1);
-    let mut inserter = client.inserter("test").with_period(Some(period));
+    let mut inserter = client
+        .inserter::<MyRow>("test")
+        .with_period(Some(period));
     let rows = 100;
 
     for i in 1..=rows {
@@ -200,7 +202,7 @@ async fn keeps_client_options() {
     let row = SimpleRow::new(42, "foo");
 
     let mut inserter = client
-        .inserter(table_name)
+        .inserter::<SimpleRow>(table_name)
         .with_option("async_insert", "1")
         .with_option("query_id", &query_id);
 
@@ -252,7 +254,7 @@ async fn overrides_client_options() {
     let row = SimpleRow::new(42, "foo");
 
     let mut inserter = client
-        .inserter(table_name)
+        .inserter::<SimpleRow>(table_name)
         .with_option("async_insert", override_value)
         .with_option("query_id", &query_id);
 

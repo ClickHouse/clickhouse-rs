@@ -4,10 +4,10 @@ use bytes::Bytes;
 use futures::channel::oneshot;
 use hyper::{Request, Response, StatusCode};
 use sealed::sealed;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use super::{Handler, HandlerFn};
-use crate::{rowbinary, Row};
+use crate::{rowbinary, Row, RowOwned, RowRead};
 
 const BUFFER_INITIAL_CAPACITY: usize = 1024;
 
@@ -82,7 +82,7 @@ pub struct RecordControl<T> {
 
 impl<T> RecordControl<T>
 where
-    T: for<'a> Deserialize<'a> + Row,
+    T: RowOwned + RowRead,
 {
     pub async fn collect<C>(self) -> C
     where
@@ -93,7 +93,7 @@ where
         let mut result = C::default();
 
         while !slice.is_empty() {
-            let res = rowbinary::deserialize_row(slice);
+            let res = rowbinary::deserialize_row(slice, None);
             let row: T = res.expect("failed to deserialize");
             result.extend(std::iter::once(row));
         }

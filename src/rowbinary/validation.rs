@@ -1,5 +1,4 @@
-use crate::row_metadata::RowMetadata;
-use crate::{Row, RowKind};
+use crate::{row::RowKind, row_metadata::RowMetadata, Row};
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;

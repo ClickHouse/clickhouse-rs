@@ -1392,7 +1392,7 @@ mod tests {
         assert_eq!(DecimalType::Decimal256.to_string(), "Decimal256");
     }
 
-    const ENUM_WITH_ESCAPING_STR: &'static str =
+    const ENUM_WITH_ESCAPING_STR: &str =
         "Enum8('f\\'' = 1, 'x =' = 2, 'b\\'\\'' = 3, '\\'c=4=' = 42, '4' = 100)";
 
     fn enum_with_escaping() -> DataTypeNode {

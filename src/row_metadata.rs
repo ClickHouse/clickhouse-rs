@@ -24,6 +24,9 @@ pub(crate) enum AccessType {
     WithMapAccess(Vec<usize>),
 }
 
+/// Contains a vector of [`Column`] objects parsed from the beginning
+/// of `RowBinaryWithNamesAndTypes` data stream.
+///
 /// [`RowMetadata`] should be owned outside the (de)serializer,
 /// as it is calculated only once per struct. It does not have lifetimes,
 /// so it does not introduce a breaking change to [`crate::cursors::RowCursor`].
@@ -212,6 +215,7 @@ mod test {
         const KIND: RowKind = RowKind::Struct;
         const COLUMN_COUNT: usize = 3;
         const COLUMN_NAMES: &'static [&'static str] = &["name", "id", "storage"];
+        type Value<'a> = SystemRolesRow;
     }
 
     #[test]

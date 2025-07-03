@@ -29,7 +29,7 @@ async fn ddl(client: &Client) -> Result<()> {
 }
 
 async fn insert(client: &Client) -> Result<()> {
-    let mut insert = client.insert("some").await?;
+    let mut insert = client.insert::<MyRow<'_>>("some").await?;
     for i in 0..1000 {
         insert.write(&MyRow { no: i, name: "foo" }).await?;
     }
@@ -42,7 +42,7 @@ async fn insert(client: &Client) -> Result<()> {
 #[cfg(feature = "inserter")]
 async fn inserter(client: &Client) -> Result<()> {
     let mut inserter = client
-        .inserter("some")
+        .inserter::<MyRow<'_>>("some")
         .with_max_rows(100_000)
         .with_period(Some(std::time::Duration::from_secs(15)));
 
