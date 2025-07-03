@@ -114,12 +114,11 @@ async fn empty_insert() {
     let client = prepare_database!();
     create_simple_table(&client, table_name).await;
 
-    let mut insert = client
+    let insert = client
         .insert::<SimpleRow>(table_name)
         .await
         .unwrap()
         .with_option("query_id", &query_id);
-
     insert.end().await.unwrap();
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;

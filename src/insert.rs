@@ -264,7 +264,7 @@ impl<T> Insert<T> {
     /// successfully, including all materialized views and quorum writes.
     ///
     /// NOTE: If it isn't called, the whole `INSERT` is aborted.
-    pub async fn end(&mut self) -> Result<()> {
+    pub async fn end(mut self) -> Result<()> {
         if !self.buffer.is_empty() {
             self.send_chunk().await?;
         }

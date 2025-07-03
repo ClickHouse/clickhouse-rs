@@ -282,7 +282,7 @@ where
     }
 
     async fn insert(&mut self) -> Result<()> {
-        if let Some(mut insert) = self.insert.take() {
+        if let Some(insert) = self.insert.take() {
             insert.end().await?;
         }
         Ok(())
