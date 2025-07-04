@@ -470,6 +470,11 @@ mod tests {
         assert_eq!(check(Bytes::new(b"")), "X''");
         assert_eq!(check(Bytes::new(b"a\xffb")), "X'61FF62'");
         assert_eq!(check(Bytes::new(b"a'b")), "X'612762'");
+
+        assert_eq!(check(b"hello"), "(104,101,108,108,111)");
+        assert_eq!(check(b""), "()");
+        assert_eq!(check(b"a\xffb"), "(97,255,98)");
+        assert_eq!(check(b"a'b"), "(97,39,98)");
     }
 
     #[test]
