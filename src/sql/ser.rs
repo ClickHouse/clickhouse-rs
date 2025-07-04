@@ -85,10 +85,15 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     unsupported!(
         serialize_map(Option<usize>) -> Result<Impossible>,
-        serialize_bytes(&[u8]),
         serialize_unit,
         serialize_unit_struct(&'static str),
     );
+
+    #[inline]
+    fn serialize_bytes(self, value: &[u8]) -> Result {
+        escape::hex_bytes(value, self.writer)?;
+        Ok(())
+    }
 
     forward_to_display!(
         serialize_i8(i8),
@@ -456,6 +461,15 @@ mod tests {
         let mut out = String::new();
         write_arg(&mut out, &v).unwrap();
         out
+    }
+
+    #[test]
+    fn it_writes_bytes() {
+        use serde_bytes::Bytes;
+        assert_eq!(check(Bytes::new(b"hello")), "X'68656C6C6F'");
+        assert_eq!(check(Bytes::new(b"")), "X''");
+        assert_eq!(check(Bytes::new(b"a\xffb")), "X'61FF62'");
+        assert_eq!(check(Bytes::new(b"a'b")), "X'612762'");
     }
 
     #[test]
