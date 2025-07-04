@@ -30,7 +30,7 @@ pub(crate) fn escape(src: &str, dst: &mut impl fmt::Write) -> fmt::Result {
 }
 
 // See https://clickhouse.com/docs/en/sql-reference/syntax#string
-pub(crate) fn hex_bytes(s: &[u8], dst: &mut impl Write) -> fmt::Result {
+pub(crate) fn hex_bytes(s: &[u8], dst: &mut impl fmt::Write) -> fmt::Result {
     dst.write_char('X')?;
     dst.write_char('\'')?;
     for &byte in s {
