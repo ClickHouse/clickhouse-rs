@@ -90,6 +90,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Start ClickHouse in Docker
         uses: hoverkraft-tech/compose-action@v2.2.0
         with:
@@ -98,10 +102,12 @@ jobs:
 
       - run: rustup show active-toolchain -v
       # TODO: --workspace won't be required after splitting workspace and the main crate
-      - run: cargo test --workspace
-      - run: cargo test --workspace --no-default-features
-      - run: cargo test --workspace --features uuid,time
-      - run: cargo test --workspace --all-features
+      - name: Run tests
+        run: cargo llvm-cov test --workspace --no-report
+      - name: Run tests without default features
+        run: cargo llvm-cov test --workspace --no-report --no-default-features
+      - name: Run tests with all features
+        run: cargo llvm-cov test --workspace --no-report --all-features
 
       - name: Run tests with ClickHouse Cloud
         env:
@@ -112,8 +118,18 @@ jobs:
         # Temporary runs tests with `cloud_` prefix only until we validate that the rest of the tests are working
         # `https_errors` should assert ClickHouse Cloud connection errors without enabled TLS features
         run: |
-          cargo test cloud_ --features rustls-tls -- --nocapture
-          cargo test https_errors -- --nocapture
+          cargo llvm-cov test cloud_ --no-report --features rustls-tls -- --nocapture
+          cargo llvm-cov test https_errors --no-report -- --nocapture
+
+      - name: Generate code coverage
+        run: cargo llvm-cov report --codecov --output-path codecov.json
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: codecov.json
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: ClickHouse/clickhouse-rs
+          fail_ci_if_error: true
 
   miri:
     needs: build
