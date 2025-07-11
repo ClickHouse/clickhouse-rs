@@ -66,6 +66,11 @@ pub enum DataTypeNode {
     /// Precision and optional timezone
     DateTime64(DateTimePrecision, Option<String>),
 
+    /// Optional timezone
+    Time(Option<String>),
+    /// Precision and optional timezone
+    Time64(DateTimePrecision, Option<String>),
+
     IPv4,
     IPv6,
 
@@ -136,6 +141,8 @@ impl DataTypeNode {
             str if str.starts_with("Decimal") => parse_decimal(str),
             str if str.starts_with("DateTime64") => parse_datetime64(str),
             str if str.starts_with("DateTime") => parse_datetime(str),
+            str if str.starts_with("Time64") => parse_time64(str),
+            str if str.starts_with("Time") => parse_time(str),
 
             str if str.starts_with("Nullable") => parse_nullable(str),
             str if str.starts_with("LowCardinality") => parse_low_cardinality(str),
@@ -200,6 +207,10 @@ impl Display for DataTypeNode {
             DateTime(Some(tz)) => format!("DateTime('{}')", tz),
             DateTime64(precision, None) => format!("DateTime64({})", precision),
             DateTime64(precision, Some(tz)) => format!("DateTime64({}, '{}')", precision, tz),
+            Time(None) => "Time".to_string(),
+            Time(Some(tz)) => format!("Time('{}')", tz),
+            Time64(precision, None) => format!("Time64({})", precision),
+            Time64(precision, Some(tz)) => format!("Time64({}, '{}')", precision, tz),
             IPv4 => "IPv4".to_string(),
             IPv6 => "IPv6".to_string(),
             Bool => "Bool".to_string(),
@@ -504,6 +515,40 @@ fn parse_datetime64(input: &str) -> Result<DataTypeNode, TypesError> {
     }
     Err(TypesError::TypeParsingError(format!(
         "Invalid DateTime format, expected DateTime('timezone'), got {}",
+        input
+    )))
+}
+
+fn parse_time(input: &str) -> Result<DataTypeNode, TypesError> {
+    if input.len() >= 5 {
+        let maybe_tz = match &input[5..input.len() - 1] {
+            str if str.len() > 2 => Some(str[2..str.len() - 1].to_string()),
+            _ => None,
+        };
+        return Ok(DataTypeNode::Time(maybe_tz));
+    }
+    Err(TypesError::TypeParsingError(format!(
+        "Invalid Time format, expected Time('timezone'), got {}",
+        input
+    )))
+}
+
+fn parse_time64(input: &str) -> Result<DataTypeNode, TypesError> {
+    if input.len() >= 8 {
+        let mut chars = input[7..input.len() - 1].chars();
+        let precision_char = chars.next().ok_or(TypesError::TypeParsingError(format!(
+            "Invalid Time64 precision, expected a positive number. Input: {}",
+            input
+        )))?;
+        let precision = DateTimePrecision::new(precision_char)?;
+        let maybe_tz = match chars.as_str() {
+            str if str.len() > 2 => Some(str[3..str.len() - 1].to_string()),
+            _ => None,
+        };
+        return Ok(DataTypeNode::Time64(precision, maybe_tz));
+    }
+    Err(TypesError::TypeParsingError(format!(
+        "Invalid Time64 format, expected Time64(precision, 'timezone'), got {}",
         input
     )))
 }
@@ -948,6 +993,94 @@ mod tests {
         );
         assert!(DataTypeNode::new("DateTime64()").is_err());
         assert!(DataTypeNode::new("DateTime64(x)").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_time() {
+        assert_eq!(
+            DataTypeNode::new("Time").unwrap(),
+            DataTypeNode::Time(None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time('UTC')").unwrap(),
+            DataTypeNode::Time(Some("UTC".to_string()))
+        );
+        assert_eq!(
+            DataTypeNode::new("Time('America/New_York')").unwrap(),
+            DataTypeNode::Time(Some("America/New_York".to_string()))
+        );
+        assert!(DataTypeNode::new("Time()").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_time64() {
+        assert_eq!(
+            DataTypeNode::new("Time64(0)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision0, None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(1)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision1, None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(2)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision2, None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(3)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision3, None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(4)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision4, None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(5)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision5, None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(6)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision6, None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(7)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision7, None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(8)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision8, None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(9)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision9, None)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision0, Some("UTC".to_string()))
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(3, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(
+                DateTimePrecision::Precision3,
+                Some("America/New_York".to_string())
+            )
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(
+                DateTimePrecision::Precision6,
+                Some("America/New_York".to_string())
+            )
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
+            DataTypeNode::Time64(
+                DateTimePrecision::Precision9,
+                Some("Europe/Amsterdam".to_string())
+            )
+        );
+        assert!(DataTypeNode::new("Time64()").is_err());
+        assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
     #[test]
