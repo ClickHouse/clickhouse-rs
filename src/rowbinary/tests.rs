@@ -8,6 +8,12 @@ struct Timestamp32(u32);
 struct Timestamp64(u64);
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct Time32(u32);
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct Time64(u64);
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct FixedPoint64(i64);
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -25,6 +31,8 @@ struct Sample<'a> {
     float64: f64,
     datetime: Timestamp32,
     datetime64: Timestamp64,
+    time32: Time32,
+    time64: Time64,
     decimal64: FixedPoint64,
     decimal128: FixedPoint128,
     string: &'a str,
@@ -51,6 +59,8 @@ impl Row for Sample<'_> {
         "float64",
         "datetime",
         "datetime64",
+        "time32",
+        "time64",
         "decimal64",
         "decimal128",
         "string",
@@ -61,7 +71,7 @@ impl Row for Sample<'_> {
         "array",
         "boolean",
     ];
-    const COLUMN_COUNT: usize = 19;
+    const COLUMN_COUNT: usize = 21;
     const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
 
     type Value<'a> = Sample<'a>;
@@ -79,6 +89,8 @@ fn sample() -> Sample<'static> {
         float64: 42.42,
         datetime: Timestamp32(2_301_990_162),
         datetime64: Timestamp64(2_301_990_162_123),
+        time32: Time32(42_000), // 11:40:00 (42,000 seconds since midnight)
+        time64: Time64(42_000_000_000), // 11:40:00.000000000 (42,000,000,000 nanoseconds since midnight)
         decimal64: FixedPoint64(4242 * 10_000_000),
         decimal128: FixedPoint128(4242 * 10_000_000),
         string: "01234",
@@ -115,6 +127,10 @@ fn sample_serialized() -> Vec<u8> {
         // [DateTime64(3)] 2042-12-12 12:42:42'123
         //       (ts: 2301990162123)
         0xcb, 0x4e, 0x4e, 0xf9, 0x17, 0x02, 0x00, 0x00, //
+        // [Time32] 11:40:00 (42,000 seconds since midnight)
+        0x10, 0xa4, 0x00, 0x00, //
+        // [Time64] 11:40:00.000000000 (42,000,000,000 nanoseconds since midnight)
+        0x00, 0x24, 0x65, 0xc7, 0x09, 0x00, 0x00, 0x00, //
         // [Decimal64(9)] 42.420000000
         0x00, 0xd5, 0x6d, 0xe0, 0x09, 0x00, 0x00, 0x00, //
         // [Decimal128(9)] 42.420000000
@@ -159,4 +175,23 @@ fn it_deserializes() {
         let actual: Sample<'_> = super::deserialize_row(&mut input.as_slice(), None).unwrap();
         assert_eq!(actual, sample());
     }
+}
+
+#[test]
+fn it_serializes_time64_correctly() {
+    let time64 = Time64(42_000_000_000);
+    println!("Time64 value: {}", time64.0);
+    let mut actual = Vec::new();
+    super::serialize_into(&mut actual, &time64).unwrap();
+    
+    // Expected: 42000000000 in little-endian
+    let expected = vec![0x00, 0x24, 0x65, 0xc7, 0x09, 0x00, 0x00, 0x00];
+    println!("Actual bytes: {:?}", actual);
+    println!("Expected bytes: {:?}", expected);
+    
+    // Calculate what the actual bytes represent
+    let actual_value = u64::from_le_bytes([actual[0], actual[1], actual[2], actual[3], actual[4], actual[5], actual[6], actual[7]]);
+    println!("Actual value: {}", actual_value);
+    
+    assert_eq!(actual, expected, "Time64 serialization mismatch");
 }
