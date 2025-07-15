@@ -4,8 +4,9 @@ Official pure Rust typed client for ClickHouse DB.
 
 [![Crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]
-[![License][license-badge]][license-url]
 [![Build Status][actions-badge]][actions-url]
+[![License][license-badge]][license-url]
+[![Codecov][codecov-badge]][codecov-url]
 
 [crates-badge]: https://img.shields.io/crates/v/clickhouse.svg
 [crates-url]: https://crates.io/crates/clickhouse
@@ -15,6 +16,8 @@ Official pure Rust typed client for ClickHouse DB.
 [license-url]: https://github.com/ClickHouse/clickhouse-rs/blob/main/LICENSE-MIT
 [actions-badge]: https://github.com/ClickHouse/clickhouse-rs/actions/workflows/ci.yml/badge.svg
 [actions-url]: https://github.com/ClickHouse/clickhouse-rs/actions/workflows/ci.yml
+[codecov-badge]: https://codecov.io/gh/ClickHouse/clickhouse-rs/graph/badge.svg?token=3MBXXYL53L
+[codecov-url]: https://codecov.io/gh/ClickHouse/clickhouse-rs
 
 * Uses `serde` for encoding/decoding rows.
 * Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
