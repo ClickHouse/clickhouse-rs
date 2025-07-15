@@ -22,7 +22,6 @@ async fn test_invalid_jwt_auth() {
     let err_msg = format!("{}", result.expect_err("result should be an error"));
     assert!(
         err_msg.contains("JWT decoding error: invalid token supplied"),
-        "err_msg = {}",
-        err_msg
+        "err_msg = {err_msg}"
     );
 }
