@@ -112,13 +112,13 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     #[inline]
     fn serialize_i128(self, value: i128) -> Result {
-        write!(self.writer, "{}::Int128", value)?;
+        write!(self.writer, "{value}::Int128")?;
         Ok(())
     }
 
     #[inline]
     fn serialize_u128(self, value: u128) -> Result {
-        write!(self.writer, "{}::UInt128", value)?;
+        write!(self.writer, "{value}::UInt128")?;
         Ok(())
     }
 
