@@ -64,7 +64,7 @@ mod tests {
 
         for (input, expected) in test_cases {
             let result = read_leb128(&mut input.as_slice()).unwrap();
-            assert_eq!(result, expected, "Failed decoding {:?}", input);
+            assert_eq!(result, expected, "Failed decoding {input:?}");
         }
     }
 
@@ -81,14 +81,11 @@ mod tests {
 
         for (input, expected_error) in test_cases {
             let result = read_leb128(&mut input.as_slice());
-            assert!(result.is_err(), "Expected error for input {:?}", input);
+            assert!(result.is_err(), "Expected error for input {input:?}");
             if let Err(e) = result {
                 assert!(
                     e.to_string().contains(expected_error),
-                    "Error message mismatch for `{:?}`; error was: `{}`, should contain: `{}`",
-                    input,
-                    e,
-                    expected_error
+                    "Error message mismatch for `{input:?}`; error was: `{e}`, should contain: `{expected_error}`"
                 );
             }
         }
@@ -114,18 +111,13 @@ mod tests {
             // Test encoding
             let mut encoded = Vec::new();
             put_leb128(&mut encoded, value);
-            assert_eq!(
-                encoded, expected_encoding,
-                "Incorrect encoding for {}",
-                value
-            );
+            assert_eq!(encoded, expected_encoding, "Incorrect encoding for {value}");
 
             // Test round-trip
             let decoded = read_leb128(&mut encoded.as_slice()).unwrap();
             assert_eq!(
                 decoded, value,
-                "Failed round trip for {}: encoded as {:?}, decoded as {}",
-                value, encoded, decoded
+                "Failed round trip for {value}: encoded as {encoded:?}, decoded as {decoded}"
             );
         }
     }
