@@ -487,7 +487,7 @@ fn validate_impl<'de, 'cursor, R: Row>(
         SerdeType::U32
             if data_type == &DataTypeNode::UInt32
                 || matches!(data_type, DataTypeNode::DateTime(_))
-                || matches!(data_type, DataTypeNode::Time(_))
+                || matches!(data_type, DataTypeNode::Time)
                 || data_type == &DataTypeNode::IPv4 =>
         {
             None

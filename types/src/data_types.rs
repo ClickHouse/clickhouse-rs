@@ -66,9 +66,9 @@ pub enum DataTypeNode {
     /// Precision and optional timezone
     DateTime64(DateTimePrecision, Option<String>),
 
-    /// Optional timezone
-    Time(Option<String>),
-    /// Precision and optional timezone
+    /// Time-of-day, no timezone (timezone is ignored in value operations)
+    Time,
+    /// Precision and optional timezone (timezone is ignored in value operations)
     Time64(DateTimePrecision, Option<String>),
 
     IPv4,
@@ -137,13 +137,13 @@ impl DataTypeNode {
             "MultiLineString" => Ok(Self::MultiLineString),
             "Polygon" => Ok(Self::Polygon),
             "MultiPolygon" => Ok(Self::MultiPolygon),
-            "Time" => Ok(Self::Time(None)),
+            "Time" => Ok(Self::Time),
 
             str if str.starts_with("Decimal") => parse_decimal(str),
             str if str.starts_with("DateTime64") => parse_datetime64(str),
             str if str.starts_with("DateTime") => parse_datetime(str),
             str if str.starts_with("Time64") => parse_time64(str),
-            str if str.starts_with("Time") => parse_time(str),
+            str if str.starts_with("Time(") => Ok(Self::Time), // ignore timezone
 
             str if str.starts_with("Nullable") => parse_nullable(str),
             str if str.starts_with("LowCardinality") => parse_low_cardinality(str),
@@ -207,8 +207,7 @@ impl Display for DataTypeNode {
             DateTime(Some(tz)) => format!("DateTime('{tz}')"),
             DateTime64(precision, None) => format!("DateTime64({precision})"),
             DateTime64(precision, Some(tz)) => format!("DateTime64({precision}, '{tz}')"),
-            Time(None) => "Time".to_string(),
-            Time(Some(tz)) => format!("Time('{tz}')"),
+            Time => "Time".to_string(),
             Time64(precision, None) => format!("Time64({precision})"),
             Time64(precision, Some(tz)) => format!("Time64({precision}, '{tz}')"),
             IPv4 => "IPv4".to_string(),
@@ -256,7 +255,7 @@ impl Display for DataTypeNode {
             Polygon => "Polygon".to_string(),
             MultiPolygon => "MultiPolygon".to_string(),
         };
-        write!(f, "{str}")
+        write!(f, "{}", str)
     }
 }
 
@@ -503,20 +502,6 @@ fn parse_datetime64(input: &str) -> Result<DataTypeNode, TypesError> {
     )))
 }
 
-fn parse_time(input: &str) -> Result<DataTypeNode, TypesError> {
-    if input == "Time" {
-        return Ok(DataTypeNode::Time(None));
-    }
-    if input.starts_with("Time('") && input.ends_with("')") && input.len() > 7 {
-        // Time('...')
-        let tz = &input[6..input.len() - 2];
-        return Ok(DataTypeNode::Time(Some(tz.to_string())));
-    }
-    Err(TypesError::TypeParsingError(format!(
-        "Invalid Time format, expected Time('timezone'), got {input}"
-    )))
-}
-
 fn parse_time64(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 8 {
         let mut chars = input[7..input.len() - 1].chars();
@@ -532,7 +517,6 @@ fn parse_time64(input: &str) -> Result<DataTypeNode, TypesError> {
     }
     Err(TypesError::TypeParsingError(format!(
         "Invalid Time64 format, expected Time64(precision, 'timezone'), got {input}"
-        "Invalid DateTime format, expected DateTime('timezone'), got {input}"
     )))
 }
 
@@ -973,15 +957,15 @@ mod tests {
     fn test_data_type_new_time() {
         assert_eq!(
             DataTypeNode::new("Time").unwrap(),
-            DataTypeNode::Time(None)
+            DataTypeNode::Time
         );
         assert_eq!(
             DataTypeNode::new("Time('UTC')").unwrap(),
-            DataTypeNode::Time(Some("UTC".to_string()))
+            DataTypeNode::Time
         );
         assert_eq!(
             DataTypeNode::new("Time('America/New_York')").unwrap(),
-            DataTypeNode::Time(Some("America/New_York".to_string()))
+            DataTypeNode::Time
         );
         assert!(DataTypeNode::new("Time()").is_err());
     }
@@ -1495,6 +1479,29 @@ mod tests {
         assert_eq!(DecimalType::Decimal64.to_string(), "Decimal64");
         assert_eq!(DecimalType::Decimal128.to_string(), "Decimal128");
         assert_eq!(DecimalType::Decimal256.to_string(), "Decimal256");
+    }
+
+    #[test]
+    fn test_time_time64_roundtrip_and_edges() {
+        // Time: only valid variant is Time
+        assert_eq!(DataTypeNode::new("Time").unwrap(), DataTypeNode::Time);
+        assert_eq!(DataTypeNode::new("Time('UTC')").unwrap(), DataTypeNode::Time);
+        assert_eq!(DataTypeNode::new("Time('Europe/Moscow')").unwrap(), DataTypeNode::Time);
+        // Edge cases for Time64
+        use super::DateTimePrecision::*;
+        // Midnight
+        assert_eq!(DataTypeNode::new("Time64(0)").unwrap(), DataTypeNode::Time64(Precision0, None));
+        // Max value (simulate parsing with and without timezone)
+        assert_eq!(DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(), DataTypeNode::Time64(Precision9, Some("Europe/Amsterdam".to_string())));
+        // Just before midnight
+        assert_eq!(DataTypeNode::new("Time64(0, 'UTC')").unwrap(), DataTypeNode::Time64(Precision0, Some("UTC".to_string())));
+        // Random value (precision 3, no tz)
+        assert_eq!(DataTypeNode::new("Time64(3)").unwrap(), DataTypeNode::Time64(Precision3, None));
+        // Random value (precision 6, with tz)
+        assert_eq!(DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(), DataTypeNode::Time64(Precision6, Some("America/New_York".to_string())));
+        // Invalid
+        assert!(DataTypeNode::new("Time64()").is_err());
+        assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
     const ENUM_WITH_ESCAPING_STR: &str =
