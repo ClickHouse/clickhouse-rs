@@ -255,7 +255,7 @@ impl Display for DataTypeNode {
             Polygon => "Polygon".to_string(),
             MultiPolygon => "MultiPolygon".to_string(),
         };
-        write!(f, "{}", str)
+        write!(f, "{str}")
     }
 }
 
