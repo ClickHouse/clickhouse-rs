@@ -955,10 +955,7 @@ mod tests {
 
     #[test]
     fn test_data_type_new_time() {
-        assert_eq!(
-            DataTypeNode::new("Time").unwrap(),
-            DataTypeNode::Time
-        );
+        assert_eq!(DataTypeNode::new("Time").unwrap(), DataTypeNode::Time);
         assert_eq!(
             DataTypeNode::new("Time('UTC')").unwrap(),
             DataTypeNode::Time
@@ -967,10 +964,7 @@ mod tests {
             DataTypeNode::new("Time('America/New_York')").unwrap(),
             DataTypeNode::Time
         );
-        assert_eq!(
-            DataTypeNode::new("Time()") .unwrap(),
-            DataTypeNode::Time
-        );
+        assert_eq!(DataTypeNode::new("Time()").unwrap(), DataTypeNode::Time);
     }
 
     #[test]
@@ -1488,20 +1482,41 @@ mod tests {
     fn test_time_time64_roundtrip_and_edges() {
         // Time: only valid variant is Time
         assert_eq!(DataTypeNode::new("Time").unwrap(), DataTypeNode::Time);
-        assert_eq!(DataTypeNode::new("Time('UTC')").unwrap(), DataTypeNode::Time);
-        assert_eq!(DataTypeNode::new("Time('Europe/Moscow')").unwrap(), DataTypeNode::Time);
+        assert_eq!(
+            DataTypeNode::new("Time('UTC')").unwrap(),
+            DataTypeNode::Time
+        );
+        assert_eq!(
+            DataTypeNode::new("Time('Europe/Moscow')").unwrap(),
+            DataTypeNode::Time
+        );
         // Edge cases for Time64
         use super::DateTimePrecision::*;
         // Midnight
-        assert_eq!(DataTypeNode::new("Time64(0)").unwrap(), DataTypeNode::Time64(Precision0, None));
+        assert_eq!(
+            DataTypeNode::new("Time64(0)").unwrap(),
+            DataTypeNode::Time64(Precision0, None)
+        );
         // Max value (simulate parsing with and without timezone)
-        assert_eq!(DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(), DataTypeNode::Time64(Precision9, Some("Europe/Amsterdam".to_string())));
+        assert_eq!(
+            DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
+            DataTypeNode::Time64(Precision9, Some("Europe/Amsterdam".to_string()))
+        );
         // Just before midnight
-        assert_eq!(DataTypeNode::new("Time64(0, 'UTC')").unwrap(), DataTypeNode::Time64(Precision0, Some("UTC".to_string())));
+        assert_eq!(
+            DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
+            DataTypeNode::Time64(Precision0, Some("UTC".to_string()))
+        );
         // Random value (precision 3, no tz)
-        assert_eq!(DataTypeNode::new("Time64(3)").unwrap(), DataTypeNode::Time64(Precision3, None));
+        assert_eq!(
+            DataTypeNode::new("Time64(3)").unwrap(),
+            DataTypeNode::Time64(Precision3, None)
+        );
         // Random value (precision 6, with tz)
-        assert_eq!(DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(), DataTypeNode::Time64(Precision6, Some("America/New_York".to_string())));
+        assert_eq!(
+            DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(Precision6, Some("America/New_York".to_string()))
+        );
         // Invalid
         assert!(DataTypeNode::new("Time64()").is_err());
         assert!(DataTypeNode::new("Time64(x)").is_err());

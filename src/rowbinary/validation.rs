@@ -492,9 +492,12 @@ fn validate_impl<'de, 'cursor, R: Row>(
         {
             None
         }
-        SerdeType::U64 
+        SerdeType::U64
             if data_type == &DataTypeNode::UInt64
-                || matches!(data_type, DataTypeNode::Time64(_, _)) => None,
+                || matches!(data_type, DataTypeNode::Time64(_, _)) =>
+        {
+            None
+        }
         SerdeType::U128 if data_type == &DataTypeNode::UInt128 => None,
         SerdeType::F32 if data_type == &DataTypeNode::Float32 => None,
         SerdeType::F64 if data_type == &DataTypeNode::Float64 => None,

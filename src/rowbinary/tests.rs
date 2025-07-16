@@ -183,15 +183,17 @@ fn it_serializes_time64_correctly() {
     println!("Time64 value: {}", time64.0);
     let mut actual = Vec::new();
     super::serialize_into(&mut actual, &time64).unwrap();
-    
+
     // Expected: 42000000000 in little-endian
     let expected = vec![0x00, 0x24, 0x65, 0xc7, 0x09, 0x00, 0x00, 0x00];
     println!("Actual bytes: {:?}", actual);
     println!("Expected bytes: {:?}", expected);
-    
+
     // Calculate what the actual bytes represent
-    let actual_value = u64::from_le_bytes([actual[0], actual[1], actual[2], actual[3], actual[4], actual[5], actual[6], actual[7]]);
+    let actual_value = u64::from_le_bytes([
+        actual[0], actual[1], actual[2], actual[3], actual[4], actual[5], actual[6], actual[7],
+    ]);
     println!("Actual value: {}", actual_value);
-    
+
     assert_eq!(actual, expected, "Time64 serialization mismatch");
 }
