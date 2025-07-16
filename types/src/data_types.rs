@@ -967,7 +967,10 @@ mod tests {
             DataTypeNode::new("Time('America/New_York')").unwrap(),
             DataTypeNode::Time
         );
-        assert!(DataTypeNode::new("Time()").is_err());
+        assert_eq!(
+            DataTypeNode::new("Time()") .unwrap(),
+            DataTypeNode::Time
+        );
     }
 
     #[test]
