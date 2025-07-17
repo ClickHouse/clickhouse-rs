@@ -23,9 +23,9 @@ Official pure Rust typed client for ClickHouse DB.
 
 ### Supported Rust Versions
 
-The current MSRV (minimum supported Rust version) is **1.79**. The MSRV history for past minor releases can be found below:
+The current MSRV (minimum supported Rust version) is **1.79.0** (for the upcoming release). The MSRV history for past minor releases can be found below:
 
- * 0.13.3 - Rust 1.79 (current)
+ * 0.13.3 - Rust 1.73.0
  * 0.13.2 - Rust 1.73
  * 0.13.0 - Rust 1.70
  * 0.12.0 - Rust 1.67
@@ -34,37 +34,15 @@ Note that the MSRV is increased when dependencies require newer Rust features. W
 
 ### Supported ClickHouse Versions
 
-clickhouse-rs is compatible with ClickHouse server versions that are currently supported with security updates. The following versions of ClickHouse server are currently supported:
+Supported ClickHouse versions:
 
-| Version | Supported |
-|:-|:-|
-| 25.6 | ✔️ |
-| 25.5 | ✔️ |
-| 25.4 | ✔️ |
-| 25.3 | ✔️ |
-| 25.2 | ❌ |
-| 25.1 | ❌ |
-| 24.12 | ❌ |
-| 24.11 | ❌ |
-| 24.10 | ❌ |
-| 24.9 | ❌ |
-| 24.8 | ✔️ |
-| 24.7 | ❌ |
-| 24.6 | ❌ |
-| 24.5 | ❌ |
-| 24.4 | ❌ |
-| 24.3 | ❌ |
-| 24.2 | ❌ |
-| 24.1 | ❌ |
-| 23.* | ❌ |
-| 22.* | ❌ |
-| 21.* | ❌ |
-| 20.* | ❌ |
-| 19.* | ❌ |
-| 18.* | ❌ |
-| 1.* | ❌ |
+- 24.8 (previous LTS)
+- 25.3 (current LTS)
+- 25.4+
 
-For more details on ClickHouse support policy, see the [ClickHouse Security Vulnerability Response Policy](https://clickhouse.com/docs/en/security-vulnerability-response-policy/).
+See also: [ClickHouse versioning guide](https://clickhouse.com/docs/en/whats-new/versioning-policy/)
+
+It will almost certainly work with ClickHouse versions older than that, but we do not guarantee compatibility in that case, and recommend upgrading.
 
 **Note**: Some features may require specific ClickHouse versions. For example, the new `JSON` data type requires ClickHouse 24.10+.
 
