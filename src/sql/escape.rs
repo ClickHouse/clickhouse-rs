@@ -34,7 +34,7 @@ pub(crate) fn hex_bytes(s: &[u8], dst: &mut impl fmt::Write) -> fmt::Result {
     dst.write_char('X')?;
     dst.write_char('\'')?;
     for &byte in s {
-        write!(dst, "{:02X}", byte)?;
+        write!(dst, "{byte:02X}")?;
     }
     dst.write_char('\'')
 }
