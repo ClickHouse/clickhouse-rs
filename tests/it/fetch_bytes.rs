@@ -58,7 +58,7 @@ async fn error() {
         .unwrap();
 
     let err = bytes_cursor.next().await;
-    println!("{:?}", err);
+    println!("{err:?}");
     assert!(matches!(err, Err(Error::BadResponse(_))));
 }
 

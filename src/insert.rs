@@ -128,7 +128,7 @@ impl<T> Insert<T> {
 
         // TODO: what about escaping a table name?
         // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
-        let sql = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields);
+        let sql = format!("INSERT INTO {table}({fields}) FORMAT RowBinary");
 
         Ok(Self {
             state: InsertState::NotStarted {

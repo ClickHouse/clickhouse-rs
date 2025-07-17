@@ -28,6 +28,6 @@ async fn main() {
 
     while let Some(line) = lines.next_line().await.unwrap() {
         let value: serde_json::Value = serde_json::de::from_str(&line).unwrap();
-        println!("JSONEachRow value: {}", value);
+        println!("JSONEachRow value: {value}");
     }
 }
