@@ -109,7 +109,23 @@ jobs:
       - name: Run tests with all features
         run: cargo llvm-cov test --workspace --no-report --all-features
 
+      - name: Check access to GitHub secrets
+        id: check-secrets-access
+        run: |
+          if [[ "${{ github.actor }}" == "loyd" ]]; then
+            echo "has-access=true" >> $GITHUB_OUTPUT
+            echo "Paul Loyd is our VIP"
+          elif gh api orgs/ClickHouse/members/${{ github.actor }} --silent; then
+            echo "has-access=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-access=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
       - name: Run tests with ClickHouse Cloud
+        if: steps.check-secrets-access.outputs.has-access == 'true'
         env:
           CLICKHOUSE_TEST_ENVIRONMENT: cloud
           CLICKHOUSE_CLOUD_HOST: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_HOST_SMT }}
@@ -122,9 +138,12 @@ jobs:
           cargo llvm-cov test https_errors --no-report -- --nocapture
 
       - name: Generate code coverage
+        if: steps.check-secrets-access.outputs.has-access == 'true'
         run: cargo llvm-cov report --codecov --output-path codecov.json
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
+        if: steps.check-secrets-access.outputs.has-access == 'true'
         with:
           files: codecov.json
           token: ${{ secrets.CODECOV_TOKEN }}
