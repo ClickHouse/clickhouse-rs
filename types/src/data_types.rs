@@ -69,7 +69,7 @@ pub enum DataTypeNode {
     /// Time-of-day, no timezone (timezone is ignored in value operations)
     Time,
     /// Precision and optional timezone (timezone is ignored in value operations)
-    Time64(DateTimePrecision, Option<String>),
+    Time64(DateTimePrecision),
 
     IPv4,
     IPv6,
@@ -208,8 +208,7 @@ impl Display for DataTypeNode {
             DateTime64(precision, None) => format!("DateTime64({precision})"),
             DateTime64(precision, Some(tz)) => format!("DateTime64({precision}, '{tz}')"),
             Time => "Time".to_string(),
-            Time64(precision, None) => format!("Time64({precision})"),
-            Time64(precision, Some(tz)) => format!("Time64({precision}, '{tz}')"),
+            Time64(precision) => format!("Time64({precision})"),
             IPv4 => "IPv4".to_string(),
             IPv6 => "IPv6".to_string(),
             Bool => "Bool".to_string(),
@@ -509,11 +508,8 @@ fn parse_time64(input: &str) -> Result<DataTypeNode, TypesError> {
             "Invalid Time64 precision, expected a positive number. Input: {input}"
         )))?;
         let precision = DateTimePrecision::new(precision_char)?;
-        let maybe_tz = match chars.as_str() {
-            str if str.len() > 2 => Some(str[3..str.len() - 1].to_string()),
-            _ => None,
-        };
-        return Ok(DataTypeNode::Time64(precision, maybe_tz));
+        
+        return Ok(DataTypeNode::Time64(precision));
     }
     Err(TypesError::TypeParsingError(format!(
         "Invalid Time64 format, expected Time64(precision, 'timezone'), got {input}"
@@ -971,67 +967,64 @@ mod tests {
     fn test_data_type_new_time64() {
         assert_eq!(
             DataTypeNode::new("Time64(0)").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision0, None)
+            DataTypeNode::Time64(DateTimePrecision::Precision0)
         );
         assert_eq!(
             DataTypeNode::new("Time64(1)").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision1, None)
+            DataTypeNode::Time64(DateTimePrecision::Precision1)
         );
         assert_eq!(
             DataTypeNode::new("Time64(2)").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision2, None)
+            DataTypeNode::Time64(DateTimePrecision::Precision2)
         );
         assert_eq!(
             DataTypeNode::new("Time64(3)").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision3, None)
+            DataTypeNode::Time64(DateTimePrecision::Precision3)
         );
         assert_eq!(
             DataTypeNode::new("Time64(4)").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision4, None)
+            DataTypeNode::Time64(DateTimePrecision::Precision4)
         );
         assert_eq!(
             DataTypeNode::new("Time64(5)").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision5, None)
+            DataTypeNode::Time64(DateTimePrecision::Precision5)
         );
         assert_eq!(
             DataTypeNode::new("Time64(6)").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision6, None)
+            DataTypeNode::Time64(DateTimePrecision::Precision6)
         );
         assert_eq!(
             DataTypeNode::new("Time64(7)").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision7, None)
+            DataTypeNode::Time64(DateTimePrecision::Precision7)
         );
         assert_eq!(
             DataTypeNode::new("Time64(8)").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision8, None)
+            DataTypeNode::Time64(DateTimePrecision::Precision8)
         );
         assert_eq!(
             DataTypeNode::new("Time64(9)").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision9, None)
+            DataTypeNode::Time64(DateTimePrecision::Precision9)
         );
         assert_eq!(
             DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
-            DataTypeNode::Time64(DateTimePrecision::Precision0, Some("UTC".to_string()))
+            DataTypeNode::Time64(DateTimePrecision::Precision0)
         );
         assert_eq!(
             DataTypeNode::new("Time64(3, 'America/New_York')").unwrap(),
             DataTypeNode::Time64(
-                DateTimePrecision::Precision3,
-                Some("America/New_York".to_string())
+                DateTimePrecision::Precision3
             )
         );
         assert_eq!(
             DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
             DataTypeNode::Time64(
-                DateTimePrecision::Precision6,
-                Some("America/New_York".to_string())
+                DateTimePrecision::Precision6
             )
         );
         assert_eq!(
             DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
             DataTypeNode::Time64(
-                DateTimePrecision::Precision9,
-                Some("Europe/Amsterdam".to_string())
+                DateTimePrecision::Precision9
             )
         );
         assert!(DataTypeNode::new("Time64()").is_err());
@@ -1495,27 +1488,27 @@ mod tests {
         // Midnight
         assert_eq!(
             DataTypeNode::new("Time64(0)").unwrap(),
-            DataTypeNode::Time64(Precision0, None)
+            DataTypeNode::Time64(Precision0)
         );
         // Max value (simulate parsing with and without timezone)
         assert_eq!(
             DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
-            DataTypeNode::Time64(Precision9, Some("Europe/Amsterdam".to_string()))
+            DataTypeNode::Time64(Precision9)
         );
         // Just before midnight
         assert_eq!(
             DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
-            DataTypeNode::Time64(Precision0, Some("UTC".to_string()))
+            DataTypeNode::Time64(Precision0)
         );
         // Random value (precision 3, no tz)
         assert_eq!(
             DataTypeNode::new("Time64(3)").unwrap(),
-            DataTypeNode::Time64(Precision3, None)
+            DataTypeNode::Time64(Precision3)
         );
         // Random value (precision 6, with tz)
         assert_eq!(
             DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
-            DataTypeNode::Time64(Precision6, Some("America/New_York".to_string()))
+            DataTypeNode::Time64(Precision6)
         );
         // Invalid
         assert!(DataTypeNode::new("Time64()").is_err());

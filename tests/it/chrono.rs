@@ -2,7 +2,7 @@
 
 use std::ops::RangeBounds;
 
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc, NaiveTime};
 use rand::{
     distr::{Distribution, StandardUniform},
     Rng,
@@ -257,4 +257,81 @@ fn generate_dates(years: impl RangeBounds<i32>, count: usize) -> Vec<NaiveDate> 
 
     dates.sort_unstable();
     dates
+}
+
+
+#[tokio::test]
+async fn time_and_time64() {
+    let client = prepare_database!();
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::chrono::time")]
+        t0: NaiveTime,
+        #[serde(with = "clickhouse::serde::chrono::time64::secs::option")]
+        t0_opt: Option<NaiveTime>,
+
+        #[serde(with = "clickhouse::serde::chrono::time64::millis")]
+        t3: NaiveTime,
+        #[serde(with = "clickhouse::serde::chrono::time64::millis::option")]
+        t3_opt: Option<NaiveTime>,
+
+        #[serde(with = "clickhouse::serde::chrono::time64::micros")]
+        t6: NaiveTime,
+        #[serde(with = "clickhouse::serde::chrono::time64::micros::option")]
+        t6_opt: Option<NaiveTime>,
+
+        #[serde(with = "clickhouse::serde::chrono::time64::nanos")]
+        t9: NaiveTime,
+        #[serde(with = "clickhouse::serde::chrono::time64::nanos::option")]
+        t9_opt: Option<NaiveTime>,
+    }
+
+    client
+        .query(
+            r#"
+            CREATE TABLE test (
+                t0      Time,
+                t0_opt  Nullable(Time64(0)),
+                t3      Time64(3),
+                t3_opt  Nullable(Time64(3)),
+                t6      Time64(6),
+                t6_opt  Nullable(Time64(6)),
+                t9      Time64(9),
+                t9_opt  Nullable(Time64(9))
+            ) ENGINE = MergeTree ORDER BY t0
+             SETTINGS enable_time_time64_type = 1;
+            "#,
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let time_s = NaiveTime::from_hms_opt(12, 34, 56).unwrap();
+    let time_ms = NaiveTime::from_hms_milli_opt(12, 34, 56, 789).unwrap();
+    let time_us = NaiveTime::from_hms_micro_opt(12, 34, 56, 789_123).unwrap();
+    let time_ns = NaiveTime::from_hms_nano_opt(12, 34, 56, 789_123_456).unwrap();
+
+    let original_row = MyRow {
+        t0: time_s,
+        t0_opt: Some(time_s),
+        t3: time_ms,
+        t3_opt: Some(time_ms),
+        t6: time_us,
+        t6_opt: Some(time_us),
+        t9: time_ns,
+        t9_opt: Some(time_ns),
+    };
+
+    let mut insert = client.insert::<MyRow>("test").unwrap();
+    insert.write(&original_row).await.unwrap();
+    insert.end().await.unwrap();
+
+    let fetched = client
+        .query("SELECT ?fields FROM test")
+        .fetch_one::<MyRow>()
+        .await
+        .unwrap();
+
+    assert_eq!(fetched, original_row);
 }
