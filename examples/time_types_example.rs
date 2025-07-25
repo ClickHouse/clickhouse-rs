@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .fetch_all()
         .await?;
     for time_example in rows {
-        println!("Time example: {:?}", time_example);
+        println!("Time example: {time_example:?}");
     }
 
     println!("✅ Time and Time64 types example completed successfully!");

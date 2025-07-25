@@ -372,7 +372,7 @@ pub mod chrono {
             D: Deserializer<'de>,
         {
             let seconds: i32 = Deserialize::deserialize(deserializer)?;
-            if seconds < 0 || seconds >= 86400 {
+            if !(0..86400).contains(&seconds) {
                 return Err(D::Error::custom(format!(
                     "{seconds} cannot be converted to Time"
                 )));
@@ -405,14 +405,8 @@ pub mod chrono {
             where
                 S: Serializer,
             {
-                let seconds = (time.hour() as u32) * 3600
-                    + (time.minute() as u32) * 60
-                    + (time.second() as u32);
-                i64::try_from(seconds)
-                    .map_err(|_| {
-                        S::Error::custom(format!("{time} cannot be represented as Time64"))
-                    })?
-                    .serialize(serializer)
+                let seconds = time.hour() * 3600 + time.minute() * 60 + time.second();
+                i64::from(seconds).serialize(serializer)
             }
 
             pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveTime, D::Error>
@@ -420,7 +414,7 @@ pub mod chrono {
                 D: Deserializer<'de>,
             {
                 let seconds: i64 = Deserialize::deserialize(deserializer)?;
-                if seconds < 0 || seconds >= 86400 {
+                if !(0..86400).contains(&seconds) {
                     return Err(D::Error::custom(format!(
                         "{seconds} cannot be converted to Time"
                     )));
@@ -449,9 +443,7 @@ pub mod chrono {
             where
                 S: Serializer,
             {
-                let seconds = (time.hour() as u32) * 3600
-                    + (time.minute() as u32) * 60
-                    + (time.second() as u32);
+                let seconds = time.hour() * 3600 + time.minute() * 60 + time.second();
                 let millis = time.nanosecond() / 1_000_000;
                 let total_millis = i64::from(seconds) * 1000 + i64::from(millis);
                 total_millis.serialize(serializer)
@@ -462,7 +454,7 @@ pub mod chrono {
                 D: Deserializer<'de>,
             {
                 let total_millis: i64 = Deserialize::deserialize(deserializer)?;
-                if total_millis < 0 || total_millis >= 86_400_000 {
+                if !(0..86_400_000).contains(&total_millis) {
                     return Err(D::Error::custom(format!(
                         "{total_millis} cannot be converted to Time"
                     )));
@@ -493,9 +485,7 @@ pub mod chrono {
             where
                 S: Serializer,
             {
-                let seconds = (time.hour() as u32) * 3600
-                    + (time.minute() as u32) * 60
-                    + (time.second() as u32);
+                let seconds = time.hour() * 3600 + time.minute() * 60 + time.second();
                 let micros = time.nanosecond() / 1_000;
                 let total_micros = i64::from(seconds) * 1_000_000 + i64::from(micros);
                 total_micros.serialize(serializer)
@@ -506,7 +496,7 @@ pub mod chrono {
                 D: Deserializer<'de>,
             {
                 let total_micros: i64 = Deserialize::deserialize(deserializer)?;
-                if total_micros < 0 || total_micros >= 86_400_000_000 {
+                if !(0..86_400_000_000).contains(&total_micros) {
                     return Err(D::Error::custom(format!(
                         "{total_micros} cannot be converted to Time"
                     )));
@@ -537,9 +527,7 @@ pub mod chrono {
             where
                 S: Serializer,
             {
-                let seconds = (time.hour() as u32) * 3600
-                    + (time.minute() as u32) * 60
-                    + (time.second() as u32);
+                let seconds = time.hour() * 3600 + time.minute() * 60 + time.second();
                 let nanos = time.nanosecond();
                 let total_nanos = i64::from(seconds) * 1_000_000_000 + i64::from(nanos);
                 total_nanos.serialize(serializer)
@@ -550,7 +538,7 @@ pub mod chrono {
                 D: Deserializer<'de>,
             {
                 let total_nanos: i64 = Deserialize::deserialize(deserializer)?;
-                if total_nanos < 0 || total_nanos >= 86_400_000_000_000 {
+                if !(0..86_400_000_000_000).contains(&total_nanos) {
                     return Err(D::Error::custom(format!(
                         "{total_nanos} cannot be converted to Time"
                     )));
@@ -813,6 +801,7 @@ pub mod time {
     }
 
     /// Ser/de `time::Time` to/from `Time`.
+    #[allow(clippy::module_inception)]
     pub mod time {
         use super::*;
         use ::time::Time;
@@ -838,7 +827,7 @@ pub mod time {
             D: Deserializer<'de>,
         {
             let seconds: i32 = Deserialize::deserialize(deserializer)?;
-            if seconds < 0 || seconds >= 86400 {
+            if !(0..86400).contains(&seconds) {
                 return Err(D::Error::custom(format!(
                     "{seconds} cannot be converted to Time"
                 )));
@@ -870,11 +859,7 @@ pub mod time {
                 let seconds = (time.hour() as u32) * 3600
                     + (time.minute() as u32) * 60
                     + (time.second() as u32);
-                i64::try_from(seconds)
-                    .map_err(|_| {
-                        S::Error::custom(format!("{time} cannot be represented as Time64"))
-                    })?
-                    .serialize(serializer)
+                i64::from(seconds).serialize(serializer)
             }
 
             pub fn deserialize<'de, D>(deserializer: D) -> Result<Time, D::Error>
@@ -882,7 +867,7 @@ pub mod time {
                 D: Deserializer<'de>,
             {
                 let seconds: i64 = Deserialize::deserialize(deserializer)?;
-                if seconds < 0 || seconds >= 86400 {
+                if !(0..86400).contains(&seconds) {
                     return Err(D::Error::custom(format!(
                         "{seconds} cannot be converted to Time"
                     )));
@@ -919,7 +904,7 @@ pub mod time {
                 D: Deserializer<'de>,
             {
                 let total_millis: i64 = Deserialize::deserialize(deserializer)?;
-                if total_millis < 0 || total_millis >= 86_400_000 {
+                if !(0..86_400_000).contains(&total_millis) {
                     return Err(D::Error::custom(format!(
                         "{total_millis} cannot be converted to Time"
                     )));
@@ -958,7 +943,7 @@ pub mod time {
                 D: Deserializer<'de>,
             {
                 let total_micros: i64 = Deserialize::deserialize(deserializer)?;
-                if total_micros < 0 || total_micros >= 86_400_000_000 {
+                if !(0..86_400_000_000).contains(&total_micros) {
                     return Err(D::Error::custom(format!(
                         "{total_micros} cannot be converted to Time"
                     )));
@@ -997,7 +982,7 @@ pub mod time {
                 D: Deserializer<'de>,
             {
                 let total_nanos: i64 = Deserialize::deserialize(deserializer)?;
-                if total_nanos < 0 || total_nanos >= 86_400_000_000_000 {
+                if !(0..86_400_000_000_000).contains(&total_nanos) {
                     return Err(D::Error::custom(format!(
                         "{total_nanos} cannot be converted to Time"
                     )));

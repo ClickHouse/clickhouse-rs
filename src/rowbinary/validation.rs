@@ -493,6 +493,7 @@ fn validate_impl<'de, 'cursor, R: Row>(
         {
             None
         }
+        SerdeType::U64 if data_type == &DataTypeNode::UInt64 => None,
         SerdeType::U128 if data_type == &DataTypeNode::UInt128 => None,
         SerdeType::F32 if data_type == &DataTypeNode::Float32 => None,
         SerdeType::F64 if data_type == &DataTypeNode::Float64 => None,
