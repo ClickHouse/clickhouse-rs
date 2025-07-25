@@ -235,7 +235,6 @@ fn generate_dates(years: Range<i32>, count: usize) -> Vec<Date> {
     dates
 }
 
-
 #[tokio::test]
 async fn time_and_time64() {
     let client = prepare_database!();
@@ -283,7 +282,7 @@ async fn time_and_time64() {
         .await
         .unwrap();
 
-    let time_s  = Time::from_hms(12, 34, 56).unwrap();
+    let time_s = Time::from_hms(12, 34, 56).unwrap();
     let time_ms = Time::from_hms_milli(12, 34, 56, 789).unwrap();
     let time_us = Time::from_hms_micro(12, 34, 56, 789_123).unwrap();
     let time_ns = Time::from_hms_nano(12, 34, 56, 789_123_456).unwrap();

@@ -2,7 +2,7 @@
 
 use std::ops::RangeBounds;
 
-use chrono::{DateTime, Datelike, NaiveDate, Utc, NaiveTime};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, Utc};
 use rand::{
     distr::{Distribution, StandardUniform},
     Rng,
@@ -258,7 +258,6 @@ fn generate_dates(years: impl RangeBounds<i32>, count: usize) -> Vec<NaiveDate> 
     dates.sort_unstable();
     dates
 }
-
 
 #[tokio::test]
 async fn time_and_time64() {

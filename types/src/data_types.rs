@@ -508,7 +508,7 @@ fn parse_time64(input: &str) -> Result<DataTypeNode, TypesError> {
             "Invalid Time64 precision, expected a positive number. Input: {input}"
         )))?;
         let precision = DateTimePrecision::new(precision_char)?;
-        
+
         return Ok(DataTypeNode::Time64(precision));
     }
     Err(TypesError::TypeParsingError(format!(
@@ -1011,21 +1011,15 @@ mod tests {
         );
         assert_eq!(
             DataTypeNode::new("Time64(3, 'America/New_York')").unwrap(),
-            DataTypeNode::Time64(
-                DateTimePrecision::Precision3
-            )
+            DataTypeNode::Time64(DateTimePrecision::Precision3)
         );
         assert_eq!(
             DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
-            DataTypeNode::Time64(
-                DateTimePrecision::Precision6
-            )
+            DataTypeNode::Time64(DateTimePrecision::Precision6)
         );
         assert_eq!(
             DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
-            DataTypeNode::Time64(
-                DateTimePrecision::Precision9
-            )
+            DataTypeNode::Time64(DateTimePrecision::Precision9)
         );
         assert!(DataTypeNode::new("Time64()").is_err());
         assert!(DataTypeNode::new("Time64(x)").is_err());
