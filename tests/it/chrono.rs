@@ -2,7 +2,7 @@
 
 use std::ops::RangeBounds;
 
-use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, Duration, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, Timelike, Utc};
 use rand::{
     distr::{Distribution, StandardUniform},
     Rng,

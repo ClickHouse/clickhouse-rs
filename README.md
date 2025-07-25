@@ -404,7 +404,7 @@ How to choose between all these features? Here are some considerations:
     </details>
 * `Time` maps to/from i32 or a newtype around it and represents the time‐of‐day value on its own, without any date or regional offset context. Attempting to apply or change a time zone on Time columns has no effect and is not supported.
     * [`time:Time`](https://docs.rs/time/latest/time/struct.Time.html) is is supported by using `serde::time::Time`, requiring the `time` feature. 
-    * [`chrono::NaiveTime`](https://docs.rs/chrono/latest/chrono/struct.NaiveTime.html) is supported by using `serde::chrono::NaiveTime`, requiring the `chrono` feature
+    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::Duration`, which is an alias to `TimeDelta`, requiring the `chrono` feature
     <details>
     <summary>Example</summary>
 

@@ -404,7 +404,6 @@ async fn time64_roundtrip() {
         t9_opt: Option<Time>,
     }
 
-
     let time_s = Time::from_hms(12, 34, 56).unwrap();
     let time_ms = Time::from_hms_milli(12, 34, 56, 789).unwrap();
     let time_us = Time::from_hms_micro(12, 34, 56, 789_123).unwrap();
