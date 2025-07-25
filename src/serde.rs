@@ -350,83 +350,59 @@ pub mod chrono {
     /// Ser/de `chrono::NaiveTime` to/from `Time`.
     pub mod time {
         use super::*;
-        use ::chrono::{NaiveTime, Timelike};
+        use ::chrono::Duration;
 
         option!(
-            NaiveTime,
-            "Ser/de `Option<NaiveTime>` to/from `Nullable(Time)`."
+            Duration,
+            "Ser/de `Option<Duration>` to/from `Nullable(Time)`."
         );
 
-        pub fn serialize<S>(time: &NaiveTime, serializer: S) -> Result<S::Ok, S::Error>
+        pub fn serialize<S>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
-            let seconds = time.hour() * 3600 + time.minute() * 60 + time.second();
-            i32::try_from(seconds)
+            i32::try_from(time.num_seconds())
                 .map_err(|_| S::Error::custom(format!("{time} cannot be represented as Time")))?
                 .serialize(serializer)
         }
 
-        pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveTime, D::Error>
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
         where
             D: Deserializer<'de>,
         {
             let seconds: i32 = Deserialize::deserialize(deserializer)?;
-            if !(0..86400).contains(&seconds) {
-                return Err(D::Error::custom(format!(
-                    "{seconds} cannot be converted to Time"
-                )));
-            }
-
-            let hour = (seconds / 3600) as u32;
-            let minute = ((seconds % 3600) / 60) as u32;
-            let second = (seconds % 60) as u32;
-
-            NaiveTime::from_hms_opt(hour, minute, second)
-                .ok_or_else(|| D::Error::custom(format!("{seconds} cannot be converted to Time")))
+            Ok(Duration::seconds(seconds as i64))
         }
     }
 
     /// Contains modules to ser/de `chrono::NaiveTime` to/from `Time64(_)`.
     pub mod time64 {
         use super::*;
-        use ::chrono::{NaiveTime, Timelike};
+        use ::chrono::Duration;
 
         /// Ser/de `NaiveTime` to/from `Time64(0)` (seconds).
         pub mod secs {
             use super::*;
 
             option!(
-                NaiveTime,
-                "Ser/de `Option<NaiveTime>` to/from `Nullable(Time64(0))`."
+                Duration,
+                "Ser/de `Option<Duration>` to/from `Nullable(Time64(0))`."
             );
 
-            pub fn serialize<S>(time: &NaiveTime, serializer: S) -> Result<S::Ok, S::Error>
+            pub fn serialize<S>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
-                let seconds = time.hour() * 3600 + time.minute() * 60 + time.second();
-                i64::from(seconds).serialize(serializer)
+                let seconds = time.num_seconds();
+                seconds.serialize(serializer)
             }
 
-            pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveTime, D::Error>
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
             where
                 D: Deserializer<'de>,
             {
                 let seconds: i64 = Deserialize::deserialize(deserializer)?;
-                if !(0..86400).contains(&seconds) {
-                    return Err(D::Error::custom(format!(
-                        "{seconds} cannot be converted to Time"
-                    )));
-                }
-
-                let hour = (seconds / 3600) as u32;
-                let minute = ((seconds % 3600) / 60) as u32;
-                let second = (seconds % 60) as u32;
-
-                NaiveTime::from_hms_opt(hour, minute, second).ok_or_else(|| {
-                    D::Error::custom(format!("{seconds} cannot be converted to Time"))
-                })
+                Ok(Duration::seconds(seconds))
             }
         }
 
@@ -435,40 +411,24 @@ pub mod chrono {
             use super::*;
 
             option!(
-                NaiveTime,
-                "Ser/de `Option<NaiveTime>` to/from `Nullable(Time64(3))`."
+                Duration,
+                "Ser/de `Option<Duration>` to/from `Nullable(Time64(3))`."
             );
 
-            pub fn serialize<S>(time: &NaiveTime, serializer: S) -> Result<S::Ok, S::Error>
+            pub fn serialize<S>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
-                let seconds = time.hour() * 3600 + time.minute() * 60 + time.second();
-                let millis = time.nanosecond() / 1_000_000;
-                let total_millis = i64::from(seconds) * 1000 + i64::from(millis);
-                total_millis.serialize(serializer)
+                let millis = time.num_milliseconds();
+                millis.serialize(serializer)
             }
 
-            pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveTime, D::Error>
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
             where
                 D: Deserializer<'de>,
             {
-                let total_millis: i64 = Deserialize::deserialize(deserializer)?;
-                if !(0..86_400_000).contains(&total_millis) {
-                    return Err(D::Error::custom(format!(
-                        "{total_millis} cannot be converted to Time"
-                    )));
-                }
-
-                let seconds = total_millis / 1000;
-                let millis = (total_millis % 1000) as u32;
-                let hour = (seconds / 3600) as u32;
-                let minute = ((seconds % 3600) / 60) as u32;
-                let second = (seconds % 60) as u32;
-
-                NaiveTime::from_hms_milli_opt(hour, minute, second, millis).ok_or_else(|| {
-                    D::Error::custom(format!("{total_millis} cannot be converted to Time"))
-                })
+                let millis: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(Duration::milliseconds(millis))
             }
         }
 
@@ -477,40 +437,27 @@ pub mod chrono {
             use super::*;
 
             option!(
-                NaiveTime,
-                "Ser/de `Option<NaiveTime>` to/from `Nullable(Time64(6))`."
+                Duration,
+                "Ser/de `Option<Duration>` to/from `Nullable(Time64(6))`."
             );
 
-            pub fn serialize<S>(time: &NaiveTime, serializer: S) -> Result<S::Ok, S::Error>
+            pub fn serialize<S>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
-                let seconds = time.hour() * 3600 + time.minute() * 60 + time.second();
-                let micros = time.nanosecond() / 1_000;
-                let total_micros = i64::from(seconds) * 1_000_000 + i64::from(micros);
-                total_micros.serialize(serializer)
+                let micros = time
+                    .num_microseconds()
+                    .ok_or_else(|| S::Error::custom("Duration too large to fit in i64 micros"))?;
+                micros.serialize(serializer)
             }
 
-            pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveTime, D::Error>
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
             where
                 D: Deserializer<'de>,
             {
-                let total_micros: i64 = Deserialize::deserialize(deserializer)?;
-                if !(0..86_400_000_000).contains(&total_micros) {
-                    return Err(D::Error::custom(format!(
-                        "{total_micros} cannot be converted to Time"
-                    )));
-                }
+                let micros: i64 = Deserialize::deserialize(deserializer)?;
 
-                let seconds = total_micros / 1_000_000;
-                let micros = (total_micros % 1_000_000) as u32;
-                let hour = (seconds / 3600) as u32;
-                let minute = ((seconds % 3600) / 60) as u32;
-                let second = (seconds % 60) as u32;
-
-                NaiveTime::from_hms_micro_opt(hour, minute, second, micros).ok_or_else(|| {
-                    D::Error::custom(format!("{total_micros} cannot be converted to Time"))
-                })
+                Ok(Duration::microseconds(micros))
             }
         }
 
@@ -519,40 +466,26 @@ pub mod chrono {
             use super::*;
 
             option!(
-                NaiveTime,
-                "Ser/de `Option<NaiveTime>` to/from `Nullable(Time64(9))`."
+                Duration,
+                "Ser/de `Option<Duration>` to/from `Nullable(Time64(9))`."
             );
 
-            pub fn serialize<S>(time: &NaiveTime, serializer: S) -> Result<S::Ok, S::Error>
+            pub fn serialize<S>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
-                let seconds = time.hour() * 3600 + time.minute() * 60 + time.second();
-                let nanos = time.nanosecond();
-                let total_nanos = i64::from(seconds) * 1_000_000_000 + i64::from(nanos);
-                total_nanos.serialize(serializer)
+                let nanos = time.num_nanoseconds().ok_or_else(|| {
+                    S::Error::custom(format!("{time:?} too large for nanosecond precision"))
+                })?;
+                nanos.serialize(serializer)
             }
 
-            pub fn deserialize<'de, D>(deserializer: D) -> Result<NaiveTime, D::Error>
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
             where
                 D: Deserializer<'de>,
             {
-                let total_nanos: i64 = Deserialize::deserialize(deserializer)?;
-                if !(0..86_400_000_000_000).contains(&total_nanos) {
-                    return Err(D::Error::custom(format!(
-                        "{total_nanos} cannot be converted to Time"
-                    )));
-                }
-
-                let seconds = total_nanos / 1_000_000_000;
-                let nanos = (total_nanos % 1_000_000_000) as u32;
-                let hour = (seconds / 3600) as u32;
-                let minute = ((seconds % 3600) / 60) as u32;
-                let second = (seconds % 60) as u32;
-
-                NaiveTime::from_hms_nano_opt(hour, minute, second, nanos).ok_or_else(|| {
-                    D::Error::custom(format!("{total_nanos} cannot be converted to Time"))
-                })
+                let nanos: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(Duration::nanoseconds(nanos))
             }
         }
     }
@@ -827,12 +760,6 @@ pub mod time {
             D: Deserializer<'de>,
         {
             let seconds: i32 = Deserialize::deserialize(deserializer)?;
-            if !(0..86400).contains(&seconds) {
-                return Err(D::Error::custom(format!(
-                    "{seconds} cannot be converted to Time"
-                )));
-            }
-
             let hour = (seconds / 3600) as u8;
             let minute = ((seconds % 3600) / 60) as u8;
             let second = (seconds % 60) as u8;
@@ -867,12 +794,6 @@ pub mod time {
                 D: Deserializer<'de>,
             {
                 let seconds: i64 = Deserialize::deserialize(deserializer)?;
-                if !(0..86400).contains(&seconds) {
-                    return Err(D::Error::custom(format!(
-                        "{seconds} cannot be converted to Time"
-                    )));
-                }
-
                 let hour = (seconds / 3600) as u8;
                 let minute = ((seconds % 3600) / 60) as u8;
                 let second = (seconds % 60) as u8;
@@ -904,12 +825,6 @@ pub mod time {
                 D: Deserializer<'de>,
             {
                 let total_millis: i64 = Deserialize::deserialize(deserializer)?;
-                if !(0..86_400_000).contains(&total_millis) {
-                    return Err(D::Error::custom(format!(
-                        "{total_millis} cannot be converted to Time"
-                    )));
-                }
-
                 let seconds = total_millis / 1000;
                 let millis = (total_millis % 1000) as u16;
                 let hour = (seconds / 3600) as u8;
@@ -943,12 +858,6 @@ pub mod time {
                 D: Deserializer<'de>,
             {
                 let total_micros: i64 = Deserialize::deserialize(deserializer)?;
-                if !(0..86_400_000_000).contains(&total_micros) {
-                    return Err(D::Error::custom(format!(
-                        "{total_micros} cannot be converted to Time"
-                    )));
-                }
-
                 let seconds = total_micros / 1_000_000;
                 let micros = (total_micros % 1_000_000) as u32;
                 let hour = (seconds / 3600) as u8;
@@ -982,12 +891,6 @@ pub mod time {
                 D: Deserializer<'de>,
             {
                 let total_nanos: i64 = Deserialize::deserialize(deserializer)?;
-                if !(0..86_400_000_000_000).contains(&total_nanos) {
-                    return Err(D::Error::custom(format!(
-                        "{total_nanos} cannot be converted to Time"
-                    )));
-                }
-
                 let seconds = total_nanos / 1_000_000_000;
                 let nanos = (total_nanos % 1_000_000_000) as u32;
                 let hour = (seconds / 3600) as u8;

@@ -2,7 +2,7 @@
 
 use std::ops::RangeBounds;
 
-use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, Duration, Timelike, Utc};
 use rand::{
     distr::{Distribution, StandardUniform},
     Rng,
@@ -260,37 +260,61 @@ fn generate_dates(years: impl RangeBounds<i32>, count: usize) -> Vec<NaiveDate> 
 }
 
 #[tokio::test]
-async fn time_and_time64() {
+async fn time_roundtrip() {
     let client = prepare_database!();
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
-    struct MyRow {
-        #[serde(with = "clickhouse::serde::chrono::time")]
-        t0: NaiveTime,
-        #[serde(with = "clickhouse::serde::chrono::time64::secs::option")]
-        t0_opt: Option<NaiveTime>,
-
-        #[serde(with = "clickhouse::serde::chrono::time64::millis")]
-        t3: NaiveTime,
-        #[serde(with = "clickhouse::serde::chrono::time64::millis::option")]
-        t3_opt: Option<NaiveTime>,
-
-        #[serde(with = "clickhouse::serde::chrono::time64::micros")]
-        t6: NaiveTime,
-        #[serde(with = "clickhouse::serde::chrono::time64::micros::option")]
-        t6_opt: Option<NaiveTime>,
-
-        #[serde(with = "clickhouse::serde::chrono::time64::nanos")]
-        t9: NaiveTime,
-        #[serde(with = "clickhouse::serde::chrono::time64::nanos::option")]
-        t9_opt: Option<NaiveTime>,
-    }
 
     client
         .query(
             r#"
-            CREATE TABLE test (
-                t0      Time,
+            CREATE TABLE test_time (
+                t0  Time,
+                t1  Nullable(Time)
+            ) ENGINE = MergeTree ORDER BY tuple()
+            SETTINGS enable_time_time64_type = 1;
+            "#,
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
+    struct TimeRow {
+        #[serde(with = "clickhouse::serde::chrono::time")]
+        t0: Duration,
+        #[serde(with = "clickhouse::serde::chrono::time::option")]
+        t1: Option<Duration>,
+    }
+
+    let time = NaiveTime::from_hms_opt(12, 34, 56).unwrap();
+    let duration = Duration::seconds(time.num_seconds_from_midnight() as i64);
+
+    let row = TimeRow {
+        t0: duration,
+        t1: Some(duration),
+    };
+
+    let mut insert = client.insert::<TimeRow>("test_time").unwrap();
+    insert.write(&row).await.unwrap();
+    insert.end().await.unwrap();
+
+    let fetched = client
+        .query("SELECT ?fields FROM test_time")
+        .fetch_one::<TimeRow>()
+        .await
+        .unwrap();
+
+    assert_eq!(fetched, row);
+}
+
+#[tokio::test]
+async fn time64_roundtrip() {
+    let client = prepare_database!();
+
+    client
+        .query(
+            r#"
+            CREATE TABLE test_time64 (
+                t0      Time64(0),
                 t0_opt  Nullable(Time64(0)),
                 t3      Time64(3),
                 t3_opt  Nullable(Time64(3)),
@@ -298,36 +322,68 @@ async fn time_and_time64() {
                 t6_opt  Nullable(Time64(6)),
                 t9      Time64(9),
                 t9_opt  Nullable(Time64(9))
-            ) ENGINE = MergeTree ORDER BY t0
-             SETTINGS enable_time_time64_type = 1;
+            ) ENGINE = MergeTree
+            ORDER BY tuple()
+            SETTINGS enable_time_time64_type = 1;
             "#,
         )
         .execute()
         .await
         .unwrap();
 
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::chrono::time64::secs")]
+        t0: Duration,
+        #[serde(with = "clickhouse::serde::chrono::time64::secs::option")]
+        t0_opt: Option<Duration>,
+
+        #[serde(with = "clickhouse::serde::chrono::time64::millis")]
+        t3: Duration,
+        #[serde(with = "clickhouse::serde::chrono::time64::millis::option")]
+        t3_opt: Option<Duration>,
+
+        #[serde(with = "clickhouse::serde::chrono::time64::micros")]
+        t6: Duration,
+        #[serde(with = "clickhouse::serde::chrono::time64::micros::option")]
+        t6_opt: Option<Duration>,
+
+        #[serde(with = "clickhouse::serde::chrono::time64::nanos")]
+        t9: Duration,
+        #[serde(with = "clickhouse::serde::chrono::time64::nanos::option")]
+        t9_opt: Option<Duration>,
+    }
+
     let time_s = NaiveTime::from_hms_opt(12, 34, 56).unwrap();
     let time_ms = NaiveTime::from_hms_milli_opt(12, 34, 56, 789).unwrap();
     let time_us = NaiveTime::from_hms_micro_opt(12, 34, 56, 789_123).unwrap();
     let time_ns = NaiveTime::from_hms_nano_opt(12, 34, 56, 789_123_456).unwrap();
 
+    let dur_s = Duration::seconds(time_s.num_seconds_from_midnight() as i64);
+    let dur_ms = Duration::seconds(time_ms.num_seconds_from_midnight() as i64)
+        + Duration::milliseconds((time_ms.nanosecond() / 1_000_000) as i64);
+    let dur_us = Duration::seconds(time_us.num_seconds_from_midnight() as i64)
+        + Duration::microseconds((time_us.nanosecond() / 1_000) as i64);
+    let dur_ns = Duration::seconds(time_ns.num_seconds_from_midnight() as i64)
+        + Duration::nanoseconds(time_ns.nanosecond() as i64);
+
     let original_row = MyRow {
-        t0: time_s,
-        t0_opt: Some(time_s),
-        t3: time_ms,
-        t3_opt: Some(time_ms),
-        t6: time_us,
-        t6_opt: Some(time_us),
-        t9: time_ns,
-        t9_opt: Some(time_ns),
+        t0: dur_s,
+        t0_opt: Some(dur_s),
+        t3: dur_ms,
+        t3_opt: Some(dur_ms),
+        t6: dur_us,
+        t6_opt: Some(dur_us),
+        t9: dur_ns,
+        t9_opt: Some(dur_ns),
     };
 
-    let mut insert = client.insert::<MyRow>("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test_time64").unwrap();
     insert.write(&original_row).await.unwrap();
     insert.end().await.unwrap();
 
     let fetched = client
-        .query("SELECT ?fields FROM test")
+        .query("SELECT ?fields FROM test_time64")
         .fetch_one::<MyRow>()
         .await
         .unwrap();

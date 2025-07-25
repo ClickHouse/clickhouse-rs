@@ -11,7 +11,7 @@ struct Timestamp64(u64);
 struct Time32(u32);
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-struct Time64(u64);
+struct Time64(i64);
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct FixedPoint64(i64);

@@ -1467,8 +1467,12 @@ mod tests {
 
     #[test]
     fn test_time_time64_roundtrip_and_edges() {
-        // Time: only valid variant is Time
+        use super::DateTimePrecision::*;
+
+        // Valid "Time" type (no precision, no timezone)
         assert_eq!(DataTypeNode::new("Time").unwrap(), DataTypeNode::Time);
+
+        // "Time" should ignore timezones – they are parsed but discarded
         assert_eq!(
             DataTypeNode::new("Time('UTC')").unwrap(),
             DataTypeNode::Time
@@ -1477,35 +1481,41 @@ mod tests {
             DataTypeNode::new("Time('Europe/Moscow')").unwrap(),
             DataTypeNode::Time
         );
-        // Edge cases for Time64
-        use super::DateTimePrecision::*;
-        // Midnight
+
+        // Time64 with precision 0 (seconds)
         assert_eq!(
             DataTypeNode::new("Time64(0)").unwrap(),
             DataTypeNode::Time64(Precision0)
         );
-        // Max value (simulate parsing with and without timezone)
+
+        // Time64 with precision 9 and a timezone (timezone ignored)
         assert_eq!(
             DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
             DataTypeNode::Time64(Precision9)
         );
-        // Just before midnight
+
+        // Time64 with precision 0 and timezone (again, timezone ignored)
         assert_eq!(
             DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
             DataTypeNode::Time64(Precision0)
         );
-        // Random value (precision 3, no tz)
+
+        // Time64 with precision 3 (milliseconds), no timezone
         assert_eq!(
             DataTypeNode::new("Time64(3)").unwrap(),
             DataTypeNode::Time64(Precision3)
         );
-        // Random value (precision 6, with tz)
+
+        // Time64 with precision 6 (microseconds), timezone present but ignored
         assert_eq!(
             DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
             DataTypeNode::Time64(Precision6)
         );
-        // Invalid
+
+        // Invalid: Empty argument list
         assert!(DataTypeNode::new("Time64()").is_err());
+
+        // Invalid: Non-numeric precision
         assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
