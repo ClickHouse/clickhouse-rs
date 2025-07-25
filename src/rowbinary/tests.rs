@@ -233,6 +233,7 @@ fn it_serializes_option_time32_some() {
     );
 }
 
+#[cfg(feature = "chrono")]
 #[test]
 fn it_serializes_time32_overflow_fails() {
     use crate::serde::chrono::time;
