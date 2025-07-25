@@ -8,7 +8,7 @@ struct Timestamp32(u32);
 struct Timestamp64(u64);
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-struct Time32(u32);
+struct Time32(i32);
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Time64(i64);
@@ -178,22 +178,77 @@ fn it_deserializes() {
 }
 
 #[test]
-fn it_serializes_time64_correctly() {
-    let time64 = Time64(42_000_000_000);
+fn it_serializes_time64() {
+    let value = 42_000_000_000;
+    let time64 = Time64(value);
     println!("Time64 value: {}", time64.0);
     let mut actual = Vec::new();
     super::serialize_into(&mut actual, &time64).unwrap();
 
     // Expected: 42000000000 in little-endian
-    let expected = vec![0x00, 0x24, 0x65, 0xc7, 0x09, 0x00, 0x00, 0x00];
-    println!("Actual bytes: {actual:?}");
-    println!("Expected bytes: {expected:?}");
-
-    // Calculate what the actual bytes represent
-    let actual_value = u64::from_le_bytes([
-        actual[0], actual[1], actual[2], actual[3], actual[4], actual[5], actual[6], actual[7],
-    ]);
-    println!("Actual value: {actual_value}");
+    let expected = value.to_le_bytes();
 
     assert_eq!(actual, expected, "Time64 serialization mismatch");
+}
+
+#[test]
+fn it_deserializes_time64() {
+    let value_bytes = 42_000_000_000_i64.to_le_bytes();
+    let time64 = { Time64(i64::from_le_bytes(value_bytes)) };
+    assert_eq!(time64.0, 42_000_000_000, "Time deserialization mismatch");
+}
+
+#[test]
+fn it_serializes_time32() {
+    let value = 42_000;
+    let time32 = Time32(value);
+    let mut actual = Vec::new();
+    super::serialize_into(&mut actual, &time32).unwrap();
+    let expected = value.to_le_bytes();
+    assert_eq!(actual, expected, "Time32 serialization mismatch");
+}
+
+#[test]
+fn it_deserializes_time32() {
+    let value_bytes = 42_000_i32.to_le_bytes();
+    let time64 = { Time32(i32::from_le_bytes(value_bytes)) };
+    assert_eq!(time64.0, 42_000, "Time deserialization mismatch");
+}
+
+#[test]
+fn it_serializes_option_time32_some() {
+    let value = 42_000;
+    let time: Option<Time32> = Some(Time32(value));
+    let mut actual = Vec::new();
+    super::serialize_into(&mut actual, &time).unwrap();
+
+    // Nullable encoding: 0x00 = not null, followed by value
+    let mut expected = vec![0x00];
+    // extend after not null
+    expected.extend_from_slice(&value.to_le_bytes());
+
+    assert_eq!(
+        actual, expected,
+        "Option<Time32> (Some) serialization mismatch"
+    );
+}
+
+#[test]
+fn it_serializes_time32_overflow_fails() {
+    use crate::serde::chrono::time;
+    use chrono::Duration;
+
+    // Duration that exceeds i32::MAX
+    let value = Duration::seconds(i64::from(i32::MAX) + 1);
+
+    // Use a dummy serializer just to trigger the error
+    let result = time::serialize(&value, serde_json::value::Serializer);
+
+    assert!(result.is_err(), "Expected error due to overflow");
+
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("cannot be represented as Time"),
+        "Unexpected error message: {err}"
+    );
 }
