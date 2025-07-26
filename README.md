@@ -403,8 +403,8 @@ How to choose between all these features? Here are some considerations:
     ```
     </details>
 * `Time` maps to/from i32 or a newtype around it and represents the time‐of‐day value on its own, without any date or regional offset context. Attempting to apply or change a time zone on Time columns has no effect and is not supported.
-    * [`time:Time`](https://docs.rs/time/latest/time/struct.Time.html) is is supported by using `serde::time::Time`, requiring the `time` feature. 
-    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::Duration`, which is an alias to `TimeDelta`, requiring the `chrono` feature
+    * [`time:Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::*`, requiring the `time` feature.
+    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::*`, which is an alias to `TimeDelta`, requiring the `chrono` feature
     <details>
     <summary>Example</summary>
 
@@ -412,16 +412,16 @@ How to choose between all these features? Here are some considerations:
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::chrono::time64::secs")]
-        t0: NaiveTime,
+        t0: chrono::Duration,
         #[serde(with = "clickhouse::serde::chrono::time64::secs::option")]
-        t0_opt: Option<NaiveTime>,
+        t0_opt: Option<chrono::Duration>,
     }
 
     ```
     </details>
 * `Time64(_)` maps to/from i64 or a newtype around it and represents the time‐of‐day with sub-second precision. Unlike DateTime64, Time64 does not store a date component, meaning that it only represents time.
-    * [`time:Time`](https://docs.rs/time/latest/time/struct.Time.html) is is supported by using `serde::time::Time`, requiring the `time` feature. 
-    * [`chrono::NaiveTime`](https://docs.rs/chrono/latest/chrono/struct.NaiveTime.html) is supported by using `serde::chrono::NaiveTime`, requiring the `chrono` feature
+    * [`time:Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::*`, requiring the `time` feature.
+    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::*`, requiring the `chrono` feature
     <details>
     <summary>Example</summary>
 

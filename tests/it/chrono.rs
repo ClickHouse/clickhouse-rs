@@ -447,7 +447,7 @@ async fn time64_negative_roundtrip() {
     client
         .query(
             r#"
-            CREATE TABLE test_time64_chrono_negative (
+            CREATE TABLE test_time64_negative (
                 t0      Time64(0),
                 t0_opt  Nullable(Time64(0)),
                 t3      Time64(3),
@@ -507,14 +507,12 @@ async fn time64_negative_roundtrip() {
         t9_opt: Some(dur_ns),
     };
 
-    let mut insert = client
-        .insert::<MyRow>("test_time64_chrono_negative")
-        .unwrap();
+    let mut insert = client.insert::<MyRow>("test_time64_negative").unwrap();
     insert.write(&negative_row).await.unwrap();
     insert.end().await.unwrap();
 
     let fetched = client
-        .query("SELECT ?fields FROM test_time64_chrono_negative")
+        .query("SELECT ?fields FROM test_time64_negative")
         .fetch_one::<MyRow>()
         .await
         .unwrap();
