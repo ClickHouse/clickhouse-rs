@@ -347,7 +347,7 @@ pub mod chrono {
         }
     }
 
-    /// Ser/de `chrono::NaiveTime` to/from `Time`.
+    /// Ser/de `chrono::Duration` to/from `Time`.
     pub mod time {
         use super::*;
         use ::chrono::Duration;
@@ -375,12 +375,12 @@ pub mod chrono {
         }
     }
 
-    /// Contains modules to ser/de `chrono::NaiveTime` to/from `Time64(_)`.
+    /// Contains modules to ser/de `chrono::Duration` to/from `Time64(_)`.
     pub mod time64 {
         use super::*;
         use ::chrono::Duration;
 
-        /// Ser/de `NaiveTime` to/from `Time64(0)` (seconds).
+        /// Ser/de `Duration` to/from `Time64(0)` (seconds).
         pub mod secs {
             use super::*;
 
@@ -406,7 +406,7 @@ pub mod chrono {
             }
         }
 
-        /// Ser/de `NaiveTime` to/from `Time64(3)` (milliseconds).
+        /// Ser/de `Duration` to/from `Time64(3)` (milliseconds).
         pub mod millis {
             use super::*;
 
@@ -432,7 +432,7 @@ pub mod chrono {
             }
         }
 
-        /// Ser/de `NaiveTime` to/from `Time64(6)` (microseconds).
+        /// Ser/de `Duration` to/from `Time64(6)` (microseconds).
         pub mod micros {
             use super::*;
 
@@ -461,7 +461,7 @@ pub mod chrono {
             }
         }
 
-        /// Ser/de `NaiveTime` to/from `Time64(9)` (nanoseconds).
+        /// Ser/de `Duration` to/from `Time64(9)` (nanoseconds).
         pub mod nanos {
             use super::*;
 
@@ -733,171 +733,155 @@ pub mod time {
         }
     }
 
-    /// Ser/de `time::Time` to/from `Time`.
+    /// Ser/de `time::Duration` to/from `Time`.
     #[allow(clippy::module_inception)]
     pub mod time {
         use super::*;
-        use ::time::Time;
+        use ::time::Duration;
 
         option!(
-            Time,
-            "Ser/de `Option<time::Time>` to/from `Nullable(Time)`."
+            Duration,
+            "Ser/de `Option<time::Duration>` to/from `Nullable(Time)`."
         );
 
-        pub fn serialize<S>(time: &Time, serializer: S) -> Result<S::Ok, S::Error>
+        pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
-            let seconds =
-                (time.hour() as u32) * 3600 + (time.minute() as u32) * 60 + (time.second() as u32);
-            i32::try_from(seconds)
-                .map_err(|_| S::Error::custom(format!("{time} cannot be represented as Time")))?
+            let total_seconds = duration.whole_seconds();
+            i32::try_from(total_seconds)
+                .map_err(|_| S::Error::custom(format!("{duration} cannot be represented as Time")))?
                 .serialize(serializer)
         }
 
-        pub fn deserialize<'de, D>(deserializer: D) -> Result<Time, D::Error>
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
         where
             D: Deserializer<'de>,
         {
             let seconds: i32 = Deserialize::deserialize(deserializer)?;
-            let hour = (seconds / 3600) as u8;
-            let minute = ((seconds % 3600) / 60) as u8;
-            let second = (seconds % 60) as u8;
-
-            Time::from_hms(hour, minute, second).map_err(D::Error::custom)
+            Ok(Duration::seconds(seconds.into()))
         }
     }
 
-    /// Contains modules to ser/de `time::Time` to/from `Time64(_)`.
     pub mod time64 {
         use super::*;
-        use ::time::Time;
+        use ::time::Duration;
 
-        /// Ser/de `Time` to/from `Time64(0)` (seconds).
+        /// Ser/de `Duration` to/from `Time64(0)` (seconds).
         pub mod secs {
             use super::*;
 
-            option!(Time, "Ser/de `Option<Time>` to/from `Nullable(Time64(0))`.");
+            option!(
+                Duration,
+                "Ser/de `Option<Duration>` to/from `Nullable(Time64(0))`."
+            );
 
-            pub fn serialize<S>(time: &Time, serializer: S) -> Result<S::Ok, S::Error>
+            pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
-                let seconds = (time.hour() as u32) * 3600
-                    + (time.minute() as u32) * 60
-                    + (time.second() as u32);
-                i64::from(seconds).serialize(serializer)
+                duration.whole_seconds().serialize(serializer)
             }
 
-            pub fn deserialize<'de, D>(deserializer: D) -> Result<Time, D::Error>
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
             where
                 D: Deserializer<'de>,
             {
                 let seconds: i64 = Deserialize::deserialize(deserializer)?;
-                let hour = (seconds / 3600) as u8;
-                let minute = ((seconds % 3600) / 60) as u8;
-                let second = (seconds % 60) as u8;
-
-                Time::from_hms(hour, minute, second).map_err(D::Error::custom)
+                Ok(Duration::seconds(seconds))
             }
         }
 
-        /// Ser/de `Time` to/from `Time64(3)` (milliseconds).
+        /// Ser/de `Duration` to/from `Time64(3)` (milliseconds).
         pub mod millis {
             use super::*;
 
-            option!(Time, "Ser/de `Option<Time>` to/from `Nullable(Time64(3))`.");
+            option!(
+                Duration,
+                "Ser/de `Option<Duration>` to/from `Nullable(Time64(3))`."
+            );
 
-            pub fn serialize<S>(time: &Time, serializer: S) -> Result<S::Ok, S::Error>
+            pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
-                let seconds = (time.hour() as u32) * 3600
-                    + (time.minute() as u32) * 60
-                    + (time.second() as u32);
-                let millis = time.nanosecond() / 1_000_000;
-                let total_millis = i64::from(seconds) * 1000 + i64::from(millis);
-                total_millis.serialize(serializer)
+                let millis_i128 = duration.whole_milliseconds();
+                let millis_i64 = i64::try_from(millis_i128).map_err(|_| {
+                    S::Error::custom(format!(
+                        "Duration {duration:?} milliseconds too large for i64"
+                    ))
+                })?;
+                millis_i64.serialize(serializer)
             }
 
-            pub fn deserialize<'de, D>(deserializer: D) -> Result<Time, D::Error>
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
             where
                 D: Deserializer<'de>,
             {
-                let total_millis: i64 = Deserialize::deserialize(deserializer)?;
-                let seconds = total_millis / 1000;
-                let millis = (total_millis % 1000) as u16;
-                let hour = (seconds / 3600) as u8;
-                let minute = ((seconds % 3600) / 60) as u8;
-                let second = (seconds % 60) as u8;
-
-                Time::from_hms_milli(hour, minute, second, millis).map_err(D::Error::custom)
+                let millis: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(Duration::milliseconds(millis))
             }
         }
 
-        /// Ser/de `Time` to/from `Time64(6)` (microseconds).
+        /// Ser/de `Duration` to/from `Time64(6)` (microseconds).
         pub mod micros {
             use super::*;
 
-            option!(Time, "Ser/de `Option<Time>` to/from `Nullable(Time64(6))`.");
+            option!(
+                Duration,
+                "Ser/de `Option<Duration>` to/from `Nullable(Time64(6))`."
+            );
 
-            pub fn serialize<S>(time: &Time, serializer: S) -> Result<S::Ok, S::Error>
+            pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
-                let seconds = (time.hour() as u32) * 3600
-                    + (time.minute() as u32) * 60
-                    + (time.second() as u32);
-                let micros = time.nanosecond() / 1_000;
-                let total_micros = i64::from(seconds) * 1_000_000 + i64::from(micros);
-                total_micros.serialize(serializer)
+                let micros_i128 = duration.whole_microseconds();
+                let micros_i64 = i64::try_from(micros_i128).map_err(|_| {
+                    S::Error::custom(format!(
+                        "Duration {duration:?} microseconds too large for i64"
+                    ))
+                })?;
+                micros_i64.serialize(serializer)
             }
 
-            pub fn deserialize<'de, D>(deserializer: D) -> Result<Time, D::Error>
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
             where
                 D: Deserializer<'de>,
             {
-                let total_micros: i64 = Deserialize::deserialize(deserializer)?;
-                let seconds = total_micros / 1_000_000;
-                let micros = (total_micros % 1_000_000) as u32;
-                let hour = (seconds / 3600) as u8;
-                let minute = ((seconds % 3600) / 60) as u8;
-                let second = (seconds % 60) as u8;
-
-                Time::from_hms_micro(hour, minute, second, micros).map_err(D::Error::custom)
+                let micros: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(Duration::microseconds(micros))
             }
         }
 
-        /// Ser/de `Time` to/from `Time64(9)` (nanoseconds).
+        /// Ser/de `Duration` to/from `Time64(9)` (nanoseconds).
         pub mod nanos {
             use super::*;
 
-            option!(Time, "Ser/de `Option<Time>` to/from `Nullable(Time64(9))`.");
+            option!(
+                Duration,
+                "Ser/de `Option<Duration>` to/from `Nullable(Time64(9))`."
+            );
 
-            pub fn serialize<S>(time: &Time, serializer: S) -> Result<S::Ok, S::Error>
+            pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
-                let seconds = (time.hour() as u32) * 3600
-                    + (time.minute() as u32) * 60
-                    + (time.second() as u32);
-                let nanos = time.nanosecond();
-                let total_nanos = i64::from(seconds) * 1_000_000_000 + i64::from(nanos);
-                total_nanos.serialize(serializer)
+                let nanos_i128 = duration.whole_nanoseconds();
+                let nanos_i64 = i64::try_from(nanos_i128).map_err(|_| {
+                    S::Error::custom(format!(
+                        "Duration {duration:?} nanoseconds too large for i64"
+                    ))
+                })?;
+                nanos_i64.serialize(serializer)
             }
 
-            pub fn deserialize<'de, D>(deserializer: D) -> Result<Time, D::Error>
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
             where
                 D: Deserializer<'de>,
             {
-                let total_nanos: i64 = Deserialize::deserialize(deserializer)?;
-                let seconds = total_nanos / 1_000_000_000;
-                let nanos = (total_nanos % 1_000_000_000) as u32;
-                let hour = (seconds / 3600) as u8;
-                let minute = ((seconds % 3600) / 60) as u8;
-                let second = (seconds % 60) as u8;
-
-                Time::from_hms_nano(hour, minute, second, nanos).map_err(D::Error::custom)
+                let nanos: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(Duration::nanoseconds(nanos))
             }
         }
     }

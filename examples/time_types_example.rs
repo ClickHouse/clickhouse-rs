@@ -1,27 +1,26 @@
 use chrono::Duration;
 use clickhouse::Client;
 use serde::{Deserialize, Serialize};
-use time::Time;
 
 #[derive(Debug, Serialize, Deserialize, clickhouse::Row)]
 struct TimeExample {
     #[serde(with = "clickhouse::serde::time::time")]
-    time_field: Time,
+    time_field: time::Duration,
 
     #[serde(with = "clickhouse::serde::time::time::option")]
-    time_optional: Option<Time>,
+    time_optional: Option<time::Duration>,
 
     #[serde(with = "clickhouse::serde::time::time64::secs")]
-    time64_seconds: Time,
+    time64_seconds: time::Duration,
 
     #[serde(with = "clickhouse::serde::time::time64::millis")]
-    time64_millis: Time,
+    time64_millis: time::Duration,
 
     #[serde(with = "clickhouse::serde::time::time64::micros")]
-    time64_micros: Time,
+    time64_micros: time::Duration,
 
     #[serde(with = "clickhouse::serde::time::time64::nanos")]
-    time64_nanos: Time,
+    time64_nanos: time::Duration,
 }
 
 #[derive(Debug, Serialize, Deserialize, clickhouse::Row)]
@@ -65,12 +64,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Insert data using time crate
     let time_example = TimeExample {
-        time_field: Time::from_hms(12, 34, 56).unwrap(),
-        time_optional: Some(Time::from_hms(23, 59, 59).unwrap()),
-        time64_seconds: Time::from_hms(1, 2, 3).unwrap(),
-        time64_millis: Time::from_hms_milli(4, 5, 6, 123).unwrap(),
-        time64_micros: Time::from_hms_micro(7, 8, 9, 456_789).unwrap(),
-        time64_nanos: Time::from_hms_nano(10, 11, 12, 123_456_789).unwrap(),
+        time_field: time::Duration::seconds(12 * 3600 + 34 * 60 + 56),
+        time_optional: Some(time::Duration::seconds(23 * 3600 + 59 * 60 + 59)),
+        time64_seconds: time::Duration::seconds(3600 + 2 * 60 + 3),
+        time64_millis: time::Duration::seconds(4 * 3600 + 5 * 60 + 6)
+            + time::Duration::milliseconds(123),
+        time64_micros: time::Duration::seconds(7 * 3600 + 8 * 60 + 9)
+            + time::Duration::microseconds(456_789),
+        time64_nanos: time::Duration::seconds(10 * 3600 + 11 * 60 + 12)
+            + time::Duration::nanoseconds(123_456_789),
     };
 
     let mut insert = client.insert::<TimeExample>("time_example")?;

@@ -253,3 +253,67 @@ fn it_serializes_time32_overflow_fails() {
         "Unexpected error message: {err}"
     );
 }
+
+#[cfg(feature = "time")]
+#[test]
+fn it_time_serializes_time64_millis_overflow_fails() {
+    use crate::serde::time::time64::millis;
+    use time::Duration;
+
+    let value = Duration::milliseconds(i64::MAX) + Duration::milliseconds(1);
+
+    let result = millis::serialize(&value, serde_json::value::Serializer);
+
+    assert!(
+        result.is_err(),
+        "Expected error due to milliseconds overflow"
+    );
+
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("milliseconds too large for i64"),
+        "Unexpected error message: {err}"
+    );
+}
+
+#[cfg(feature = "time")]
+#[test]
+fn it_time_serializes_time64_micros_overflow_fails() {
+    use crate::serde::time::time64::micros;
+    use time::Duration;
+
+    let value = Duration::microseconds(i64::MAX) + Duration::microseconds(1);
+    let result = micros::serialize(&value, serde_json::value::Serializer);
+
+    assert!(
+        result.is_err(),
+        "Expected error due to microseconds overflow"
+    );
+
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("microseconds too large for i64"),
+        "Unexpected error message: {err}"
+    );
+}
+
+#[cfg(feature = "time")]
+#[test]
+fn it_time_serializes_time64_nanos_overflow_fails() {
+    use crate::serde::time::time64::nanos;
+    use time::Duration;
+
+    let value = Duration::nanoseconds(i64::MAX) + Duration::nanoseconds(1);
+    let result = nanos::serialize(&value, serde_json::value::Serializer);
+
+    assert!(
+        result.is_err(),
+        "Expected error due to nanoseconds overflow"
+    );
+
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("nanoseconds too large for i64"),
+        "Unexpected error message: {err}"
+    );
+}
