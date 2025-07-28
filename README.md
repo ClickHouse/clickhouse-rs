@@ -402,7 +402,7 @@ How to choose between all these features? Here are some considerations:
 
     ```
     </details>
-* `Time` maps to/from i32 or a newtype around it and represents the time‐of‐day value on its own, without any date or regional offset context. Attempting to apply or change a time zone on Time columns has no effect and is not supported.
+* `Time` maps to/from i32 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
     * [`time:Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::*`, requiring the `time` feature.
     * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::*`, which is an alias to `TimeDelta`, requiring the `chrono` feature
     <details>
@@ -419,7 +419,7 @@ How to choose between all these features? Here are some considerations:
 
     ```
     </details>
-* `Time64(_)` maps to/from i64 or a newtype around it and represents the time‐of‐day with sub-second precision. Unlike DateTime64, Time64 does not store a date component, meaning that it only represents time.
+* `Time64(_)` maps to/from i64 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
     * [`time:Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::*`, requiring the `time` feature.
     * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::*`, requiring the `chrono` feature
     <details>

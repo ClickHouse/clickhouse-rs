@@ -137,13 +137,12 @@ impl DataTypeNode {
             "MultiLineString" => Ok(Self::MultiLineString),
             "Polygon" => Ok(Self::Polygon),
             "MultiPolygon" => Ok(Self::MultiPolygon),
-            "Time" => Ok(Self::Time),
 
             str if str.starts_with("Decimal") => parse_decimal(str),
             str if str.starts_with("DateTime64") => parse_datetime64(str),
             str if str.starts_with("DateTime") => parse_datetime(str),
             str if str.starts_with("Time64") => parse_time64(str),
-            str if str.starts_with("Time(") => Ok(Self::Time), // ignore timezone
+            str if str.starts_with("Time") => Ok(Self::Time),
 
             str if str.starts_with("Nullable") => parse_nullable(str),
             str if str.starts_with("LowCardinality") => parse_low_cardinality(str),
