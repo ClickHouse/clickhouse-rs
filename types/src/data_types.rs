@@ -179,81 +179,100 @@ impl From<DataTypeNode> for String {
 impl Display for DataTypeNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         use DataTypeNode::*;
-        let str = match self {
-            UInt8 => "UInt8".to_string(),
-            UInt16 => "UInt16".to_string(),
-            UInt32 => "UInt32".to_string(),
-            UInt64 => "UInt64".to_string(),
-            UInt128 => "UInt128".to_string(),
-            UInt256 => "UInt256".to_string(),
-            Int8 => "Int8".to_string(),
-            Int16 => "Int16".to_string(),
-            Int32 => "Int32".to_string(),
-            Int64 => "Int64".to_string(),
-            Int128 => "Int128".to_string(),
-            Int256 => "Int256".to_string(),
-            Float32 => "Float32".to_string(),
-            Float64 => "Float64".to_string(),
-            BFloat16 => "BFloat16".to_string(),
+        match self {
+            UInt8 => write!(f, "UInt8"),
+            UInt16 => write!(f, "UInt16"),
+            UInt32 => write!(f, "UInt32"),
+            UInt64 => write!(f, "UInt64"),
+            UInt128 => write!(f, "UInt128"),
+            UInt256 => write!(f, "UInt256"),
+            Int8 => write!(f, "Int8"),
+            Int16 => write!(f, "Int16"),
+            Int32 => write!(f, "Int32"),
+            Int64 => write!(f, "Int64"),
+            Int128 => write!(f, "Int128"),
+            Int256 => write!(f, "Int256"),
+            Float32 => write!(f, "Float32"),
+            Float64 => write!(f, "Float64"),
+            BFloat16 => write!(f, "BFloat16"),
             Decimal(precision, scale, _) => {
-                format!("Decimal({precision}, {scale})")
+                write!(f, "Decimal({precision}, {scale})")
             }
-            String => "String".to_string(),
-            UUID => "UUID".to_string(),
-            Date => "Date".to_string(),
-            Date32 => "Date32".to_string(),
-            DateTime(None) => "DateTime".to_string(),
-            DateTime(Some(tz)) => format!("DateTime('{tz}')"),
-            DateTime64(precision, None) => format!("DateTime64({precision})"),
-            DateTime64(precision, Some(tz)) => format!("DateTime64({precision}, '{tz}')"),
-            Time => "Time".to_string(),
-            Time64(precision) => format!("Time64({precision})"),
-            IPv4 => "IPv4".to_string(),
-            IPv6 => "IPv6".to_string(),
-            Bool => "Bool".to_string(),
-            Nullable(inner) => format!("Nullable({inner})"),
-            Array(inner) => format!("Array({inner})"),
+            String => write!(f, "String"),
+            UUID => write!(f, "UUID"),
+            Date => write!(f, "Date"),
+            Date32 => write!(f, "Date32"),
+            DateTime(None) => write!(f, "DateTime"),
+            DateTime(Some(tz)) => write!(f, "DateTime('{tz}')"),
+            DateTime64(precision, None) => write!(f, "DateTime64({precision})"),
+            DateTime64(precision, Some(tz)) => write!(f, "DateTime64({precision}, '{tz}')"),
+            Time => write!(f, "Time"),
+            Time64(precision) => write!(f, "Time64({precision})"),
+            IPv4 => write!(f, "IPv4"),
+            IPv6 => write!(f, "IPv6"),
+            Bool => write!(f, "Bool"),
+            Nullable(inner) => write!(f, "Nullable({inner})"),
+            Array(inner) => write!(f, "Array({inner})"),
             Tuple(elements) => {
-                let elements_str = data_types_to_string(elements);
-                format!("Tuple({elements_str})")
+                write!(f, "Tuple(")?;
+                for (i, element) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{element}")?;
+                }
+                write!(f, ")")
             }
             Map([key, value]) => {
-                format!("Map({key}, {value})")
+                write!(f, "Map({key}, {value})")
             }
             LowCardinality(inner) => {
-                format!("LowCardinality({inner})")
+                write!(f, "LowCardinality({inner})")
             }
             Enum(enum_type, values) => {
                 let mut values_vec = values.iter().collect::<Vec<_>>();
                 values_vec.sort_by(|(i1, _), (i2, _)| (*i1).cmp(*i2));
-                let values_str = values_vec
-                    .iter()
-                    .map(|(index, name)| format!("'{name}' = {index}"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{enum_type}({values_str})")
+                write!(f, "{enum_type}(")?;
+                for (i, (index, name)) in values_vec.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "'{name}' = {index}")?;
+                }
+                write!(f, ")")
             }
             AggregateFunction(func_name, args) => {
-                let args_str = data_types_to_string(args);
-                format!("AggregateFunction({func_name}, {args_str})")
+                write!(f, "AggregateFunction({func_name}, ")?;
+                for (i, element) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{element}")?;
+                }
+                write!(f, ")")
             }
             FixedString(size) => {
-                format!("FixedString({size})")
+                write!(f, "FixedString({size})")
             }
             Variant(types) => {
-                let types_str = data_types_to_string(types);
-                format!("Variant({types_str})")
+                write!(f, "Variant(")?;
+                for (i, element) in types.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{element}")?;
+                }
+                write!(f, ")")
             }
-            JSON => "JSON".to_string(),
-            Dynamic => "Dynamic".to_string(),
-            Point => "Point".to_string(),
-            Ring => "Ring".to_string(),
-            LineString => "LineString".to_string(),
-            MultiLineString => "MultiLineString".to_string(),
-            Polygon => "Polygon".to_string(),
-            MultiPolygon => "MultiPolygon".to_string(),
-        };
-        write!(f, "{str}")
+            JSON => write!(f, "JSON"),
+            Dynamic => write!(f, "Dynamic"),
+            Point => write!(f, "Point"),
+            Ring => write!(f, "Ring"),
+            LineString => write!(f, "LineString"),
+            MultiLineString => write!(f, "MultiLineString"),
+            Polygon => write!(f, "Polygon"),
+            MultiPolygon => write!(f, "MultiPolygon"),
+        }
     }
 }
 
@@ -371,14 +390,6 @@ impl Display for DateTimePrecision {
             DateTimePrecision::Precision9 => write!(f, "9"),
         }
     }
-}
-
-fn data_types_to_string(elements: &[DataTypeNode]) -> String {
-    elements
-        .iter()
-        .map(|a| a.to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 fn parse_fixed_string(input: &str) -> Result<DataTypeNode, TypesError> {
@@ -744,6 +755,107 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_aggregate_function_display() {
+        let simple = DataTypeNode::AggregateFunction("sum".to_string(), vec![DataTypeNode::UInt64]);
+        assert_eq!(simple.to_string(), "AggregateFunction(sum, UInt64)");
+
+        let complex = DataTypeNode::AggregateFunction(
+            "groupArray".to_string(),
+            vec![
+                DataTypeNode::String,
+                DataTypeNode::UInt32,
+                DataTypeNode::Nullable(Box::new(DataTypeNode::Float64)),
+            ],
+        );
+        assert_eq!(
+            complex.to_string(),
+            "AggregateFunction(groupArray, String, UInt32, Nullable(Float64))"
+        );
+    }
+
+    #[test]
+    fn test_tuple_display() {
+        let empty = DataTypeNode::Tuple(vec![]);
+        assert_eq!(empty.to_string(), "Tuple()");
+
+        let single = DataTypeNode::Tuple(vec![DataTypeNode::String]);
+        assert_eq!(single.to_string(), "Tuple(String)");
+
+        let multiple = DataTypeNode::Tuple(vec![
+            DataTypeNode::UInt64,
+            DataTypeNode::String,
+            DataTypeNode::DateTime(None),
+            DataTypeNode::Array(Box::new(DataTypeNode::Int32)),
+        ]);
+        assert_eq!(
+            multiple.to_string(),
+            "Tuple(UInt64, String, DateTime, Array(Int32))"
+        );
+    }
+
+    #[test]
+    fn test_enum_display() {
+        let mut values1 = HashMap::new();
+        values1.insert(1, "one".to_string());
+        values1.insert(2, "two".to_string());
+        values1.insert(3, "three".to_string());
+
+        let simple_enum = DataTypeNode::Enum(EnumType::Enum8, values1);
+        assert_eq!(
+            simple_enum.to_string(),
+            "Enum8('one' = 1, 'two' = 2, 'three' = 3)"
+        );
+
+        // Enum with unordered values (should sort by index)
+        let mut values2 = HashMap::new();
+        values2.insert(10, "ten".to_string());
+        values2.insert(1, "one".to_string());
+        values2.insert(5, "five".to_string());
+
+        let ordered_enum = DataTypeNode::Enum(EnumType::Enum16, values2);
+        assert_eq!(
+            ordered_enum.to_string(),
+            "Enum16('one' = 1, 'five' = 5, 'ten' = 10)"
+        );
+    }
+
+    #[test]
+    fn test_variant_display() {
+        // Empty variant
+        let empty = DataTypeNode::Variant(vec![]);
+        assert_eq!(empty.to_string(), "Variant()");
+
+        // Single type variant
+        let single = DataTypeNode::Variant(vec![DataTypeNode::String]);
+        assert_eq!(single.to_string(), "Variant(String)");
+
+        // Multiple types variant
+        let multiple = DataTypeNode::Variant(vec![
+            DataTypeNode::UInt64,
+            DataTypeNode::String,
+            DataTypeNode::Nullable(Box::new(DataTypeNode::DateTime(None))),
+            DataTypeNode::Array(Box::new(DataTypeNode::Int32)),
+        ]);
+        assert_eq!(
+            multiple.to_string(),
+            "Variant(UInt64, String, Nullable(DateTime), Array(Int32))"
+        );
+
+        // Nested variant
+        let nested = DataTypeNode::Variant(vec![
+            DataTypeNode::Tuple(vec![DataTypeNode::String, DataTypeNode::UInt64]),
+            DataTypeNode::Map([
+                Box::new(DataTypeNode::String),
+                Box::new(DataTypeNode::Int32),
+            ]),
+        ]);
+        assert_eq!(
+            nested.to_string(),
+            "Variant(Tuple(String, UInt64), Map(String, Int32))"
+        );
+    }
 
     #[test]
     fn test_data_type_new_simple() {
