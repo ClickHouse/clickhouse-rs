@@ -66,6 +66,11 @@ pub enum DataTypeNode {
     /// Precision and optional timezone
     DateTime64(DateTimePrecision, Option<String>),
 
+    /// Time-of-day, no timezone (timezone is ignored in value operations)
+    Time,
+    /// Precision and optional timezone (timezone is ignored in value operations)
+    Time64(DateTimePrecision),
+
     IPv4,
     IPv6,
 
@@ -136,6 +141,8 @@ impl DataTypeNode {
             str if str.starts_with("Decimal") => parse_decimal(str),
             str if str.starts_with("DateTime64") => parse_datetime64(str),
             str if str.starts_with("DateTime") => parse_datetime(str),
+            str if str.starts_with("Time64") => parse_time64(str),
+            str if str.starts_with("Time") => Ok(Self::Time),
 
             str if str.starts_with("Nullable") => parse_nullable(str),
             str if str.starts_with("LowCardinality") => parse_low_cardinality(str),
@@ -199,6 +206,8 @@ impl Display for DataTypeNode {
             DateTime(Some(tz)) => format!("DateTime('{tz}')"),
             DateTime64(precision, None) => format!("DateTime64({precision})"),
             DateTime64(precision, Some(tz)) => format!("DateTime64({precision}, '{tz}')"),
+            Time => "Time".to_string(),
+            Time64(precision) => format!("Time64({precision})"),
             IPv4 => "IPv4".to_string(),
             IPv6 => "IPv6".to_string(),
             Bool => "Bool".to_string(),
@@ -488,6 +497,21 @@ fn parse_datetime64(input: &str) -> Result<DataTypeNode, TypesError> {
     }
     Err(TypesError::TypeParsingError(format!(
         "Invalid DateTime format, expected DateTime('timezone'), got {input}"
+    )))
+}
+
+fn parse_time64(input: &str) -> Result<DataTypeNode, TypesError> {
+    if input.len() >= 8 {
+        let mut chars = input[7..input.len() - 1].chars();
+        let precision_char = chars.next().ok_or(TypesError::TypeParsingError(format!(
+            "Invalid Time64 precision, expected a positive number. Input: {input}"
+        )))?;
+        let precision = DateTimePrecision::new(precision_char)?;
+
+        return Ok(DataTypeNode::Time64(precision));
+    }
+    Err(TypesError::TypeParsingError(format!(
+        "Invalid Time64 format, expected Time64(precision, 'timezone'), got {input}"
     )))
 }
 
@@ -922,6 +946,82 @@ mod tests {
         );
         assert!(DataTypeNode::new("DateTime64()").is_err());
         assert!(DataTypeNode::new("DateTime64(x)").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_time() {
+        assert_eq!(DataTypeNode::new("Time").unwrap(), DataTypeNode::Time);
+        assert_eq!(
+            DataTypeNode::new("Time('UTC')").unwrap(),
+            DataTypeNode::Time
+        );
+        assert_eq!(
+            DataTypeNode::new("Time('America/New_York')").unwrap(),
+            DataTypeNode::Time
+        );
+        assert_eq!(DataTypeNode::new("Time()").unwrap(), DataTypeNode::Time);
+    }
+
+    #[test]
+    fn test_data_type_new_time64() {
+        assert_eq!(
+            DataTypeNode::new("Time64(0)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision0)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(1)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision1)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(2)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision2)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(3)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision3)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(4)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision4)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(5)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision5)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(6)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision6)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(7)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision7)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(8)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision8)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(9)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision9)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision0)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(3, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision3)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision6)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision9)
+        );
+        assert!(DataTypeNode::new("Time64()").is_err());
+        assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
     #[test]
@@ -1362,6 +1462,60 @@ mod tests {
         assert_eq!(DecimalType::Decimal64.to_string(), "Decimal64");
         assert_eq!(DecimalType::Decimal128.to_string(), "Decimal128");
         assert_eq!(DecimalType::Decimal256.to_string(), "Decimal256");
+    }
+
+    #[test]
+    fn test_time_time64_roundtrip_and_edges() {
+        use super::DateTimePrecision::*;
+
+        // Valid "Time" type (no precision, no timezone)
+        assert_eq!(DataTypeNode::new("Time").unwrap(), DataTypeNode::Time);
+
+        // "Time" should ignore timezones – they are parsed but discarded
+        assert_eq!(
+            DataTypeNode::new("Time('UTC')").unwrap(),
+            DataTypeNode::Time
+        );
+        assert_eq!(
+            DataTypeNode::new("Time('Europe/Moscow')").unwrap(),
+            DataTypeNode::Time
+        );
+
+        // Time64 with precision 0 (seconds)
+        assert_eq!(
+            DataTypeNode::new("Time64(0)").unwrap(),
+            DataTypeNode::Time64(Precision0)
+        );
+
+        // Time64 with precision 9 and a timezone (timezone ignored)
+        assert_eq!(
+            DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
+            DataTypeNode::Time64(Precision9)
+        );
+
+        // Time64 with precision 0 and timezone (again, timezone ignored)
+        assert_eq!(
+            DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
+            DataTypeNode::Time64(Precision0)
+        );
+
+        // Time64 with precision 3 (milliseconds), no timezone
+        assert_eq!(
+            DataTypeNode::new("Time64(3)").unwrap(),
+            DataTypeNode::Time64(Precision3)
+        );
+
+        // Time64 with precision 6 (microseconds), timezone present but ignored
+        assert_eq!(
+            DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(Precision6)
+        );
+
+        // Invalid: Empty argument list
+        assert!(DataTypeNode::new("Time64()").is_err());
+
+        // Invalid: Non-numeric precision
+        assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
     const ENUM_WITH_ESCAPING_STR: &str =

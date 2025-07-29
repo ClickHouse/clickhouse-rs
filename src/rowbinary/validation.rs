@@ -452,6 +452,7 @@ fn validate_impl<'de, 'cursor, R: Row>(
         SerdeType::I32
             if data_type == &DataTypeNode::Int32
                 || data_type == &DataTypeNode::Date32
+                || matches!(data_type, DataTypeNode::Time)
                 || matches!(
                     data_type,
                     DataTypeNode::Decimal(_, _, DecimalType::Decimal32)
@@ -462,6 +463,7 @@ fn validate_impl<'de, 'cursor, R: Row>(
         SerdeType::I64
             if data_type == &DataTypeNode::Int64
                 || matches!(data_type, DataTypeNode::DateTime64(_, _))
+                || matches!(data_type, DataTypeNode::Time64(_))
                 || matches!(
                     data_type,
                     DataTypeNode::Decimal(_, _, DecimalType::Decimal64)
