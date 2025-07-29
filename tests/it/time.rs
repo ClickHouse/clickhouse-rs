@@ -431,7 +431,10 @@ async fn time64_negative_roundtrip() {
         t9: time::Duration::nanoseconds(neg_base_seconds * 1_000_000_000 - 123_456_789),
     };
 
-    let mut insert = client.insert::<MyRow>("test_time64_negative").await.unwrap();
+    let mut insert = client
+        .insert::<MyRow>("test_time64_negative")
+        .await
+        .unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 
