@@ -85,10 +85,15 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     unsupported!(
         serialize_map(Option<usize>) -> Result<Impossible>,
-        serialize_bytes(&[u8]),
         serialize_unit,
         serialize_unit_struct(&'static str),
     );
+
+    #[inline]
+    fn serialize_bytes(self, value: &[u8]) -> Result {
+        escape::hex_bytes(value, self.writer)?;
+        Ok(())
+    }
 
     forward_to_display!(
         serialize_i8(i8),
@@ -112,13 +117,13 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     #[inline]
     fn serialize_i128(self, value: i128) -> Result {
-        write!(self.writer, "{}::Int128", value)?;
+        write!(self.writer, "{value}::Int128")?;
         Ok(())
     }
 
     #[inline]
     fn serialize_u128(self, value: u128) -> Result {
-        write!(self.writer, "{}::UInt128", value)?;
+        write!(self.writer, "{value}::UInt128")?;
         Ok(())
     }
 
@@ -456,6 +461,33 @@ mod tests {
         let mut out = String::new();
         write_arg(&mut out, &v).unwrap();
         out
+    }
+
+    #[test]
+    fn it_writes_bytes() {
+        use serde_bytes::ByteArray;
+        use serde_bytes::ByteBuf;
+        use serde_bytes::Bytes;
+
+        assert_eq!(check(Bytes::new(b"hello")), "X'68656C6C6F'");
+        assert_eq!(check(Bytes::new(b"")), "X''");
+        assert_eq!(check(Bytes::new(b"a\xffb")), "X'61FF62'");
+        assert_eq!(check(Bytes::new(b"a'b")), "X'612762'");
+
+        assert_eq!(check(ByteArray::new(*b"hello")), "X'68656C6C6F'");
+        assert_eq!(check(ByteArray::new(*b"")), "X''");
+        assert_eq!(check(ByteArray::new(*b"a\xffb")), "X'61FF62'");
+        assert_eq!(check(ByteArray::new(*b"a'b")), "X'612762'");
+
+        assert_eq!(check(ByteBuf::from(b"hello")), "X'68656C6C6F'");
+        assert_eq!(check(ByteBuf::from(b"")), "X''");
+        assert_eq!(check(ByteBuf::from(b"a\xffb")), "X'61FF62'");
+        assert_eq!(check(ByteBuf::from(b"a'b")), "X'612762'");
+
+        assert_eq!(check(b"hello"), "(104,101,108,108,111)");
+        assert_eq!(check(b""), "()");
+        assert_eq!(check(b"a\xffb"), "(97,255,98)");
+        assert_eq!(check(b"a'b"), "(97,39,98)");
     }
 
     #[test]

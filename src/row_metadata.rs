@@ -204,7 +204,7 @@ fn join_panic_schema_hint<T: Display>(col: &[T]) -> String {
         return String::default();
     }
     col.iter()
-        .map(|c| format!("- {}", c))
+        .map(|c| format!("- {c}"))
         .collect::<Vec<String>>()
         .join("\n")
 }

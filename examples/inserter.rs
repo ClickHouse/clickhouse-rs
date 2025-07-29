@@ -151,7 +151,7 @@ async fn main() -> Result<()> {
 
     // Prints 10 batches with 100 rows in each.
     for (insertion_time, count) in fetch_batches(&client).await? {
-        println!("{}: {} rows", insertion_time, count);
+        println!("{insertion_time}: {count} rows");
     }
 
     client
@@ -166,7 +166,7 @@ async fn main() -> Result<()> {
 
     // Prints batches every 100±10ms.
     for (insertion_time, count) in fetch_batches(&client).await? {
-        println!("{}: {} rows", insertion_time, count);
+        println!("{insertion_time}: {count} rows");
     }
 
     Ok(())

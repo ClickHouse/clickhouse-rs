@@ -66,6 +66,11 @@ pub enum DataTypeNode {
     /// Precision and optional timezone
     DateTime64(DateTimePrecision, Option<String>),
 
+    /// Time-of-day, no timezone (timezone is ignored in value operations)
+    Time,
+    /// Precision and optional timezone (timezone is ignored in value operations)
+    Time64(DateTimePrecision),
+
     IPv4,
     IPv6,
 
@@ -136,6 +141,8 @@ impl DataTypeNode {
             str if str.starts_with("Decimal") => parse_decimal(str),
             str if str.starts_with("DateTime64") => parse_datetime64(str),
             str if str.starts_with("DateTime") => parse_datetime(str),
+            str if str.starts_with("Time64") => parse_time64(str),
+            str if str.starts_with("Time") => Ok(Self::Time),
 
             str if str.starts_with("Nullable") => parse_nullable(str),
             str if str.starts_with("LowCardinality") => parse_low_cardinality(str),
@@ -149,8 +156,7 @@ impl DataTypeNode {
 
             // ...
             str => Err(TypesError::TypeParsingError(format!(
-                "Unknown data type: {}",
-                str
+                "Unknown data type: {str}"
             ))),
         }
     }
@@ -190,51 +196,53 @@ impl Display for DataTypeNode {
             Float64 => "Float64".to_string(),
             BFloat16 => "BFloat16".to_string(),
             Decimal(precision, scale, _) => {
-                format!("Decimal({}, {})", precision, scale)
+                format!("Decimal({precision}, {scale})")
             }
             String => "String".to_string(),
             UUID => "UUID".to_string(),
             Date => "Date".to_string(),
             Date32 => "Date32".to_string(),
             DateTime(None) => "DateTime".to_string(),
-            DateTime(Some(tz)) => format!("DateTime('{}')", tz),
-            DateTime64(precision, None) => format!("DateTime64({})", precision),
-            DateTime64(precision, Some(tz)) => format!("DateTime64({}, '{}')", precision, tz),
+            DateTime(Some(tz)) => format!("DateTime('{tz}')"),
+            DateTime64(precision, None) => format!("DateTime64({precision})"),
+            DateTime64(precision, Some(tz)) => format!("DateTime64({precision}, '{tz}')"),
+            Time => "Time".to_string(),
+            Time64(precision) => format!("Time64({precision})"),
             IPv4 => "IPv4".to_string(),
             IPv6 => "IPv6".to_string(),
             Bool => "Bool".to_string(),
-            Nullable(inner) => format!("Nullable({})", inner),
-            Array(inner) => format!("Array({})", inner),
+            Nullable(inner) => format!("Nullable({inner})"),
+            Array(inner) => format!("Array({inner})"),
             Tuple(elements) => {
                 let elements_str = data_types_to_string(elements);
-                format!("Tuple({})", elements_str)
+                format!("Tuple({elements_str})")
             }
             Map([key, value]) => {
-                format!("Map({}, {})", key, value)
+                format!("Map({key}, {value})")
             }
             LowCardinality(inner) => {
-                format!("LowCardinality({})", inner)
+                format!("LowCardinality({inner})")
             }
             Enum(enum_type, values) => {
                 let mut values_vec = values.iter().collect::<Vec<_>>();
                 values_vec.sort_by(|(i1, _), (i2, _)| (*i1).cmp(*i2));
                 let values_str = values_vec
                     .iter()
-                    .map(|(index, name)| format!("'{}' = {}", name, index))
+                    .map(|(index, name)| format!("'{name}' = {index}"))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{}({})", enum_type, values_str)
+                format!("{enum_type}({values_str})")
             }
             AggregateFunction(func_name, args) => {
                 let args_str = data_types_to_string(args);
-                format!("AggregateFunction({}, {})", func_name, args_str)
+                format!("AggregateFunction({func_name}, {args_str})")
             }
             FixedString(size) => {
-                format!("FixedString({})", size)
+                format!("FixedString({size})")
             }
             Variant(types) => {
                 let types_str = data_types_to_string(types);
-                format!("Variant({})", types_str)
+                format!("Variant({types_str})")
             }
             JSON => "JSON".to_string(),
             Dynamic => "Dynamic".to_string(),
@@ -245,7 +253,7 @@ impl Display for DataTypeNode {
             Polygon => "Polygon".to_string(),
             MultiPolygon => "MultiPolygon".to_string(),
         };
-        write!(f, "{}", str)
+        write!(f, "{str}")
     }
 }
 
@@ -299,8 +307,7 @@ impl DateTimePrecision {
             '8' => Ok(DateTimePrecision::Precision8),
             '9' => Ok(DateTimePrecision::Precision9),
             _ => Err(TypesError::TypeParsingError(format!(
-                "Invalid DateTime64 precision, expected to be within [0, 9] interval, got {}",
-                char
+                "Invalid DateTime64 precision, expected to be within [0, 9] interval, got {char}"
             ))),
         }
     }
@@ -343,8 +350,7 @@ impl DecimalType {
             Ok(DecimalType::Decimal256)
         } else {
             return Err(TypesError::TypeParsingError(format!(
-                "Invalid Decimal precision: {}",
-                precision
+                "Invalid Decimal precision: {precision}"
             )));
         }
     }
@@ -380,21 +386,18 @@ fn parse_fixed_string(input: &str) -> Result<DataTypeNode, TypesError> {
         let size_str = &input[12..input.len() - 1];
         let size = size_str.parse::<usize>().map_err(|err| {
             TypesError::TypeParsingError(format!(
-                "Invalid FixedString size, expected a valid number. Underlying error: {}, input: {}, size_str: {}",
-                err, input, size_str
+                "Invalid FixedString size, expected a valid number. Underlying error: {err}, input: {input}, size_str: {size_str}"
             ))
         })?;
         if size == 0 {
             return Err(TypesError::TypeParsingError(format!(
-                "Invalid FixedString size, expected a positive number, got zero. Input: {}",
-                input
+                "Invalid FixedString size, expected a positive number, got zero. Input: {input}"
             )));
         }
         return Ok(DataTypeNode::FixedString(size));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid FixedString format, expected FixedString(N), got {}",
-        input
+        "Invalid FixedString format, expected FixedString(N), got {input}"
     )))
 }
 
@@ -405,8 +408,7 @@ fn parse_array(input: &str) -> Result<DataTypeNode, TypesError> {
         return Ok(DataTypeNode::Array(Box::new(inner_type)));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid Array format, expected Array(InnerType), got {}",
-        input
+        "Invalid Array format, expected Array(InnerType), got {input}"
     )))
 }
 
@@ -418,8 +420,7 @@ fn parse_enum(input: &str) -> Result<DataTypeNode, TypesError> {
             (EnumType::Enum16, 7)
         } else {
             return Err(TypesError::TypeParsingError(format!(
-                "Invalid Enum type, expected Enum8 or Enum16, got {}",
-                input
+                "Invalid Enum type, expected Enum8 or Enum16, got {input}"
             )));
         };
         let enum_values_map_str = &input[prefix_len..input.len() - 1];
@@ -427,8 +428,7 @@ fn parse_enum(input: &str) -> Result<DataTypeNode, TypesError> {
         return Ok(DataTypeNode::Enum(enum_type, enum_values_map));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid Enum format, expected Enum8('name' = value), got {}",
-        input
+        "Invalid Enum format, expected Enum8('name' = value), got {input}"
     )))
 }
 
@@ -441,8 +441,7 @@ fn parse_datetime(input: &str) -> Result<DataTypeNode, TypesError> {
         return Ok(DataTypeNode::DateTime(Some(timezone)));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid DateTime format, expected DateTime('timezone'), got {}",
-        input
+        "Invalid DateTime format, expected DateTime('timezone'), got {input}"
     )))
 }
 
@@ -451,8 +450,7 @@ fn parse_decimal(input: &str) -> Result<DataTypeNode, TypesError> {
         let precision_and_scale_str = input[8..input.len() - 1].split(", ").collect::<Vec<_>>();
         if precision_and_scale_str.len() != 2 {
             return Err(TypesError::TypeParsingError(format!(
-                "Invalid Decimal format, expected Decimal(P, S), got {}",
-                input
+                "Invalid Decimal format, expected Decimal(P, S), got {input}"
             )));
         }
         let parsed = precision_and_scale_str
@@ -461,30 +459,26 @@ fn parse_decimal(input: &str) -> Result<DataTypeNode, TypesError> {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|err| {
                 TypesError::TypeParsingError(format!(
-                    "Invalid Decimal format, expected Decimal(P, S), got {}. Underlying error: {}",
-                    input, err
+                    "Invalid Decimal format, expected Decimal(P, S), got {input}. Underlying error: {err}"
                 ))
             })?;
         let precision = parsed[0];
         let scale = parsed[1];
         if scale < 1 || precision < 1 {
             return Err(TypesError::TypeParsingError(format!(
-                "Invalid Decimal format, expected Decimal(P, S) with P > 0 and S > 0, got {}",
-                input
+                "Invalid Decimal format, expected Decimal(P, S) with P > 0 and S > 0, got {input}"
             )));
         }
         if precision < scale {
             return Err(TypesError::TypeParsingError(format!(
-                "Invalid Decimal format, expected Decimal(P, S) with P >= S, got {}",
-                input
+                "Invalid Decimal format, expected Decimal(P, S) with P >= S, got {input}"
             )));
         }
         let size = DecimalType::new(parsed[0])?;
         return Ok(DataTypeNode::Decimal(precision, scale, size));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid Decimal format, expected Decimal(P), got {}",
-        input
+        "Invalid Decimal format, expected Decimal(P), got {input}"
     )))
 }
 
@@ -492,8 +486,7 @@ fn parse_datetime64(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 13 {
         let mut chars = input[11..input.len() - 1].chars();
         let precision_char = chars.next().ok_or(TypesError::TypeParsingError(format!(
-            "Invalid DateTime64 precision, expected a positive number. Input: {}",
-            input
+            "Invalid DateTime64 precision, expected a positive number. Input: {input}"
         )))?;
         let precision = DateTimePrecision::new(precision_char)?;
         let maybe_tz = match chars.as_str() {
@@ -503,8 +496,22 @@ fn parse_datetime64(input: &str) -> Result<DataTypeNode, TypesError> {
         return Ok(DataTypeNode::DateTime64(precision, maybe_tz));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid DateTime format, expected DateTime('timezone'), got {}",
-        input
+        "Invalid DateTime format, expected DateTime('timezone'), got {input}"
+    )))
+}
+
+fn parse_time64(input: &str) -> Result<DataTypeNode, TypesError> {
+    if input.len() >= 8 {
+        let mut chars = input[7..input.len() - 1].chars();
+        let precision_char = chars.next().ok_or(TypesError::TypeParsingError(format!(
+            "Invalid Time64 precision, expected a positive number. Input: {input}"
+        )))?;
+        let precision = DateTimePrecision::new(precision_char)?;
+
+        return Ok(DataTypeNode::Time64(precision));
+    }
+    Err(TypesError::TypeParsingError(format!(
+        "Invalid Time64 format, expected Time64(precision, 'timezone'), got {input}"
     )))
 }
 
@@ -515,8 +522,7 @@ fn parse_low_cardinality(input: &str) -> Result<DataTypeNode, TypesError> {
         return Ok(DataTypeNode::LowCardinality(Box::new(inner_type)));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid LowCardinality format, expected LowCardinality(InnerType), got {}",
-        input
+        "Invalid LowCardinality format, expected LowCardinality(InnerType), got {input}"
     )))
 }
 
@@ -527,8 +533,7 @@ fn parse_nullable(input: &str) -> Result<DataTypeNode, TypesError> {
         return Ok(DataTypeNode::Nullable(Box::new(inner_type)));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid Nullable format, expected Nullable(InnerType), got {}",
-        input
+        "Invalid Nullable format, expected Nullable(InnerType), got {input}"
     )))
 }
 
@@ -538,8 +543,7 @@ fn parse_map(input: &str) -> Result<DataTypeNode, TypesError> {
         let inner_types = parse_inner_types(inner_types_str)?;
         if inner_types.len() != 2 {
             return Err(TypesError::TypeParsingError(format!(
-                "Expected two inner elements in a Map from input {}",
-                input
+                "Expected two inner elements in a Map from input {input}"
             )));
         }
         return Ok(DataTypeNode::Map([
@@ -548,8 +552,7 @@ fn parse_map(input: &str) -> Result<DataTypeNode, TypesError> {
         ]));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid Map format, expected Map(KeyType, ValueType), got {}",
-        input
+        "Invalid Map format, expected Map(KeyType, ValueType), got {input}"
     )))
 }
 
@@ -559,15 +562,13 @@ fn parse_tuple(input: &str) -> Result<DataTypeNode, TypesError> {
         let inner_types = parse_inner_types(inner_types_str)?;
         if inner_types.is_empty() {
             return Err(TypesError::TypeParsingError(format!(
-                "Expected at least one inner element in a Tuple from input {}",
-                input
+                "Expected at least one inner element in a Tuple from input {input}"
             )));
         }
         return Ok(DataTypeNode::Tuple(inner_types));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid Tuple format, expected Tuple(Type1, Type2, ...), got {}",
-        input
+        "Invalid Tuple format, expected Tuple(Type1, Type2, ...), got {input}"
     )))
 }
 
@@ -578,8 +579,7 @@ fn parse_variant(input: &str) -> Result<DataTypeNode, TypesError> {
         return Ok(DataTypeNode::Variant(inner_types));
     }
     Err(TypesError::TypeParsingError(format!(
-        "Invalid Variant format, expected Variant(Type1, Type2, ...), got {}",
-        input
+        "Invalid Variant format, expected Variant(Type1, Type2, ...), got {input}"
     )))
 }
 
@@ -663,8 +663,7 @@ fn parse_enum_index(input_bytes: &[u8], input: &str) -> Result<i16, TypesError> 
         .parse::<i16>()
         .map_err(|_| {
             TypesError::TypeParsingError(format!(
-                "Invalid Enum index, expected a valid number. Input: {}",
-                input
+                "Invalid Enum index, expected a valid number. Input: {input}"
             ))
         })
 }
@@ -698,8 +697,7 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
                 // Skip ` = ` and the first digit, as it will always have at least one
                 if i + 4 >= input_bytes.len() {
                     return Err(TypesError::TypeParsingError(format!(
-                        "Invalid Enum format - expected ` = ` after name, input: {}",
-                        input,
+                        "Invalid Enum format - expected ` = ` after name, input: {input}",
                     )));
                 }
                 i += 4;
@@ -951,6 +949,82 @@ mod tests {
     }
 
     #[test]
+    fn test_data_type_new_time() {
+        assert_eq!(DataTypeNode::new("Time").unwrap(), DataTypeNode::Time);
+        assert_eq!(
+            DataTypeNode::new("Time('UTC')").unwrap(),
+            DataTypeNode::Time
+        );
+        assert_eq!(
+            DataTypeNode::new("Time('America/New_York')").unwrap(),
+            DataTypeNode::Time
+        );
+        assert_eq!(DataTypeNode::new("Time()").unwrap(), DataTypeNode::Time);
+    }
+
+    #[test]
+    fn test_data_type_new_time64() {
+        assert_eq!(
+            DataTypeNode::new("Time64(0)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision0)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(1)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision1)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(2)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision2)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(3)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision3)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(4)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision4)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(5)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision5)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(6)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision6)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(7)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision7)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(8)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision8)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(9)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision9)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision0)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(3, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision3)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision6)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision9)
+        );
+        assert!(DataTypeNode::new("Time64()").is_err());
+        assert!(DataTypeNode::new("Time64(x)").is_err());
+    }
+
+    #[test]
     fn test_data_type_new_low_cardinality() {
         assert_eq!(
             DataTypeNode::new("LowCardinality(UInt8)").unwrap(),
@@ -1090,7 +1164,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            DataTypeNode::new(&format!("Tuple(String, {})", ENUM_WITH_ESCAPING_STR)).unwrap(),
+            DataTypeNode::new(&format!("Tuple(String, {ENUM_WITH_ESCAPING_STR})")).unwrap(),
             DataTypeNode::Tuple(vec![DataTypeNode::String, enum_with_escaping()])
         );
         assert!(DataTypeNode::new("Tuple").is_err());
@@ -1351,9 +1425,7 @@ mod tests {
             assert_eq!(
                 &data_type.to_string(),
                 expected_str,
-                "Expected data type {} to be formatted as {}",
-                data_type,
-                expected_str
+                "Expected data type {data_type} to be formatted as {expected_str}"
             );
         }
     }
@@ -1390,6 +1462,60 @@ mod tests {
         assert_eq!(DecimalType::Decimal64.to_string(), "Decimal64");
         assert_eq!(DecimalType::Decimal128.to_string(), "Decimal128");
         assert_eq!(DecimalType::Decimal256.to_string(), "Decimal256");
+    }
+
+    #[test]
+    fn test_time_time64_roundtrip_and_edges() {
+        use super::DateTimePrecision::*;
+
+        // Valid "Time" type (no precision, no timezone)
+        assert_eq!(DataTypeNode::new("Time").unwrap(), DataTypeNode::Time);
+
+        // "Time" should ignore timezones – they are parsed but discarded
+        assert_eq!(
+            DataTypeNode::new("Time('UTC')").unwrap(),
+            DataTypeNode::Time
+        );
+        assert_eq!(
+            DataTypeNode::new("Time('Europe/Moscow')").unwrap(),
+            DataTypeNode::Time
+        );
+
+        // Time64 with precision 0 (seconds)
+        assert_eq!(
+            DataTypeNode::new("Time64(0)").unwrap(),
+            DataTypeNode::Time64(Precision0)
+        );
+
+        // Time64 with precision 9 and a timezone (timezone ignored)
+        assert_eq!(
+            DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
+            DataTypeNode::Time64(Precision9)
+        );
+
+        // Time64 with precision 0 and timezone (again, timezone ignored)
+        assert_eq!(
+            DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
+            DataTypeNode::Time64(Precision0)
+        );
+
+        // Time64 with precision 3 (milliseconds), no timezone
+        assert_eq!(
+            DataTypeNode::new("Time64(3)").unwrap(),
+            DataTypeNode::Time64(Precision3)
+        );
+
+        // Time64 with precision 6 (microseconds), timezone present but ignored
+        assert_eq!(
+            DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(Precision6)
+        );
+
+        // Invalid: Empty argument list
+        assert!(DataTypeNode::new("Time64()").is_err());
+
+        // Invalid: Non-numeric precision
+        assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
     const ENUM_WITH_ESCAPING_STR: &str =

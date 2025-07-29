@@ -854,7 +854,7 @@ async fn issue_109_1() {
     let mut insert = client.insert::<Data>("issue_109").await.unwrap();
     for (id, elem) in data.iter().enumerate() {
         let elem = Data {
-            en_id: format!("ABC-{}", id),
+            en_id: format!("ABC-{id}"),
             journey: elem.journey,
             drone_id: elem.drone_id.clone(),
             call_sign: elem.call_sign.clone(),

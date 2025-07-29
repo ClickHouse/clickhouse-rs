@@ -78,6 +78,10 @@ required-features = ["time", "uuid", "chrono"]
 name = "data_types_variant"
 required-features = ["time"]
 
+[[example]]
+name = "time_types_example"
+required-features = ["time", "chrono"]
+
 [profile.release]
 debug = true
 

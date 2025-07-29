@@ -12,8 +12,7 @@ async fn wait_end_of_query() {
         let result = max_execution_time(client.clone(), wait_end_of_query).await;
         assert_eq!(
             result, expected_rows,
-            "wait_end_of_query: {}, expected_rows: {}",
-            wait_end_of_query, expected_rows
+            "wait_end_of_query: {wait_end_of_query}, expected_rows: {expected_rows}"
         );
     }
 }

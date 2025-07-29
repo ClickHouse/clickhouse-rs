@@ -23,8 +23,7 @@ async fn test_https_error_on_missing_feature() {
     ] {
         assert!(
             result.contains(fragment),
-            "TLS error message should contain `{}`",
-            fragment
+            "TLS error message should contain `{fragment}`"
         );
     }
 }

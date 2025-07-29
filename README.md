@@ -4,8 +4,9 @@ Official pure Rust typed client for ClickHouse DB.
 
 [![Crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]
-[![License][license-badge]][license-url]
 [![Build Status][actions-badge]][actions-url]
+[![License][license-badge]][license-url]
+[![Codecov][codecov-badge]][codecov-url]
 
 [crates-badge]: https://img.shields.io/crates/v/clickhouse.svg
 [crates-url]: https://crates.io/crates/clickhouse
@@ -15,6 +16,8 @@ Official pure Rust typed client for ClickHouse DB.
 [license-url]: https://github.com/ClickHouse/clickhouse-rs/blob/main/LICENSE-MIT
 [actions-badge]: https://github.com/ClickHouse/clickhouse-rs/actions/workflows/ci.yml/badge.svg
 [actions-url]: https://github.com/ClickHouse/clickhouse-rs/actions/workflows/ci.yml
+[codecov-badge]: https://codecov.io/gh/ClickHouse/clickhouse-rs/graph/badge.svg?token=3MBXXYL53L
+[codecov-url]: https://codecov.io/gh/ClickHouse/clickhouse-rs
 
 * Uses `serde` for encoding/decoding rows.
 * Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
@@ -396,6 +399,38 @@ How to choose between all these features? Here are some considerations:
         dt64ns_chrono: DateTime<Utc>, // `DateTime64(9)`
     }
 
+
+    ```
+    </details>
+* `Time` maps to/from i32 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
+    * [`time:Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::*`, requiring the `time` feature.
+    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::*`, which is an alias to `TimeDelta`, requiring the `chrono` feature
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::chrono::time64::secs")]
+        t0: chrono::Duration,
+        #[serde(with = "clickhouse::serde::chrono::time64::secs::option")]
+        t0_opt: Option<chrono::Duration>,
+    }
+
+    ```
+    </details>
+* `Time64(_)` maps to/from i64 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
+    * [`time:Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::*`, requiring the `time` feature.
+    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::*`, requiring the `chrono` feature
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::time::time")]
+        t0: Time,
+    }
 
     ```
     </details>

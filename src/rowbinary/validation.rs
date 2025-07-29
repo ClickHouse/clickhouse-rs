@@ -72,31 +72,27 @@ impl<'caller, R: Row> DataTypeValidator<'caller, R> {
             RowKind::Primitive => {
                 panic!(
                     "While processing row as a primitive: attempting to deserialize \
-                    ClickHouse type {} as {} which is not compatible",
-                    data_type, serde_type
+                    ClickHouse type {data_type} as {serde_type} which is not compatible"
                 )
             }
             RowKind::Vec => {
                 panic!(
                     "While processing row as a vector: attempting to deserialize \
-                    ClickHouse type {} as {} which is not compatible",
-                    data_type, serde_type
+                    ClickHouse type {data_type} as {serde_type} which is not compatible"
                 )
             }
             RowKind::Tuple => {
                 panic!(
                     "While processing row as a tuple: attempting to deserialize \
-                    ClickHouse type {} as {} which is not compatible",
-                    data_type, serde_type
+                    ClickHouse type {data_type} as {serde_type} which is not compatible"
                 )
             }
             RowKind::Struct => {
                 if is_inner {
                     let (full_name, full_data_type) = self.get_current_column_name_and_type();
                     panic!(
-                        "While processing column {} defined as {}: attempting to deserialize \
-                        nested ClickHouse type {} as {} which is not compatible",
-                        full_name, full_data_type, data_type, serde_type
+                        "While processing column {full_name} defined as {full_data_type}: attempting to deserialize \
+                        nested ClickHouse type {data_type} as {serde_type} which is not compatible"
                     )
                 } else {
                     panic!(
@@ -143,8 +139,7 @@ impl<'caller, R: Row> SchemaValidator<R> for DataTypeValidator<'caller, R> {
                     _ => {
                         // should be unreachable
                         panic!(
-                            "While processing tuple row: expected serde type Tuple(N), got {}",
-                            serde_type
+                            "While processing tuple row: expected serde type Tuple(N), got {serde_type}"
                         );
                     }
                 }
@@ -302,9 +297,8 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                         let (full_name, full_data_type) =
                             inner.root.get_current_column_name_and_type();
                         panic!(
-                            "While processing column {} defined as {}: \
-                                attempting to deserialize {} while no more elements are allowed",
-                            full_name, full_data_type, serde_type
+                            "While processing column {full_name} defined as {full_data_type}: \
+                                attempting to deserialize {serde_type} while no more elements are allowed"
                         )
                     }
                 }
@@ -320,9 +314,8 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                 } else {
                     let (full_name, full_data_type) = inner.root.get_current_column_name_and_type();
                     panic!(
-                        "While processing root tuple element {} defined as {}: \
-                             attempting to deserialize {} while no more elements are allowed",
-                        full_name, full_data_type, serde_type
+                        "While processing root tuple element {full_name} defined as {full_data_type}: \
+                             attempting to deserialize {serde_type} while no more elements are allowed"
                     )
                 }
             }
@@ -459,6 +452,7 @@ fn validate_impl<'serde, 'caller, R: Row>(
         SerdeType::I32
             if data_type == &DataTypeNode::Int32
                 || data_type == &DataTypeNode::Date32
+                || matches!(data_type, DataTypeNode::Time)
                 || matches!(
                     data_type,
                     DataTypeNode::Decimal(_, _, DecimalType::Decimal32)
@@ -469,6 +463,7 @@ fn validate_impl<'serde, 'caller, R: Row>(
         SerdeType::I64
             if data_type == &DataTypeNode::Int64
                 || matches!(data_type, DataTypeNode::DateTime64(_, _))
+                || matches!(data_type, DataTypeNode::Time64(_))
                 || matches!(
                     data_type,
                     DataTypeNode::Decimal(_, _, DecimalType::Decimal64)
@@ -564,9 +559,8 @@ fn validate_impl<'serde, 'caller, R: Row>(
                 } else {
                     let (full_name, full_data_type) = root.get_current_column_name_and_type();
                     panic!(
-                        "While processing column {} defined as {}: attempting to deserialize \
-                        nested ClickHouse type {} as {}",
-                        full_name, full_data_type, data_type, serde_type,
+                        "While processing column {full_name} defined as {full_data_type}: attempting to deserialize \
+                        nested ClickHouse type {data_type} as {serde_type}",
                     )
                 }
             }
@@ -599,10 +593,7 @@ fn validate_impl<'serde, 'caller, R: Row>(
                     kind: InnerDataTypeValidatorKind::Map(kv, MapValidatorState::Key),
                 })
             } else {
-                panic!(
-                    "Expected Map for {} call, but got {}",
-                    serde_type, data_type
-                )
+                panic!("Expected Map for {serde_type} call, but got {data_type}",)
             }
         }
         SerdeType::Variant => {
@@ -615,10 +606,7 @@ fn validate_impl<'serde, 'caller, R: Row>(
                     ),
                 })
             } else {
-                panic!(
-                    "Expected Variant for {} call, but got {}",
-                    serde_type, data_type
-                )
+                panic!("Expected Variant for {serde_type} call, but got {data_type}")
             }
         }
 
