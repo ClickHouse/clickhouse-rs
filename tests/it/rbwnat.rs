@@ -1,5 +1,5 @@
 use crate::{execute_statements, get_client};
-use clickhouse::sql::Identifier;
+use clickhouse::{query::QI, sql::Identifier};
 use clickhouse_derive::Row;
 use clickhouse_types::data_types::{Column, DataTypeNode};
 use clickhouse_types::parse_rbwnat_columns_header;
@@ -717,7 +717,7 @@ async fn enums() {
 
     let client = prepare_database!();
     client
-        .query(
+        .query_with_flags::<{ QI::BIND }>(
             "
             CREATE OR REPLACE TABLE ?
             (
@@ -762,7 +762,7 @@ async fn enums() {
     insert.end().await.unwrap();
 
     let result = client
-        .query("SELECT * FROM ? ORDER BY id ASC")
+        .query_with_flags::<{ QI::BIND }>("SELECT * FROM ? ORDER BY id ASC")
         .bind(Identifier(table_name))
         .fetch_all::<Data>()
         .await

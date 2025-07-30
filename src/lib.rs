@@ -317,9 +317,37 @@ impl Client {
         inserter::Inserter::new(self, table)
     }
 
-    /// Starts a new SELECT/DDL query.
+    /// Starts a new SELECT/DDL query with default interpolation flags.
+    ///
+    /// This method uses [`queries::QI::DEFAULT`] flags which enable:
+    /// - `?fields` substitution with struct field names
+    /// - Parameter substitution (reserved for future use)
+    ///
+    /// For explicit control over interpolation features, use [`Client::query_with_flags`].
     pub fn query(&self, query: &str) -> query::Query {
         query::Query::new(self, query)
+    }
+
+    /// Starts a new SELECT/DDL query with explicit interpolation flags
+    /// to specify exactly which interpolation features should be enabled..
+    ///
+    /// ## Query with both features enabled
+    /// ```rust,ignore
+    /// use clickhouse::queries::QI;
+    ///
+    /// let rows = client
+    ///     .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM users WHERE age > ?")
+    ///     .bind(18)
+    ///     .fetch::<User>()
+    ///     .await?;
+    /// ```
+    /// # Comparison with [`Client::query`]
+    ///
+    /// - [`Client::query`] uses default flags ([`query::QI::DEFAULT`])
+    /// - [`Client::query_with_flags`] allows explicit control over interpolation features
+    ///
+    pub fn query_with_flags<const FLAGS: u8>(&self, query: &str) -> query::Query<FLAGS> {
+        query::Query::<FLAGS>::new(self, query)
     }
 
     /// Enables or disables [`Row`] data types validation against the database schema
@@ -517,5 +545,61 @@ mod client_tests {
         assert!(!client.validation);
         let client = client.with_validation(true);
         assert!(client.validation);
+    }
+}
+
+#[cfg(test)]
+mod query_flags_tests {
+    use super::*;
+    use crate::query::QI;
+
+    #[test]
+    fn test_query_with_flags() {
+        let client = Client::default();
+
+        // Test query with BIND flag
+        let query_bind = client.query_with_flags::<{ QI::BIND }>("SELECT * FROM test WHERE id = ?");
+        assert_eq!(
+            format!("{}", query_bind.sql_display()),
+            "SELECT * FROM test WHERE id = ?"
+        );
+
+        // Test query with FIELDS flag
+        let query_fields = client.query_with_flags::<{ QI::FIELDS }>("SELECT ?fields FROM test");
+        assert_eq!(
+            format!("{}", query_fields.sql_display()),
+            "SELECT ?fields FROM test"
+        );
+
+        // Test query with combined flags
+        let query_combined = client
+            .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM test WHERE id = ?");
+        assert_eq!(
+            format!("{}", query_combined.sql_display()),
+            "SELECT ?fields FROM test WHERE id = ?"
+        );
+    }
+
+    #[test]
+    fn test_binding_behavior_with_flags() {
+        let client = Client::default();
+
+        // Test with BIND flag - should work normally
+        let mut query_with_bind =
+            client.query_with_flags::<{ QI::BIND }>("SELECT * FROM test WHERE id = ?");
+        query_with_bind = query_with_bind.bind(42);
+        assert_eq!(
+            format!("{}", query_with_bind.sql_display()),
+            "SELECT * FROM test WHERE id = 42"
+        );
+
+        // Test without BIND flag - should skip binding
+        let mut query_without_bind =
+            client.query_with_flags::<{ QI::NONE }>("SELECT * FROM test WHERE id = ?");
+        query_without_bind = query_without_bind.bind(42); // This should be skipped
+        assert_eq!(
+            format!("{}", query_without_bind.sql_display()),
+            "SELECT * FROM test WHERE id = ?"
+        );
     }
 }

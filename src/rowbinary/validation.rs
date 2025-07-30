@@ -239,7 +239,7 @@ pub(crate) enum VariantValidationState {
     Identifier(u8),
 }
 
-impl<'cursor, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, 'cursor, R>> {
+impl<R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '_, R>> {
     type Inner<'de>
         = Self
     where
