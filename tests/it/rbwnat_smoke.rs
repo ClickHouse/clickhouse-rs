@@ -1,6 +1,6 @@
 use crate::decimals::*;
 use crate::geo_types::{LineString, MultiLineString, MultiPolygon, Point, Polygon, Ring};
-use crate::{create_simple_table, insert_and_select, SimpleRow};
+use crate::{create_simple_table, get_client, insert_and_select, SimpleRow};
 use clickhouse::sql::Identifier;
 use clickhouse::Row;
 use fxhash::FxHashMap;
@@ -1194,8 +1194,8 @@ async fn issue_99_flatten_maps() {
         .query(
             "
             CREATE TABLE IF NOT EXISTS test (
-                foo String,
-                bar String,
+                foo  String,
+                bar  String,
                 data String
             )
             ENGINE = MergeTree
@@ -1216,4 +1216,75 @@ async fn issue_99_flatten_maps() {
 
     let result = insert_and_select(&client, "test", rows.clone()).await;
     assert_eq!(result, rows);
+}
+
+#[tokio::test]
+async fn struct_and_primitive_in_a_tuple() {
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        id: u16,
+        value: String,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS test (
+                id  UInt16,
+                value String
+            )
+            ENGINE = MergeTree
+            ORDER BY id
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let row1 = Data {
+        id: 42,
+        value: "forty-two".to_string(),
+    };
+    let row2 = Data {
+        id: 144,
+        value: "one four four".to_string(),
+    };
+    let rows = vec![&row1, &row2];
+
+    let mut insert = client.insert::<Data>("test").await.unwrap();
+    for data in rows {
+        insert.write(data).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let mut cursor = client
+        .query("SELECT ?fields, count() FROM test GROUP BY ?fields")
+        .fetch::<(Data, u64)>()
+        .unwrap();
+
+    let mut results = Vec::new();
+    while let Some(row) = cursor.next().await.unwrap() {
+        results.push(row);
+    }
+
+    assert_eq!(results, vec![(row1, 1), (row2, 1)]);
+}
+
+#[tokio::test]
+async fn several_primitives_in_a_tuple() {
+    let client = get_client();
+    let mut cursor = client
+        .query("SELECT number, number * 2 FROM system.numbers LIMIT 3")
+        .fetch::<(u64, u64)>()
+        .unwrap();
+    let mut results = Vec::new();
+    while let Some(row) = cursor.next().await.unwrap() {
+        results.push(row);
+    }
+    assert_eq!(
+        results,
+        vec![(0, 0), (1, 2), (2, 4)],
+        "Expected tuples with two u64 values"
+    );
 }
