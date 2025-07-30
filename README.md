@@ -137,7 +137,7 @@ struct MyRow {
     name: String,
 }
 
-let mut insert = client.insert("some")?;
+let mut insert = client.insert::<MyRow>("some").await?;
 insert.write(&MyRow { no: 0, name: "foo".into() }).await?;
 insert.write(&MyRow { no: 1, name: "bar".into() }).await?;
 insert.end().await?;
@@ -158,14 +158,14 @@ insert.end().await?;
 Requires the `inserter` feature.
 
 ```rust,ignore
-let mut inserter = client.inserter("some")?
+let mut inserter = client.inserter::<MyRow>("some")?
     .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
     .with_max_bytes(50_000_000)
     .with_max_rows(750_000)
     .with_period(Some(Duration::from_secs(15)));
 
-inserter.write(&MyRow { no: 0, name: "foo".into() })?;
-inserter.write(&MyRow { no: 1, name: "bar".into() })?;
+inserter.write(&MyRow { no: 0, name: "foo".into() }).await?;
+inserter.write(&MyRow { no: 1, name: "bar".into() }).await?;
 let stats = inserter.commit().await?;
 if stats.rows > 0 {
     println!(

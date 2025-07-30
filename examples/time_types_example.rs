@@ -75,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             + time::Duration::nanoseconds(123_456_789),
     };
 
-    let mut insert = client.insert::<TimeExample>("time_example")?;
+    let mut insert = client.insert::<TimeExample>("time_example").await?;
     insert.write(&time_example).await?;
     insert.end().await?;
 
@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             + Duration::nanoseconds(987_654_321),
     };
 
-    let mut insert = client.insert::<TimeExampleChrono>("time_example")?;
+    let mut insert = client.insert::<TimeExampleChrono>("time_example").await?;
     insert.write(&time_example_chrono).await?;
     insert.end().await?;
 
@@ -110,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             time64_micros: edge,
             time64_nanos: edge,
         };
-        let mut insert = client.insert::<TimeExampleChrono>("time_example")?;
+        let mut insert = client.insert::<TimeExampleChrono>("time_example").await?;
         insert.write(&data).await?;
         insert.end().await?;
         println!("Inserted edge case #{i}: {edge:?}");

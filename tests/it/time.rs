@@ -80,7 +80,7 @@ async fn datetime() {
         dt64ns_opt: Some(datetime!(2022-11-13 15:27:42.123456789 UTC)),
     };
 
-    let mut insert = client.insert::<MyRow>("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").await.unwrap();
     insert.write(&original_row).await.unwrap();
     insert.end().await.unwrap();
 
@@ -138,7 +138,7 @@ async fn date() {
         .await
         .unwrap();
 
-    let mut insert = client.insert::<MyRow>("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").await.unwrap();
 
     let dates = generate_dates(1970..2149, 100);
     for &date in &dates {
@@ -191,7 +191,7 @@ async fn date32() {
         .await
         .unwrap();
 
-    let mut insert = client.insert::<MyRow>("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").await.unwrap();
 
     let dates = generate_dates(1925..2283, 100); // TODO: 1900..=2299 for newer versions.
     for &date in &dates {
@@ -267,7 +267,7 @@ async fn time_roundtrip() {
         t1: Some(positive_value),
     };
 
-    let mut insert = client.insert::<MyRow>("test_time").unwrap();
+    let mut insert = client.insert::<MyRow>("test_time").await.unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 
@@ -313,7 +313,7 @@ async fn time_negative_roundtrip() {
         t1: Some(negative_value),
     };
 
-    let mut insert = client.insert::<MyRow>("test_time_negative").unwrap();
+    let mut insert = client.insert::<MyRow>("test_time_negative").await.unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 
@@ -372,7 +372,7 @@ async fn time64_roundtrip() {
         t9: time::Duration::nanoseconds(base_seconds * 1_000_000_000 + 789_123_456),
     };
 
-    let mut insert = client.insert::<MyRow>("test_time64").unwrap();
+    let mut insert = client.insert::<MyRow>("test_time64").await.unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 
@@ -431,7 +431,10 @@ async fn time64_negative_roundtrip() {
         t9: time::Duration::nanoseconds(neg_base_seconds * 1_000_000_000 - 123_456_789),
     };
 
-    let mut insert = client.insert::<MyRow>("test_time64_negative").unwrap();
+    let mut insert = client
+        .insert::<MyRow>("test_time64_negative")
+        .await
+        .unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 

@@ -41,21 +41,21 @@ async fn prepare_data() {
     client
         .query(
             r#"
-            CREATE TABLE IF NOT EXISTS l2_book_log
-            (
-                `instrument_id` UInt32 CODEC(T64, Default),
-                `received_time` DateTime64(9) CODEC(DoubleDelta, Default),
-                `exchange_time` Nullable(DateTime64(9)) CODEC(DoubleDelta, Default),
-                `sequence_no` Nullable(UInt64) CODEC(DoubleDelta, Default),
-                `trace_id` UInt64 CODEC(DoubleDelta, Default),
-                `side` Enum8('Bid' = 0, 'Ask' = 1),
-                `price` Float64,
-                `amount` Float64,
-                `is_eot` Bool
-            )
-            ENGINE = MergeTree
-            PRIMARY KEY (instrument_id, received_time)
-        "#,
+                CREATE TABLE IF NOT EXISTS l2_book_log
+                (
+                    `instrument_id` UInt32                      CODEC(T64,         Default),
+                    `received_time` DateTime64(9)               CODEC(DoubleDelta, Default),
+                    `exchange_time` Nullable(DateTime64(9))     CODEC(DoubleDelta, Default),
+                    `sequence_no`   Nullable(UInt64)            CODEC(DoubleDelta, Default),
+                    `trace_id`      UInt64                      CODEC(DoubleDelta, Default),
+                    `side`          Enum8('Bid' = 0, 'Ask' = 1),
+                    `price`         Float64,
+                    `amount`        Float64,
+                    `is_eot`        Bool
+                )
+                ENGINE = MergeTree
+                PRIMARY KEY (instrument_id, received_time)
+            "#,
         )
         .execute()
         .await
@@ -71,7 +71,7 @@ async fn prepare_data() {
         return;
     }
 
-    let mut insert = client.insert::<L2Update>("l2_book_log").unwrap();
+    let mut insert = client.insert::<L2Update>("l2_book_log").await.unwrap();
 
     for i in 0..10_000_000 {
         insert
