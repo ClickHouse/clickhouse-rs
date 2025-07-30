@@ -136,8 +136,12 @@ where
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
     for validation in [true, false] {
-        {
-            let compression = Compression::None;
+        #[allow(clippy::single_element_loop)]
+        for compression in [
+            Compression::None,
+            #[cfg(feature = "lz4")]
+            Compression::Lz4,
+        ] {
             group.bench_function(
                 format!("validation={validation}/compression={compression:?}"),
                 |b| {
