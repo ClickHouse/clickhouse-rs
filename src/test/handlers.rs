@@ -37,6 +37,15 @@ pub fn failure(status: StatusCode) -> impl Handler {
         .expect("invalid builder")
 }
 
+#[track_caller]
+pub fn exception(code: u8) -> impl Handler {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("X-ClickHouse-Exception-Code", code.to_string())
+        .body(Bytes::new())
+        .map(Thunk)
+        .expect("invalid builder")
+}
 // === provide ===
 
 #[track_caller]
