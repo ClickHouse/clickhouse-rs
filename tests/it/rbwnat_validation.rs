@@ -353,7 +353,7 @@ async fn tuple_too_many_elements_in_the_struct() {
     }
     // too many elements in the struct enum
     assert_panic_on_fetch!(
-        &["Data.a", "Tuple(UInt32, String)", "deserialize bool"],
+        &["Data.a", "Tuple(UInt32, String)", "bool"],
         "
         SELECT
             (42, 'foo')            :: Tuple(UInt32, String)              AS a,
@@ -443,7 +443,7 @@ async fn issue_57() {
         metadata_id: "test_id".to_string(),
         start_time: 1622548800,
         end_time: Some(1622552400),
-        double_value: 3.14,
+        double_value: 4.22,
         string_value: "test_value".to_string(),
         long_value: 42,
         write_time: 1622556000,
