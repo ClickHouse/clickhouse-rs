@@ -289,7 +289,6 @@ impl<B: BufMut, R: Row, V: SchemaValidator<R>> SerializeStruct
 
     #[inline]
     fn serialize_field<T: Serialize + ?Sized>(&mut self, _: &'static str, value: &T) -> Result<()> {
-        // TODO: validation, field order
         value.serialize(&mut **self)
     }
 

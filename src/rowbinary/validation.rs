@@ -71,19 +71,19 @@ impl<'caller, R: Row> DataTypeValidator<'caller, R> {
         match R::KIND {
             RowKind::Primitive => {
                 panic!(
-                    "While processing row as a primitive: attempting to deserialize \
+                    "While processing row as a primitive: attempting to (de)serialize \
                     ClickHouse type {data_type} as {serde_type} which is not compatible"
                 )
             }
             RowKind::Vec => {
                 panic!(
-                    "While processing row as a vector: attempting to deserialize \
+                    "While processing row as a vector: attempting to (de)serialize \
                     ClickHouse type {data_type} as {serde_type} which is not compatible"
                 )
             }
             RowKind::Tuple => {
                 panic!(
-                    "While processing row as a tuple: attempting to deserialize \
+                    "While processing row as a tuple: attempting to (de)serialize \
                     ClickHouse type {data_type} as {serde_type} which is not compatible"
                 )
             }
@@ -91,12 +91,12 @@ impl<'caller, R: Row> DataTypeValidator<'caller, R> {
                 if is_inner {
                     let (full_name, full_data_type) = self.get_current_column_name_and_type();
                     panic!(
-                        "While processing column {full_name} defined as {full_data_type}: attempting to deserialize \
+                        "While processing column {full_name} defined as {full_data_type}: attempting to (de)serialize \
                         nested ClickHouse type {data_type} as {serde_type} which is not compatible"
                     )
                 } else {
                     panic!(
-                        "While processing column {}: attempting to deserialize \
+                        "While processing column {}: attempting to (de)serialize \
                         ClickHouse type {} as {} which is not compatible",
                         self.get_current_column_name_and_type().0,
                         data_type,
@@ -298,7 +298,7 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                             inner.root.get_current_column_name_and_type();
                         panic!(
                             "While processing column {full_name} defined as {full_data_type}: \
-                                attempting to deserialize {serde_type} while no more elements are allowed"
+                                attempting to (de)serialize {serde_type} while no more elements are allowed"
                         )
                     }
                 }
@@ -315,7 +315,7 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                     let (full_name, full_data_type) = inner.root.get_current_column_name_and_type();
                     panic!(
                         "While processing root tuple element {full_name} defined as {full_data_type}: \
-                             attempting to deserialize {serde_type} while no more elements are allowed"
+                             attempting to (de)serialize {serde_type} while no more elements are allowed"
                     )
                 }
             }
@@ -401,7 +401,7 @@ impl<R: Row> Drop for InnerDataTypeValidator<'_, '_, R> {
             if !elements_types.is_empty() {
                 let (column_name, column_type) = self.root.get_current_column_name_and_type();
                 panic!(
-                    "While processing column {} defined as {}: tuple was not fully deserialized; \
+                    "While processing column {} defined as {}: tuple was not fully (de)serialized; \
                     remaining elements: {}; likely, the field definition is incomplete",
                     column_name,
                     column_type,
@@ -559,7 +559,7 @@ fn validate_impl<'serde, 'caller, R: Row>(
                 } else {
                     let (full_name, full_data_type) = root.get_current_column_name_and_type();
                     panic!(
-                        "While processing column {full_name} defined as {full_data_type}: attempting to deserialize \
+                        "While processing column {full_name} defined as {full_data_type}: attempting to (de)serialize \
                         nested ClickHouse type {data_type} as {serde_type}",
                     )
                 }

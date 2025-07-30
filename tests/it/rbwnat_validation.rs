@@ -1,8 +1,6 @@
-use crate::{execute_statements, geo_types::*, get_client};
-use clickhouse::sql::Identifier;
+use crate::{execute_statements, get_client};
 use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
 
 #[tokio::test]
@@ -191,181 +189,6 @@ async fn fetch_tuple_row_with_struct_schema_mismatch_too_few_fields() {
 }
 
 #[tokio::test]
-async fn basic_types() {
-    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
-    struct Data {
-        uint8_val: u8,
-        uint16_val: u16,
-        uint32_val: u32,
-        uint64_val: u64,
-        uint128_val: u128,
-        int8_val: i8,
-        int16_val: i16,
-        int32_val: i32,
-        int64_val: i64,
-        int128_val: i128,
-        float32_val: f32,
-        float64_val: f64,
-        string_val: String,
-    }
-
-    let client = get_client();
-    let result = client
-        .query(
-            "
-            SELECT
-                255                                      :: UInt8   AS uint8_val,
-                65535                                    :: UInt16  AS uint16_val,
-                4294967295                               :: UInt32  AS uint32_val,
-                18446744073709551615                     :: UInt64  AS uint64_val,
-                340282366920938463463374607431768211455  :: UInt128 AS uint128_val,
-                -128                                     :: Int8    AS int8_val,
-                -32768                                   :: Int16   AS int16_val,
-                -2147483648                              :: Int32   AS int32_val,
-                -9223372036854775808                     :: Int64   AS int64_val,
-                -170141183460469231731687303715884105728 :: Int128  AS int128_val,
-                42.0                                     :: Float32 AS float32_val,
-                144.0                                    :: Float64 AS float64_val,
-                'test'                                   :: String  AS string_val
-            ",
-        )
-        .fetch_one::<Data>()
-        .await;
-
-    assert_eq!(
-        result.unwrap(),
-        Data {
-            uint8_val: 255,
-            uint16_val: 65535,
-            uint32_val: 4294967295,
-            uint64_val: 18446744073709551615,
-            uint128_val: 340282366920938463463374607431768211455,
-            int8_val: -128,
-            int16_val: -32768,
-            int32_val: -2147483648,
-            int64_val: -9223372036854775808,
-            int128_val: -170141183460469231731687303715884105728,
-            float32_val: 42.0,
-            float64_val: 144.0,
-            string_val: "test".to_string(),
-        }
-    );
-}
-
-#[tokio::test]
-async fn borrowed_data() {
-    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
-    struct Data<'a> {
-        str: &'a str,
-        array: Vec<&'a str>,
-        tuple: (&'a str, &'a str),
-        str_opt: Option<&'a str>,
-        vec_map_str: Vec<(&'a str, &'a str)>,
-        vec_map_f32: Vec<(&'a str, f32)>,
-        vec_map_nested: Vec<(&'a str, Vec<(&'a str, &'a str)>)>,
-        hash_map_str: HashMap<&'a str, &'a str>,
-        hash_map_f32: HashMap<&'a str, f32>,
-        hash_map_nested: HashMap<&'a str, HashMap<&'a str, &'a str>>,
-    }
-
-    let client = get_client();
-    let mut cursor = client
-        .query(
-            "
-            SELECT * FROM
-            (
-            SELECT
-                'a'                                     :: String                           AS str,
-                ['b', 'c']                              :: Array(String)                    AS array,
-                ('d', 'e')                              :: Tuple(String, String)            AS tuple,
-                NULL                                    :: Nullable(String)                 AS str_opt,
-                map('key1', 'value1', 'key2', 'value2') :: Map(String, String)              AS hash_map_str,
-                map('key3', 100, 'key4', 200)           :: Map(String, Float32)             AS hash_map_f32,
-                map('n1', hash_map_str)                 :: Map(String, Map(String, String)) AS hash_map_nested,
-                hash_map_str                                                                AS vec_map_str,
-                hash_map_f32                                                                AS vec_map_f32,
-                hash_map_nested                                                             AS vec_map_nested
-            UNION ALL
-            SELECT
-                'f'                                     :: String                           AS str,
-                ['g', 'h']                              :: Array(String)                    AS array,
-                ('i', 'j')                              :: Tuple(String, String)            AS tuple,
-                'k'                                     :: Nullable(String)                 AS str_opt,
-                map('key4', 'value4', 'key5', 'value5') :: Map(String, String)              AS hash_map_str,
-                map('key6', 300, 'key7', 400)           :: Map(String, Float32)             AS hash_map_f32,
-                map('n2', hash_map_str)                 :: Map(String, Map(String, String)) AS hash_map_nested,
-                hash_map_str                                                                AS vec_map_str,
-                hash_map_f32                                                                AS vec_map_f32,
-                hash_map_nested                                                             AS vec_map_nested
-            )
-            ORDER BY str
-            ",
-        )
-        .fetch::<Data<'_>>()
-        .unwrap();
-
-    assert_eq!(
-        cursor.next().await.unwrap().unwrap(),
-        Data {
-            str: "a",
-            array: vec!["b", "c"],
-            tuple: ("d", "e"),
-            str_opt: None,
-            vec_map_str: vec![("key1", "value1"), ("key2", "value2")],
-            vec_map_f32: vec![("key3", 100.0), ("key4", 200.0)],
-            vec_map_nested: vec![("n1", vec![("key1", "value1"), ("key2", "value2")])],
-            hash_map_str: HashMap::from([("key1", "value1"), ("key2", "value2")]),
-            hash_map_f32: HashMap::from([("key3", 100.0), ("key4", 200.0)]),
-            hash_map_nested: HashMap::from([(
-                "n1",
-                HashMap::from([("key1", "value1"), ("key2", "value2")]),
-            )]),
-        }
-    );
-
-    assert_eq!(
-        cursor.next().await.unwrap().unwrap(),
-        Data {
-            str: "f",
-            array: vec!["g", "h"],
-            tuple: ("i", "j"),
-            str_opt: Some("k"),
-            vec_map_str: vec![("key4", "value4"), ("key5", "value5")],
-            vec_map_f32: vec![("key6", 300.0), ("key7", 400.0)],
-            vec_map_nested: vec![("n2", vec![("key4", "value4"), ("key5", "value5")])],
-            hash_map_str: HashMap::from([("key4", "value4"), ("key5", "value5")]),
-            hash_map_f32: HashMap::from([("key6", 300.0), ("key7", 400.0)]),
-            hash_map_nested: HashMap::from([(
-                "n2",
-                HashMap::from([("key4", "value4"), ("key5", "value5")]),
-            )]),
-        },
-    );
-
-    assert!(cursor.next().await.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn many_numbers() {
-    #[derive(Row, Deserialize)]
-    struct Data {
-        number: u64,
-    }
-
-    let client = get_client();
-    let mut cursor = client
-        .query("SELECT number FROM system.numbers_mt LIMIT 2000")
-        .fetch::<Data>()
-        .unwrap();
-
-    let mut sum = 0;
-    while let Some(row) = cursor.next().await.unwrap() {
-        sum += row.number;
-    }
-    assert_eq!(sum, (0..2000).sum::<u64>());
-}
-
-#[tokio::test]
 async fn map_as_vec_of_tuples_schema_mismatch() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
@@ -396,126 +219,6 @@ async fn map_as_vec_of_tuples_schema_mismatch_nested() {
         ],
         "SELECT map(42, map('foo', map(144, 255)))
                 :: Map(UInt16, Map(String, Map(Int32, Int128))) AS m"
-    );
-}
-
-#[tokio::test]
-async fn enums() {
-    #[derive(Debug, PartialEq, Serialize_repr, Deserialize_repr)]
-    #[repr(i8)]
-    enum MyEnum8 {
-        Winter = -128,
-        Spring = 0,
-        Summer = 100,
-        Autumn = 127,
-    }
-
-    #[derive(Debug, PartialEq, Serialize_repr, Deserialize_repr)]
-    #[repr(i16)]
-    enum MyEnum16 {
-        North = -32768,
-        East = 0,
-        South = 144,
-        West = 32767,
-    }
-
-    #[derive(Debug, PartialEq, Row, Serialize, Deserialize)]
-    struct Data {
-        id: u16,
-        enum8: MyEnum8,
-        enum16: MyEnum16,
-    }
-
-    let table_name = "test_rbwnat_enum";
-
-    let client = prepare_database!();
-    client
-        .query(
-            "
-            CREATE OR REPLACE TABLE ?
-            (
-                id     UInt16,
-                enum8  Enum8 ('Winter' = -128,   'Spring' = 0, 'Summer' = 100, 'Autumn' = 127),
-                enum16 Enum16('North'  = -32768, 'East'   = 0, 'South'  = 144, 'West'   = 32767)
-            ) ENGINE MergeTree ORDER BY id
-            ",
-        )
-        .bind(Identifier(table_name))
-        .execute()
-        .await
-        .unwrap();
-
-    let expected = vec![
-        Data {
-            id: 1,
-            enum8: MyEnum8::Spring,
-            enum16: MyEnum16::East,
-        },
-        Data {
-            id: 2,
-            enum8: MyEnum8::Autumn,
-            enum16: MyEnum16::North,
-        },
-        Data {
-            id: 3,
-            enum8: MyEnum8::Winter,
-            enum16: MyEnum16::South,
-        },
-        Data {
-            id: 4,
-            enum8: MyEnum8::Summer,
-            enum16: MyEnum16::West,
-        },
-    ];
-
-    let mut insert = client.insert::<Data>(table_name).await.unwrap();
-    for row in &expected {
-        insert.write(row).await.unwrap()
-    }
-    insert.end().await.unwrap();
-
-    let result = client
-        .query("SELECT * FROM ? ORDER BY id ASC")
-        .bind(Identifier(table_name))
-        .fetch_all::<Data>()
-        .await
-        .unwrap();
-
-    assert_eq!(result, expected);
-}
-
-#[tokio::test]
-async fn nullable() {
-    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
-    struct Data {
-        a: u32,
-        b: Option<i64>,
-    }
-
-    let client = get_client();
-    let result = client
-        .query(
-            "
-            SELECT * FROM (
-                SELECT 1 :: UInt32 AS a, 2    :: Nullable(Int64) AS b
-                UNION ALL
-                SELECT 3 :: UInt32 AS a, NULL :: Nullable(Int64) AS b
-                UNION ALL
-                SELECT 4 :: UInt32 AS a, 5    :: Nullable(Int64) AS b
-            )
-            ORDER BY a ASC
-            ",
-        )
-        .fetch_all::<Data>()
-        .await;
-
-    assert_eq!(
-        result.unwrap(),
-        vec![
-            Data { a: 1, b: Some(2) },
-            Data { a: 3, b: None },
-            Data { a: 4, b: Some(5) },
-        ]
     );
 }
 
@@ -594,35 +297,6 @@ async fn fixed_str_too_long() {
     assert_panic_on_fetch!(
         &["Data.a", "FixedString(5)", "with length 4"],
         "SELECT '12345' :: FixedString(5) AS a, '777' :: FixedString(3) AS b"
-    );
-}
-
-#[tokio::test]
-async fn tuple() {
-    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
-    struct Data {
-        a: (u32, String),
-        b: (i128, HashMap<u16, String>),
-    }
-
-    let client = get_client();
-    let result = client
-        .query(
-            "
-            SELECT
-                (42, 'foo')            :: Tuple(UInt32, String)              AS a,
-                (144, map(255, 'bar')) :: Tuple(Int128, Map(UInt16, String)) AS b
-            ",
-        )
-        .fetch_one::<Data>()
-        .await;
-
-    assert_eq!(
-        result.unwrap(),
-        Data {
-            a: (42, "foo".to_string()),
-            b: (144, vec![(255, "bar".to_string())].into_iter().collect()),
-        }
     );
 }
 
@@ -706,51 +380,6 @@ async fn deeply_nested_validation_incorrect_fixed_string() {
     );
 }
 
-#[tokio::test]
-async fn geo() {
-    #[derive(Clone, Debug, PartialEq)]
-    #[derive(Row, serde::Serialize, serde::Deserialize)]
-    struct Data {
-        id: u32,
-        point: Point,
-        ring: Ring,
-        polygon: Polygon,
-        multi_polygon: MultiPolygon,
-        line_string: LineString,
-        multi_line_string: MultiLineString,
-    }
-
-    let client = get_client();
-    let result = client
-        .query(
-            "
-            SELECT
-                42                                               :: UInt32          AS id,
-                (1.0, 2.0)                                       :: Point           AS point,
-                [(3.0, 4.0), (5.0, 6.0)]                         :: Ring            AS ring,
-                [[(7.0, 8.0), (9.0, 10.0)], [(11.0, 12.0)]]      :: Polygon         AS polygon,
-                [[[(13.0, 14.0), (15.0, 16.0)], [(17.0, 18.0)]]] :: MultiPolygon    AS multi_polygon,
-                [(19.0, 20.0), (21.0, 22.0)]                     :: LineString      AS line_string,
-                [[(23.0, 24.0), (25.0, 26.0)], [(27.0, 28.0)]]   :: MultiLineString AS multi_line_string
-            ",
-        )
-        .fetch_one::<Data>()
-        .await;
-
-    assert_eq!(
-        result.unwrap(),
-        Data {
-            id: 42,
-            point: (1.0, 2.0),
-            ring: vec![(3.0, 4.0), (5.0, 6.0)],
-            polygon: vec![vec![(7.0, 8.0), (9.0, 10.0)], vec![(11.0, 12.0)]],
-            multi_polygon: vec![vec![vec![(13.0, 14.0), (15.0, 16.0)], vec![(17.0, 18.0)]]],
-            line_string: vec![(19.0, 20.0), (21.0, 22.0)],
-            multi_line_string: vec![vec![(23.0, 24.0), (25.0, 26.0)], vec![(27.0, 28.0)]],
-        }
-    );
-}
-
 // TODO: there are two panics; one about schema mismatch,
 //  another about not all Tuple elements being deserialized
 //  not easy to assert, same applies to the other Geo types
@@ -772,8 +401,68 @@ async fn geo_invalid_point() {
     );
 }
 
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/57
 #[tokio::test]
+async fn issue_57() {
+    #[derive(Debug, Row, Deserialize, Serialize)]
+    struct Data {
+        pub metadata_id: String,
+        pub start_time: i64,
+        pub end_time: Option<i64>,
+        pub double_value: f64,
+        pub string_value: String,
+        pub long_value: i64,
+        pub write_time: i64,
+        pub sign: i8,
+        pub version: u64,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE TABLE test (
+                metadata_id  String,
+                start_time   DateTime64(3, 'UTC') CODEC(DoubleDelta, ZSTD(22)),
+                end_time     DateTime64(3, 'UTC') CODEC(DoubleDelta, ZSTD(22)),
+                double_value Float64 CODEC(DoubleDelta, ZSTD(22)),
+                string_value String CODEC(ZSTD(22)),
+                long_value   Int64,
+                write_time   DateTime64(3, 'UTC') CODEC(DoubleDelta, ZSTD(22)),
+                sign         Int8 DEFAULT 1,
+                version      UInt64
+            ) Engine = MergeTree
+            ORDER BY (metadata_id, start_time, end_time);
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let data = Data {
+        metadata_id: "test_id".to_string(),
+        start_time: 1622548800,
+        end_time: Some(1622552400),
+        double_value: 3.14,
+        string_value: "test_value".to_string(),
+        long_value: 42,
+        write_time: 1622556000,
+        sign: -1,
+        version: 1,
+    };
+
+    let mut insert = client.insert::<Data>("test").await.unwrap();
+    let unwind = std::panic::AssertUnwindSafe(async {
+        insert.write(&data).await.unwrap();
+    });
+    assert_panic_msg!(
+        unwind,
+        &["Data.end_time", "DateTime64(3, 'UTC')", "Option<T>"]
+    );
+}
+
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/100
+#[tokio::test]
 async fn issue_100() {
     {
         #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
@@ -809,10 +498,8 @@ async fn issue_100() {
     }
 }
 
-// TODO: unignore after insert implementation uses RBWNAT, too
-#[ignore]
-#[tokio::test]
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/109#issuecomment-2243197221
+#[tokio::test]
 async fn issue_109_1() {
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct Data {
@@ -822,46 +509,29 @@ async fn issue_109_1() {
         drone_id: String,
         call_sign: String,
     }
+
     let client = prepare_database!();
-    execute_statements(
-        &client,
-        &[
+    client
+        .query(
             "
             CREATE TABLE issue_109 (
                 drone_id  String,
                 call_sign String,
                 journey   UInt32,
-                en_id     String,
+                en_id     String
             )
             ENGINE = MergeTree
             ORDER BY (drone_id)
             ",
-            "
-            INSERT INTO issue_109 VALUES
-                ('drone_1', 'call_sign_1', 1, 'en_id_1'),
-                ('drone_2', 'call_sign_2', 2, 'en_id_2'),
-                ('drone_3', 'call_sign_3', 3, 'en_id_3')
-            ",
-        ],
-    )
-    .await;
-
-    let data = client
-        .query("SELECT journey, drone_id, call_sign FROM issue_109")
-        .fetch_all::<Data>()
+        )
+        .execute()
         .await
         .unwrap();
-    let mut insert = client.insert::<Data>("issue_109").await.unwrap();
-    for (id, elem) in data.iter().enumerate() {
-        let elem = Data {
-            en_id: format!("ABC-{id}"),
-            journey: elem.journey,
-            drone_id: elem.drone_id.clone(),
-            call_sign: elem.call_sign.clone(),
-        };
-        insert.write(&elem).await.unwrap();
-    }
-    insert.end().await.unwrap();
+
+    let unwind = std::panic::AssertUnwindSafe(async {
+        let _ = client.insert::<Data>("issue_109").await.unwrap();
+    });
+    assert_panic_msg!(unwind, &["Data", "4 columns", "3 fields"]);
 }
 
 #[tokio::test]
@@ -878,8 +548,8 @@ async fn issue_112() {
     );
 }
 
-#[tokio::test]
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/113
+#[tokio::test]
 async fn issue_113() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
@@ -922,9 +592,9 @@ async fn issue_113() {
     );
 }
 
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/114
 #[tokio::test]
 #[cfg(feature = "time")]
-/// See https://github.com/ClickHouse/clickhouse-rs/issues/114
 async fn issue_114() {
     #[derive(Row, Deserialize, Debug, PartialEq)]
     struct Data {
@@ -957,9 +627,9 @@ async fn issue_114() {
     );
 }
 
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/173
 #[tokio::test]
 #[cfg(feature = "time")]
-/// See https://github.com/ClickHouse/clickhouse-rs/issues/173
 async fn issue_173() {
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct Data {
@@ -992,8 +662,8 @@ async fn issue_173() {
     );
 }
 
-#[tokio::test]
 /// See https://github.com/ClickHouse/clickhouse-rs/issues/185
+#[tokio::test]
 async fn issue_185() {
     #[derive(Row, Deserialize, Debug, PartialEq)]
     struct Data {
@@ -1007,7 +677,7 @@ async fn issue_185() {
         &[
             "
             CREATE TABLE issue_185(
-                pk UInt32,
+                pk          UInt32,
                 decimal_col Nullable(Decimal(10, 4)))
             ENGINE MergeTree
             ORDER BY pk

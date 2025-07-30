@@ -1,4 +1,5 @@
 use crate::decimals::*;
+use crate::geo_types::{LineString, MultiLineString, MultiPolygon, Point, Polygon, Ring};
 use crate::{create_simple_table, insert_and_select, SimpleRow};
 use clickhouse::sql::Identifier;
 use clickhouse::Row;
@@ -10,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
 use std::str::FromStr;
-// TODO: these "e2e" tests should replace many other tests from `rbwnat.rs`
 
 #[tokio::test]
 async fn basic_types() {
@@ -94,6 +94,51 @@ async fn several_simple_rows() {
 }
 
 #[tokio::test]
+async fn many_numbers() {
+    #[derive(Row, Serialize, Deserialize)]
+    struct Data {
+        number: u64,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS test (
+                number UInt64
+            )
+            ENGINE = MergeTree
+            ORDER BY number
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let mut insert = client.insert::<Data>("test").await.unwrap();
+    for i in 1..=20_000 {
+        insert.write(&Data { number: i }).await.unwrap();
+    }
+
+    insert.end().await.unwrap();
+
+    let mut cursor = client
+        .query("SELECT number FROM test ORDER BY number")
+        .fetch::<Data>()
+        .unwrap();
+
+    let mut sum: u64 = 0;
+    for i in 1..=20_000 {
+        let row = cursor.next().await.unwrap().unwrap();
+        assert_eq!(row.number, i);
+        sum += row.number;
+    }
+
+    assert!(cursor.next().await.unwrap().is_none());
+    assert_eq!(sum, 200_010_000);
+}
+
+#[tokio::test]
 async fn arrays() {
     #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
@@ -109,11 +154,11 @@ async fn arrays() {
         .query(
             "
             CREATE TABLE IF NOT EXISTS test (
-                id UInt16,
-                one_dim_array Array(UInt32),
-                two_dim_array Array(Array(Int64)),
+                id              UInt16,
+                one_dim_array   Array(UInt32),
+                two_dim_array   Array(Array(Int64)),
                 three_dim_array Array(Array(Array(Float64))),
-                description String
+                description     String
             )
             ENGINE = MergeTree
             ORDER BY ()
@@ -134,6 +179,110 @@ async fn arrays() {
         ],
         description: "foobar".to_string(),
     }];
+
+    let result = insert_and_select(&client, "test", rows.clone()).await;
+    assert_eq!(result, rows);
+}
+
+#[tokio::test]
+async fn tuples() {
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        a: (u32, String),
+        b: (i128, HashMap<u16, String>),
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS test (
+                a Tuple(UInt32, String),
+                b Tuple(Int128, Map(UInt16, String))
+            )
+            ENGINE = MergeTree
+            ORDER BY ()
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = vec![
+        Data {
+            a: (42, "foo".to_string()),
+            b: (144, vec![(255, "bar".to_string())].into_iter().collect()),
+        },
+        Data {
+            a: (100, "qaz".to_string()),
+            b: (
+                222,
+                vec![(1, "qux".to_string()), (2, "quux".to_string())]
+                    .into_iter()
+                    .collect(),
+            ),
+        },
+    ];
+
+    let result = insert_and_select(&client, "test", rows.clone()).await;
+    assert_eq!(result, rows);
+}
+
+#[tokio::test]
+async fn geo() {
+    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Row, serde::Serialize, serde::Deserialize)]
+    struct Data {
+        id: u32,
+        point: Point,
+        ring: Ring,
+        polygon: Polygon,
+        multi_polygon: MultiPolygon,
+        line_string: LineString,
+        multi_line_string: MultiLineString,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS test (
+                id                UInt32,
+                point             Point,
+                ring              Ring,
+                polygon           Polygon,
+                multi_polygon     MultiPolygon,
+                line_string       LineString,
+                multi_line_string MultiLineString
+            )
+            ENGINE = MergeTree
+            ORDER BY id
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = vec![
+        Data {
+            id: 42,
+            point: (1.0, 2.0),
+            ring: vec![(3.0, 4.0), (5.0, 6.0)],
+            polygon: vec![vec![(7.0, 8.0), (9.0, 10.0)], vec![(11.0, 12.0)]],
+            multi_polygon: vec![vec![vec![(13.0, 14.0), (15.0, 16.0)], vec![(17.0, 18.0)]]],
+            line_string: vec![(19.0, 20.0), (21.0, 22.0)],
+            multi_line_string: vec![vec![(23.0, 24.0), (25.0, 26.0)], vec![(27.0, 28.0)]],
+        },
+        Data {
+            id: 144,
+            point: (29.0, 30.0),
+            ring: vec![(31.0, 32.0), (33.0, 34.0)],
+            polygon: vec![vec![(35.0, 36.0), (37.0, 38.0)], vec![(39.0, 40.0)]],
+            multi_polygon: vec![vec![vec![(41.0, 42.0), (43.0, 44.0)], vec![(45.0, 46.0)]]],
+            line_string: vec![(47.0, 48.0), (49.0, 50.0)],
+            multi_line_string: vec![vec![(51.0, 52.0), (53.0, 54.0)], vec![(55.0, 56.0)]],
+        },
+    ];
 
     let result = insert_and_select(&client, "test", rows.clone()).await;
     assert_eq!(result, rows);
@@ -556,9 +705,9 @@ async fn date_and_time() {
         .query(
             "
             CREATE TABLE IF NOT EXISTS test (
-                date Date,
-                date32 Date32,
-                date_time DateTime,
+                date          Date,
+                date32        Date32,
+                date_time     DateTime,
                 date_time64_0 DateTime64(0),
                 date_time64_3 DateTime64(3),
                 date_time64_6 DateTime64(6),
@@ -893,4 +1042,178 @@ async fn different_struct_field_order_mixed_usage() {
             },
         ]
     );
+}
+
+#[tokio::test]
+async fn borrowed_data() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data<'a> {
+        str: &'a str,
+        array: Vec<&'a str>,
+        tuple: (&'a str, &'a str),
+        str_opt: Option<&'a str>,
+        vec_map_str: Vec<(&'a str, &'a str)>,
+        vec_map_f32: Vec<(&'a str, f32)>,
+        vec_map_nested: Vec<(&'a str, Vec<(&'a str, &'a str)>)>,
+        hash_map_str: HashMap<&'a str, &'a str>,
+        hash_map_f32: HashMap<&'a str, f32>,
+        hash_map_nested: HashMap<&'a str, HashMap<&'a str, &'a str>>,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE OR REPLACE TABLE test (
+                str              String,
+                array            Array(String),
+                tuple            Tuple(String, String),
+                str_opt          Nullable(String),
+                vec_map_str      Map(String, String),
+                vec_map_f32      Map(String, Float32),
+                vec_map_nested   Map(String, Map(String, String)),
+                hash_map_str     Map(String, String),
+                hash_map_f32     Map(String, Float32),
+                hash_map_nested  Map(String, Map(String, String))
+            ) ENGINE MergeTree ORDER BY str
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let row1 = Data {
+        str: "a",
+        array: vec!["b", "c"],
+        tuple: ("d", "e"),
+        str_opt: None,
+        vec_map_str: vec![("key1", "value1"), ("key2", "value2")],
+        vec_map_f32: vec![("key3", 100.0), ("key4", 200.0)],
+        vec_map_nested: vec![("n1", vec![("key1", "value1"), ("key2", "value2")])],
+        hash_map_str: HashMap::from([("key1", "value1"), ("key2", "value2")]),
+        hash_map_f32: HashMap::from([("key3", 100.0), ("key4", 200.0)]),
+        hash_map_nested: HashMap::from([(
+            "n1",
+            HashMap::from([("key1", "value1"), ("key2", "value2")]),
+        )]),
+    };
+
+    let row2 = Data {
+        str: "f",
+        array: vec!["g", "h"],
+        tuple: ("i", "j"),
+        str_opt: Some("k"),
+        vec_map_str: vec![("key4", "value4"), ("key5", "value5")],
+        vec_map_f32: vec![("key6", 300.0), ("key7", 400.0)],
+        vec_map_nested: vec![("n2", vec![("key4", "value4"), ("key5", "value5")])],
+        hash_map_str: HashMap::from([("key4", "value4"), ("key5", "value5")]),
+        hash_map_f32: HashMap::from([("key6", 300.0), ("key7", 400.0)]),
+        hash_map_nested: HashMap::from([(
+            "n2",
+            HashMap::from([("key4", "value4"), ("key5", "value5")]),
+        )]),
+    };
+
+    let mut insert = client.insert::<Data<'_>>("test").await.unwrap();
+    insert.write(&row1).await.unwrap();
+    insert.write(&row2).await.unwrap();
+    insert.end().await.unwrap();
+
+    let mut cursor = client
+        .query("SELECT ?fields FROM test")
+        .fetch::<Data<'_>>()
+        .unwrap();
+
+    assert_eq!(cursor.next().await.unwrap().unwrap(), row1);
+    assert_eq!(cursor.next().await.unwrap().unwrap(), row2);
+    assert!(cursor.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn nested_data_type() {
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        id: u16,
+        #[serde(rename = "nested.id")]
+        nested_id: Vec<u32>,
+        #[serde(rename = "nested.value")]
+        nested_value: Vec<String>,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS test (
+                id     UInt16,
+                nested Nested(id UInt32, value String)
+            )
+            ENGINE = MergeTree
+            ORDER BY id
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = vec![
+        Data {
+            id: 42,
+            nested_id: vec![1, 2, 3],
+            nested_value: vec!["one".to_string(), "two".to_string(), "three".to_string()],
+        },
+        Data {
+            id: 144,
+            nested_id: vec![4, 5],
+            nested_value: vec!["four".to_string(), "five".to_string()],
+        },
+    ];
+
+    let result = insert_and_select(&client, "test", rows.clone()).await;
+    assert_eq!(result, rows);
+}
+
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/99
+#[tokio::test]
+#[ignore] // FIXME: requires https://github.com/ClickHouse/clickhouse-rs/issues/264
+async fn issue_99_flatten_maps() {
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Metadata {
+        foo: String,
+        bar: String,
+    }
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        #[serde(flatten)]
+        metadata: Metadata,
+        data: String,
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE TABLE IF NOT EXISTS test (
+                foo String,
+                bar String,
+                data String
+            )
+            ENGINE = MergeTree
+            ORDER BY tuple()
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = vec![Data {
+        metadata: Metadata {
+            foo: "foo_value".to_string(),
+            bar: "bar_value".to_string(),
+        },
+        data: "data_value".to_string(),
+    }];
+
+    let result = insert_and_select(&client, "test", rows.clone()).await;
+    assert_eq!(result, rows);
 }

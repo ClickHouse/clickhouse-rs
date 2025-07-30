@@ -68,6 +68,25 @@ macro_rules! assert_panic_on_fetch {
     };
 }
 
+macro_rules! assert_panic_msg {
+    ($unwinded:ident, $msg_parts:expr) => {
+        use futures::FutureExt;
+        let result = $unwinded.catch_unwind().await;
+        assert!(
+            result.is_err(),
+            "expected a panic, but got a result instead: {:?}",
+            result.unwrap()
+        );
+        let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
+        for &msg in $msg_parts {
+            assert!(
+                panic_msg.contains(msg),
+                "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
+            );
+        }
+    };
+}
+
 macro_rules! prepare_database {
     () => {
         crate::_priv::prepare_database({
