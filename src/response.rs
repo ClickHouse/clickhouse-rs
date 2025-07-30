@@ -40,16 +40,25 @@ impl Response {
     pub(crate) fn new(response: HyperResponseFuture, compression: Compression) -> Self {
         Self::Waiting(Box::pin(async move {
             let response = response.await?;
-            let status = response.status();
-            let body = response.into_body();
 
-            if status == StatusCode::OK {
+            let status = response.status();
+            let exception_code = response.headers().get("X-ClickHouse-Exception-Code");
+
+            if status == StatusCode::OK && exception_code.is_none() {
                 // More likely to be successful, start streaming.
                 // It still can fail, but we'll handle it in `DetectDbException`.
-                Ok(Chunks::new(body, compression))
+                Ok(Chunks::new(response.into_body(), compression))
             } else {
                 // An instantly failed request.
-                Err(collect_bad_response(status, body, compression).await)
+                Err(collect_bad_response(
+                    status,
+                    exception_code
+                        .and_then(|value| value.to_str().ok())
+                        .map(|code| format!("Code: {code}")),
+                    response.into_body(),
+                    compression,
+                )
+                .await)
             }
         }))
     }
@@ -78,6 +87,7 @@ impl Response {
 #[inline(never)]
 async fn collect_bad_response(
     status: StatusCode,
+    exception_code: Option<String>,
     body: Incoming,
     compression: Compression,
 ) -> Error {
@@ -90,8 +100,11 @@ async fn collect_bad_response(
     let raw_bytes = match body.collect().await {
         Ok(collected) => collected.to_bytes(),
         // If we can't collect the body, return standardised reason for the status code.
-        Err(_) => return Error::BadResponse(stringify_status(status)),
+        Err(_) => return Error::BadResponse(reason(status, exception_code)),
     };
+    if raw_bytes.is_empty() {
+        return Error::BadResponse(reason(status, exception_code));
+    }
 
     // Try to decompress the body, because CH uses compression even for errors.
     let stream = stream::once(future::ready(Result::<_>::Ok(raw_bytes.slice(..))));
@@ -106,7 +119,7 @@ async fn collect_bad_response(
     let reason = String::from_utf8(bytes.into())
         .map(|reason| reason.trim().into())
         // If we have a unreadable response, return standardised reason for the status code.
-        .unwrap_or_else(|_| stringify_status(status));
+        .unwrap_or_else(|_| reason(status, exception_code));
 
     Error::BadResponse(reason)
 }
@@ -124,12 +137,14 @@ async fn collect_bytes(stream: impl Stream<Item = Result<Bytes>>) -> Result<Byte
     Ok(bytes.into())
 }
 
-fn stringify_status(status: StatusCode) -> String {
-    format!(
-        "{} {}",
-        status.as_str(),
-        status.canonical_reason().unwrap_or("<unknown>"),
-    )
+fn reason(status: StatusCode, exception_code: Option<String>) -> String {
+    exception_code.unwrap_or_else(|| {
+        format!(
+            "{} {}",
+            status.as_str(),
+            status.canonical_reason().unwrap_or("<unknown>"),
+        )
+    })
 }
 
 // === Chunks ===
