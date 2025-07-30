@@ -136,11 +136,8 @@ where
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
     for validation in [true, false] {
-        for compression in [
-            Compression::None,
-            #[cfg(feature = "lz4")]
-            Compression::Lz4,
-        ] {
+        {
+            let compression = Compression::None;
             group.bench_function(
                 format!("validation={validation}/compression={compression:?}"),
                 |b| {
