@@ -29,20 +29,25 @@ impl fmt::Display for SqlBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SqlBuilder::InProgress(parts, output_format_opt) => {
+                let mut sql = String::new();
+
                 for part in parts {
                     match part {
-                        Part::Arg => f.write_char('?')?,
-                        Part::Fields => f.write_str("?fields")?,
-                        Part::Text(text) => f.write_str(text)?,
+                        Part::Arg => sql.write_char('?')?,
+                        Part::Fields => sql.write_str("?fields")?,
+                        Part::Text(text) => sql.write_str(text)?,
                     }
                 }
+
                 if let Some(output_format) = output_format_opt {
-                    f.write_str(&format!(" FORMAT {output_format}"))?
+                    let insert_pos = Self::find_format_position(&sql);
+                    sql.insert_str(insert_pos, &format!(" FORMAT {output_format}"));
                 }
+
+                f.write_str(&sql)
             }
-            SqlBuilder::Failed(err) => f.write_str(err)?,
+            SqlBuilder::Failed(err) => f.write_str(err),
         }
-        Ok(())
     }
 }
 
@@ -135,12 +140,76 @@ impl SqlBuilder {
         match self {
             Self::InProgress(_, output_format_opt) => {
                 if let Some(output_format) = output_format_opt {
-                    sql.push_str(&format!(" FORMAT {output_format}"))
+                    let insert_pos = Self::find_format_position(&sql);
+                    sql.insert_str(insert_pos, &format!(" FORMAT {output_format}"));
                 }
                 Ok(sql)
             }
             Self::Failed(err) => Err(Error::InvalidParams(err.into())),
         }
+    }
+
+    fn find_format_position(sql: &str) -> usize {
+        enum State {
+            Normal,
+            InString(char),
+            InLineComment,
+            InBlockComment,
+        }
+
+        let mut state = State::Normal;
+        let mut last_meaningful_byte_pos = 0;
+        let mut chars = sql.char_indices().peekable();
+
+        while let Some((byte_pos, ch)) = chars.next() {
+            match state {
+                State::Normal => match ch {
+                    '\'' | '`' | '"' => {
+                        state = State::InString(ch);
+                        last_meaningful_byte_pos = byte_pos + ch.len_utf8();
+                    }
+                    '-' if chars.peek().is_some_and(|(_, c)| *c == '-') => {
+                        state = State::InLineComment;
+                        chars.next();
+                    }
+                    '/' if chars.peek().is_some_and(|(_, c)| *c == '*') => {
+                        state = State::InBlockComment;
+                        chars.next();
+                    }
+                    ';' | ' ' | '\t' | '\n' | '\r' => {
+                        // trailing characters
+                    }
+                    _ => {
+                        last_meaningful_byte_pos = byte_pos + ch.len_utf8();
+                    }
+                },
+                State::InString(quote_char) => {
+                    last_meaningful_byte_pos = byte_pos + ch.len_utf8();
+                    if ch == quote_char {
+                        if chars.peek().is_some_and(|(_, c)| *c == quote_char) {
+                            if let Some((next_pos, next_ch)) = chars.next() {
+                                last_meaningful_byte_pos = next_pos + next_ch.len_utf8();
+                            }
+                        } else {
+                            state = State::Normal;
+                        }
+                    }
+                }
+                State::InLineComment => {
+                    if ch == '\n' {
+                        state = State::Normal;
+                    }
+                }
+                State::InBlockComment => {
+                    if ch == '*' && chars.peek().is_some_and(|(_, c)| *c == '/') {
+                        state = State::Normal;
+                        chars.next();
+                    }
+                }
+            }
+        }
+
+        last_meaningful_byte_pos
     }
 
     fn error(&mut self, err: impl Display) {
@@ -279,5 +348,54 @@ mod tests {
         sql.bind_arg(42);
         let err = sql.finish().unwrap_err();
         assert!(err.to_string().contains("unbound query argument ?fields"));
+    }
+
+    #[cfg(test)]
+    mod find_format_position {
+        use super::*;
+
+        #[test]
+        fn test_multiline_query_with_format() {
+            let mut sql =
+                SqlBuilder::new("SELECT\nid,\nname\nFROM users\nWHERE active = true   ;\n  ");
+            sql.set_output_format("JSONEachRow");
+            assert_eq!(
+                sql.finish().unwrap(),
+                "SELECT\nid,\nname\nFROM users\nWHERE active = true FORMAT JSONEachRow   ;\n  "
+            );
+        }
+
+        #[test]
+        fn test_with_placeholder_and_format() {
+            let mut sql = SqlBuilder::new("SELECT * FROM `table`.`name` WHERE id = ?   ;\n  ");
+            sql.bind_arg(42);
+            sql.set_output_format("JSONEachRow");
+            assert_eq!(
+                sql.finish().unwrap(),
+                "SELECT * FROM `table`.`name` WHERE id = 42 FORMAT JSONEachRow   ;\n  "
+            );
+        }
+
+        #[test]
+        fn test_mixed_identifier() {
+            let mut sql =
+                SqlBuilder::new(r#"SELECT `style`, "ansi_style" FROM `t1` JOIN "table2""#);
+            sql.set_output_format("JSONEachRow");
+            assert_eq!(
+                sql.finish().unwrap(),
+                "SELECT `style`, \"ansi_style\" FROM `t1` JOIN \"table2\" FORMAT JSONEachRow"
+            );
+        }
+
+        #[test]
+        fn test_mixed_identifier_multiline() {
+            let mut sql =
+                SqlBuilder::new("SELECT `number`\nFROM `system`.\"numbers\"\nLIMIT 1\r\n");
+            sql.set_output_format("JSONEachRow");
+            assert_eq!(
+                sql.finish().unwrap(),
+                "SELECT `number`\nFROM `system`.\"numbers\"\nLIMIT 1 FORMAT JSONEachRow\r\n"
+            );
+        }
     }
 }
