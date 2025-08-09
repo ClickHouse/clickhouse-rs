@@ -22,7 +22,7 @@ use crate::request_body::RequestBody;
 /// future (e.g. to support more runtimes, not only tokio). Thus, prefer to open
 /// a feature request instead of implementing this trait manually.
 #[sealed]
-pub trait HttpClient: Send + Sync + 'static {
+pub trait HttpClient: Send + Sync + std::fmt::Debug + 'static {
     fn request(&self, req: Request<RequestBody>) -> ResponseFuture;
 }
 
