@@ -158,7 +158,7 @@ impl Query {
 
         let (method, body, content_length) = if use_post {
             if read_only {
-                pairs.append_pair("readonly", "1");
+                pairs.append_pair("readonly", "2");
             }
             let len = query.len();
             (Method::POST, RequestBody::full(query), len)
