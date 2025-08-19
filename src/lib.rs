@@ -525,14 +525,10 @@ mod client_tests {
         assert!(client.validation);
     }
 
-	#[test]
+    #[test]
     fn it_does_follow_previous_configuration() {
-        let client = Client::default()
-            .with_option("async_insert", "1");
-        assert_eq!(
-            client.options,
-            client.clone().options,
-        );
+        let client = Client::default().with_option("async_insert", "1");
+        assert_eq!(client.options, client.clone().options,);
     }
 
     #[test]
@@ -540,9 +536,6 @@ mod client_tests {
         let client = Client::default();
         let client_clone = client.clone();
         let client = client.with_option("async_insert", "1");
-        assert_ne!(
-            client.options,
-            client_clone.options,
-        );
+        assert_ne!(client.options, client_clone.options,);
     }
 }
