@@ -308,9 +308,14 @@ impl Client {
         inserter::Inserter::new(self, table)
     }
 
-    /// Starts a new SELECT/DDL query.
+    /// Starts a new SELECT/DDL query with sql rendering
     pub fn query(&self, query: &str) -> query::Query {
-        query::Query::new(self, query)
+        query::Query::new(self, query, true)
+    }
+
+    /// Starts a new SELECT/DDL query with a raw sql
+    pub fn query_with_raw_sql(&self, query: &str) -> query::Query {
+        query::Query::new(self, query, false)
     }
 
     /// Starts a new WATCH query.

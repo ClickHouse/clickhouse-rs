@@ -26,10 +26,10 @@ pub struct Query {
 }
 
 impl Query {
-    pub(crate) fn new(client: &Client, template: &str) -> Self {
+    pub(crate) fn new(client: &Client, template: &str, need_render: bool) -> Self {
         Self {
             client: client.clone(),
-            sql: SqlBuilder::new(template),
+            sql: SqlBuilder::new_with_need_render(template, need_render),
         }
     }
 

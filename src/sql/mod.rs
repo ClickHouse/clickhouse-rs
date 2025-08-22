@@ -47,24 +47,31 @@ impl fmt::Display for SqlBuilder {
 }
 
 impl SqlBuilder {
+    #[cfg(test)]
     pub(crate) fn new(template: &str) -> Self {
+        Self::new_with_need_render(template, true)
+    }
+
+    pub(crate) fn new_with_need_render(template: &str, need_render: bool) -> Self {
         let mut parts = Vec::new();
         let mut rest = template;
-        while let Some(idx) = rest.find('?') {
-            if rest[idx + 1..].starts_with('?') {
-                parts.push(Part::Text(rest[..idx + 1].to_string()));
-                rest = &rest[idx + 2..];
-                continue;
-            } else if idx != 0 {
-                parts.push(Part::Text(rest[..idx].to_string()));
-            }
+        if need_render {
+            while let Some(idx) = rest.find('?') {
+                if rest[idx + 1..].starts_with('?') {
+                    parts.push(Part::Text(rest[..idx + 1].to_string()));
+                    rest = &rest[idx + 2..];
+                    continue;
+                } else if idx != 0 {
+                    parts.push(Part::Text(rest[..idx].to_string()));
+                }
 
-            rest = &rest[idx + 1..];
-            if let Some(restfields) = rest.strip_prefix("fields") {
-                parts.push(Part::Fields);
-                rest = restfields;
-            } else {
-                parts.push(Part::Arg);
+                rest = &rest[idx + 1..];
+                if let Some(restfields) = rest.strip_prefix("fields") {
+                    parts.push(Part::Fields);
+                    rest = restfields;
+                } else {
+                    parts.push(Part::Arg);
+                }
             }
         }
 
