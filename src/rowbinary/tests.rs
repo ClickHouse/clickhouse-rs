@@ -48,30 +48,34 @@ struct Sample<'a> {
 // clickhouse_derive is not working here
 impl Row for Sample<'_> {
     const NAME: &'static str = "Sample";
-    const COLUMN_NAMES: &'static [&'static str] = &[
-        "int8",
-        "int32",
-        "int64",
-        "uint8",
-        "uint32",
-        "uint64",
-        "float32",
-        "float64",
-        "datetime",
-        "datetime64",
-        "time32",
-        "time64",
-        "decimal64",
-        "decimal128",
-        "string",
-        "blob",
-        "optional_decimal64",
-        "optional_datetime",
-        "fixed_string",
-        "array",
-        "boolean",
-    ];
-    const COLUMN_COUNT: usize = 21;
+    fn column_names() -> impl IntoIterator<Item = &'static str> {
+        [
+            "int8",
+            "int32",
+            "int64",
+            "uint8",
+            "uint32",
+            "uint64",
+            "float32",
+            "float64",
+            "datetime",
+            "datetime64",
+            "time32",
+            "time64",
+            "decimal64",
+            "decimal128",
+            "string",
+            "blob",
+            "optional_decimal64",
+            "optional_datetime",
+            "fixed_string",
+            "array",
+            "boolean",
+        ]
+    }
+    fn column_count() -> usize {
+        21
+    }
     const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
 
     type Value<'a> = Sample<'a>;

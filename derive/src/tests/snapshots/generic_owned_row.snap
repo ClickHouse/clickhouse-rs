@@ -11,8 +11,12 @@ struct Sample<T> {
 #[automatically_derived]
 impl<T> clickhouse::Row for Sample<T> {
     const NAME: &'static str = stringify!(Sample);
-    const COLUMN_NAMES: &'static [&'static str] = &["a", "b"];
-    const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
+    fn column_names() -> impl IntoIterator<Item = &'static str> {
+        ["a", "b"]
+    }
+    fn column_count() -> usize {
+        <Self as clickhouse::Row>::column_names().into_iter().count()
+    }
     const KIND: clickhouse::_priv::RowKind = clickhouse::_priv::RowKind::Struct;
     type Value<'__v> = Self;
 }
