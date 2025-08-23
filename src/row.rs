@@ -390,4 +390,26 @@ mod tests {
 
         assert_eq!(join_column_names::<MyRow>().unwrap(), "`type`,`if`");
     }
+
+    #[test]
+    fn it_flattens() {
+        use serde::Serialize;
+
+        #[derive(Row, Serialize)]
+        #[allow(dead_code)]
+        struct Inner {
+            a: u32,
+            b: u32,
+        }
+
+        #[derive(Row, Serialize)]
+        #[allow(dead_code)]
+        struct Outer {
+            #[serde(flatten)]
+            inner: Inner,
+            c: u32,
+        }
+
+        assert_eq!(join_column_names::<Outer>().unwrap(), "`a`,`b`,`c`");
+    }
 }
