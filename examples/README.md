@@ -9,6 +9,7 @@ If something is missing, or you found a mistake in one of these examples, please
 ### General usage
 
 - [usage.rs](usage.rs) - creating tables, executing other DDLs, inserting the data, and selecting it back. Optional cargo features: `inserter`.
+- [query_flags.rs](query_flags.rs) - Supports query interpolation flags to finely control how SQL templates are processed.
 - [mock.rs](mock.rs) - writing tests with `mock` feature. Cargo features: requires `test-util`.
 - [inserter.rs](inserter.rs) - using the client-side batching via the `inserter` feature. Cargo features: requires `inserter`.
 - [async_insert.rs](async_insert.rs) - using the server-side batching via the [asynchronous inserts](https://clickhouse.com/docs/en/optimize/asynchronous-inserts) ClickHouse feature
