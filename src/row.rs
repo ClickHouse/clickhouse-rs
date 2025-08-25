@@ -129,7 +129,7 @@ impl<R> RowRead for R where R: for<'a> Row<Value<'a>: Deserialize<'a>> {}
 ///     client: Client,
 ///     data: &[R],
 /// ) -> Result<()> {
-///     let mut insert = client.insert::<R>(table)?;
+///     let mut insert = client.insert::<R>(table).await?;
 ///     for row in data {
 ///         insert.write(row).await?;
 ///     }
@@ -158,7 +158,7 @@ impl<R> RowRead for R where R: for<'a> Row<Value<'a>: Deserialize<'a>> {}
 ///     data: &[R::Value<'_>],                //<<< R::Value instead of R
 /// ) -> Result<()> {
 ///     /* same code */
-/// #   let mut insert = client.insert::<R>(table)?;
+/// #   let mut insert = client.insert::<R>(table).await?;
 /// #   for row in data { insert.write(row).await?; }
 /// #   insert.end().await
 /// }

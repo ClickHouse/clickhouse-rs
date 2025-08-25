@@ -16,6 +16,7 @@ async fn keeps_client_options() {
 
     let mut insert = client
         .insert::<SimpleRow>(table_name)
+        .await
         .unwrap()
         .with_option(insert_setting_name, insert_setting_value)
         .with_option("query_id", &query_id);
@@ -68,6 +69,7 @@ async fn overrides_client_options() {
 
     let mut insert = client
         .insert::<SimpleRow>(table_name)
+        .await
         .unwrap()
         .with_option(setting_name, override_value)
         .with_option("query_id", &query_id);
@@ -114,9 +116,9 @@ async fn empty_insert() {
 
     let insert = client
         .insert::<SimpleRow>(table_name)
+        .await
         .unwrap()
         .with_option("query_id", &query_id);
-
     insert.end().await.unwrap();
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
@@ -164,6 +166,7 @@ async fn rename_insert() {
 
     let mut insert = client
         .insert::<RenameRow>(table_name)
+        .await
         .unwrap()
         .with_option("query_id", &query_id);
 
@@ -188,7 +191,7 @@ async fn insert_from_cursor() {
     create_simple_table(&client, "test").await;
 
     // Fill the table with initial data.
-    let mut insert = client.insert::<BorrowedRow<'_>>("test").unwrap();
+    let mut insert = client.insert::<BorrowedRow<'_>>("test").await.unwrap();
     for (i, data) in ["foo", "bar"].iter().enumerate() {
         let row = BorrowedRow { id: i as _, data };
         insert.write(&row).await.unwrap();
@@ -201,7 +204,7 @@ async fn insert_from_cursor() {
         .fetch::<BorrowedRow<'_>>()
         .unwrap();
 
-    let mut insert = client.insert::<BorrowedRow<'_>>("test").unwrap();
+    let mut insert = client.insert::<BorrowedRow<'_>>("test").await.unwrap();
     while let Some(row) = cursor.next().await.unwrap() {
         insert.write(&row).await.unwrap();
     }
