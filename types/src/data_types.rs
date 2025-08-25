@@ -368,9 +368,9 @@ impl DecimalType {
         } else if precision <= 76 {
             Ok(DecimalType::Decimal256)
         } else {
-            return Err(TypesError::TypeParsingError(format!(
+            Err(TypesError::TypeParsingError(format!(
                 "Invalid Decimal precision: {precision}"
-            )));
+            )))
         }
     }
 }
