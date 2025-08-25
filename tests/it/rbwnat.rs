@@ -997,6 +997,131 @@ async fn date_and_time() {
 }
 
 #[tokio::test]
+async fn interval() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        id: u32,
+        interval_nanosecond: i64,
+        interval_microsecond: i64,
+        interval_millisecond: i64,
+        interval_second: i64,
+        interval_minute: i64,
+        interval_hour: i64,
+        interval_day: i64,
+        interval_week: i64,
+        interval_month: i64,
+        interval_quarter: i64,
+        interval_year: i64,
+    }
+
+    let client = get_client();
+    let mut cursor = client
+        .query(
+            "
+            SELECT * FROM (
+                SELECT
+                    0 :: UInt32                                  AS id,
+                    toIntervalNanosecond  (0)                    AS interval_nanosecond,
+                    toIntervalMicrosecond (0)                    AS interval_microsecond,
+                    toIntervalMillisecond (0)                    AS interval_millisecond,
+                    toIntervalSecond      (0)                    AS interval_second,
+                    toIntervalMinute      (0)                    AS interval_minute,
+                    toIntervalHour        (0)                    AS interval_hour,
+                    toIntervalDay         (0)                    AS interval_day,
+                    toIntervalWeek        (0)                    AS interval_week,
+                    toIntervalMonth       (0)                    AS interval_month,
+                    toIntervalQuarter     (0)                    AS interval_quarter,
+                    toIntervalYear        (0)                    AS interval_year
+                UNION ALL
+                SELECT
+                    1 :: UInt32                                  AS id,
+                    toIntervalNanosecond  (-9223372036854775808) AS interval_nanosecond,
+                    toIntervalMicrosecond (-9223372036854775808) AS interval_microsecond,
+                    toIntervalMillisecond (-9223372036854775808) AS interval_millisecond,
+                    toIntervalSecond      (-9223372036854775808) AS interval_second,
+                    toIntervalMinute      (-9223372036854775808) AS interval_minute,
+                    toIntervalHour        (-9223372036854775808) AS interval_hour,
+                    toIntervalDay         (-9223372036854775808) AS interval_day,
+                    toIntervalWeek        (-9223372036854775808) AS interval_week,
+                    toIntervalMonth       (-9223372036854775808) AS interval_month,
+                    toIntervalQuarter     (-9223372036854775808) AS interval_quarter,
+                    toIntervalYear        (-9223372036854775808) AS interval_year
+                UNION ALL
+                SELECT
+                    2 :: UInt32                                  AS id,
+                    toIntervalNanosecond  (9223372036854775807)  AS interval_nanosecond,
+                    toIntervalMicrosecond (9223372036854775807)  AS interval_microsecond,
+                    toIntervalMillisecond (9223372036854775807)  AS interval_millisecond,
+                    toIntervalSecond      (9223372036854775807)  AS interval_second,
+                    toIntervalMinute      (9223372036854775807)  AS interval_minute,
+                    toIntervalHour        (9223372036854775807)  AS interval_hour,
+                    toIntervalDay         (9223372036854775807)  AS interval_day,
+                    toIntervalWeek        (9223372036854775807)  AS interval_week,
+                    toIntervalMonth       (9223372036854775807)  AS interval_month,
+                    toIntervalQuarter     (9223372036854775807)  AS interval_quarter,
+                    toIntervalYear        (9223372036854775807)  AS interval_year
+            ) ORDER BY id ASC
+            ",
+        )
+        .fetch::<Data>()
+        .unwrap();
+
+    assert_eq!(
+        cursor.next().await.unwrap().unwrap(),
+        Data {
+            id: 0,
+            interval_nanosecond: 0,
+            interval_microsecond: 0,
+            interval_millisecond: 0,
+            interval_second: 0,
+            interval_minute: 0,
+            interval_hour: 0,
+            interval_day: 0,
+            interval_week: 0,
+            interval_month: 0,
+            interval_quarter: 0,
+            interval_year: 0,
+        }
+    );
+
+    assert_eq!(
+        cursor.next().await.unwrap().unwrap(),
+        Data {
+            id: 1,
+            interval_nanosecond: i64::MIN,
+            interval_microsecond: i64::MIN,
+            interval_millisecond: i64::MIN,
+            interval_second: i64::MIN,
+            interval_minute: i64::MIN,
+            interval_hour: i64::MIN,
+            interval_day: i64::MIN,
+            interval_week: i64::MIN,
+            interval_month: i64::MIN,
+            interval_quarter: i64::MIN,
+            interval_year: i64::MIN,
+        }
+    );
+
+    assert_eq!(
+        cursor.next().await.unwrap().unwrap(),
+        Data {
+            id: 2,
+            interval_nanosecond: i64::MAX,
+            interval_microsecond: i64::MAX,
+            interval_millisecond: i64::MAX,
+            interval_second: i64::MAX,
+            interval_minute: i64::MAX,
+            interval_hour: i64::MAX,
+            interval_day: i64::MAX,
+            interval_week: i64::MAX,
+            interval_month: i64::MAX,
+            interval_quarter: i64::MAX,
+            interval_year: i64::MAX,
+        }
+    );
+}
+
+#[tokio::test]
 #[cfg(feature = "uuid")]
 async fn uuid() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
