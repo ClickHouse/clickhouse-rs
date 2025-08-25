@@ -19,6 +19,33 @@ Official pure Rust typed client for ClickHouse DB.
 [codecov-badge]: https://codecov.io/gh/ClickHouse/clickhouse-rs/graph/badge.svg?token=3MBXXYL53L
 [codecov-url]: https://codecov.io/gh/ClickHouse/clickhouse-rs
 
+## Version Compatibility
+
+### Supported Rust Versions
+
+The current MSRV (minimum supported Rust version) is **1.79.0** (for the upcoming release). The MSRV history for past minor releases can be found below:
+
+ * 0.13.3 - Rust 1.73.0
+ * 0.13.2 - Rust 1.73
+ * 0.13.0 - Rust 1.70
+ * 0.12.0 - Rust 1.67
+
+Note that the MSRV is increased when dependencies require newer Rust features. We try to avoid the situation where a dependency transitively increases the MSRV of clickhouse-rs, but we do not guarantee that this does not happen.
+
+### Supported ClickHouse Versions
+
+Supported ClickHouse versions:
+
+- 24.8 (previous LTS)
+- 25.3 (current LTS)
+- 25.4+
+
+See also: [ClickHouse versioning guide](https://clickhouse.com/docs/en/whats-new/versioning-policy/)
+
+It will almost certainly work with ClickHouse versions older than that, but we do not guarantee compatibility in that case, and recommend upgrading.
+
+**Note**: Some features may require specific ClickHouse versions. For example, the new `JSON` data type requires ClickHouse 24.10+.
+
 * Uses `serde` for encoding/decoding rows.
 * Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
 * Uses `RowBinaryWithNamesAndTypes` or `RowBinary` formats over HTTP transport.
