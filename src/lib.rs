@@ -37,7 +37,7 @@ mod rowbinary;
 mod ticks;
 
 /// A client containing HTTP pool.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Client {
     http: Arc<dyn HttpClient>,
 
@@ -54,7 +54,7 @@ pub struct Client {
     mocked: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ProductInfo {
     name: String,
     version: String,
