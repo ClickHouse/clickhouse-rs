@@ -159,8 +159,35 @@ where
     impl_num!(f64, deserialize_f64, visit_f64, get_f64_le, SerdeType::F64);
 
     #[inline(always)]
-    fn deserialize_any<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
-        Err(Error::DeserializeAnyNotSupported)
+    fn deserialize_any<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        match self
+            .validator
+            .peek()
+            .ok_or(Error::DeserializeAnyNotSupported)?
+        {
+            SerdeType::Bool => self.deserialize_bool(visitor),
+            SerdeType::I8 => self.deserialize_i8(visitor),
+            SerdeType::I16 => self.deserialize_i16(visitor),
+            SerdeType::I32 => self.deserialize_i32(visitor),
+            SerdeType::I64 => self.deserialize_i64(visitor),
+            SerdeType::I128 => self.deserialize_i128(visitor),
+            SerdeType::U8 => self.deserialize_u8(visitor),
+            SerdeType::U16 => self.deserialize_u16(visitor),
+            SerdeType::U32 => self.deserialize_u32(visitor),
+            SerdeType::U64 => self.deserialize_u64(visitor),
+            SerdeType::U128 => self.deserialize_u128(visitor),
+            SerdeType::F32 => self.deserialize_f32(visitor),
+            SerdeType::F64 => self.deserialize_f64(visitor),
+            SerdeType::Str => self.deserialize_str(visitor),
+            SerdeType::String => self.deserialize_string(visitor),
+            SerdeType::Option => self.deserialize_option(visitor),
+            SerdeType::Enum => self.deserialize_enum("", &[], visitor),
+            SerdeType::Bytes(_) => self.deserialize_bytes(visitor),
+            SerdeType::ByteBuf(_) => self.deserialize_byte_buf(visitor),
+            SerdeType::Tuple(len) => self.deserialize_tuple(len, visitor),
+            SerdeType::Seq(_) => self.deserialize_seq(visitor),
+            SerdeType::Map(_) => self.deserialize_map(visitor),
+        }
     }
 
     #[inline(always)]
