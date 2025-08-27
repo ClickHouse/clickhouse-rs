@@ -13,20 +13,35 @@ fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> Result<T
     Ok(match &data.fields {
         Fields::Named(fields) => {
             let rename_rule = container.rename_all_rules().deserialize;
-            let column_names_iter = fields
+
+            let chain_iters = fields
                 .named
                 .iter()
                 .enumerate()
-                .map(|(index, field)| Field::from_ast(cx, index, field, None, &SerdeDefault::None))
-                .filter(|field| !field.skip_serializing() && !field.skip_deserializing())
-                .map(|field| {
-                    rename_rule
-                        .apply_to_field(field.name().serialize_name())
-                        .to_string()
+                .map(|(index, field)| {
+                    (
+                        Field::from_ast(cx, index, field, None, &SerdeDefault::None),
+                        &field.ty,
+                    )
+                })
+                .filter(|(field, _)| !(field.skip_serializing() || field.skip_deserializing()))
+                .map(|(field_meta, ty)| {
+                    if field_meta.flatten() {
+                        quote! {
+                            <#ty as clickhouse::Row>::column_names().into_iter()
+                        }
+                    } else {
+                        let column_name = rename_rule
+                            .apply_to_field(field_meta.name().serialize_name())
+                            .to_string();
+                        quote! {
+                            std::iter::once(#column_name)
+                        }
+                    }
                 });
 
             quote! {
-                [#( #column_names_iter,)*]
+                std::iter::empty() #(.chain(#chain_iters))*
             }
         }
         Fields::Unnamed(_) => {
