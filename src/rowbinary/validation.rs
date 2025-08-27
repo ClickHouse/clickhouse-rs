@@ -28,6 +28,7 @@ pub(crate) trait SchemaValidator<R: Row>: Sized {
     /// It is used only if the crate detects that while the field names and the types are correct,
     /// the field order in the struct does not match the column order in the database schema.
     fn get_schema_index(&self, struct_idx: usize) -> usize;
+    fn get_field_name(&self, struct_idx: usize) -> Option<&'static str>;
 }
 
 pub(crate) struct DataTypeValidator<'cursor, R: Row> {
@@ -182,6 +183,10 @@ impl<'cursor, R: Row> SchemaValidator<R> for DataTypeValidator<'cursor, R> {
     #[inline]
     fn get_schema_index(&self, struct_idx: usize) -> usize {
         self.metadata.get_schema_index(struct_idx)
+    }
+
+    fn get_field_name(&self, struct_idx: usize) -> Option<&'static str> {
+        self.metadata.get_field_name(struct_idx)
     }
 
     #[cold]
@@ -391,6 +396,10 @@ impl<'cursor, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
 
     #[cold]
     fn get_schema_index(&self, _struct_idx: usize) -> usize {
+        unreachable!()
+    }
+
+    fn get_field_name(&self, _struct_idx: usize) -> Option<&'static str> {
         unreachable!()
     }
 }
@@ -636,6 +645,10 @@ impl<R: Row> SchemaValidator<R> for () {
 
     #[cold]
     fn get_schema_index(&self, _struct_idx: usize) -> usize {
+        unreachable!()
+    }
+
+    fn get_field_name(&self, _struct_idx: usize) -> Option<&'static str> {
         unreachable!()
     }
 }

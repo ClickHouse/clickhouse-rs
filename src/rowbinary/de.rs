@@ -287,7 +287,6 @@ where
             visitor.visit_map(RowBinaryStructAsMapAccess {
                 deserializer: self,
                 current_field_idx: 0,
-                fields,
             })
         }
     }
@@ -417,7 +416,6 @@ where
 {
     deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, R, Validator>,
     current_field_idx: usize,
-    fields: &'static [&'static str],
 }
 
 struct StructFieldIdentifier(&'static str);
@@ -475,14 +473,14 @@ where
     where
         K: DeserializeSeed<'data>,
     {
-        if self.current_field_idx >= self.fields.len() {
-            return Ok(None);
-        }
-        let schema_index = self
+        let Some(field_name) = self
             .deserializer
             .validator
-            .get_schema_index(self.current_field_idx);
-        let field_id = StructFieldIdentifier(self.fields[schema_index]);
+            .get_field_name(self.current_field_idx)
+        else {
+            return Ok(None);
+        };
+        let field_id = StructFieldIdentifier(field_name);
         self.current_field_idx += 1;
         seed.deserialize(field_id).map(Some)
     }
@@ -495,7 +493,8 @@ where
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.fields.len())
+        // Some(self.fields.len())
+        None
     }
 }
 

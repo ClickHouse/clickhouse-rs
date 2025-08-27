@@ -22,7 +22,7 @@ static ROW_METADATA_CACHE: OnceCell<LockedRowMetadataCache> = OnceCell::const_ne
 #[derive(Debug, PartialEq)]
 pub(crate) enum AccessType {
     WithSeqAccess,
-    WithMapAccess(Vec<usize>),
+    WithMapAccess(Vec<usize>, Vec<&'static str>),
 }
 
 /// Contains a vector of [`Column`] objects parsed from the beginning
@@ -122,7 +122,7 @@ impl RowMetadata {
                     }
                 }
                 if should_use_map {
-                    AccessType::WithMapAccess(mapping)
+                    AccessType::WithMapAccess(mapping, T::column_names().into_iter().collect())
                 } else {
                     AccessType::WithSeqAccess
                 }
@@ -137,7 +137,7 @@ impl RowMetadata {
     #[inline]
     pub(crate) fn get_schema_index(&self, struct_idx: usize) -> usize {
         match &self.access_type {
-            AccessType::WithMapAccess(mapping) => {
+            AccessType::WithMapAccess(mapping, _) => {
                 if struct_idx < mapping.len() {
                     mapping[struct_idx]
                 } else {
@@ -150,8 +150,21 @@ impl RowMetadata {
     }
 
     #[inline]
+    pub(crate) fn get_field_name(&self, struct_idx: usize) -> Option<&'static str> {
+        match &self.access_type {
+            AccessType::WithMapAccess(mapping, field_names) => {
+                let Some(mapped) = mapping.get(struct_idx) else {
+                    return None;
+                };
+                field_names.get(*mapped).copied()
+            }
+            AccessType::WithSeqAccess => None,
+        }
+    }
+
+    #[inline]
     pub(crate) fn is_field_order_wrong(&self) -> bool {
-        matches!(self.access_type, AccessType::WithMapAccess(_))
+        matches!(self.access_type, AccessType::WithMapAccess(_, _))
     }
 }
 
