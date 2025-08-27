@@ -57,13 +57,13 @@ impl RowMetadata {
                 AccessType::WithSeqAccess // ignored
             }
             RowKind::Tuple => {
-                if T::COLUMN_COUNT != columns.len() {
+                if T::column_count() != columns.len() {
                     panic!(
                         "While processing a tuple row: database schema has {} columns, \
                         but the tuple definition has {} fields in total.\
                         \n#### All schema columns:\n{}",
                         columns.len(),
-                        T::COLUMN_COUNT,
+                        T::column_count(),
                         join_panic_schema_hint(&columns),
                     );
                 }
@@ -82,23 +82,25 @@ impl RowMetadata {
                 AccessType::WithSeqAccess // ignored
             }
             RowKind::Struct => {
-                if columns.len() != T::COLUMN_NAMES.len() {
+                if columns.len() != T::column_names().into_iter().count() {
                     panic!(
                         "While processing struct {}: database schema has {} columns, \
                         but the struct definition has {} fields.\
                         \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
                         T::NAME,
                         columns.len(),
-                        T::COLUMN_NAMES.len(),
-                        join_panic_schema_hint(T::COLUMN_NAMES),
+                        T::column_names().into_iter().count(),
+                        join_panic_schema_hint(&T::column_names().into_iter().collect::<Vec<_>>()),
                         join_panic_schema_hint(&columns),
                     );
                 }
-                let mut mapping = Vec::with_capacity(T::COLUMN_NAMES.len());
+                let mut mapping = Vec::with_capacity(T::column_names().into_iter().count());
                 let mut expected_index = 0;
                 let mut should_use_map = false;
                 for col in &columns {
-                    if let Some(index) = T::COLUMN_NAMES.iter().position(|field| col.name == *field)
+                    if let Some(index) = T::column_names()
+                        .into_iter()
+                        .position(|field| col.name == *field)
                     {
                         if index != expected_index {
                             should_use_map = true
@@ -112,7 +114,9 @@ impl RowMetadata {
                             \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
                             T::NAME,
                             col,
-                            join_panic_schema_hint(T::COLUMN_NAMES),
+                            join_panic_schema_hint(
+                                &T::column_names().into_iter().collect::<Vec<_>>()
+                            ),
                             join_panic_schema_hint(&columns),
                         );
                     }

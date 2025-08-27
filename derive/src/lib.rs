@@ -26,11 +26,11 @@ fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> Result<T
                 });
 
             quote! {
-                &[#( #column_names_iter,)*]
+                [#( #column_names_iter,)*]
             }
         }
         Fields::Unnamed(_) => {
-            quote! { &[] }
+            quote! { [] }
         }
         Fields::Unit => unreachable!("checked by the caller"),
     })
@@ -94,8 +94,8 @@ fn row_impl(input: DeriveInput) -> Result<TokenStream> {
         #[automatically_derived]
         impl #impl_generics clickhouse::Row for #name #ty_generics #where_clause {
             const NAME: &'static str = stringify!(#name);
-            const COLUMN_NAMES: &'static [&'static str] = #column_names;
-            const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
+            fn column_names() -> impl IntoIterator<Item = &'static str> { #column_names }
+            fn column_count() -> usize { <Self as clickhouse::Row>::column_names().into_iter().count() }
             const KIND: clickhouse::_priv::RowKind = clickhouse::_priv::RowKind::Struct;
 
             type Value<'__v> = #value;

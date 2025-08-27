@@ -29,9 +29,9 @@ pub trait Row {
     const NAME: &'static str;
     // TODO: different list for SELECT/INSERT (de/ser)
     #[doc(hidden)]
-    const COLUMN_NAMES: &'static [&'static str];
+    fn column_names() -> impl IntoIterator<Item = &'static str>;
     #[doc(hidden)]
-    const COLUMN_COUNT: usize;
+    fn column_count() -> usize;
     #[doc(hidden)]
     const KIND: RowKind;
     #[doc(hidden)]
@@ -220,8 +220,8 @@ macro_rules! impl_row_for_tuple {
     ($i:ident $($other:ident)+) => {
         impl<$i: Row, $($other: Primitive),+> Row for ($i, $($other),+) {
             const NAME: &'static str = $i::NAME;
-            const COLUMN_NAMES: &'static [&'static str] = $i::COLUMN_NAMES;
-            const COLUMN_COUNT: usize = $i::COLUMN_COUNT + count_tokens!($($other)*);
+            fn column_names() -> impl IntoIterator<Item = &'static str> { $i::column_names() }
+            fn column_count() -> usize { $i::column_count() + count_tokens!($($other)*) }
             const KIND: RowKind = RowKind::Tuple;
 
             type Value<'a> = Self;
@@ -237,8 +237,12 @@ impl Primitive for () {}
 
 impl<P: Primitive> Row for P {
     const NAME: &'static str = stringify!(P);
-    const COLUMN_NAMES: &'static [&'static str] = &[];
-    const COLUMN_COUNT: usize = 1;
+    fn column_names() -> impl IntoIterator<Item = &'static str> {
+        []
+    }
+    fn column_count() -> usize {
+        1
+    }
     const KIND: RowKind = RowKind::Primitive;
 
     type Value<'a> = Self;
@@ -248,8 +252,12 @@ impl_row_for_tuple!(T0 T1 T2 T3 T4 T5 T6 T7 T8);
 
 impl<T> Row for Vec<T> {
     const NAME: &'static str = "Vec";
-    const COLUMN_NAMES: &'static [&'static str] = &[];
-    const COLUMN_COUNT: usize = 1;
+    fn column_names() -> impl IntoIterator<Item = &'static str> {
+        []
+    }
+    fn column_count() -> usize {
+        1
+    }
     const KIND: RowKind = RowKind::Vec;
 
     type Value<'a> = Self;
@@ -257,20 +265,21 @@ impl<T> Row for Vec<T> {
 
 /// Collects all field names in depth and joins them with comma.
 pub(crate) fn join_column_names<R: Row>() -> Option<String> {
-    if R::COLUMN_NAMES.is_empty() {
+    if R::column_names().into_iter().next().is_none() {
         return None;
     }
 
-    let out = R::COLUMN_NAMES
-        .iter()
-        .enumerate()
-        .fold(String::new(), |mut res, (idx, name)| {
-            if idx > 0 {
-                res.push(',');
-            }
-            sql::escape::identifier(name, &mut res).expect("impossible");
-            res
-        });
+    let out =
+        R::column_names()
+            .into_iter()
+            .enumerate()
+            .fold(String::new(), |mut res, (idx, name)| {
+                if idx > 0 {
+                    res.push(',');
+                }
+                sql::escape::identifier(name, &mut res).expect("impossible");
+                res
+            });
 
     Some(out)
 }
