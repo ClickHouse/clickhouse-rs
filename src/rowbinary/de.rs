@@ -61,6 +61,7 @@ where
 {
     input: &'cursor mut &'data [u8],
     validator: V,
+    is_inner: bool,
     _marker: PhantomData<R>,
 }
 
@@ -72,6 +73,7 @@ where
         Self {
             input,
             validator,
+            is_inner: false,
             _marker: PhantomData,
         }
     }
@@ -83,6 +85,7 @@ where
         RowBinaryDeserializer {
             input: self.input,
             validator: self.validator.validate(serde_type),
+            is_inner: true,
             _marker: PhantomData,
         }
     }
@@ -263,12 +266,19 @@ where
 
     #[inline(always)]
     fn deserialize_map<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        let len = self.read_size()?;
-        let deserializer = &mut self.inner(SerdeType::Map(len));
-        visitor.visit_map(RowBinaryMapAccess {
-            deserializer,
-            remaining: len,
-        })
+        if self.is_inner {
+            let len = self.read_size()?;
+            let deserializer = &mut self.inner(SerdeType::Map(len));
+            visitor.visit_map(RowBinaryMapAccess {
+                deserializer,
+                remaining: len,
+            })
+        } else {
+            visitor.visit_map(RowBinaryStructAsMapAccess {
+                deserializer: self,
+                current_field_idx: 0,
+            })
+        }
     }
 
     #[inline(always)]
@@ -278,6 +288,7 @@ where
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
+        self.is_inner = true;
         if !self.validator.is_field_order_wrong() {
             visitor.visit_seq(RowBinarySeqAccess {
                 deserializer: self,
