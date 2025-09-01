@@ -1,15 +1,12 @@
 use std::{
-    future::Future,
-    pin::Pin,
+    future::{self, Future},
+    pin::{pin, Pin},
     task::{Context, Poll},
 };
 
 use bstr::ByteSlice;
 use bytes::{BufMut, Bytes};
-use futures::{
-    future,
-    stream::{self, Stream, TryStreamExt},
-};
+use futures::stream::{self, Stream, TryStreamExt};
 use http_body_util::BodyExt as _;
 use hyper::{
     body::{Body as _, Incoming},
@@ -125,7 +122,7 @@ async fn collect_bad_response(
 }
 
 async fn collect_bytes(stream: impl Stream<Item = Result<Bytes>>) -> Result<Bytes> {
-    futures::pin_mut!(stream);
+    let mut stream = pin!(stream);
 
     let mut bytes = Vec::new();
 

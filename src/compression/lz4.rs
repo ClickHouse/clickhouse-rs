@@ -1,11 +1,11 @@
 use std::{
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use cityhash_rs::cityhash_102_128;
-use futures::{ready, stream::Stream};
+use futures::stream::Stream;
 use lz4_flex::block;
 
 use crate::{
