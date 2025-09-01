@@ -6,7 +6,7 @@ use std::{
 
 use bstr::ByteSlice;
 use bytes::{BufMut, Bytes};
-use futures::stream::{self, Stream, TryStreamExt};
+use futures_util::stream::{self, Stream, TryStreamExt};
 use http_body_util::BodyExt as _;
 use hyper::{
     body::{Body as _, Incoming},

@@ -5,7 +5,7 @@ use std::{
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use cityhash_rs::cityhash_102_128;
-use futures::stream::Stream;
+use futures_util::stream::Stream;
 use lz4_flex::block;
 
 use crate::{
@@ -182,7 +182,7 @@ pub(crate) fn compress(uncompressed: &[u8]) -> Result<Bytes> {
 
 #[tokio::test]
 async fn it_decompresses() {
-    use futures::stream::{self, TryStreamExt};
+    use futures_util::stream::{self, TryStreamExt};
 
     let expected = vec![
         1u8, 0, 2, 255, 255, 255, 255, 0, 1, 1, 1, 115, 6, 83, 116, 114, 105, 110, 103, 3, 97, 98,
