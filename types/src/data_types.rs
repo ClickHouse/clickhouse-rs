@@ -699,20 +699,17 @@ fn parse_inner_type(input: &mut &str) -> Result<DataTypeNode, TypesError> {
 
     let mut i = 0;
     while i < input_bytes.len() {
-        if char_escaped {
-            char_escaped = false;
-        } else if input_bytes[i] == b'\\' {
-            char_escaped = true;
-        } else if input_bytes[i] == b'\'' {
-            quote_open = !quote_open; // unescaped quote
-        } else if !quote_open {
-            if input_bytes[i] == b'(' {
-                open_parens += 1;
-            } else if input_bytes[i] == b')' {
-                open_parens -= 1;
-            } else if input_bytes[i] == b',' && open_parens == 0 {
-                break;
-            }
+        match input_bytes[i] {
+            _ if char_escaped => char_escaped = false,
+            b'\\' if quote_open => char_escaped = true,
+            b'\'' => quote_open = !quote_open, // unescaped quote
+            byte if !quote_open => match byte {
+                b'(' => open_parens += 1,
+                b',' | b')' if open_parens == 0 => break,
+                b')' => open_parens -= 1,
+                _ => {}
+            },
+            _ => {}
         }
         i += 1;
     }
@@ -723,6 +720,14 @@ fn parse_inner_type(input: &mut &str) -> Result<DataTypeNode, TypesError> {
             &input[..i]
         ))
     })?;
+
+    if open_parens != 0 || quote_open || char_escaped {
+        return Err(TypesError::TypeParsingError(format!(
+            "Invalid inner data type: {}",
+            &input[..i]
+        )));
+    }
+
     *input = &input[i..];
     DataTypeNode::new(&data_type_str)
 }
