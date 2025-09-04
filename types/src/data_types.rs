@@ -101,6 +101,8 @@ pub enum DataTypeNode {
     MultiLineString,
     Polygon,
     MultiPolygon,
+
+    Nested(Vec<Column>),
 }
 
 impl DataTypeNode {
@@ -156,6 +158,8 @@ impl DataTypeNode {
             str if str.starts_with("Map") => parse_map(str),
             str if str.starts_with("Tuple") => parse_tuple(str),
             str if str.starts_with("Variant") => parse_variant(str),
+
+            str if str.starts_with("Nested") => Ok(Self::Nested(parse_nested(str)?)),
 
             // ...
             str => Err(TypesError::TypeParsingError(format!(
@@ -276,6 +280,16 @@ impl Display for DataTypeNode {
             MultiLineString => write!(f, "MultiLineString"),
             Polygon => write!(f, "Polygon"),
             MultiPolygon => write!(f, "MultiPolygon"),
+            Nested(columns) => {
+                write!(f, "Nested(")?;
+                for (i, column) in columns.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{} {}", column.name, column.data_type)?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -824,6 +838,92 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
         .into_iter()
         .zip(names)
         .collect::<HashMap<i16, String>>())
+}
+
+fn parse_nested(mut input: &str) -> Result<Vec<Column>, TypesError> {
+    /// Removes the prefix `prefix` from `input`.
+    fn parse_str(input: &mut &str, prefix: &str) -> Result<(), TypesError> {
+        if input.starts_with(prefix) {
+            *input = &input[prefix.len()..];
+            Ok(())
+        } else {
+            Err(TypesError::TypeParsingError(format!(
+                "Expected {prefix:?}, got {input:?}"
+            )))
+        }
+    }
+
+    /// Removes and returns the prefix of `input` up to the first character that does not match the
+    /// predicate.
+    fn parse_while<'a>(input: &mut &'a str, predicate: impl Fn(char) -> bool) -> &'a str {
+        let index = input
+            .char_indices()
+            .find(|(_, c)| !predicate(*c))
+            .map(|(i, _)| i)
+            .unwrap_or(input.len());
+        let (prefix, rest) = input.split_at(index);
+        *input = rest;
+        prefix
+    }
+
+    /// Removes and returns a valid identifier from the start of `input`.
+    fn parse_identifier<'a>(input: &mut &'a str) -> Result<&'a str, TypesError> {
+        let original_input = *input;
+
+        if input.starts_with('`') {
+            parse_str(input, "`")?;
+            let mut is_escaping = false;
+
+            for (index, char) in input.char_indices() {
+                match char {
+                    _ if is_escaping => is_escaping = false,
+                    '\\' => is_escaping = true,
+                    '`' => {
+                        let name = &input[..index];
+                        *input = &input[index + 1..];
+                        return Ok(name);
+                    }
+                    _ => {}
+                }
+            }
+
+            Err(TypesError::TypeParsingError(format!(
+                "Unclosed backtick in name: {original_input}"
+            )))
+        } else {
+            Ok(parse_while(input, |c| {
+                c.is_ascii_alphanumeric() || c == '_'
+            }))
+        }
+    }
+
+    let original_input = input;
+    parse_str(&mut input, "Nested(")?;
+
+    let mut columns = Vec::new();
+    while !input.starts_with(')') {
+        let name = parse_identifier(&mut input)?;
+        parse_str(&mut input, " ")?;
+        let data_type = parse_inner_type(&mut input)?;
+
+        columns.push(Column {
+            name: name.to_string(),
+            data_type,
+        });
+
+        if input.starts_with(',') {
+            parse_str(&mut input, ", ")?;
+        }
+    }
+
+    if columns.is_empty() {
+        return Err(TypesError::TypeParsingError(format!(
+            "Expected at least one column in Nested from input {original_input}"
+        )));
+    }
+
+    parse_str(&mut input, ")")?;
+    Ok(columns)
 }
 
 #[cfg(test)]
@@ -1477,6 +1577,65 @@ mod tests {
     }
 
     #[test]
+    fn test_data_type_new_nested() {
+        assert_eq!(
+            DataTypeNode::new("Nested(foo UInt8)").unwrap(),
+            DataTypeNode::Nested(vec![Column::new("foo".to_string(), DataTypeNode::UInt8)])
+        );
+        assert_eq!(
+            DataTypeNode::new("Nested(foo UInt8, bar String)").unwrap(),
+            DataTypeNode::Nested(vec![
+                Column::new("foo".to_string(), DataTypeNode::UInt8),
+                Column::new("bar".to_string(), DataTypeNode::String),
+            ])
+        );
+        assert_eq!(
+            DataTypeNode::new("Nested(foo UInt8, `bar` String)").unwrap(),
+            DataTypeNode::Nested(vec![
+                Column::new("foo".to_string(), DataTypeNode::UInt8),
+                Column::new("bar".to_string(), DataTypeNode::String),
+            ])
+        );
+        assert_eq!(
+            DataTypeNode::new("Nested(foo UInt8, `b a r` String)").unwrap(),
+            DataTypeNode::Nested(vec![
+                Column::new("foo".to_string(), DataTypeNode::UInt8),
+                Column::new("b a r".to_string(), DataTypeNode::String),
+            ])
+        );
+        assert_eq!(
+            DataTypeNode::new(
+                "Nested(foo Enum8('f\\'(' = 1), `b a r` Nested(bar Tuple(Enum8('f\\'()' = 1))))"
+            )
+            .unwrap(),
+            DataTypeNode::Nested(vec![
+                Column::new(
+                    "foo".to_string(),
+                    DataTypeNode::Enum(EnumType::Enum8, HashMap::from([(1, "f\\'(".to_string())]),)
+                ),
+                Column::new(
+                    "b a r".to_string(),
+                    DataTypeNode::Nested(vec![Column::new(
+                        "bar".to_string(),
+                        DataTypeNode::Tuple(vec![DataTypeNode::Enum(
+                            EnumType::Enum8,
+                            HashMap::from([(1, "f\\'()".to_string())]),
+                        )]),
+                    )])
+                ),
+            ])
+        );
+
+        assert!(DataTypeNode::new("Nested").is_err());
+        assert!(DataTypeNode::new("Nested(").is_err());
+        assert!(DataTypeNode::new("Nested()").is_err());
+        assert!(DataTypeNode::new("Nested(,)").is_err());
+        assert!(DataTypeNode::new("Nested(String)").is_err());
+        assert!(DataTypeNode::new("Nested(Int32, String)").is_err());
+        assert!(DataTypeNode::new("Nested(foo Int32, String)").is_err());
+    }
+
+    #[test]
     fn test_data_type_to_string_simple() {
         // Simple types
         assert_eq!(DataTypeNode::UInt8.to_string(), "UInt8");
@@ -1583,6 +1742,14 @@ mod tests {
         assert_eq!(
             DataTypeNode::Variant(vec![DataTypeNode::UInt8, DataTypeNode::Bool]).to_string(),
             "Variant(UInt8, Bool)"
+        );
+        assert_eq!(
+            DataTypeNode::Nested(vec![
+                Column::new("foo".to_string(), DataTypeNode::UInt8),
+                Column::new("bar".to_string(), DataTypeNode::String),
+            ])
+            .to_string(),
+            "Nested(foo UInt8, bar String)"
         );
     }
 
