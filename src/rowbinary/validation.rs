@@ -1,4 +1,4 @@
-use crate::{row::RowKind, row_metadata::RowMetadata, Row};
+use crate::{Row, row::RowKind, row_metadata::RowMetadata};
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -331,10 +331,10 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                         let (full_name, full_data_type) =
                             inner.root.get_current_column_name_and_type();
                         panic!(
-                                "While processing column {full_name} defined as {full_data_type}: \
+                            "While processing column {full_name} defined as {full_data_type}: \
                                  Variant identifier {value} is out of bounds, max allowed index is {}",
-                                possible_types.len() - 1
-                            );
+                            possible_types.len() - 1
+                        );
                     }
                     let data_type = &possible_types[*value as usize];
                     validate_impl(inner.root, data_type, &serde_type, true)
@@ -547,6 +547,10 @@ fn validate_impl<'serde, 'caller, R: Row>(
             DataTypeNode::MultiLineString => Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::LineString),
+            }),
+            DataTypeNode::Nested { as_tuple, .. } => Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Array(as_tuple),
             }),
             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },

@@ -102,7 +102,12 @@ pub enum DataTypeNode {
     Polygon,
     MultiPolygon,
 
-    Nested(Vec<Column>),
+    Nested {
+        columns: Vec<Column>,
+        // This stores the types in `columns` as a tuple node as a hack to be able to validate
+        // data for this column as an array of tuples
+        as_tuple: Box<DataTypeNode>,
+    },
 }
 
 impl DataTypeNode {
@@ -159,7 +164,7 @@ impl DataTypeNode {
             str if str.starts_with("Tuple") => parse_tuple(str),
             str if str.starts_with("Variant") => parse_variant(str),
 
-            str if str.starts_with("Nested") => Ok(Self::Nested(parse_nested(str)?)),
+            str if str.starts_with("Nested") => parse_nested(str),
 
             // ...
             str => Err(TypesError::TypeParsingError(format!(
@@ -280,7 +285,7 @@ impl Display for DataTypeNode {
             MultiLineString => write!(f, "MultiLineString"),
             Polygon => write!(f, "Polygon"),
             MultiPolygon => write!(f, "MultiPolygon"),
-            Nested(columns) => {
+            Nested { columns, .. } => {
                 write!(f, "Nested(")?;
                 for (i, column) in columns.iter().enumerate() {
                     if i > 0 {
@@ -840,7 +845,7 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
         .collect::<HashMap<i16, String>>())
 }
 
-fn parse_nested(mut input: &str) -> Result<Vec<Column>, TypesError> {
+fn parse_nested(mut input: &str) -> Result<DataTypeNode, TypesError> {
     /// Removes the prefix `prefix` from `input`.
     fn parse_str(input: &mut &str, prefix: &str) -> Result<(), TypesError> {
         if input.starts_with(prefix) {
@@ -901,6 +906,8 @@ fn parse_nested(mut input: &str) -> Result<Vec<Column>, TypesError> {
     parse_str(&mut input, "Nested(")?;
 
     let mut columns = Vec::new();
+    let mut types = Vec::new();
+
     while !input.starts_with(')') {
         let name = parse_identifier(&mut input)?;
         parse_str(&mut input, " ")?;
@@ -908,8 +915,9 @@ fn parse_nested(mut input: &str) -> Result<Vec<Column>, TypesError> {
 
         columns.push(Column {
             name: name.to_string(),
-            data_type,
+            data_type: data_type.clone(),
         });
+        types.push(data_type);
 
         if input.starts_with(',') {
             parse_str(&mut input, ", ")?;
@@ -923,7 +931,10 @@ fn parse_nested(mut input: &str) -> Result<Vec<Column>, TypesError> {
     }
 
     parse_str(&mut input, ")")?;
-    Ok(columns)
+    Ok(DataTypeNode::Nested {
+        columns,
+        as_tuple: Box::new(DataTypeNode::Tuple(types)),
+    })
 }
 
 #[cfg(test)]
@@ -1580,50 +1591,73 @@ mod tests {
     fn test_data_type_new_nested() {
         assert_eq!(
             DataTypeNode::new("Nested(foo UInt8)").unwrap(),
-            DataTypeNode::Nested(vec![Column::new("foo".to_string(), DataTypeNode::UInt8)])
+            DataTypeNode::Nested {
+                columns: vec![Column::new("foo".to_string(), DataTypeNode::UInt8)],
+                as_tuple: Box::new(DataTypeNode::Tuple(vec![DataTypeNode::UInt8])),
+            }
         );
         assert_eq!(
             DataTypeNode::new("Nested(foo UInt8, bar String)").unwrap(),
-            DataTypeNode::Nested(vec![
-                Column::new("foo".to_string(), DataTypeNode::UInt8),
-                Column::new("bar".to_string(), DataTypeNode::String),
-            ])
+            DataTypeNode::Nested {
+                columns: vec![
+                    Column::new("foo".to_string(), DataTypeNode::UInt8),
+                    Column::new("bar".to_string(), DataTypeNode::String),
+                ],
+                as_tuple: Box::new(DataTypeNode::Tuple(vec![
+                    DataTypeNode::UInt8,
+                    DataTypeNode::String,
+                ])),
+            }
         );
         assert_eq!(
             DataTypeNode::new("Nested(foo UInt8, `bar` String)").unwrap(),
-            DataTypeNode::Nested(vec![
-                Column::new("foo".to_string(), DataTypeNode::UInt8),
-                Column::new("bar".to_string(), DataTypeNode::String),
-            ])
+            DataTypeNode::Nested {
+                columns: vec![
+                    Column::new("foo".to_string(), DataTypeNode::UInt8),
+                    Column::new("bar".to_string(), DataTypeNode::String),
+                ],
+                as_tuple: Box::new(DataTypeNode::Tuple(vec![
+                    DataTypeNode::UInt8,
+                    DataTypeNode::String,
+                ])),
+            }
         );
         assert_eq!(
             DataTypeNode::new("Nested(foo UInt8, `b a r` String)").unwrap(),
-            DataTypeNode::Nested(vec![
-                Column::new("foo".to_string(), DataTypeNode::UInt8),
-                Column::new("b a r".to_string(), DataTypeNode::String),
-            ])
+            DataTypeNode::Nested {
+                columns: vec![
+                    Column::new("foo".to_string(), DataTypeNode::UInt8),
+                    Column::new("b a r".to_string(), DataTypeNode::String),
+                ],
+                as_tuple: Box::new(DataTypeNode::Tuple(vec![
+                    DataTypeNode::UInt8,
+                    DataTypeNode::String,
+                ])),
+            }
         );
+
+        let foo = DataTypeNode::Enum(EnumType::Enum8, HashMap::from([(1, "f\\'(".to_string())]));
+        let baz = DataTypeNode::Tuple(vec![DataTypeNode::Enum(
+            EnumType::Enum8,
+            HashMap::from([(1, "f\\'()".to_string())]),
+        )]);
+        let bar = DataTypeNode::Nested {
+            columns: vec![Column::new("baz".to_string(), baz.clone())],
+            as_tuple: Box::new(DataTypeNode::Tuple(vec![baz])),
+        };
+
         assert_eq!(
             DataTypeNode::new(
-                "Nested(foo Enum8('f\\'(' = 1), `b a r` Nested(bar Tuple(Enum8('f\\'()' = 1))))"
+                "Nested(foo Enum8('f\\'(' = 1), `b a r` Nested(baz Tuple(Enum8('f\\'()' = 1))))"
             )
             .unwrap(),
-            DataTypeNode::Nested(vec![
-                Column::new(
-                    "foo".to_string(),
-                    DataTypeNode::Enum(EnumType::Enum8, HashMap::from([(1, "f\\'(".to_string())]),)
-                ),
-                Column::new(
-                    "b a r".to_string(),
-                    DataTypeNode::Nested(vec![Column::new(
-                        "bar".to_string(),
-                        DataTypeNode::Tuple(vec![DataTypeNode::Enum(
-                            EnumType::Enum8,
-                            HashMap::from([(1, "f\\'()".to_string())]),
-                        )]),
-                    )])
-                ),
-            ])
+            DataTypeNode::Nested {
+                columns: vec![
+                    Column::new("foo".to_string(), foo.clone()),
+                    Column::new("b a r".to_string(), bar.clone()),
+                ],
+                as_tuple: Box::new(DataTypeNode::Tuple(vec![foo, bar])),
+            }
         );
 
         assert!(DataTypeNode::new("Nested").is_err());
@@ -1744,10 +1778,16 @@ mod tests {
             "Variant(UInt8, Bool)"
         );
         assert_eq!(
-            DataTypeNode::Nested(vec![
-                Column::new("foo".to_string(), DataTypeNode::UInt8),
-                Column::new("bar".to_string(), DataTypeNode::String),
-            ])
+            DataTypeNode::Nested {
+                columns: vec![
+                    Column::new("foo".to_string(), DataTypeNode::UInt8),
+                    Column::new("bar".to_string(), DataTypeNode::String),
+                ],
+                as_tuple: Box::new(DataTypeNode::Tuple(vec![
+                    DataTypeNode::UInt8,
+                    DataTypeNode::String
+                ])),
+            }
             .to_string(),
             "Nested(foo UInt8, bar String)"
         );
