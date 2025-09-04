@@ -663,15 +663,39 @@ fn parse_variant(input: &str) -> Result<DataTypeNode, TypesError> {
 ///  let input1 = "Tuple(Enum8('f\'()' = 1))";  // the result is  `f\'()`
 ///  let input2 = "Tuple(Enum8('(' = 1))";       // the result is  `(`
 /// ```
-fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, TypesError> {
+fn parse_inner_types(mut input: &str) -> Result<Vec<DataTypeNode>, TypesError> {
     let mut inner_types: Vec<DataTypeNode> = Vec::new();
 
+    while !input.is_empty() {
+        inner_types.push(parse_inner_type(&mut input)?);
+
+        if !input.starts_with(',') {
+            break;
+        }
+
+        input = &input[1..];
+
+        if input.starts_with(' ') {
+            input = &input[1..];
+        }
+    }
+
+    if !input.is_empty() {
+        return Err(TypesError::TypeParsingError(format!(
+            "Failed to parse all inner types, remaining input: {input}"
+        )));
+    }
+
+    Ok(inner_types)
+}
+
+/// Parses a single type from the input string and removes it from the input.
+fn parse_inner_type(input: &mut &str) -> Result<DataTypeNode, TypesError> {
     let input_bytes = input.as_bytes();
 
     let mut open_parens = 0;
     let mut quote_open = false;
     let mut char_escaped = false;
-    let mut last_element_index = 0;
 
     let mut i = 0;
     while i < input_bytes.len() {
@@ -687,42 +711,20 @@ fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, TypesError> {
             } else if input_bytes[i] == b')' {
                 open_parens -= 1;
             } else if input_bytes[i] == b',' && open_parens == 0 {
-                let data_type_str = String::from_utf8(input_bytes[last_element_index..i].to_vec())
-                    .map_err(|_| {
-                        TypesError::TypeParsingError(format!(
-                            "Invalid UTF-8 sequence in input for the inner data type: {}",
-                            &input[last_element_index..]
-                        ))
-                    })?;
-                let data_type = DataTypeNode::new(&data_type_str)?;
-                inner_types.push(data_type);
-                // Skip ', ' (comma and space)
-                if i + 2 <= input_bytes.len() && input_bytes[i + 1] == b' ' {
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-                last_element_index = i;
-                continue; // Skip the normal increment at the end of the loop
+                break;
             }
         }
         i += 1;
     }
 
-    // Push the remaining part of the type if it seems to be valid (at least all parentheses are closed)
-    if open_parens == 0 && last_element_index < input_bytes.len() {
-        let data_type_str =
-            String::from_utf8(input_bytes[last_element_index..].to_vec()).map_err(|_| {
-                TypesError::TypeParsingError(format!(
-                    "Invalid UTF-8 sequence in input for the inner data type: {}",
-                    &input[last_element_index..]
-                ))
-            })?;
-        let data_type = DataTypeNode::new(&data_type_str)?;
-        inner_types.push(data_type);
-    }
-
-    Ok(inner_types)
+    let data_type_str = String::from_utf8(input_bytes[..i].to_vec()).map_err(|_| {
+        TypesError::TypeParsingError(format!(
+            "Invalid UTF-8 sequence in input for the inner data type: {}",
+            &input[..i]
+        ))
+    })?;
+    *input = &input[i..];
+    DataTypeNode::new(&data_type_str)
 }
 
 #[inline]
