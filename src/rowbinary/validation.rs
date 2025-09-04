@@ -548,6 +548,10 @@ fn validate_impl<'serde, 'caller, R: Row>(
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::LineString),
             }),
+            DataTypeNode::Nested { as_tuple, .. } => Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Array(as_tuple),
+            }),
             _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::Tuple(len) => match data_type {
