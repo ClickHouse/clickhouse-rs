@@ -106,36 +106,31 @@ impl<T> RowCursor<T> {
             debug_assert!(self.row_metadata.is_some());
         }
 
-        loop {
-            if self.bytes.remaining() > 0 {
-                let mut slice = self.bytes.slice();
-                let result = rowbinary::deserialize_row::<T::Value<'_>>(
-                    &mut slice,
-                    self.row_metadata.as_ref(),
-                );
+        let mut bytes = &mut self.bytes;
 
-                match result {
-                    Ok(value) => {
-                        self.bytes.set_remaining(slice.len());
-                        return Poll::Ready(Ok(Some(value)));
+        loop {
+            polonius!(|bytes| -> Poll<Result<Option<T::Value<'polonius>>>> {
+                if bytes.remaining() > 0 {
+                    let mut slice = bytes.slice();
+                    let result = rowbinary::deserialize_row::<T::Value<'_>>(
+                        &mut slice,
+                        self.row_metadata.as_ref(),
+                    );
+
+                    match result {
+                        Ok(value) => {
+                            bytes.set_remaining(slice.len());
+                            polonius_return!(Poll::Ready(Ok(Some(value))))
+                        }
+                        Err(Error::NotEnoughData) => {}
+                        Err(err) => polonius_return!(Poll::Ready(Err(err))),
                     }
-                    Err(Error::NotEnoughData) => {}
-                    Err(err) => return Poll::Ready(Err(err)),
                 }
-            }
+            });
 
             match ready!(self.raw.poll_next(cx))? {
-                Some(chunk) => {
-                    // SAFETY: we actually don't have active immutable references at this point.
-                    //
-                    // The borrow checker prior to polonius thinks we still have ones.
-                    // This is a pretty common restriction that can be fixed by using
-                    // the polonius-the-crab crate, which cannot be used in async code.
-                    //
-                    // See https://github.com/rust-lang/rust/issues/51132
-                    unsafe { self.bytes.extend_by_ref(chunk) }
-                }
-                None if self.bytes.remaining() > 0 => {
+                Some(chunk) => bytes.extend(chunk),
+                None if bytes.remaining() > 0 => {
                     // If some data is left, we have an incomplete row in the buffer.
                     // This is usually a schema mismatch on the client side.
                     return Poll::Ready(Err(Error::NotEnoughData));
