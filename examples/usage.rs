@@ -70,6 +70,25 @@ async fn fetch(client: &Client) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "futures03")]
+async fn fetch_stream(client: &Client) -> Result<()> {
+    use futures_util::TryStreamExt;
+
+    client
+        .query("SELECT ?fields FROM some WHERE name = ? AND no BETWEEN ? AND ?")
+        .bind("foo")
+        .bind(500)
+        .bind(504)
+        .fetch::<MyRowOwned>()?
+        .try_for_each(|row| {
+            println!("{row:?}");
+            futures_util::future::ready(Ok(()))
+        })
+        .await?;
+
+    Ok(())
+}
+
 async fn fetch_all(client: &Client) -> Result<()> {
     let vec = client
         .query("SELECT ?fields FROM ? WHERE no BETWEEN ? AND ?")
@@ -117,6 +136,10 @@ async fn main() -> Result<()> {
     inserter(&client).await?;
     select_count(&client).await?;
     fetch(&client).await?;
+    #[cfg(feature = "futures03")]
+    {
+        fetch_stream(&client).await?;
+    }
     fetch_all(&client).await?;
     delete(&client).await?;
     select_count(&client).await?;
