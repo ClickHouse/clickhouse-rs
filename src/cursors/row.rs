@@ -1,3 +1,5 @@
+#[cfg(feature = "futures03")]
+use crate::RowOwned;
 use crate::row_metadata::RowMetadata;
 use crate::{
     RowRead,
@@ -157,6 +159,21 @@ impl<T> RowCursor<T> {
     #[inline]
     pub fn decoded_bytes(&self) -> u64 {
         self.raw.decoded_bytes()
+    }
+}
+
+#[cfg(feature = "futures03")]
+impl<T> futures_util::stream::Stream for RowCursor<T>
+where
+    T: RowOwned + RowRead,
+{
+    type Item = Result<T>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        Self::poll_next(self.get_mut(), cx).map(Result::transpose)
     }
 }
 
