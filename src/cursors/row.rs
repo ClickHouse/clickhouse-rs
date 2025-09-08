@@ -9,7 +9,10 @@ use crate::{
 };
 use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
+use polonius_the_crab::prelude::*;
 use std::marker::PhantomData;
+use std::pin::Pin;
+use std::task::{Context, Poll, ready};
 
 /// A cursor that emits rows deserialized as structures from RowBinary.
 #[must_use]
@@ -20,7 +23,7 @@ pub struct RowCursor<T> {
     /// [`None`] until the first call to [`RowCursor::next()`],
     /// as [`RowCursor::new`] is not `async`, so it loads lazily.
     row_metadata: Option<RowMetadata>,
-    _marker: PhantomData<T>,
+    _marker: PhantomData<fn() -> T>,
 }
 
 impl<T> RowCursor<T> {
@@ -36,7 +39,7 @@ impl<T> RowCursor<T> {
 
     #[cold]
     #[inline(never)]
-    async fn read_columns(&mut self) -> Result<()>
+    fn poll_read_columns(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>>
     where
         T: RowRead,
     {
@@ -47,32 +50,32 @@ impl<T> RowCursor<T> {
                     Ok(columns) if !columns.is_empty() => {
                         self.bytes.set_remaining(slice.len());
                         self.row_metadata = Some(RowMetadata::new_for_cursor::<T>(columns));
-                        return Ok(());
+                        return Poll::Ready(Ok(()));
                     }
                     Ok(_) => {
                         // This does not panic, as it could be a network issue
                         // or a malformed response from the server or LB,
                         // and a simple retry might help in certain cases.
-                        return Err(Error::BadResponse(
+                        return Poll::Ready(Err(Error::BadResponse(
                             "Expected at least one column in the header".to_string(),
-                        ));
+                        )));
                     }
                     Err(TypesError::NotEnoughData(_)) => {}
                     Err(err) => {
-                        return Err(Error::InvalidColumnsHeader(err.into()));
+                        return Poll::Ready(Err(Error::InvalidColumnsHeader(err.into())));
                     }
                 }
             }
-            match self.raw.next().await? {
+            match ready!(self.raw.poll_next(cx))? {
                 Some(chunk) => self.bytes.extend(chunk),
                 None if self.row_metadata.is_none() => {
                     // Similar to the other BadResponse branch above
-                    return Err(Error::BadResponse(
+                    return Poll::Ready(Err(Error::BadResponse(
                         "Could not read columns header".to_string(),
-                    ));
+                    )));
                 }
                 // if the result set is empty, there is only the columns header
-                None => return Ok(()),
+                None => return Poll::Ready(Ok(())),
             }
         }
     }
@@ -88,8 +91,16 @@ impl<T> RowCursor<T> {
     where
         T: RowRead,
     {
+        Next::new(self).await
+    }
+
+    #[inline]
+    fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<T::Value<'_>>>>
+    where
+        T: RowRead,
+    {
         if self.validation && self.row_metadata.is_none() {
-            self.read_columns().await?;
+            ready!(self.poll_read_columns(cx))?;
             debug_assert!(self.row_metadata.is_some());
         }
 
@@ -104,14 +115,14 @@ impl<T> RowCursor<T> {
                 match result {
                     Ok(value) => {
                         self.bytes.set_remaining(slice.len());
-                        return Ok(Some(value));
+                        return Poll::Ready(Ok(Some(value)));
                     }
                     Err(Error::NotEnoughData) => {}
-                    Err(err) => return Err(err),
+                    Err(err) => return Poll::Ready(Err(err)),
                 }
             }
 
-            match self.raw.next().await? {
+            match ready!(self.raw.poll_next(cx))? {
                 Some(chunk) => {
                     // SAFETY: we actually don't have active immutable references at this point.
                     //
@@ -125,9 +136,9 @@ impl<T> RowCursor<T> {
                 None if self.bytes.remaining() > 0 => {
                     // If some data is left, we have an incomplete row in the buffer.
                     // This is usually a schema mismatch on the client side.
-                    return Err(Error::NotEnoughData);
+                    return Poll::Ready(Err(Error::NotEnoughData));
                 }
-                None => return Ok(None),
+                None => return Poll::Ready(Ok(None)),
             }
         }
     }
@@ -146,5 +157,41 @@ impl<T> RowCursor<T> {
     #[inline]
     pub fn decoded_bytes(&self) -> u64 {
         self.raw.decoded_bytes()
+    }
+}
+
+struct Next<'a, T> {
+    cursor: Option<&'a mut RowCursor<T>>,
+}
+
+impl<'a, T> Next<'a, T> {
+    fn new(cursor: &'a mut RowCursor<T>) -> Self {
+        Self {
+            cursor: Some(cursor),
+        }
+    }
+}
+
+impl<'a, T> std::future::Future for Next<'a, T>
+where
+    T: RowRead,
+{
+    type Output = Result<Option<T::Value<'a>>>;
+
+    #[inline]
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Temporarily take the cursor out in order for `cursor.poll_next` to return a value with
+        // the correct lifetime `'a` rather than the unnamed lifetime of `&mut self`.
+        let mut cursor = self.cursor.take().expect("Future polled after completion");
+
+        polonius!(|cursor| -> Poll<Result<Option<T::Value<'polonius>>>> {
+            match cursor.poll_next(cx) {
+                Poll::Ready(value) => polonius_return!(Poll::Ready(value)),
+                Poll::Pending => {}
+            }
+        });
+
+        self.cursor = Some(cursor);
+        Poll::Pending
     }
 }
