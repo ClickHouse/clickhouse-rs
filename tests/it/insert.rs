@@ -1,5 +1,5 @@
 use crate::{create_simple_table, fetch_rows, flush_query_log, SimpleRow};
-use clickhouse::{sql::Identifier, Row};
+use clickhouse::{query::QI, sql::Identifier, Row};
 use serde::{Deserialize, Serialize};
 
 #[tokio::test]
@@ -26,7 +26,7 @@ async fn keeps_client_options() {
     flush_query_log(&client).await;
 
     let (has_insert_setting, has_client_setting) = client
-        .query(&format!(
+        .query_with_flags::<{ QI::BIND }>(&format!(
             "
             SELECT
               Settings['{insert_setting_name}'] = '{insert_setting_value}',
@@ -78,7 +78,7 @@ async fn overrides_client_options() {
     flush_query_log(&client).await;
 
     let has_setting_override = client
-        .query(&format!(
+        .query_with_flags::<{ QI::BIND }>(&format!(
             "
             SELECT Settings['{setting_name}'] = '{override_value}'
             FROM system.query_log
@@ -140,7 +140,7 @@ async fn rename_insert() {
 
     let client = prepare_database!();
     client
-        .query(
+        .query_with_flags::<{ QI::BIND }>(
             "
             CREATE TABLE ?(
               fixId UInt64,

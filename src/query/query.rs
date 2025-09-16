@@ -4,6 +4,7 @@ use std::fmt::Display;
 use url::Url;
 
 use crate::{
+    cursors::{BytesCursor, RowCursor},
     error::{Error, Result},
     headers::with_request_headers,
     request_body::RequestBody,
@@ -15,21 +16,24 @@ use crate::{
 
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
-pub use crate::cursors::{BytesCursor, RowCursor};
 use crate::headers::with_authentication;
+
+use crate::query::query_flags::QI;
 
 #[must_use]
 #[derive(Clone)]
-pub struct Query {
+pub struct Query<const INTERPFLAGS: u8 = { QI::DEFAULT }> {
     client: Client,
     sql: SqlBuilder,
+    interp_flags: u8,
 }
 
-impl Query {
+impl<const INTERPFLAGS: u8> Query<INTERPFLAGS> {
     pub(crate) fn new(client: &Client, template: &str) -> Self {
         Self {
             client: client.clone(),
             sql: SqlBuilder::new(template),
+            interp_flags: INTERPFLAGS,
         }
     }
 
@@ -53,7 +57,9 @@ impl Query {
     /// [`Identifier`]: crate::sql::Identifier
     #[track_caller]
     pub fn bind(mut self, value: impl Bind) -> Self {
-        self.sql.bind_arg(value);
+        if QI::has_bind(self.interp_flags) {
+            self.sql.bind_arg(value);
+        }
         self
     }
 
@@ -84,7 +90,9 @@ impl Query {
     /// # Ok(()) }
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
-        self.sql.bind_fields::<T>();
+        if QI::has_fields(self.interp_flags) {
+            self.sql.bind_fields::<T>();
+        }
 
         let validation = self.client.get_validation();
         if validation {
@@ -150,7 +158,7 @@ impl Query {
     }
 
     pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {
-        let query = self.sql.finish()?;
+        let query = self.sql.finish(self.interp_flags)?;
 
         let mut url =
             Url::parse(&self.client.url).map_err(|err| Error::InvalidParams(Box::new(err)))?;
