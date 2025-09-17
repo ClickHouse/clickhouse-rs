@@ -31,3 +31,38 @@ impl Bind for Identifier<'_> {
         escape::identifier(self.0, dst).map_err(|err| err.to_string())
     }
 }
+
+#[derive(Clone, Copy)]
+pub struct ScopedIdentifier<'a>(pub &'a str, pub &'a str);
+
+#[sealed]
+impl Bind for ScopedIdentifier<'_> {
+    #[inline]
+    fn write(&self, dst: &mut impl fmt::Write) -> Result<(), String> {
+        if self.0.len() > 0 {
+            escape::identifier(self.0, dst).map_err(|err| err.to_string())?;
+            dst.write_char('.').map_err(|err| err.to_string())?;
+        }
+        escape::identifier(self.1, dst).map_err(|err| err.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Bind, ScopedIdentifier};
+
+    fn bind_to_string(b: impl Bind) -> String {
+        let mut s = String::new();
+        b.write(&mut s).expect("bind should succeed");
+        s
+    }
+
+    #[test]
+    fn test_scoped_identifier() {
+        assert_eq!(
+            bind_to_string(ScopedIdentifier("foo", "bar baz")),
+            "`foo`.`bar baz`"
+        );
+        assert_eq!(bind_to_string(ScopedIdentifier("", "bar baz")), "`bar baz`");
+    }
+}
