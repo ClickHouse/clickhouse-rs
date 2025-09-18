@@ -35,14 +35,14 @@ async fn main() -> Result<()> {
 
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct Event {
-        timestamp: u64,
+        timestamp: i64,
         message: String,
         level: Level,
     }
 
     // How to define enums that map to `Enum8`/`Enum16`.
     #[derive(Debug, Serialize_repr, Deserialize_repr)]
-    #[repr(u8)]
+    #[repr(i8)]
     enum Level {
         Debug = 1,
         Info = 2,
@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
         Error = 4,
     }
 
-    let mut insert = client.insert("event_log")?;
+    let mut insert = client.insert::<Event>("event_log")?;
     insert
         .write(&Event {
             timestamp: now(),
@@ -69,9 +69,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn now() -> u64 {
+fn now() -> i64 {
     UNIX_EPOCH
         .elapsed()
         .expect("invalid system time")
-        .as_nanos() as u64
+        .as_nanos() as i64
 }

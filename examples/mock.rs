@@ -19,34 +19,19 @@ async fn make_select(client: &Client) -> Result<Vec<SomeRow>> {
 }
 
 async fn make_insert(client: &Client, data: &[SomeRow]) -> Result<()> {
-    let mut insert = client.insert("who cares")?;
+    let mut insert = client.insert::<SomeRow>("who cares")?;
     for row in data {
         insert.write(row).await?;
     }
     insert.end().await
 }
 
-#[cfg(feature = "watch")]
-async fn make_watch(client: &Client) -> Result<(u64, SomeRow)> {
-    client
-        .watch("SELECT max(no) no FROM test")
-        .fetch_one::<SomeRow>()
-        .await
-}
-
-#[cfg(feature = "watch")]
-async fn make_watch_only_events(client: &Client) -> Result<u64> {
-    client
-        .watch("SELECT max(no) no FROM test")
-        .only_events()
-        .fetch_one()
-        .await
-}
-
 #[tokio::main]
 async fn main() {
     let mock = test::Mock::new();
-    let client = Client::default().with_url(mock.url());
+    // Note that an explicit `with_url` call is not required,
+    // it will be set automatically to the mock server URL.
+    let client = Client::default().with_mock(&mock);
     let list = vec![SomeRow { no: 1 }, SomeRow { no: 2 }];
 
     // How to test DDL.
@@ -70,22 +55,8 @@ async fn main() {
     let rows: Vec<SomeRow> = recording.collect().await;
     assert_eq!(rows, list);
 
-    // How to test WATCH.
-    #[cfg(feature = "watch")]
-    {
-        // Check `CREATE LIVE VIEW` (for `watch(query)` case only).
-        let recording = mock.add(test::handlers::record_ddl());
-        mock.add(test::handlers::watch(list.into_iter().map(|row| (42, row))));
-        let (version, row) = make_watch(&client).await.unwrap();
-        assert!(recording.query().await.contains("CREATE LIVE VIEW"));
-        assert_eq!(version, 42);
-        assert_eq!(row, SomeRow { no: 1 });
-
-        // `EVENTS`.
-        let recording = mock.add(test::handlers::record_ddl());
-        mock.add(test::handlers::watch_only_events(3..5));
-        let version = make_watch_only_events(&client).await.unwrap();
-        assert!(recording.query().await.contains("CREATE LIVE VIEW"));
-        assert_eq!(version, 3);
-    }
+    // How to test unsuccessful INSERT.
+    mock.add(test::handlers::exception(209));
+    let reason = make_insert(&client, &list).await;
+    assert_eq!(format!("{reason:?}"), r#"Err(BadResponse("Code: 209"))"#);
 }

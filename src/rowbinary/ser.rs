@@ -1,4 +1,5 @@
 use bytes::BufMut;
+use clickhouse_types::put_leb128;
 use serde::{
     ser::{Impossible, SerializeSeq, SerializeStruct, SerializeTuple, Serializer},
     Serialize,
@@ -42,27 +43,16 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
     type SerializeTupleVariant = Impossible<(), Error>;
 
     impl_num!(i8, serialize_i8, put_i8);
-
     impl_num!(i16, serialize_i16, put_i16_le);
-
     impl_num!(i32, serialize_i32, put_i32_le);
-
     impl_num!(i64, serialize_i64, put_i64_le);
-
     impl_num!(i128, serialize_i128, put_i128_le);
-
     impl_num!(u8, serialize_u8, put_u8);
-
     impl_num!(u16, serialize_u16, put_u16_le);
-
     impl_num!(u32, serialize_u32, put_u32_le);
-
     impl_num!(u64, serialize_u64, put_u64_le);
-
     impl_num!(u128, serialize_u128, put_u128_le);
-
     impl_num!(f32, serialize_f32, put_f32_le);
-
     impl_num!(f64, serialize_f64, put_f64_le);
 
     #[inline]
@@ -78,14 +68,14 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
 
     #[inline]
     fn serialize_str(self, v: &str) -> Result<()> {
-        put_unsigned_leb128(&mut self.buffer, v.len() as u64);
+        put_leb128(&mut self.buffer, v.len() as u64);
         self.buffer.put_slice(v.as_bytes());
         Ok(())
     }
 
     #[inline]
     fn serialize_bytes(self, v: &[u8]) -> Result<()> {
-        put_unsigned_leb128(&mut self.buffer, v.len() as u64);
+        put_leb128(&mut self.buffer, v.len() as u64);
         self.buffer.put_slice(v);
         Ok(())
     }
@@ -148,9 +138,7 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
         // Max number of types in the Variant data type is 255
         // See also: https://github.com/ClickHouse/ClickHouse/issues/54864
         if variant_index > 255 {
-            return Err(Error::VariantDiscriminatorIsOutOfBound(
-                variant_index as usize,
-            ));
+            panic!("max number of types in the Variant data type is 255, got {variant_index}")
         }
         self.buffer.put_u8(variant_index as u8);
         value.serialize(self)
@@ -159,7 +147,7 @@ impl<B: BufMut> Serializer for &'_ mut RowBinarySerializer<B> {
     #[inline]
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
         let len = len.ok_or(Error::SequenceMustHaveLength)?;
-        put_unsigned_leb128(&mut self.buffer, len as u64);
+        put_leb128(&mut self.buffer, len as u64);
         Ok(self)
     }
 
@@ -259,28 +247,4 @@ impl<B: BufMut> SerializeTuple for &'_ mut RowBinarySerializer<B> {
     fn end(self) -> Result<()> {
         Ok(())
     }
-}
-
-fn put_unsigned_leb128(mut buffer: impl BufMut, mut value: u64) {
-    while {
-        let mut byte = value as u8 & 0x7f;
-        value >>= 7;
-
-        if value != 0 {
-            byte |= 0x80;
-        }
-
-        buffer.put_u8(byte);
-
-        value != 0
-    } {}
-}
-
-#[test]
-fn it_serializes_unsigned_leb128() {
-    let mut vec = Vec::new();
-
-    put_unsigned_leb128(&mut vec, 624_485);
-
-    assert_eq!(vec, [0xe5, 0x8e, 0x26]);
 }

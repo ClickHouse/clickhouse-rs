@@ -1,20 +1,23 @@
-use serde::Deserialize;
-
-use clickhouse::{error::Error, Client, Compression, Row};
-
-#[tokio::test]
-async fn deferred() {
-    let client = prepare_database!();
-    max_execution_time(client, false).await;
-}
+use clickhouse::{Client, Compression};
 
 #[tokio::test]
 async fn wait_end_of_query() {
     let client = prepare_database!();
-    max_execution_time(client, true).await;
+    let scenarios = vec![
+        // wait_end_of_query=?, expected_rows
+        (false, 3), // server returns some rows before throwing an error
+        (true, 0),  // server throws an error immediately
+    ];
+    for (wait_end_of_query, expected_rows) in scenarios {
+        let result = max_execution_time(client.clone(), wait_end_of_query).await;
+        assert_eq!(
+            result, expected_rows,
+            "wait_end_of_query: {wait_end_of_query}, expected_rows: {expected_rows}"
+        );
+    }
 }
 
-async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
+async fn max_execution_time(mut client: Client, wait_end_of_query: bool) -> u8 {
     if wait_end_of_query {
         client = client.with_option("wait_end_of_query", "1")
     }
@@ -22,27 +25,24 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) {
     // TODO: check different `timeout_overflow_mode`
     let mut cursor = client
         .with_compression(Compression::None)
+        // fails on the 4th row
         .with_option("max_execution_time", "0.1")
-        .query("SELECT toUInt8(65 + number % 5) FROM system.numbers LIMIT 100000000")
+        // force streaming one row in a chunk
+        .with_option("max_block_size", "1")
+        .query("SELECT sleepEachRow(0.03) AS s FROM system.numbers LIMIT 5")
         .fetch::<u8>()
         .unwrap();
 
-    let mut i = 0u64;
-
+    let mut i = 0;
     let err = loop {
         match cursor.next().await {
-            Ok(Some(no)) => {
-                // Check that we haven't parsed something extra.
-                assert_eq!(no, (65 + i % 5) as u8);
-                i += 1;
-            }
+            Ok(Some(_)) => i += 1,
             Ok(None) => panic!("DB exception hasn't been found"),
             Err(err) => break err,
         }
     };
-
-    assert!(wait_end_of_query ^ (i != 0));
     assert!(err.to_string().contains("TIMEOUT_EXCEEDED"));
+    i
 }
 
 #[cfg(feature = "lz4")]
@@ -66,7 +66,7 @@ async fn deferred_lz4() {
 
     // Due to compression we need more complex test here: write a lot of big parts.
     for i in 0..part_count {
-        let mut insert = client.insert("test").unwrap();
+        let mut insert = client.insert::<Row>("test").unwrap();
 
         for j in 0..part_size {
             let row = Row {
@@ -97,41 +97,4 @@ async fn deferred_lz4() {
 
     assert_ne!(i, 0); // we're interested only in errors during processing
     assert!(err.to_string().contains("TIMEOUT_EXCEEDED"));
-}
-
-// See #185.
-#[tokio::test]
-async fn invalid_schema() {
-    #[derive(Debug, Row, Deserialize)]
-    #[allow(dead_code)]
-    struct MyRow {
-        no: u32,
-        dec: Option<String>, // valid schema: u64-based types
-    }
-
-    let client = prepare_database!();
-
-    client
-        .query(
-            "CREATE TABLE test(no UInt32, dec Nullable(Decimal64(4)))
-             ENGINE = MergeTree
-             ORDER BY no",
-        )
-        .execute()
-        .await
-        .unwrap();
-
-    client
-        .query("INSERT INTO test VALUES (1, 1.1), (2, 2.2), (3, 3.3)")
-        .execute()
-        .await
-        .unwrap();
-
-    let err = client
-        .query("SELECT ?fields FROM test")
-        .fetch_all::<MyRow>()
-        .await
-        .unwrap_err();
-
-    assert!(matches!(err, Error::NotEnoughData));
 }

@@ -14,6 +14,7 @@
   <tmp_path>/var/lib/clickhouse/tmp/</tmp_path>
   <user_files_path>/var/lib/clickhouse/user_files/</user_files_path>
   <access_control_path>/var/lib/clickhouse/access/</access_control_path>
+  <keep_alive_timeout>3</keep_alive_timeout>
 
   <logger>
     <level>debug</level>
@@ -30,4 +31,15 @@
     <partition_by>toYYYYMM(event_date)</partition_by>
     <flush_interval_milliseconds>1000</flush_interval_milliseconds>
   </query_log>
+
+  <!-- required after 25.1+ -->
+  <format_schema_path>/var/lib/clickhouse/format_schemas/</format_schema_path>
+  <user_directories>
+    <users_xml>
+      <path>users.xml</path>
+    </users_xml>
+  </user_directories>
+
+  <!-- Avoid SERVER_OVERLOADED running many parallel tests after 25.5+ -->
+  <os_cpu_busy_time_threshold>1000000000000000000</os_cpu_busy_time_threshold>
 </clickhouse>

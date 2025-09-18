@@ -22,7 +22,7 @@ struct MyRow {
 // In other words, this pattern is applicable for ETL-like tasks.
 async fn dense(client: &Client, mut rx: Receiver<u32>) -> Result<()> {
     let mut inserter = client
-        .inserter(TABLE_NAME)?
+        .inserter::<MyRow>(TABLE_NAME)?
         // We limit the number of rows to be inserted in a single `INSERT` statement.
         // We use small value (100) for the example only.
         // See documentation of `with_max_rows` for details.
@@ -47,7 +47,7 @@ async fn dense(client: &Client, mut rx: Receiver<u32>) -> Result<()> {
 // Some rows are arriving one by one with delay, some batched.
 async fn sparse(client: &Client, mut rx: Receiver<u32>) -> Result<()> {
     let mut inserter = client
-        .inserter(TABLE_NAME)?
+        .inserter::<MyRow>(TABLE_NAME)?
         // Slice the stream into chunks (one `INSERT` per chunk) by time.
         // See documentation of `with_period` for details.
         .with_period(Some(Duration::from_millis(100)))
@@ -151,7 +151,7 @@ async fn main() -> Result<()> {
 
     // Prints 10 batches with 100 rows in each.
     for (insertion_time, count) in fetch_batches(&client).await? {
-        println!("{}: {} rows", insertion_time, count);
+        println!("{insertion_time}: {count} rows");
     }
 
     client
@@ -166,7 +166,7 @@ async fn main() -> Result<()> {
 
     // Prints batches every 100±10ms.
     for (insertion_time, count) in fetch_batches(&client).await? {
-        println!("{}: {} rows", insertion_time, count);
+        println!("{insertion_time}: {count} rows");
     }
 
     Ok(())

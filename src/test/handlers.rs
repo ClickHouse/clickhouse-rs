@@ -1,13 +1,13 @@
 use std::marker::PhantomData;
 
 use bytes::Bytes;
-use futures::channel::oneshot;
+use futures_channel::oneshot;
 use hyper::{Request, Response, StatusCode};
 use sealed::sealed;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use super::{Handler, HandlerFn};
-use crate::rowbinary;
+use crate::{rowbinary, RowOwned, RowRead};
 
 const BUFFER_INITIAL_CAPACITY: usize = 1024;
 
@@ -37,6 +37,15 @@ pub fn failure(status: StatusCode) -> impl Handler {
         .expect("invalid builder")
 }
 
+#[track_caller]
+pub fn exception(code: u8) -> impl Handler {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("X-ClickHouse-Exception-Code", code.to_string())
+        .body(Bytes::new())
+        .map(Thunk)
+        .expect("invalid builder")
+}
 // === provide ===
 
 #[track_caller]
@@ -82,7 +91,7 @@ pub struct RecordControl<T> {
 
 impl<T> RecordControl<T>
 where
-    T: for<'a> Deserialize<'a>,
+    T: RowOwned + RowRead,
 {
     pub async fn collect<C>(self) -> C
     where
@@ -93,7 +102,8 @@ where
         let mut result = C::default();
 
         while !slice.is_empty() {
-            let row: T = rowbinary::deserialize_from(slice).expect("failed to deserialize");
+            let res = rowbinary::deserialize_row(slice, None);
+            let row: T = res.expect("failed to deserialize");
             result.extend(std::iter::once(row));
         }
 
@@ -140,56 +150,4 @@ impl RecordDdlControl {
 
 pub fn record_ddl() -> impl Handler<Control = RecordDdlControl> {
     RecordDdlHandler
-}
-
-// === watch ===
-
-#[cfg(feature = "watch")]
-#[derive(Serialize)]
-#[serde(rename_all = "lowercase")]
-enum JsonRow<T> {
-    Row(T),
-}
-
-#[cfg(feature = "watch")]
-#[track_caller]
-pub fn watch<T>(rows: impl IntoIterator<Item = (u64, T)>) -> impl Handler
-where
-    T: Serialize,
-{
-    #[derive(Serialize)]
-    struct RowPayload<T> {
-        _version: u64,
-        #[serde(flatten)]
-        data: T,
-    }
-
-    let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
-    for (_version, data) in rows {
-        let payload = RowPayload { _version, data };
-        let row = JsonRow::Row(payload);
-        serde_json::to_writer(&mut buffer, &row).expect("failed to serialize");
-        buffer.push(b'\n');
-    }
-
-    Thunk(Response::new(Bytes::from(buffer)))
-}
-
-#[cfg(feature = "watch")]
-#[track_caller]
-pub fn watch_only_events(rows: impl IntoIterator<Item = u64>) -> impl Handler {
-    #[derive(Serialize)]
-    struct EventPayload {
-        version: u64,
-    }
-
-    let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
-    for version in rows {
-        let payload = EventPayload { version };
-        let row = JsonRow::Row(payload);
-        serde_json::to_writer(&mut buffer, &row).expect("failed to serialize");
-        buffer.push(b'\n');
-    }
-
-    Thunk(Response::new(Bytes::from(buffer)))
 }

@@ -4,8 +4,9 @@ Official pure Rust typed client for ClickHouse DB.
 
 [![Crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]
-[![License][license-badge]][license-url]
 [![Build Status][actions-badge]][actions-url]
+[![License][license-badge]][license-url]
+[![Codecov][codecov-badge]][codecov-url]
 
 [crates-badge]: https://img.shields.io/crates/v/clickhouse.svg
 [crates-url]: https://crates.io/crates/clickhouse
@@ -15,42 +16,56 @@ Official pure Rust typed client for ClickHouse DB.
 [license-url]: https://github.com/ClickHouse/clickhouse-rs/blob/main/LICENSE-MIT
 [actions-badge]: https://github.com/ClickHouse/clickhouse-rs/actions/workflows/ci.yml/badge.svg
 [actions-url]: https://github.com/ClickHouse/clickhouse-rs/actions/workflows/ci.yml
+[codecov-badge]: https://codecov.io/gh/ClickHouse/clickhouse-rs/graph/badge.svg?token=3MBXXYL53L
+[codecov-url]: https://codecov.io/gh/ClickHouse/clickhouse-rs
 
 * Uses `serde` for encoding/decoding rows.
 * Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
-* Uses `RowBinary` encoding over HTTP transport.
-    * There are plans to switch to `Native` over TCP.
+* Uses `RowBinaryWithNamesAndTypes` or `RowBinary` formats over HTTP transport.
+    * By default, `RowBinaryWithNamesAndTypes` with database schema validation is used.
+    * It is possible to switch to `RowBinary`, which can potentially lead to increased performance ([see below](#validation)).
+    * There are plans to implement `Native` format over TCP.
 * Supports TLS (see `native-tls` and `rustls-tls` features below).
 * Supports compression and decompression (LZ4 and LZ4HC).
 * Provides API for selecting.
 * Provides API for inserting.
 * Provides API for infinite transactional (see below) inserting.
-* Provides API for watching live views.
 * Provides mocks for unit testing.
 
 Note: [ch2rs](https://github.com/ClickHouse/ch2rs) is useful to generate a row type from ClickHouse.
 
+## Validation
+
+Starting from 0.14.0, the crate uses `RowBinaryWithNamesAndTypes` format by default, which allows row types validation
+against the ClickHouse schema. This enables clearer error messages in case of schema mismatch at the cost of
+performance. Additionally, with enabled validation, the crate supports structs with correct field names and matching
+types, but incorrect order of the fields, with an additional slight (5-10%) performance penalty.
+
+If you are looking to maximize performance, you could disable validation using `Client::with_validation(false)`. When
+validation is disabled, the client switches to `RowBinary` format usage instead.
+
+The downside with plain `RowBinary` is that instead of clearer error messages, a mismatch between `Row` and database
+schema will result in a `NotEnoughData` error without specific details.
+
+However, depending on the dataset, there might be x1.1 to x3 performance improvement, but that highly depends on the
+shape and volume of the dataset.
+
+It is always recommended to measure the performance impact of validation in your specific use case. Additionally,
+writing smoke tests to ensure that the row types match the ClickHouse schema is highly recommended, if you plan to
+disable validation in your application.
+
 ## Usage
 
 To use the crate, add this to your `Cargo.toml`:
+
 ```toml
 [dependencies]
-clickhouse = "0.13.1"
+clickhouse = "0.13.3"
 
 [dev-dependencies]
-clickhouse = { version = "0.13.1", features = ["test-util"] }
+clickhouse = { version = "0.13.3", features = ["test-util"] }
 ```
 
-<details>
-<summary>
-
-### Note about ClickHouse prior to v22.6
-
-</summary>
-
-CH server older than v22.6 (2022-06-16) handles `RowBinary` [incorrectly](https://github.com/ClickHouse/ClickHouse/issues/37420) in some rare cases. Use 0.11 and enable `wa-37420` feature to solve this problem. Don't use it for newer versions.
-
-</details>
 <details>
 <summary>
 
@@ -130,7 +145,7 @@ insert.end().await?;
 
 * If `end()` isn't called, the `INSERT` is aborted.
 * Rows are being sent progressively to spread network load.
-* ClickHouse inserts batches atomically only if all rows fit in the same partition and their number is less [`max_insert_block_size`](https://clickhouse.tech/docs/en/operations/settings/settings/#settings-max_insert_block_size).
+* ClickHouse inserts batches atomically only if all rows fit in the same partition and their number is less [`max_insert_block_size`](https://clickhouse.com/docs/en/operations/settings/settings#max_insert_block_size).
 
 </details>
 <details>
@@ -185,45 +200,14 @@ client.query("DROP TABLE IF EXISTS some").execute().await?;
 ```
 
 </details>
-<details>
-<summary>
-
-### Live views
-
-</summary>
-
-Requires the `watch` feature.
-
-```rust,ignore
-let mut cursor = client
-    .watch("SELECT max(no), argMax(name, no) FROM some")
-    .fetch::<Row<'_>>()?;
-
-let (version, row) = cursor.next().await?.unwrap();
-println!("live view updated: version={}, row={:?}", version, row);
-
-// Use `only_events()` to iterate over versions only.
-let mut cursor = client.watch("some_live_view").limit(20).only_events().fetch()?;
-println!("live view updated: version={:?}", cursor.next().await?);
-```
-
-* Use [carefully](https://github.com/ClickHouse/ClickHouse/issues/28309#issuecomment-908666042).
-* This code uses or creates if not exists a temporary live view named `lv_{sha1(query)}` to reuse the same live view by parallel watchers.
-* You can specify a name instead of a query.
-* This API uses `JSONEachRowWithProgress` under the hood because of [the issue](https://github.com/ClickHouse/ClickHouse/issues/22996).
-* Only struct rows can be used. Avoid `fetch::<u64>()` and other without specified names.
-
-</details>
-
-See [examples](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples).
 
 ## Feature Flags
-* `lz4` (enabled by default) — enables `Compression::Lz4`. If enabled, `Compression::Lz4` is used by default for all queries except for `WATCH`.
+* `lz4` (enabled by default) — enables `Compression::Lz4`. If enabled, `Compression::Lz4` is used by default for all queries.
 * `inserter` — enables `client.inserter()`.
 * `test-util` — adds mocks. See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs). Use it only in `dev-dependencies`.
-* `watch` — enables `client.watch` functionality. See the corresponding section for details.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
+* `chrono` — adds `serde::chrono` to work with [chrono](https://docs.rs/chrono) crate.
 
 ### TLS
 By default, TLS is disabled and one or more following features must be enabled to use HTTPS urls:
@@ -281,7 +265,8 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/).
+* `Enum(8|16)` are supported using [serde_repr](https://docs.rs/serde_repr/latest/serde_repr/). You could use
+  `#[repr(i8)]` for `Enum8` and `#[repr(i16)]` for `Enum16`.
     <details>
     <summary>Example</summary>
 
@@ -294,7 +279,7 @@ How to choose between all these features? Here are some considerations:
     }
 
     #[derive(Debug, Serialize_repr, Deserialize_repr)]
-    #[repr(u8)]
+    #[repr(i8)]
     enum Level {
         Debug = 1,
         Info = 2,
@@ -328,7 +313,9 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* `Date` maps to/from `u16` or a newtype around it and represents a number of days elapsed since `1970-01-01`. Also, [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date`, that requires the `time` feature.
+* `Date` maps to/from `u16` or a newtype around it and represents a number of days elapsed since `1970-01-01`. The following external types are supported: 
+    * [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date`, requiring the `time` feature. 
+    * [`chrono::NaiveDate`](https://docs.rs/chrono/latest/chrono/struct.NaiveDate.html) is supported by using `serde::chrono::date`, requiring the `chrono` feature. 
     <details>
     <summary>Example</summary>
 
@@ -338,10 +325,16 @@ How to choose between all these features? Here are some considerations:
         days: u16,
         #[serde(with = "clickhouse::serde::time::date")]
         date: Date,
+        // if you prefer using chrono:
+        #[serde(with = "clickhouse::serde::chrono::date")]
+        date_chrono: NaiveDate,
     }
+
     ```
     </details>
-* `Date32` maps to/from `i32` or a newtype around it and represents a number of days elapsed since `1970-01-01`. Also, [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date32`, that requires the `time` feature.
+* `Date32` maps to/from `i32` or a newtype around it and represents a number of days elapsed since `1970-01-01`. The following external types are supported: 
+    * [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date32`, requiring the `time` feature. 
+    * [`chrono::NaiveDate`](https://docs.rs/chrono/latest/chrono/struct.NaiveDate.html) is supported by using `serde::chrono::date32`, requiring the `chrono` feature. 
     <details>
     <summary>Example</summary>
 
@@ -351,10 +344,17 @@ How to choose between all these features? Here are some considerations:
         days: i32,
         #[serde(with = "clickhouse::serde::time::date32")]
         date: Date,
+        // if you prefer using chrono:
+        #[serde(with = "clickhouse::serde::chrono::date32")]
+        date_chrono: NaiveDate,
+
     }
+
     ```
     </details>
-* `DateTime` maps to/from `u32` or a newtype around it and represents a number of seconds elapsed since UNIX epoch. Also, [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime`, that requires the `time` feature.
+* `DateTime` maps to/from `u32` or a newtype around it and represents a number of seconds elapsed since UNIX epoch. The following external types are supported:
+    * [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime`, requiring the `time` feature. 
+    * [`chrono::DateTime<Utc>`](https://docs.rs/chrono/latest/chrono/struct.DateTime.html) is supported by using `serde::chrono::datetime`, requiring the `chrono` feature. 
     <details>
     <summary>Example</summary>
 
@@ -364,10 +364,15 @@ How to choose between all these features? Here are some considerations:
         ts: u32,
         #[serde(with = "clickhouse::serde::time::datetime")]
         dt: OffsetDateTime,
+        // if you prefer using chrono:
+        #[serde(with = "clickhouse::serde::chrono::datetime")]
+        dt_chrono: DateTime<Utc>,        
     }
     ```
     </details>
-* `DateTime64(_)` maps to/from `i32` or a newtype around it and represents a time elapsed since UNIX epoch. Also, [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime64::*`, that requires the `time` feature.
+* `DateTime64(_)` maps to/from `i64` or a newtype around it and represents a time elapsed since UNIX epoch. The following external types are supported:
+    * [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime64::*`, requiring the `time` feature. 
+    * [`chrono::DateTime<Utc>`](https://docs.rs/chrono/latest/chrono/struct.DateTime.html) is supported by using `serde::chrono::datetime64::*`, requiring the `chrono` feature. 
     <details>
     <summary>Example</summary>
 
@@ -383,12 +388,55 @@ How to choose between all these features? Here are some considerations:
         dt64us: OffsetDateTime, // `DateTime64(6)`
         #[serde(with = "clickhouse::serde::time::datetime64::nanos")]
         dt64ns: OffsetDateTime, // `DateTime64(9)`
+        // if you prefer using chrono:
+        #[serde(with = "clickhouse::serde::chrono::datetime64::secs")]
+        dt64s_chrono: DateTime<Utc>,  // `DateTime64(0)`
+        #[serde(with = "clickhouse::serde::chrono::datetime64::millis")]
+        dt64ms_chrono: DateTime<Utc>, // `DateTime64(3)`
+        #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+        dt64us_chrono: DateTime<Utc>, // `DateTime64(6)`
+        #[serde(with = "clickhouse::serde::chrono::datetime64::nanos")]
+        dt64ns_chrono: DateTime<Utc>, // `DateTime64(9)`
     }
+
+
+    ```
+    </details>
+* `Time` maps to/from i32 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
+    * [`time:Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::*`, requiring the `time` feature.
+    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::*`, which is an alias to `TimeDelta`, requiring the `chrono` feature
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::chrono::time64::secs")]
+        t0: chrono::Duration,
+        #[serde(with = "clickhouse::serde::chrono::time64::secs::option")]
+        t0_opt: Option<chrono::Duration>,
+    }
+
+    ```
+    </details>
+* `Time64(_)` maps to/from i64 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
+    * [`time:Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::*`, requiring the `time` feature.
+    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::*`, requiring the `chrono` feature
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::time::time")]
+        t0: Time,
+    }
+
     ```
     </details>
 * `Tuple(A, B, ...)` maps to/from `(A, B, ...)` or a newtype around it.
 * `Array(_)` maps to/from any slice, e.g. `Vec<_>`, `&[_]`. Newtypes are also supported.
-* `Map(K, V)` behaves like `Array((K, V))`.
+* `Map(K, V)` can be deserialized as `HashMap<K, V>` or `Vec<(K, V)>`.
 * `LowCardinality(_)` is supported seamlessly.
 * `Nullable(_)` maps to/from `Option<_>`. For `clickhouse::serde::*` helpers add `::option`.
     <details>
@@ -417,7 +465,8 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* `Geo` types are supported. `Point` behaves like a tuple `(f64, f64)`, and the rest of the types are just slices of points. 
+* `Geo` types are supported. `Point` behaves like a tuple `(f64, f64)`, and the rest of the types are just slices of
+  points.
     <details>
     <summary>Example</summary>
 
@@ -472,7 +521,7 @@ See also the additional examples:
 * [Variant data type](examples/data_types_variant.rs)
 
 ## Mocking
-The crate provides utils for mocking CH server and testing DDL, `SELECT`, `INSERT` and `WATCH` queries.
+The crate provides utils for mocking CH server and testing DDL, `SELECT` and `INSERT` queries.
 
 The functionality can be enabled with the `test-util` feature. Use it **only** in dev-dependencies.
 

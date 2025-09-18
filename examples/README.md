@@ -8,7 +8,7 @@ If something is missing, or you found a mistake in one of these examples, please
 
 ### General usage
 
-- [usage.rs](usage.rs) - creating tables, executing other DDLs, inserting the data, and selecting it back. Additionally, it covers `WATCH` queries. Optional cargo features: `inserter`, `watch`.
+- [usage.rs](usage.rs) - creating tables, executing other DDLs, inserting the data, and selecting it back. Optional cargo features: `inserter`.
 - [mock.rs](mock.rs) - writing tests with `mock` feature. Cargo features: requires `test-util`.
 - [inserter.rs](inserter.rs) - using the client-side batching via the `inserter` feature. Cargo features: requires `inserter`.
 - [async_insert.rs](async_insert.rs) - using the server-side batching via the [asynchronous inserts](https://clickhouse.com/docs/en/optimize/asynchronous-inserts) ClickHouse feature
@@ -28,6 +28,8 @@ If something is missing, or you found a mistake in one of these examples, please
 - [custom_http_headers.rs](custom_http_headers.rs) - setting additional HTTP headers to the client, or overriding the generated ones
 - [query_id.rs](query_id.rs) - setting a specific `query_id` on the query level
 - [session_id.rs](session_id.rs) - using the client in the session context with temporary tables
+- [stream_into_file.rs](stream_into_file.rs) - streaming the query result as raw bytes into a file in an arbitrary format. Required cargo features: `futures03`.
+- [stream_arbitrary_format_rows.rs](stream_arbitrary_format_rows.rs) - streaming the query result in an arbitrary format, row by row. Required cargo features: `futures03`.
 
 ## How to run
 
@@ -55,7 +57,7 @@ cargo run --package clickhouse --example async_insert
 If a particular example requires a cargo feature, you could run it as follows:
 
 ```sh
-cargo run --package clickhouse --example usage --features inserter watch
+cargo run --package clickhouse --example usage --features inserter
 ```
 
 Additionally, the individual examples should be runnable via the IDE such as CLion or RustRover.

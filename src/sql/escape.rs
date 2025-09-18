@@ -29,6 +29,16 @@ pub(crate) fn escape(src: &str, dst: &mut impl fmt::Write) -> fmt::Result {
     dst.write_str(rest)
 }
 
+// See https://clickhouse.com/docs/en/sql-reference/syntax#string
+pub(crate) fn hex_bytes(s: &[u8], dst: &mut impl fmt::Write) -> fmt::Result {
+    dst.write_char('X')?;
+    dst.write_char('\'')?;
+    for &byte in s {
+        write!(dst, "{byte:02X}")?;
+    }
+    dst.write_char('\'')
+}
+
 #[test]
 fn it_escapes_string() {
     let mut actual = String::new();

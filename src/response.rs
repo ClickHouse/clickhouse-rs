@@ -1,15 +1,12 @@
 use std::{
-    future::Future,
-    pin::Pin,
+    future::{self, Future},
+    pin::{pin, Pin},
     task::{Context, Poll},
 };
 
 use bstr::ByteSlice;
 use bytes::{BufMut, Bytes};
-use futures::{
-    future,
-    stream::{self, Stream, TryStreamExt},
-};
+use futures_util::stream::{self, Stream, TryStreamExt};
 use http_body_util::BodyExt as _;
 use hyper::{
     body::{Body as _, Incoming},
@@ -40,16 +37,25 @@ impl Response {
     pub(crate) fn new(response: HyperResponseFuture, compression: Compression) -> Self {
         Self::Waiting(Box::pin(async move {
             let response = response.await?;
-            let status = response.status();
-            let body = response.into_body();
 
-            if status == StatusCode::OK {
+            let status = response.status();
+            let exception_code = response.headers().get("X-ClickHouse-Exception-Code");
+
+            if status == StatusCode::OK && exception_code.is_none() {
                 // More likely to be successful, start streaming.
                 // It still can fail, but we'll handle it in `DetectDbException`.
-                Ok(Chunks::new(body, compression))
+                Ok(Chunks::new(response.into_body(), compression))
             } else {
                 // An instantly failed request.
-                Err(collect_bad_response(status, body, compression).await)
+                Err(collect_bad_response(
+                    status,
+                    exception_code
+                        .and_then(|value| value.to_str().ok())
+                        .map(|code| format!("Code: {code}")),
+                    response.into_body(),
+                    compression,
+                )
+                .await)
             }
         }))
     }
@@ -78,6 +84,7 @@ impl Response {
 #[inline(never)]
 async fn collect_bad_response(
     status: StatusCode,
+    exception_code: Option<String>,
     body: Incoming,
     compression: Compression,
 ) -> Error {
@@ -90,8 +97,11 @@ async fn collect_bad_response(
     let raw_bytes = match body.collect().await {
         Ok(collected) => collected.to_bytes(),
         // If we can't collect the body, return standardised reason for the status code.
-        Err(_) => return Error::BadResponse(stringify_status(status)),
+        Err(_) => return Error::BadResponse(reason(status, exception_code)),
     };
+    if raw_bytes.is_empty() {
+        return Error::BadResponse(reason(status, exception_code));
+    }
 
     // Try to decompress the body, because CH uses compression even for errors.
     let stream = stream::once(future::ready(Result::<_>::Ok(raw_bytes.slice(..))));
@@ -106,13 +116,13 @@ async fn collect_bad_response(
     let reason = String::from_utf8(bytes.into())
         .map(|reason| reason.trim().into())
         // If we have a unreadable response, return standardised reason for the status code.
-        .unwrap_or_else(|_| stringify_status(status));
+        .unwrap_or_else(|_| reason(status, exception_code));
 
     Error::BadResponse(reason)
 }
 
 async fn collect_bytes(stream: impl Stream<Item = Result<Bytes>>) -> Result<Bytes> {
-    futures::pin_mut!(stream);
+    let mut stream = pin!(stream);
 
     let mut bytes = Vec::new();
 
@@ -124,12 +134,14 @@ async fn collect_bytes(stream: impl Stream<Item = Result<Bytes>>) -> Result<Byte
     Ok(bytes.into())
 }
 
-fn stringify_status(status: StatusCode) -> String {
-    format!(
-        "{} {}",
-        status.as_str(),
-        status.canonical_reason().unwrap_or("<unknown>"),
-    )
+fn reason(status: StatusCode, exception_code: Option<String>) -> String {
+    exception_code.unwrap_or_else(|| {
+        format!(
+            "{} {}",
+            status.as_str(),
+            status.canonical_reason().unwrap_or("<unknown>"),
+        )
+    })
 }
 
 // === Chunks ===
@@ -147,8 +159,17 @@ impl Chunks {
     fn new(stream: Incoming, compression: Compression) -> Self {
         let stream = IncomingStream(stream);
         let stream = Decompress::new(stream, compression);
-        let stream = DetectDbException::new(stream);
+        let stream = DetectDbException(stream);
         Self(Some(Box::new(stream)))
+    }
+
+    pub(crate) fn empty() -> Self {
+        Self(None)
+    }
+
+    #[cfg(feature = "futures03")]
+    pub(crate) fn is_terminated(&self) -> bool {
+        self.0.is_none()
     }
 }
 
@@ -156,14 +177,12 @@ impl Stream for Chunks {
     type Item = Result<Chunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // `take()` prevents from use after caught panic.
+        // We use `take()` to make the stream fused, including the case of panics.
         if let Some(mut stream) = self.0.take() {
             let res = Pin::new(&mut stream).poll_next(cx);
 
             if matches!(res, Poll::Pending | Poll::Ready(Some(Ok(_)))) {
                 self.0 = Some(stream);
-            } else {
-                assert!(self.0.is_none());
             }
 
             res
@@ -244,16 +263,7 @@ where
 
 // === DetectDbException ===
 
-enum DetectDbException<S> {
-    Stream(S),
-    Exception(Option<Error>),
-}
-
-impl<S> DetectDbException<S> {
-    fn new(stream: S) -> Self {
-        Self::Stream(stream)
-    }
-}
+struct DetectDbException<S>(S);
 
 impl<S> Stream for DetectDbException<S>
 where
@@ -262,22 +272,15 @@ where
     type Item = Result<Chunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match &mut *self {
-            Self::Stream(stream) => {
-                let mut res = Pin::new(stream).poll_next(cx);
+        let res = Pin::new(&mut self.0).poll_next(cx);
 
-                if let Poll::Ready(Some(Ok(chunk))) = &mut res {
-                    if let Some(err) = extract_exception(&mut chunk.data) {
-                        *self = Self::Exception(Some(err));
-
-                        // NOTE: `chunk` can be empty, but it's ok for callers.
-                    }
-                }
-
-                res
+        if let Poll::Ready(Some(Ok(chunk))) = &res {
+            if let Some(err) = extract_exception(&chunk.data) {
+                return Poll::Ready(Some(Err(err)));
             }
-            Self::Exception(err) => Poll::Ready(err.take().map(Err)),
         }
+
+        res
     }
 }
 
@@ -285,7 +288,7 @@ where
 // ```
 //   <data>Code: <code>. DB::Exception: <desc> (version <version> (official build))\n
 // ```
-fn extract_exception(chunk: &mut Bytes) -> Option<Error> {
+fn extract_exception(chunk: &[u8]) -> Option<Error> {
     // `))\n` is very rare in real data, so it's fast dirty check.
     // In random data, it occurs with a probability of ~6*10^-8 only.
     if chunk.ends_with(b"))\n") {
@@ -297,14 +300,27 @@ fn extract_exception(chunk: &mut Bytes) -> Option<Error> {
 
 #[cold]
 #[inline(never)]
-fn extract_exception_slow(chunk: &mut Bytes) -> Option<Error> {
+fn extract_exception_slow(chunk: &[u8]) -> Option<Error> {
     let index = chunk.rfind(b"Code:")?;
 
-    if !chunk[index..].contains_str(b"DB::Exception:") {
+    if !(chunk[index..].contains_str(b"DB::") && chunk[index..].contains_str(b"Exception:")) {
         return None;
     }
 
-    let exception = chunk.split_off(index);
-    let exception = String::from_utf8_lossy(&exception[..exception.len() - 1]);
+    let exception = String::from_utf8_lossy(&chunk[index..chunk.len() - 1]);
     Some(Error::BadResponse(exception.into()))
+}
+
+#[test]
+fn it_extracts_exception() {
+    let errors = [
+        "Code: 159. DB::Exception: Timeout exceeded: elapsed 1.2 seconds, maximum: 0.1. (TIMEOUT_EXCEEDED) (version 24.10.1.2812 (official build))",
+        "Code: 210. DB::NetException: I/O error: Broken pipe, while writing to socket (127.0.0.1:9000 -> 127.0.0.1:54646). (NETWORK_ERROR) (version 23.8.8.20 (official build))",
+    ];
+
+    for error in errors {
+        let chunk = format!("{error}\n");
+        let err = extract_exception(chunk.as_bytes()).expect("failed to extract exception");
+        assert_eq!(err.to_string(), format!("bad response: {error}"));
+    }
 }

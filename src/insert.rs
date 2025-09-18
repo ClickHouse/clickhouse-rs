@@ -3,19 +3,18 @@ use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Durat
 use bytes::{Bytes, BytesMut};
 use hyper::{self, Request};
 use replace_with::replace_with_or_abort;
-use serde::Serialize;
 use tokio::{
     task::JoinHandle,
     time::{Instant, Sleep},
 };
 use url::Url;
 
-use crate::headers::with_request_headers;
+use crate::headers::{with_authentication, with_request_headers};
 use crate::{
     error::{Error, Result},
     request_body::{ChunkSender, RequestBody},
     response::Response,
-    row::{self, Row},
+    row::{self, Row, RowWrite},
     rowbinary, Client, Compression,
 };
 
@@ -129,7 +128,7 @@ impl<T> Insert<T> {
 
         // TODO: what about escaping a table name?
         // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
-        let sql = format!("INSERT INTO {}({}) FORMAT RowBinary", table, fields);
+        let sql = format!("INSERT INTO {table}({fields}) FORMAT RowBinary");
 
         Ok(Self {
             state: InsertState::NotStarted {
@@ -206,9 +205,12 @@ impl<T> Insert<T> {
     ///
     /// # Panics
     /// If called after the previous call that returned an error.
-    pub fn write<'a>(&'a mut self, row: &T) -> impl Future<Output = Result<()>> + 'a + Send
+    pub fn write<'a>(
+        &'a mut self,
+        row: &T::Value<'_>,
+    ) -> impl Future<Output = Result<()>> + 'a + Send
     where
-        T: Serialize,
+        T: RowWrite,
     {
         let result = self.do_write(row);
 
@@ -222,9 +224,9 @@ impl<T> Insert<T> {
     }
 
     #[inline(always)]
-    pub(crate) fn do_write(&mut self, row: &T) -> Result<usize>
+    pub(crate) fn do_write(&mut self, row: &T::Value<'_>) -> Result<usize>
     where
-        T: Serialize,
+        T: RowWrite,
     {
         match self.state {
             InsertState::NotStarted { .. } => self.init_request(),
@@ -353,14 +355,7 @@ impl<T> Insert<T> {
 
         let mut builder = Request::post(url.as_str());
         builder = with_request_headers(builder, &client.headers, &client.products_info);
-
-        if let Some(user) = &client.user {
-            builder = builder.header("X-ClickHouse-User", user);
-        }
-
-        if let Some(password) = &client.password {
-            builder = builder.header("X-ClickHouse-Key", password);
-        }
+        builder = with_authentication(builder, &client.authentication);
 
         let (sender, body) = RequestBody::chunked();
 

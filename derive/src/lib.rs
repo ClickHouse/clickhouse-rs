@@ -1,12 +1,15 @@
-mod attributes;
-
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use serde_derive_internals::{
     attr::{Container, Default as SerdeDefault, Field},
     Ctxt,
 };
-use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields};
+use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Error, Fields, Lifetime, Result};
+
+mod attributes;
+
+#[cfg(test)]
+mod tests;
 
 struct Attributes {
     row: attributes::Row,
@@ -26,8 +29,8 @@ impl From<&[syn::Attribute]> for Attributes {
     }
 }
 
-fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> TokenStream {
-    match &data.fields {
+fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> Result<TokenStream> {
+    Ok(match &data.fields {
         Fields::Named(fields) => {
             let rename_rule = container.rename_all_rules().deserialize;
             let column_names_iter = fields
@@ -49,8 +52,8 @@ fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> TokenStr
         Fields::Unnamed(_) => {
             quote! { &[] }
         }
-        Fields::Unit => panic!("`Row` cannot be derived for unit structs"),
-    }
+        Fields::Unit => unreachable!("checked by the caller"),
+    })
 }
 
 // TODO: support wrappers `Wrapper(Inner)` and `Wrapper<T>(T)`.
@@ -58,7 +61,12 @@ fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> TokenStr
 #[proc_macro_derive(Row, attributes(row))]
 pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    row_impl(input)
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
 
+fn row_impl(input: DeriveInput) -> Result<TokenStream> {
     let cx = Ctxt::new();
     let Attributes {
         row: attributes::Row { crate_path },
@@ -66,22 +74,52 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let container = Container::from_ast(&cx, &input);
     let name = input.ident;
 
-    let column_names = match &input.data {
+    let result = match &input.data {
+        Data::Struct(data) if data.fields.is_empty() => {
+            let reason = "`Row` cannot be derived for unit or empty structs";
+            Err(Error::new(name.span(), reason))
+        }
         Data::Struct(data) => column_names(data, &cx, &container),
-        Data::Enum(_) | Data::Union(_) => panic!("`Row` can be derived only for structs"),
+        Data::Enum(_) | Data::Union(_) => {
+            let reason = "`Row` can only be derived for structs";
+            Err(Error::new(name.span(), reason))
+        }
     };
 
-    // TODO: do something more clever?
-    let _ = cx.check().expect("derive context error");
+    cx.check()?;
+    let column_names = result?;
+
+    let value = match input.generics.lifetimes().count() {
+        // An owned row: `struct Row { .. }`
+        0 => quote! { Self },
+        // A borrowed row: `struct Row<'a> { .. }`
+        1 => {
+            // Replace the lifetime with `__v` to set `Value<'__v> = ..`.
+            let mut cloned = input.generics.clone();
+            let param = cloned.lifetimes_mut().next().unwrap();
+            param.lifetime = Lifetime::new("'__v", Span::call_site());
+            let ty_generics = cloned.split_for_impl().1;
+            quote! { #name #ty_generics }
+        }
+        // A borrowed row with multiple lifetimes: `struct Row<'a, 'b> { .. }`
+        _ => {
+            let lt = input.generics.lifetimes().nth(1).unwrap();
+            let reason = "`Row` cannot be derived for structs with multiple lifetimes";
+            return Err(Error::new(lt.lifetime.span(), reason));
+        }
+    };
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let expanded = quote! {
         #[automatically_derived]
         impl #impl_generics #crate_path::Row for #name #ty_generics #where_clause {
+            const NAME: &'static str = stringify!(#name);
             const COLUMN_NAMES: &'static [&'static str] = #column_names;
-        }
-    };
+            const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
+            const KIND: clickhouse::_priv::RowKind = clickhouse::_priv::RowKind::Struct;
 
-    proc_macro::TokenStream::from(expanded)
+            type Value<'__v> = #value;
+        }
+    })
 }

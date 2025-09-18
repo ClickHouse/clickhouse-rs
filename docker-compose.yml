@@ -1,7 +1,10 @@
+name: clickhouse-rs
 services:
   clickhouse:
-    image: 'clickhouse/clickhouse-server:${CLICKHOUSE_VERSION-24.10-alpine}'
+    image: 'clickhouse/clickhouse-server:${CLICKHOUSE_VERSION-latest-alpine}'
     container_name: 'clickhouse-rs-clickhouse-server'
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: 1
     ports:
       - '8123:8123'
       - '9000:9000'

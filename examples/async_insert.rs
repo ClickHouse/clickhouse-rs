@@ -10,7 +10,7 @@ use clickhouse::{error::Result, Client, Row};
 
 #[derive(Debug, Serialize, Deserialize, Row)]
 struct Event {
-    timestamp: u64,
+    timestamp: i64,
     message: String,
 }
 
@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert(table_name)?;
+    let mut insert = client.insert::<Event>(table_name)?;
     insert
         .write(&Event {
             timestamp: now(),
@@ -70,9 +70,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn now() -> u64 {
+fn now() -> i64 {
     UNIX_EPOCH
         .elapsed()
         .expect("invalid system time")
-        .as_nanos() as u64
+        .as_nanos() as i64
 }

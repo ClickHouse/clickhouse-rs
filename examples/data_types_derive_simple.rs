@@ -1,14 +1,14 @@
+use chrono::{DateTime, NaiveDate, Utc};
+use fixnum::{
+    typenum::{U12, U4, U8},
+    FixedPoint,
+};
+use rand::prelude::IndexedRandom;
+use rand::{distr::Alphanumeric, Rng};
 use std::str::FromStr;
-
-use fixnum::typenum::{U12, U4, U8};
-use fixnum::FixedPoint;
-use rand::distributions::Alphanumeric;
-use rand::seq::SliceRandom;
-use rand::Rng;
 use time::{Date, Month, OffsetDateTime, Time};
 
-use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client};
+use clickhouse::{error::Result, sql::Identifier, Client};
 
 // This example covers derivation of _simpler_ ClickHouse data types.
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types
@@ -53,15 +53,26 @@ async fn main() -> Result<()> {
                 decimal64_18_8       Decimal(18, 8),
                 decimal128_38_12     Decimal(38, 12),
                 -- decimal256_76_20           Decimal(76, 20),
-                date                 Date,
-                date32               Date32,
-                datetime             DateTime,
-                datetime_tz          DateTime('UTC'),
-                datetime64_0         DateTime64(0),
-                datetime64_3         DateTime64(3),
-                datetime64_6         DateTime64(6),
-                datetime64_9         DateTime64(9),
-                datetime64_9_tz      DateTime64(9, 'UTC')
+
+                time_date              Date,
+                time_date32            Date32,
+                time_datetime          DateTime,
+                time_datetime_tz       DateTime('UTC'),
+                time_datetime64_0      DateTime64(0),
+                time_datetime64_3      DateTime64(3),
+                time_datetime64_6      DateTime64(6),
+                time_datetime64_9      DateTime64(9),
+                time_datetime64_9_tz   DateTime64(9, 'UTC'),
+
+                chrono_date            Date,
+                chrono_date32          Date32,
+                chrono_datetime        DateTime,
+                chrono_datetime_tz     DateTime('UTC'),
+                chrono_datetime64_0    DateTime64(0),
+                chrono_datetime64_3    DateTime64(3),
+                chrono_datetime64_6    DateTime64(6),
+                chrono_datetime64_9    DateTime64(9),
+                chrono_datetime64_9_tz DateTime64(9, 'UTC'),
             ) ENGINE MergeTree ORDER BY ();
         ",
         )
@@ -69,7 +80,7 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert(table_name)?;
+    let mut insert = client.insert::<Row>(table_name)?;
     insert.write(&Row::new()).await?;
     insert.end().await?;
 
@@ -121,23 +132,42 @@ pub struct Row {
     pub decimal64_18_8: Decimal64,
     pub decimal128_38_12: Decimal128,
     #[serde(with = "clickhouse::serde::time::date")]
-    pub date: Date,
+    pub time_date: Date,
     #[serde(with = "clickhouse::serde::time::date32")]
-    pub date32: Date,
+    pub time_date32: Date,
     #[serde(with = "clickhouse::serde::time::datetime")]
-    pub datetime: OffsetDateTime,
+    pub time_datetime: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime")]
-    pub datetime_tz: OffsetDateTime,
+    pub time_datetime_tz: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime64::secs")]
-    pub datetime64_0: OffsetDateTime,
+    pub time_datetime64_0: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime64::millis")]
-    pub datetime64_3: OffsetDateTime,
+    pub time_datetime64_3: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
-    pub datetime64_6: OffsetDateTime,
+    pub time_datetime64_6: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime64::nanos")]
-    pub datetime64_9: OffsetDateTime,
+    pub time_datetime64_9: OffsetDateTime,
     #[serde(with = "clickhouse::serde::time::datetime64::nanos")]
-    pub datetime64_9_tz: OffsetDateTime,
+    pub time_datetime64_9_tz: OffsetDateTime,
+
+    #[serde(with = "clickhouse::serde::chrono::date")]
+    pub chrono_date: NaiveDate,
+    #[serde(with = "clickhouse::serde::chrono::date32")]
+    pub chrono_date32: NaiveDate,
+    #[serde(with = "clickhouse::serde::chrono::datetime")]
+    pub chrono_datetime: DateTime<Utc>,
+    #[serde(with = "clickhouse::serde::chrono::datetime")]
+    pub chrono_datetime_tz: DateTime<Utc>,
+    #[serde(with = "clickhouse::serde::chrono::datetime64::secs")]
+    pub chrono_datetime64_0: DateTime<Utc>,
+    #[serde(with = "clickhouse::serde::chrono::datetime64::millis")]
+    pub chrono_datetime64_3: DateTime<Utc>,
+    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    pub chrono_datetime64_6: DateTime<Utc>,
+    #[serde(with = "clickhouse::serde::chrono::datetime64::nanos")]
+    pub chrono_datetime64_9: DateTime<Utc>,
+    #[serde(with = "clickhouse::serde::chrono::datetime64::nanos")]
+    pub chrono_datetime64_9_tz: DateTime<Utc>,
 }
 
 // See ClickHouse decimal sizes: https://clickhouse.com/docs/en/sql-reference/data-types/decimal
@@ -147,7 +177,7 @@ type Decimal128 = FixedPoint<i128, U12>; // Decimal(38, 12) = Decimal128(12)
 
 #[derive(Clone, Debug, PartialEq)]
 #[derive(serde_repr::Serialize_repr, serde_repr::Deserialize_repr)]
-#[repr(u8)]
+#[repr(i8)]
 pub enum Enum8 {
     Foo = 1,
     Bar = 2,
@@ -155,7 +185,7 @@ pub enum Enum8 {
 
 #[derive(Clone, Debug, PartialEq)]
 #[derive(serde_repr::Serialize_repr, serde_repr::Deserialize_repr)]
-#[repr(u16)]
+#[repr(i16)]
 pub enum Enum16 {
     Qaz = 42,
     Qux = 255,
@@ -163,27 +193,27 @@ pub enum Enum16 {
 
 impl Row {
     pub fn new() -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         Row {
-            int8: rng.gen(),
-            int16: rng.gen(),
-            int32: rng.gen(),
-            int64: rng.gen(),
-            int128: rng.gen(),
-            uint8: rng.gen(),
-            uint16: rng.gen(),
-            uint32: rng.gen(),
-            uint64: rng.gen(),
-            uint128: rng.gen(),
-            float32: rng.gen(),
-            float64: rng.gen(),
-            boolean: rng.gen(),
+            int8: rng.random(),
+            int16: rng.random(),
+            int32: rng.random(),
+            int64: rng.random(),
+            int128: rng.random(),
+            uint8: rng.random(),
+            uint16: rng.random(),
+            uint32: rng.random(),
+            uint64: rng.random(),
+            uint128: rng.random(),
+            float32: rng.random(),
+            float64: rng.random(),
+            boolean: rng.random(),
             str: random_str(),
-            blob_str: rng.gen::<[u8; 3]>().to_vec(),
+            blob_str: rng.random::<[u8; 3]>().to_vec(),
             nullable_str: Some(random_str()),
             low_car_str: random_str(),
             nullable_low_car_str: Some(random_str()),
-            fixed_str: rng.gen(),
+            fixed_str: rng.random(),
             uuid: uuid::Uuid::new_v4(),
             ipv4: std::net::Ipv4Addr::from_str("172.195.0.1").unwrap(),
             ipv6: std::net::Ipv6Addr::from_str("::ffff:acc3:1").unwrap(),
@@ -206,15 +236,25 @@ impl Row {
             // See
             // - https://clickhouse.com/docs/en/sql-reference/data-types/date
             // - https://clickhouse.com/docs/en/sql-reference/data-types/date32
-            date: Date::from_calendar_date(2149, Month::June, 6).unwrap(),
-            date32: Date::from_calendar_date(2299, Month::December, 31).unwrap(),
-            datetime: max_datetime(),
-            datetime_tz: max_datetime(),
-            datetime64_0: max_datetime64(),
-            datetime64_3: max_datetime64(),
-            datetime64_6: max_datetime64(),
-            datetime64_9: max_datetime64_nanos(),
-            datetime64_9_tz: max_datetime64_nanos(),
+            time_date: Date::from_calendar_date(2149, Month::June, 6).unwrap(),
+            time_date32: Date::from_calendar_date(2299, Month::December, 31).unwrap(),
+            time_datetime: max_datetime(),
+            time_datetime_tz: max_datetime(),
+            time_datetime64_0: max_datetime64(),
+            time_datetime64_3: max_datetime64(),
+            time_datetime64_6: max_datetime64(),
+            time_datetime64_9: max_datetime64_nanos(),
+            time_datetime64_9_tz: max_datetime64_nanos(),
+
+            chrono_date: NaiveDate::from_ymd_opt(2149, 6, 6).unwrap(),
+            chrono_date32: NaiveDate::from_ymd_opt(2299, 12, 31).unwrap(),
+            chrono_datetime: Utc::now(),
+            chrono_datetime_tz: Utc::now(),
+            chrono_datetime64_0: Utc::now(),
+            chrono_datetime64_3: Utc::now(),
+            chrono_datetime64_6: Utc::now(),
+            chrono_datetime64_9: Utc::now(),
+            chrono_datetime64_9_tz: Utc::now(),
         }
     }
 }
@@ -226,7 +266,7 @@ impl Default for Row {
 }
 
 fn random_str() -> String {
-    rand::thread_rng()
+    rand::rng()
         .sample_iter(&Alphanumeric)
         .take(3)
         .map(char::from)

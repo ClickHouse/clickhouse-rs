@@ -85,22 +85,25 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     unsupported!(
         serialize_map(Option<usize>) -> Result<Impossible>,
-        serialize_bytes(&[u8]),
         serialize_unit,
         serialize_unit_struct(&'static str),
     );
+
+    #[inline]
+    fn serialize_bytes(self, value: &[u8]) -> Result {
+        escape::hex_bytes(value, self.writer)?;
+        Ok(())
+    }
 
     forward_to_display!(
         serialize_i8(i8),
         serialize_i16(i16),
         serialize_i32(i32),
         serialize_i64(i64),
-        serialize_i128(i128),
         serialize_u8(u8),
         serialize_u16(u16),
         serialize_u32(u32),
         serialize_u64(u64),
-        serialize_u128(u128),
         serialize_f32(f32),
         serialize_f64(f64),
         serialize_bool(bool),
@@ -110,6 +113,18 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
     fn serialize_char(self, value: char) -> Result {
         let mut tmp = [0u8; 4];
         self.serialize_str(value.encode_utf8(&mut tmp))
+    }
+
+    #[inline]
+    fn serialize_i128(self, value: i128) -> Result {
+        write!(self.writer, "{value}::Int128")?;
+        Ok(())
+    }
+
+    #[inline]
+    fn serialize_u128(self, value: u128) -> Result {
+        write!(self.writer, "{value}::UInt128")?;
+        Ok(())
     }
 
     #[inline]
@@ -449,10 +464,38 @@ mod tests {
     }
 
     #[test]
+    fn it_writes_bytes() {
+        use serde_bytes::ByteArray;
+        use serde_bytes::ByteBuf;
+        use serde_bytes::Bytes;
+
+        assert_eq!(check(Bytes::new(b"hello")), "X'68656C6C6F'");
+        assert_eq!(check(Bytes::new(b"")), "X''");
+        assert_eq!(check(Bytes::new(b"a\xffb")), "X'61FF62'");
+        assert_eq!(check(Bytes::new(b"a'b")), "X'612762'");
+
+        assert_eq!(check(ByteArray::new(*b"hello")), "X'68656C6C6F'");
+        assert_eq!(check(ByteArray::new(*b"")), "X''");
+        assert_eq!(check(ByteArray::new(*b"a\xffb")), "X'61FF62'");
+        assert_eq!(check(ByteArray::new(*b"a'b")), "X'612762'");
+
+        assert_eq!(check(ByteBuf::from(b"hello")), "X'68656C6C6F'");
+        assert_eq!(check(ByteBuf::from(b"")), "X''");
+        assert_eq!(check(ByteBuf::from(b"a\xffb")), "X'61FF62'");
+        assert_eq!(check(ByteBuf::from(b"a'b")), "X'612762'");
+
+        assert_eq!(check(b"hello"), "(104,101,108,108,111)");
+        assert_eq!(check(b""), "()");
+        assert_eq!(check(b"a\xffb"), "(97,255,98)");
+        assert_eq!(check(b"a'b"), "(97,39,98)");
+    }
+
+    #[test]
     fn it_writes_numeric_primitives() {
         assert_eq!(check(42), "42");
         assert_eq!(check(42.5), "42.5");
-        assert_eq!(check(42u128), "42");
+        assert_eq!(check(42u128), "42::UInt128");
+        assert_eq!(check(42i128), "42::Int128");
     }
 
     #[test]

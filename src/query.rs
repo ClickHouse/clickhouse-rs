@@ -1,5 +1,5 @@
 use hyper::{header::CONTENT_LENGTH, Method, Request};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fmt::Display;
 use url::Url;
 
@@ -8,14 +8,15 @@ use crate::{
     headers::with_request_headers,
     request_body::RequestBody,
     response::Response,
-    row::Row,
+    row::{Row, RowOwned, RowRead},
     sql::{ser, Bind, SqlBuilder},
     Client,
 };
 
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
 
-pub use crate::cursor::RowCursor;
+pub use crate::cursors::{BytesCursor, RowCursor};
+use crate::headers::with_authentication;
 
 #[must_use]
 #[derive(Clone)]
@@ -43,7 +44,7 @@ impl Query {
     /// [`Identifier`], will be appropriately escaped.
     ///
     /// All possible errors will be returned as [`Error::InvalidParams`]
-    /// during query execution (`execute()`, `fetch()` etc).
+    /// during query execution (`execute()`, `fetch()`, etc.).
     ///
     /// WARNING: This means that the query must not have any extra `?`, even if
     /// they are in a string literal! Use `??` to have plain `?` in query.
@@ -84,10 +85,16 @@ impl Query {
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
         self.sql.bind_fields::<T>();
-        self.sql.append(" FORMAT RowBinary");
+
+        let validation = self.client.get_validation();
+        if validation {
+            self.sql.set_output_format("RowBinaryWithNamesAndTypes");
+        } else {
+            self.sql.set_output_format("RowBinary");
+        }
 
         let response = self.do_execute(true)?;
-        Ok(RowCursor::new(response))
+        Ok(RowCursor::new(response, validation))
     }
 
     /// Executes the query and returns just a single row.
@@ -95,9 +102,9 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_one<T>(self) -> Result<T>
     where
-        T: Row + for<'b> Deserialize<'b>,
+        T: RowOwned + RowRead,
     {
-        match self.fetch()?.next().await {
+        match self.fetch::<T>()?.next().await {
             Ok(Some(row)) => Ok(row),
             Ok(None) => Err(Error::RowNotFound),
             Err(err) => Err(err),
@@ -109,9 +116,9 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_optional<T>(self) -> Result<Option<T>>
     where
-        T: Row + for<'b> Deserialize<'b>,
+        T: RowOwned + RowRead,
     {
-        self.fetch()?.next().await
+        self.fetch::<T>()?.next().await
     }
 
     /// Executes the query and returns all the generated results,
@@ -120,7 +127,7 @@ impl Query {
     /// Note that `T` must be owned.
     pub async fn fetch_all<T>(self) -> Result<Vec<T>>
     where
-        T: Row + for<'b> Deserialize<'b>,
+        T: RowOwned + RowRead,
     {
         let mut result = Vec::new();
         let mut cursor = self.fetch::<T>()?;
@@ -130,6 +137,16 @@ impl Query {
         }
 
         Ok(result)
+    }
+
+    /// Executes the query, returning a [`BytesCursor`] to obtain results as raw
+    /// bytes containing data in the [provided format].
+    ///
+    /// [provided format]: https://clickhouse.com/docs/en/interfaces/formats
+    pub fn fetch_bytes(mut self, format: impl Into<String>) -> Result<BytesCursor> {
+        self.sql.set_output_format(format);
+        let response = self.do_execute(true)?;
+        Ok(BytesCursor::new(response))
     }
 
     pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {
@@ -168,19 +185,12 @@ impl Query {
 
         let mut builder = Request::builder().method(method).uri(url.as_str());
         builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
+        builder = with_authentication(builder, &self.client.authentication);
 
         if content_length == 0 {
             builder = builder.header(CONTENT_LENGTH, "0");
         } else {
             builder = builder.header(CONTENT_LENGTH, content_length.to_string());
-        }
-
-        if let Some(user) = &self.client.user {
-            builder = builder.header("X-ClickHouse-User", user);
-        }
-
-        if let Some(password) = &self.client.password {
-            builder = builder.header("X-ClickHouse-Key", password);
         }
 
         let request = builder

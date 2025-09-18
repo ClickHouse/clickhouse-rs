@@ -42,7 +42,7 @@ async fn main() -> clickhouse::error::Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert(table_name)?;
+    let mut insert = client.insert::<Data>(table_name)?;
     insert
         .write(&Data {
             id: 42,
@@ -66,7 +66,7 @@ async fn main() -> clickhouse::error::Result<()> {
 
 #[derive(Debug, Serialize, Deserialize, Row)]
 struct Data {
-    id: u32,
+    id: i32,
     name: String,
 }
 

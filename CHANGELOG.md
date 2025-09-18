@@ -7,14 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+### Removed
+
+- **BREAKING** watch: `Client::watch()` API is removed ([#245]).
+- **BREAKING** mock: `watch()` and `watch_only_events()` are removed ([#245]).
+
+### Changed
+
+- **BREAKING** query: `RowBinaryWithNamesAndTypes` is now used by default for query results. This may cause panics if
+  the row struct definition does not match the database schema. Use `Client::with_validation(false)` to revert to the
+  previous behavior which uses plain `RowBinary` format for fetching rows. ([#221])
+- **BREAKING** mock: when using `test-util` feature, it is now required to use `Client::with_mock(&mock)` to set up the
+  mock server, so it properly handles the response format and automatically disables parsing
+  `RowBinaryWithNamesAndTypes` header parsing and validation. Additionally, it is not required to call `with_url`
+  explicitly. See the [updated example](./examples/mock.rs).
+- query: due to `RowBinaryWithNamesAndTypes` format usage, there might be an impact on fetch performance, which largely
+  depends on how the dataset is defined. If you notice decreased performance, consider disabling validation by using
+  `Client::with_validation(false)`.
+- serde: it is now possible to deserialize Map ClickHouse type into `HashMap<K, V>` (or `BTreeMap`, `IndexMap`, 
+  `DashMap`, etc.).
+
 ### Added
-- [Variant data type](https://clickhouse.com/docs/en/sql-reference/data-types/variant) support ([#170]).
+
+- client: added `Client::with_validation` builder method. Validation is enabled by default, meaning that
+  `RowBinaryWithNamesAndTypes` format will be used to fetch rows from the database. If validation is disabled,
+  `RowBinary` format will be used, similarly to the previous versions. ([#221]).
+- types: a new crate `clickhouse-types` was added to the project workspace. This crate is required for
+  `RowBinaryWithNamesAndTypes` struct definition validation, as it contains ClickHouse data types AST, as well as
+  functions and utilities to parse the types out of the ClickHouse server response. ([#221]).
+
+[#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
+[#245]: https://github.com/ClickHouse/clickhouse-rs/pull/245
+
+## [0.13.3] - 2025-05-29
+### Added
+- client: added `Client::with_access_token` to support JWT authentication ClickHouse Cloud feature ([#215]).
+- Identifier: added `Copy` and `Clone` derive ([#224]).
+
+### Fixed
+- query/cursor: detect more deferred errors ([#220]).
+- query/bind: fixed `i128`/`u128` SQL serialization ([#209]).
+
+[#209]: https://github.com/ClickHouse/clickhouse-rs/pull/209
+[#215]: https://github.com/ClickHouse/clickhouse-rs/pull/215
+[#220]: https://github.com/ClickHouse/clickhouse-rs/pull/220
+[#224]: https://github.com/ClickHouse/clickhouse-rs/pull/224
+
+## [0.13.2] - 2025-03-12
+### Added
+- query: added `Query::with_param` to support server-side parameters binding ([#159])
+- derive: added [Variant data type](https://clickhouse.com/docs/en/sql-reference/data-types/variant) support ([#170]).
+- query: added `Query::fetch_bytes` that allows streaming data in an arbitrary format ([#182])
+- serde: added support for [chrono](https://docs.rs/chrono/latest/chrono/) ([#188])
+
+### Changed
+- MSRV is now 1.73 due to changes in `bstr` and `hyper-rustls` dependencies ([#180]).
 
 ### Fixed
 - query/cursor: return `NotEnoughData` if a row is unparsed when the stream ends ([#185]).
 
+[#159]: https://github.com/ClickHouse/clickhouse-rs/pull/159
 [#170]: https://github.com/ClickHouse/clickhouse-rs/pull/170
+[#180]: https://github.com/ClickHouse/clickhouse-rs/pull/180
+[#182]: https://github.com/ClickHouse/clickhouse-rs/pull/182
 [#185]: https://github.com/ClickHouse/clickhouse-rs/pull/185
+[#188]: https://github.com/ClickHouse/clickhouse-rs/pull/188
 
 ## [0.13.1] - 2024-10-21
 ### Added
@@ -367,7 +425,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.3...HEAD
+[0.13.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.2...v0.13.3
+[0.13.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.2...v0.13.0
 [0.12.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.12.1...v0.12.2

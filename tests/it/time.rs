@@ -1,8 +1,8 @@
 #![cfg(feature = "time")]
 
-use std::ops::RangeBounds;
+use std::ops::Range;
 
-use rand::{distributions::Standard, Rng};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use time::{macros::datetime, Date, OffsetDateTime};
 
@@ -80,7 +80,7 @@ async fn datetime() {
         dt64ns_opt: Some(datetime!(2022-11-13 15:27:42.123456789 UTC)),
     };
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").unwrap();
     insert.write(&original_row).await.unwrap();
     insert.end().await.unwrap();
 
@@ -93,11 +93,11 @@ async fn datetime() {
     let row_str = client
         .query(
             "
-            SELECT toString(dt),
-                   toString(dt64s),
-                   toString(dt64ms),
-                   toString(dt64us),
-                   toString(dt64ns)
+            SELECT toString(dt)     AS dt,
+                   toString(dt64s)  AS dt64s,
+                   toString(dt64ms) AS dt64ms,
+                   toString(dt64us) AS dt64us,
+                   toString(dt64ns) AS dt64ns
               FROM test
         ",
         )
@@ -138,7 +138,7 @@ async fn date() {
         .await
         .unwrap();
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").unwrap();
 
     let dates = generate_dates(1970..2149, 100);
     for &date in &dates {
@@ -191,7 +191,7 @@ async fn date32() {
         .await
         .unwrap();
 
-    let mut insert = client.insert("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").unwrap();
 
     let dates = generate_dates(1925..2283, 100); // TODO: 1900..=2299 for newer versions.
     for &date in &dates {
@@ -219,14 +219,228 @@ async fn date32() {
     }
 }
 
-fn generate_dates(years: impl RangeBounds<i32>, count: usize) -> Vec<Date> {
-    let mut rng = rand::thread_rng();
-    let mut dates: Vec<_> = (&mut rng)
-        .sample_iter(Standard)
-        .filter(|date: &Date| years.contains(&date.year()))
-        .take(count)
+fn generate_dates(years: Range<i32>, count: usize) -> Vec<Date> {
+    let mut rng = rand::rng();
+    let mut dates: Vec<_> = (0..count)
+        .map(|_| {
+            let year = rng.random_range(years.clone());
+            let month = rng.random_range(1..=12);
+            let day = rng.random_range(1..=28); // Safe for all months
+            Date::from_calendar_date(year, time::Month::try_from(month).unwrap(), day as u8)
+                .unwrap()
+        })
         .collect();
 
     dates.sort_unstable();
     dates
+}
+
+#[tokio::test]
+async fn time_roundtrip() {
+    let client = prepare_database!();
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::time::time")]
+        t0: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time::option")]
+        t1: Option<time::Duration>,
+    }
+
+    client
+        .query(
+            r#"
+            CREATE TABLE test_time (
+                t0  Time,
+                t1  Nullable(Time)
+            ) ENGINE = MergeTree ORDER BY tuple()
+            SETTINGS enable_time_time64_type = 1;
+            "#,
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let positive_value = time::Duration::seconds(12 * 3600 + 34 * 60 + 56); // 12:34:56
+    let row = MyRow {
+        t0: positive_value,
+        t1: Some(positive_value),
+    };
+
+    let mut insert = client.insert::<MyRow>("test_time").unwrap();
+    insert.write(&row).await.unwrap();
+    insert.end().await.unwrap();
+
+    let fetched_rows: Vec<MyRow> = client
+        .query("SELECT ?fields FROM test_time")
+        .fetch_all()
+        .await
+        .unwrap();
+
+    assert_eq!(fetched_rows.len(), 1);
+    assert_eq!(fetched_rows[0], row);
+}
+
+#[tokio::test]
+async fn time_negative_roundtrip() {
+    let client = prepare_database!();
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::time::time")]
+        t0: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time::option")]
+        t1: Option<time::Duration>,
+    }
+
+    client
+        .query(
+            r#"
+            CREATE TABLE test_time_negative (
+                t0  Time,
+                t1  Nullable(Time)
+            ) ENGINE = MergeTree ORDER BY tuple()
+            SETTINGS enable_time_time64_type = 1;
+            "#,
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let negative_value = time::Duration::seconds(-2 * 3600 - 15 * 60 - 30); // -02:15:30
+    let row = MyRow {
+        t0: negative_value,
+        t1: Some(negative_value),
+    };
+
+    let mut insert = client.insert::<MyRow>("test_time_negative").unwrap();
+    insert.write(&row).await.unwrap();
+    insert.end().await.unwrap();
+
+    let fetched_rows: Vec<MyRow> = client
+        .query("SELECT ?fields FROM test_time_negative")
+        .fetch_all()
+        .await
+        .unwrap();
+
+    assert_eq!(fetched_rows.len(), 1);
+    assert_eq!(fetched_rows[0], row);
+}
+
+#[tokio::test]
+async fn time64_roundtrip() {
+    let client = prepare_database!();
+
+    client
+        .query(
+            r#"
+            CREATE TABLE test_time64 (
+                t0      Time64(0),
+                t0_opt  Nullable(Time64(0)),
+                t3      Time64(3),
+                t6      Time64(6),
+                t9      Time64(9)
+            ) ENGINE = MergeTree
+            ORDER BY tuple()
+            SETTINGS enable_time_time64_type = 1;
+            "#,
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::time::time64::secs")]
+        t0: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time64::secs::option")]
+        t0_opt: Option<time::Duration>,
+        #[serde(with = "clickhouse::serde::time::time64::millis")]
+        t3: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time64::micros")]
+        t6: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time64::nanos")]
+        t9: time::Duration,
+    }
+
+    let base_seconds = 12 * 3600 + 34 * 60 + 56; // 45296 seconds
+    let row = MyRow {
+        t0: time::Duration::seconds(base_seconds),
+        t0_opt: Some(time::Duration::seconds(base_seconds)),
+        t3: time::Duration::milliseconds(base_seconds * 1000 + 789),
+        t6: time::Duration::microseconds(base_seconds * 1_000_000 + 789_123),
+        t9: time::Duration::nanoseconds(base_seconds * 1_000_000_000 + 789_123_456),
+    };
+
+    let mut insert = client.insert::<MyRow>("test_time64").unwrap();
+    insert.write(&row).await.unwrap();
+    insert.end().await.unwrap();
+
+    let fetched_rows: Vec<MyRow> = client
+        .query("SELECT ?fields FROM test_time64")
+        .fetch_all()
+        .await
+        .unwrap();
+
+    assert_eq!(fetched_rows.len(), 1);
+    assert_eq!(fetched_rows[0], row);
+}
+
+#[tokio::test]
+async fn time64_negative_roundtrip() {
+    let client = prepare_database!();
+
+    client
+        .query(
+            r#"
+            CREATE TABLE test_time64_negative (
+                t0      Time64(0),
+                t0_opt  Nullable(Time64(0)),
+                t3      Time64(3),
+                t6      Time64(6),
+                t9      Time64(9)
+            ) ENGINE = MergeTree
+            ORDER BY tuple()
+            SETTINGS enable_time_time64_type = 1;
+            "#,
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::time::time64::secs")]
+        t0: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time64::secs::option")]
+        t0_opt: Option<time::Duration>,
+        #[serde(with = "clickhouse::serde::time::time64::millis")]
+        t3: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time64::micros")]
+        t6: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time64::nanos")]
+        t9: time::Duration,
+    }
+
+    let neg_base_seconds = -5 * 3600 - 15 * 60 - 30; // -18930 seconds
+    let row = MyRow {
+        t0: time::Duration::seconds(neg_base_seconds),
+        t0_opt: Some(time::Duration::seconds(neg_base_seconds)),
+        t3: time::Duration::milliseconds(neg_base_seconds * 1000 - 123),
+        t6: time::Duration::microseconds(neg_base_seconds * 1_000_000 - 123_456),
+        t9: time::Duration::nanoseconds(neg_base_seconds * 1_000_000_000 - 123_456_789),
+    };
+
+    let mut insert = client.insert::<MyRow>("test_time64_negative").unwrap();
+    insert.write(&row).await.unwrap();
+    insert.end().await.unwrap();
+
+    let fetched_rows: Vec<MyRow> = client
+        .query("SELECT ?fields FROM test_time64_negative")
+        .fetch_all()
+        .await
+        .unwrap();
+
+    assert_eq!(fetched_rows.len(), 1);
+    assert_eq!(fetched_rows[0], row);
 }
