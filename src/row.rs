@@ -13,15 +13,17 @@ pub enum RowKind {
 /// Represents a row that can be used in queries.
 ///
 /// Implemented for:
-/// * All `#[derive(Row)]` items
+/// * All [`#[derive(Row)]`][row-derive] items
 /// * `(P1, P2, ...)` where P* is a primitive type or string
 ///
-/// Do not implement this trait directly, use `#[derive(Row)]` instead.
+/// Do not implement this trait directly, use [`#[derive(Row)]`][row-derive] instead.
 ///
 /// In order to write a generic code over rows, check
 /// * [`RowRead`] for reading queries.
 /// * [`RowWrite`] for writing queries.
 /// * [`RowOwned`] for rows that do not hold any references.
+///
+/// [row-derive]: derive@crate::Row
 pub trait Row {
     // NOTE: all properties are unstable and, hence, not following semver.
 
@@ -277,21 +279,21 @@ pub(crate) fn join_column_names<R: Row>() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    // XXX: need for `derive(Row)`. Provide `row(crate = ..)` instead.
-    use crate as clickhouse;
-    use clickhouse::Row;
+    use crate::Row;
 
     use super::*;
 
     #[test]
     fn it_grabs_simple_struct() {
         #[derive(Row)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct Simple1 {
             one: u32,
         }
 
         #[derive(Row)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct Simple2 {
             one: u32,
@@ -305,6 +307,7 @@ mod tests {
     #[test]
     fn it_grabs_mix() {
         #[derive(Row)]
+        #[clickhouse(crate = "crate")]
         struct SomeRow {
             _a: u32,
         }
@@ -317,6 +320,7 @@ mod tests {
         use serde::Serialize;
 
         #[derive(Row, Serialize)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct TopLevel {
             #[serde(rename = "two")]
@@ -331,6 +335,7 @@ mod tests {
         use serde::Serialize;
 
         #[derive(Row, Serialize)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct TopLevel {
             one: u32,
@@ -346,6 +351,7 @@ mod tests {
         use serde::Deserialize;
 
         #[derive(Row, Deserialize)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct TopLevel {
             one: u32,
@@ -360,6 +366,7 @@ mod tests {
     fn it_rejects_other() {
         #[allow(dead_code)]
         #[derive(Row)]
+        #[clickhouse(crate = "crate")]
         struct NamedTuple(u32, u32);
 
         assert_eq!(join_column_names::<u32>(), None);
@@ -372,6 +379,7 @@ mod tests {
         use serde::Serialize;
 
         #[derive(Row, Serialize)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct MyRow {
             r#type: u32,

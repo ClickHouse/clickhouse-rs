@@ -36,9 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - types: a new crate `clickhouse-types` was added to the project workspace. This crate is required for
   `RowBinaryWithNamesAndTypes` struct definition validation, as it contains ClickHouse data types AST, as well as
   functions and utilities to parse the types out of the ClickHouse server response. ([#221]).
+- derive: added `#[clickhouse(crate = "...")]` attribute for `#[derive(Row)]` ([#189]/[#292])
 
+[#189]: https://github.com/ClickHouse/clickhouse-rs/pull/189
 [#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
 [#245]: https://github.com/ClickHouse/clickhouse-rs/pull/245
+[#292]: https://github.com/ClickHouse/clickhouse-rs/pull/292
 
 ## [0.13.3] - 2025-05-29
 ### Added

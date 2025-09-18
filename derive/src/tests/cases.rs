@@ -14,7 +14,7 @@ fn simple_owned_row() {
             a: i32,
             b: String,
         }
-    };
+    }
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn generic_owned_row() {
             a: i32,
             b: T,
         }
-    };
+    }
 
     render! {
         #[derive(Row)]
@@ -33,7 +33,7 @@ fn generic_owned_row() {
             a: A,
             b: B,
         }
-    };
+    }
 
     render! {
         #[derive(Row)]
@@ -41,7 +41,7 @@ fn generic_owned_row() {
             a: i32,
             b: T,
         }
-    };
+    }
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn simple_borrowed_row() {
             a: i32,
             b: &'a str,
         }
-    };
+    }
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn generic_borrowed_row() {
             a: i32,
             b: &'a T,
         }
-    };
+    }
 
     render! {
         #[derive(Row)]
@@ -71,7 +71,7 @@ fn generic_borrowed_row() {
             a: A,
             b: &'a B,
         }
-    };
+    }
 
     render! {
         #[derive(Row)]
@@ -79,7 +79,7 @@ fn generic_borrowed_row() {
             a: i32,
             b: &'a T,
         }
-    };
+    }
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn serde_rename() {
             #[serde(rename = "items.b")]
             items_b: Vec<u32>,
         }
-    };
+    }
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn serde_skip_serializing() {
             #[serde(skip_serializing)]
             b: u32,
         }
-    };
+    }
 }
 
 #[test]
@@ -117,5 +117,17 @@ fn serde_skip_deserializing() {
             #[serde(skip_deserializing)]
             b: u32,
         }
-    };
+    }
+}
+
+#[test]
+fn crate_attribute() {
+    render! {
+        #[derive(Row)]
+        #[clickhouse(crate = "foo")]
+        struct Foo {
+            a: u32,
+            b: u32,
+        }
+    }
 }
