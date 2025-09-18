@@ -5,7 +5,7 @@ use crate::{
     row::{self, Row},
 };
 
-pub use bind::{Bind, Identifier};
+pub use bind::{Bind, Identifier, QualifiedIdentifier};
 
 mod bind;
 pub(crate) mod escape;

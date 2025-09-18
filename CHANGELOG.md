@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - query: due to `RowBinaryWithNamesAndTypes` format usage, there might be an impact on fetch performance, which largely
   depends on how the dataset is defined. If you notice decreased performance, consider disabling validation by using
   `Client::with_validation(false)`.
-- serde: it is now possible to deserialize Map ClickHouse type into `HashMap<K, V>` (or `BTreeMap`, `IndexMap`, 
+- serde: it is now possible to deserialize Map ClickHouse type into `HashMap<K, V>` (or `BTreeMap`, `IndexMap`,
   `DashMap`, etc.).
 
 ### Added
@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - types: a new crate `clickhouse-types` was added to the project workspace. This crate is required for
   `RowBinaryWithNamesAndTypes` struct definition validation, as it contains ClickHouse data types AST, as well as
   functions and utilities to parse the types out of the ClickHouse server response. ([#221]).
+- sql: added `QualifiedIdentifier` type to represent qualified identifiers (e.g., `table.column`) safely as client-side bind values
 
 [#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
 [#245]: https://github.com/ClickHouse/clickhouse-rs/pull/245
