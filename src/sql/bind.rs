@@ -32,11 +32,13 @@ impl Bind for Identifier<'_> {
     }
 }
 
+/// A variant on `Identifier` which supports qualifying an identifier. For example,
+/// `QualifiedIdentifier("foo", "bar")` will emit the SQL `\`foo\`.\`bar\``.
 #[derive(Clone, Copy)]
-pub struct ScopedIdentifier<'a>(pub &'a str, pub &'a str);
+pub struct QualifiedIdentifier<'a>(pub &'a str, pub &'a str);
 
 #[sealed]
-impl Bind for ScopedIdentifier<'_> {
+impl Bind for QualifiedIdentifier<'_> {
     #[inline]
     fn write(&self, dst: &mut impl fmt::Write) -> Result<(), String> {
         if self.0.len() > 0 {
@@ -49,7 +51,7 @@ impl Bind for ScopedIdentifier<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bind, ScopedIdentifier};
+    use super::{Bind, QualifiedIdentifier};
 
     fn bind_to_string(b: impl Bind) -> String {
         let mut s = String::new();
@@ -58,23 +60,26 @@ mod tests {
     }
 
     #[test]
-    fn test_scoped_identifier() {
+    fn test_qualified_identifier() {
         assert_eq!(
-            bind_to_string(ScopedIdentifier("foo", "bar baz")),
+            bind_to_string(QualifiedIdentifier("foo", "bar baz")),
             "`foo`.`bar baz`"
         );
-        assert_eq!(bind_to_string(ScopedIdentifier("", "bar baz")), "`bar baz`");
+        assert_eq!(
+            bind_to_string(QualifiedIdentifier("", "bar baz")),
+            "`bar baz`"
+        );
 
         assert_eq!(
-            bind_to_string(ScopedIdentifier("`'.", ".................````")),
+            bind_to_string(QualifiedIdentifier("`'.", ".................````")),
             "`\\`\\'.`.`.................\\`\\`\\`\\``"
         );
 
         assert_eq!(
-            bind_to_string(ScopedIdentifier("クリック", "ハウス")),
+            bind_to_string(QualifiedIdentifier("クリック", "ハウス")),
             "`クリック`.`ハウス`"
         );
 
-        assert_eq!(bind_to_string(ScopedIdentifier(" ", " ")), "` `.` `");
+        assert_eq!(bind_to_string(QualifiedIdentifier(" ", " ")), "` `.` `");
     }
 }

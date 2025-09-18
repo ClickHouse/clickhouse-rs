@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - types: a new crate `clickhouse-types` was added to the project workspace. This crate is required for
   `RowBinaryWithNamesAndTypes` struct definition validation, as it contains ClickHouse data types AST, as well as
   functions and utilities to parse the types out of the ClickHouse server response. ([#221]).
-- sql: added `ScopedIdentifier` type to represent scoped identifiers (e.g., `table.column`) safely as bind values
+- sql: added `QualifiedIdentifier` type to represent qualified identifiers (e.g., `table.column`) safely as client-side bind values
 
 [#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
 [#245]: https://github.com/ClickHouse/clickhouse-rs/pull/245
