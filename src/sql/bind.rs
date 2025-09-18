@@ -64,5 +64,17 @@ mod tests {
             "`foo`.`bar baz`"
         );
         assert_eq!(bind_to_string(ScopedIdentifier("", "bar baz")), "`bar baz`");
+
+        assert_eq!(
+            bind_to_string(ScopedIdentifier("`'.", ".................````")),
+            "`\\`\\'.`.`.................\\`\\`\\`\\``"
+        );
+
+        assert_eq!(
+            bind_to_string(ScopedIdentifier("クリック", "ハウス")),
+            "`クリック`.`ハウス`"
+        );
+
+        assert_eq!(bind_to_string(ScopedIdentifier(" ", " ")), "` `.` `");
     }
 }
