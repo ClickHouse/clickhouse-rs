@@ -12,6 +12,16 @@ mod attributes;
 #[cfg(test)]
 mod tests;
 
+// TODO: support wrappers `Wrapper(Inner)` and `Wrapper<T>(T)`.
+// TODO: support the `nested` attribute.
+#[proc_macro_derive(Row, attributes(clickhouse))]
+pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    row_impl(input)
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
+
 fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> Result<TokenStream> {
     Ok(match &data.fields {
         Fields::Named(fields) => {
@@ -37,16 +47,6 @@ fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> Result<T
         }
         Fields::Unit => unreachable!("checked by the caller"),
     })
-}
-
-// TODO: support wrappers `Wrapper(Inner)` and `Wrapper<T>(T)`.
-// TODO: support the `nested` attribute.
-#[proc_macro_derive(Row, attributes(clickhouse))]
-pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    row_impl(input)
-        .unwrap_or_else(Error::into_compile_error)
-        .into()
 }
 
 fn row_impl(input: DeriveInput) -> Result<TokenStream> {

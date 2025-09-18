@@ -13,15 +13,17 @@ pub enum RowKind {
 /// Represents a row that can be used in queries.
 ///
 /// Implemented for:
-/// * All `#[derive(Row)]` items
+/// * All [`#[derive(Row)]`][row-derive] items
 /// * `(P1, P2, ...)` where P* is a primitive type or string
 ///
-/// Do not implement this trait directly, use `#[derive(Row)]` instead.
+/// Do not implement this trait directly, use [`#[derive(Row)]`][row-derive] instead.
 ///
 /// In order to write a generic code over rows, check
 /// * [`RowRead`] for reading queries.
 /// * [`RowWrite`] for writing queries.
 /// * [`RowOwned`] for rows that do not hold any references.
+///
+/// [row-derive]: derive@crate::Row
 pub trait Row {
     // NOTE: all properties are unstable and, hence, not following semver.
 
