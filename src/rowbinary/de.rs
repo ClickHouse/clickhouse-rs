@@ -61,6 +61,7 @@ where
 {
     input: &'cursor mut &'data [u8],
     validator: V,
+    is_inner: bool,
     _marker: PhantomData<R>,
 }
 
@@ -72,6 +73,7 @@ where
         Self {
             input,
             validator,
+            is_inner: false,
             _marker: PhantomData,
         }
     }
@@ -83,6 +85,7 @@ where
         RowBinaryDeserializer {
             input: self.input,
             validator: self.validator.validate(serde_type),
+            is_inner: true,
             _marker: PhantomData,
         }
     }
@@ -156,8 +159,35 @@ where
     impl_num!(f64, deserialize_f64, visit_f64, get_f64_le, SerdeType::F64);
 
     #[inline(always)]
-    fn deserialize_any<V: Visitor<'data>>(self, _: V) -> Result<V::Value> {
-        Err(Error::DeserializeAnyNotSupported)
+    fn deserialize_any<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
+        match self
+            .validator
+            .peek()
+            .ok_or(Error::DeserializeAnyNotSupported)?
+        {
+            SerdeType::Bool => self.deserialize_bool(visitor),
+            SerdeType::I8 => self.deserialize_i8(visitor),
+            SerdeType::I16 => self.deserialize_i16(visitor),
+            SerdeType::I32 => self.deserialize_i32(visitor),
+            SerdeType::I64 => self.deserialize_i64(visitor),
+            SerdeType::I128 => self.deserialize_i128(visitor),
+            SerdeType::U8 => self.deserialize_u8(visitor),
+            SerdeType::U16 => self.deserialize_u16(visitor),
+            SerdeType::U32 => self.deserialize_u32(visitor),
+            SerdeType::U64 => self.deserialize_u64(visitor),
+            SerdeType::U128 => self.deserialize_u128(visitor),
+            SerdeType::F32 => self.deserialize_f32(visitor),
+            SerdeType::F64 => self.deserialize_f64(visitor),
+            SerdeType::Str => self.deserialize_str(visitor),
+            SerdeType::String => self.deserialize_string(visitor),
+            SerdeType::Option => self.deserialize_option(visitor),
+            SerdeType::Enum => self.deserialize_enum("", &[], visitor),
+            SerdeType::Bytes(_) => self.deserialize_bytes(visitor),
+            SerdeType::ByteBuf(_) => self.deserialize_byte_buf(visitor),
+            SerdeType::Tuple(len) => self.deserialize_tuple(len, visitor),
+            SerdeType::Seq(_) => self.deserialize_seq(visitor),
+            SerdeType::Map(_) => self.deserialize_map(visitor),
+        }
     }
 
     #[inline(always)]
@@ -263,12 +293,19 @@ where
 
     #[inline(always)]
     fn deserialize_map<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        let len = self.read_size()?;
-        let deserializer = &mut self.inner(SerdeType::Map(len));
-        visitor.visit_map(RowBinaryMapAccess {
-            deserializer,
-            remaining: len,
-        })
+        if self.is_inner {
+            let len = self.read_size()?;
+            let deserializer = &mut self.inner(SerdeType::Map(len));
+            visitor.visit_map(RowBinaryMapAccess {
+                deserializer,
+                remaining: len,
+            })
+        } else {
+            visitor.visit_map(RowBinaryStructAsMapAccess {
+                deserializer: self,
+                current_field_idx: 0,
+            })
+        }
     }
 
     #[inline(always)]
@@ -278,6 +315,7 @@ where
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
+        self.is_inner = true;
         if !self.validator.is_field_order_wrong() {
             visitor.visit_seq(RowBinarySeqAccess {
                 deserializer: self,
@@ -287,7 +325,6 @@ where
             visitor.visit_map(RowBinaryStructAsMapAccess {
                 deserializer: self,
                 current_field_idx: 0,
-                fields,
             })
         }
     }
@@ -417,7 +454,6 @@ where
 {
     deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, R, Validator>,
     current_field_idx: usize,
-    fields: &'static [&'static str],
 }
 
 struct StructFieldIdentifier(&'static str);
@@ -475,14 +511,14 @@ where
     where
         K: DeserializeSeed<'data>,
     {
-        if self.current_field_idx >= self.fields.len() {
-            return Ok(None);
-        }
-        let schema_index = self
+        let Some(field_name) = self
             .deserializer
             .validator
-            .get_schema_index(self.current_field_idx);
-        let field_id = StructFieldIdentifier(self.fields[schema_index]);
+            .get_field_name(self.current_field_idx)
+        else {
+            return Ok(None);
+        };
+        let field_id = StructFieldIdentifier(field_name);
         self.current_field_idx += 1;
         seed.deserialize(field_id).map(Some)
     }
@@ -495,7 +531,8 @@ where
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.fields.len())
+        // Some(self.fields.len())
+        None
     }
 }
 

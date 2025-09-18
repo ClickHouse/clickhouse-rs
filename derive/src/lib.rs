@@ -13,24 +13,39 @@ fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> Result<T
     Ok(match &data.fields {
         Fields::Named(fields) => {
             let rename_rule = container.rename_all_rules().deserialize;
-            let column_names_iter = fields
+
+            let chain_iters = fields
                 .named
                 .iter()
                 .enumerate()
-                .map(|(index, field)| Field::from_ast(cx, index, field, None, &SerdeDefault::None))
-                .filter(|field| !field.skip_serializing() && !field.skip_deserializing())
-                .map(|field| {
-                    rename_rule
-                        .apply_to_field(field.name().serialize_name())
-                        .to_string()
+                .map(|(index, field)| {
+                    (
+                        Field::from_ast(cx, index, field, None, &SerdeDefault::None),
+                        &field.ty,
+                    )
+                })
+                .filter(|(field, _)| !(field.skip_serializing() || field.skip_deserializing()))
+                .map(|(field_meta, ty)| {
+                    if field_meta.flatten() {
+                        quote! {
+                            <#ty as clickhouse::Row>::column_names().into_iter()
+                        }
+                    } else {
+                        let column_name = rename_rule
+                            .apply_to_field(field_meta.name().serialize_name())
+                            .to_string();
+                        quote! {
+                            std::iter::once(#column_name)
+                        }
+                    }
                 });
 
             quote! {
-                &[#( #column_names_iter,)*]
+                std::iter::empty() #(.chain(#chain_iters))*
             }
         }
         Fields::Unnamed(_) => {
-            quote! { &[] }
+            quote! { [] }
         }
         Fields::Unit => unreachable!("checked by the caller"),
     })
@@ -94,8 +109,8 @@ fn row_impl(input: DeriveInput) -> Result<TokenStream> {
         #[automatically_derived]
         impl #impl_generics clickhouse::Row for #name #ty_generics #where_clause {
             const NAME: &'static str = stringify!(#name);
-            const COLUMN_NAMES: &'static [&'static str] = #column_names;
-            const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
+            fn column_names() -> impl IntoIterator<Item = &'static str> { #column_names }
+            fn column_count() -> usize { <Self as clickhouse::Row>::column_names().into_iter().count() }
             const KIND: clickhouse::_priv::RowKind = clickhouse::_priv::RowKind::Struct;
 
             type Value<'__v> = #value;

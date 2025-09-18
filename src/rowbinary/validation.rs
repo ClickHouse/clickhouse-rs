@@ -28,6 +28,8 @@ pub(crate) trait SchemaValidator<R: Row>: Sized {
     /// It is used only if the crate detects that while the field names and the types are correct,
     /// the field order in the struct does not match the column order in the database schema.
     fn get_schema_index(&self, struct_idx: usize) -> usize;
+    fn get_field_name(&self, struct_idx: usize) -> Option<&'static str>;
+    fn peek(&self) -> Option<SerdeType>;
 }
 
 pub(crate) struct DataTypeValidator<'cursor, R: Row> {
@@ -182,6 +184,34 @@ impl<'cursor, R: Row> SchemaValidator<R> for DataTypeValidator<'cursor, R> {
     #[inline]
     fn get_schema_index(&self, struct_idx: usize) -> usize {
         self.metadata.get_schema_index(struct_idx)
+    }
+
+    fn get_field_name(&self, struct_idx: usize) -> Option<&'static str> {
+        self.metadata.get_field_name(struct_idx)
+    }
+
+    fn peek(&self) -> Option<SerdeType> {
+        match R::KIND {
+            RowKind::Primitive => {
+                let data_type = &self.metadata.columns[0].data_type;
+                Some(data_type.into())
+            }
+            RowKind::Tuple => Some(SerdeType::Tuple(self.metadata.columns.len()).into()),
+            RowKind::Vec => {
+                let data_type = &self.metadata.columns[0].data_type;
+                match data_type {
+                    DataTypeNode::Array(inner_type) => Some(From::from(&**inner_type)),
+                    _ => panic!(
+                        "Expected Array type when validating root level sequence, but got {}",
+                        self.metadata.columns[0].data_type
+                    ),
+                }
+            }
+            RowKind::Struct => {
+                let current_column = &self.metadata.columns[self.current_column_idx];
+                Some(From::from(&current_column.data_type))
+            }
+        }
     }
 
     #[cold]
@@ -392,6 +422,50 @@ impl<'cursor, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
     #[cold]
     fn get_schema_index(&self, _struct_idx: usize) -> usize {
         unreachable!()
+    }
+
+    fn get_field_name(&self, _struct_idx: usize) -> Option<&'static str> {
+        unreachable!()
+    }
+
+    fn peek(&self) -> Option<SerdeType> {
+        let inner = self.as_ref()?;
+        match &inner.kind {
+            InnerDataTypeValidatorKind::Map(kv, state) => match state {
+                MapValidatorState::Key => Some(From::from(&*kv[0])),
+                MapValidatorState::Value => Some(From::from(&*kv[1])),
+            },
+            InnerDataTypeValidatorKind::MapAsSequence(kv, state) => match state {
+                MapAsSequenceValidatorState::Tuple | MapAsSequenceValidatorState::Key => {
+                    Some(From::from(&*kv[0]))
+                }
+                MapAsSequenceValidatorState::Value => Some(From::from(&*kv[1])),
+            },
+            InnerDataTypeValidatorKind::Array(inner_type) => Some(From::from(*inner_type)),
+            InnerDataTypeValidatorKind::Nullable(inner_type) => Some(From::from(*inner_type)),
+            InnerDataTypeValidatorKind::Tuple(elements_types) => {
+                Some(From::from(&elements_types[0]))
+            }
+            InnerDataTypeValidatorKind::FixedString(_len) => None,
+            InnerDataTypeValidatorKind::RootTuple(columns, current_index) => {
+                Some(From::from(&columns[*current_index].data_type))
+            }
+            InnerDataTypeValidatorKind::RootArray(inner_data_type) => {
+                Some(From::from(*inner_data_type))
+            }
+            InnerDataTypeValidatorKind::Variant(possible_types, state) => match state {
+                VariantValidationState::Pending => {
+                    unreachable!()
+                }
+                VariantValidationState::Identifier(value) => {
+                    let data_type = &possible_types[*value as usize];
+                    Some(From::from(data_type))
+                }
+            },
+            InnerDataTypeValidatorKind::Enum(_values_map) => {
+                unreachable!()
+            }
+        }
     }
 }
 
@@ -638,6 +712,14 @@ impl<R: Row> SchemaValidator<R> for () {
     fn get_schema_index(&self, _struct_idx: usize) -> usize {
         unreachable!()
     }
+
+    fn get_field_name(&self, _struct_idx: usize) -> Option<&'static str> {
+        unreachable!()
+    }
+
+    fn peek(&self) -> Option<SerdeType> {
+        unreachable!()
+    }
 }
 
 /// Which Serde data type (De)serializer used for the given type.
@@ -675,6 +757,51 @@ pub(crate) enum SerdeType {
     // TupleStruct,
     // UnitStruct,
     // IgnoredAny,
+}
+
+impl From<&DataTypeNode> for SerdeType {
+    fn from(data_type: &DataTypeNode) -> Self {
+        match dbg!(data_type.remove_low_cardinality()) {
+            DataTypeNode::Bool => SerdeType::Bool,
+            DataTypeNode::Int8 | DataTypeNode::Enum(EnumType::Enum8, _) => SerdeType::I8,
+            DataTypeNode::Int16 | DataTypeNode::Enum(EnumType::Enum16, _) => SerdeType::I16,
+            DataTypeNode::Int32
+            | DataTypeNode::Date32
+            | DataTypeNode::Time
+            | DataTypeNode::Decimal(_, _, DecimalType::Decimal32) => SerdeType::I32,
+            DataTypeNode::Int64
+            | DataTypeNode::DateTime64(_, _)
+            | DataTypeNode::Time64(_)
+            | DataTypeNode::Decimal(_, _, DecimalType::Decimal64)
+            | DataTypeNode::Interval(_) => SerdeType::I64,
+            DataTypeNode::Int128 | DataTypeNode::Decimal(_, _, DecimalType::Decimal128) => {
+                SerdeType::I128
+            }
+            DataTypeNode::UInt8 => SerdeType::U8,
+            DataTypeNode::UInt16 | DataTypeNode::Date => SerdeType::U16,
+            DataTypeNode::UInt32 | DataTypeNode::DateTime(_) | DataTypeNode::IPv4 => SerdeType::U32,
+            DataTypeNode::UInt64 => SerdeType::U64,
+            DataTypeNode::UInt128 => SerdeType::U128,
+            DataTypeNode::Float32 => SerdeType::F32,
+            DataTypeNode::Float64 => SerdeType::F64,
+            DataTypeNode::String | DataTypeNode::JSON => SerdeType::String,
+            DataTypeNode::Nullable(_) => SerdeType::Option,
+            DataTypeNode::Array(_)
+            | DataTypeNode::Ring
+            | DataTypeNode::Polygon
+            | DataTypeNode::MultiPolygon
+            | DataTypeNode::LineString
+            | DataTypeNode::MultiLineString => SerdeType::Seq(0),
+            DataTypeNode::Tuple(elements) => SerdeType::Tuple(elements.len()),
+            DataTypeNode::FixedString(len) => SerdeType::Tuple(*len),
+            DataTypeNode::IPv6 => SerdeType::Tuple(16),
+            DataTypeNode::UUID => SerdeType::Tuple(UUID_TUPLE_ELEMENTS.len()),
+            DataTypeNode::Point => SerdeType::Tuple(POINT_TUPLE_ELEMENTS.len()),
+            DataTypeNode::Map(_) => SerdeType::Map(0),
+            DataTypeNode::Variant(_) => SerdeType::Enum,
+            _ => unimplemented!(),
+        }
+    }
 }
 
 impl Display for SerdeType {
