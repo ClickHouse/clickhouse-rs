@@ -41,6 +41,9 @@ jobs:
       - run: cargo update -p zerofrom --precise 0.1.5 # 0.1.6 requires rustc 1.81
       - run: cargo update -p lz4_flex --precise 0.11.3 # 0.11.4 requires rustc 1.81
       - run: cargo update -p url --precise 2.5.0 # 2.5.4 requires rustc 1.82
+      - run: cargo update -p deranged --precise 0.4.0 # 0.5.x requires rustc 1.81
+      - run: cargo update -p time --precise 0.3.41 # 0.3.43 requires rustc 1.81
+      - run: cargo update -p time-core --precise 0.1.4 # 0.1.6 requires rustc 1.81
       - run: cargo build
       - run: cargo build --no-default-features
       - run: cargo build --features uuid,time,chrono
