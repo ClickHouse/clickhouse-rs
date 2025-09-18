@@ -54,4 +54,9 @@ async fn main() {
     make_insert(&client, &list).await.unwrap();
     let rows: Vec<SomeRow> = recording.collect().await;
     assert_eq!(rows, list);
+
+    // How to test unsuccessful INSERT.
+    mock.add(test::handlers::exception(209));
+    let reason = make_insert(&client, &list).await;
+    assert_eq!(format!("{reason:?}"), r#"Err(BadResponse("Code: 209"))"#);
 }

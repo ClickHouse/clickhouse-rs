@@ -6,8 +6,8 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{SinkExt, Stream};
 use futures_channel::mpsc;
+use futures_util::{SinkExt, Stream};
 use hyper::body::{Body, Frame, SizeHint};
 
 // === RequestBody ===

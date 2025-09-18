@@ -12,7 +12,7 @@ use std::{
 
 use bytes::Bytes;
 use clickhouse::error::Result;
-use futures::stream::StreamExt;
+use futures_util::stream::StreamExt;
 use http_body_util::BodyExt;
 use hyper::{
     body::{Body, Incoming},

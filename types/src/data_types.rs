@@ -66,6 +66,13 @@ pub enum DataTypeNode {
     /// Precision and optional timezone
     DateTime64(DateTimePrecision, Option<String>),
 
+    /// Time-of-day, no timezone (timezone is ignored in value operations)
+    Time,
+    /// Precision and optional timezone (timezone is ignored in value operations)
+    Time64(DateTimePrecision),
+
+    Interval(IntervalType),
+
     IPv4,
     IPv6,
 
@@ -136,6 +143,9 @@ impl DataTypeNode {
             str if str.starts_with("Decimal") => parse_decimal(str),
             str if str.starts_with("DateTime64") => parse_datetime64(str),
             str if str.starts_with("DateTime") => parse_datetime(str),
+            str if str.starts_with("Time64") => parse_time64(str),
+            str if str.starts_with("Time") => Ok(Self::Time),
+            str if str.starts_with("Interval") => Ok(Self::Interval(str[8..].parse()?)),
 
             str if str.starts_with("Nullable") => parse_nullable(str),
             str if str.starts_with("LowCardinality") => parse_low_cardinality(str),
@@ -172,79 +182,101 @@ impl From<DataTypeNode> for String {
 impl Display for DataTypeNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         use DataTypeNode::*;
-        let str = match self {
-            UInt8 => "UInt8".to_string(),
-            UInt16 => "UInt16".to_string(),
-            UInt32 => "UInt32".to_string(),
-            UInt64 => "UInt64".to_string(),
-            UInt128 => "UInt128".to_string(),
-            UInt256 => "UInt256".to_string(),
-            Int8 => "Int8".to_string(),
-            Int16 => "Int16".to_string(),
-            Int32 => "Int32".to_string(),
-            Int64 => "Int64".to_string(),
-            Int128 => "Int128".to_string(),
-            Int256 => "Int256".to_string(),
-            Float32 => "Float32".to_string(),
-            Float64 => "Float64".to_string(),
-            BFloat16 => "BFloat16".to_string(),
+        match self {
+            UInt8 => write!(f, "UInt8"),
+            UInt16 => write!(f, "UInt16"),
+            UInt32 => write!(f, "UInt32"),
+            UInt64 => write!(f, "UInt64"),
+            UInt128 => write!(f, "UInt128"),
+            UInt256 => write!(f, "UInt256"),
+            Int8 => write!(f, "Int8"),
+            Int16 => write!(f, "Int16"),
+            Int32 => write!(f, "Int32"),
+            Int64 => write!(f, "Int64"),
+            Int128 => write!(f, "Int128"),
+            Int256 => write!(f, "Int256"),
+            Float32 => write!(f, "Float32"),
+            Float64 => write!(f, "Float64"),
+            BFloat16 => write!(f, "BFloat16"),
             Decimal(precision, scale, _) => {
-                format!("Decimal({precision}, {scale})")
+                write!(f, "Decimal({precision}, {scale})")
             }
-            String => "String".to_string(),
-            UUID => "UUID".to_string(),
-            Date => "Date".to_string(),
-            Date32 => "Date32".to_string(),
-            DateTime(None) => "DateTime".to_string(),
-            DateTime(Some(tz)) => format!("DateTime('{tz}')"),
-            DateTime64(precision, None) => format!("DateTime64({precision})"),
-            DateTime64(precision, Some(tz)) => format!("DateTime64({precision}, '{tz}')"),
-            IPv4 => "IPv4".to_string(),
-            IPv6 => "IPv6".to_string(),
-            Bool => "Bool".to_string(),
-            Nullable(inner) => format!("Nullable({inner})"),
-            Array(inner) => format!("Array({inner})"),
+            String => write!(f, "String"),
+            UUID => write!(f, "UUID"),
+            Date => write!(f, "Date"),
+            Date32 => write!(f, "Date32"),
+            DateTime(None) => write!(f, "DateTime"),
+            DateTime(Some(tz)) => write!(f, "DateTime('{tz}')"),
+            DateTime64(precision, None) => write!(f, "DateTime64({precision})"),
+            DateTime64(precision, Some(tz)) => write!(f, "DateTime64({precision}, '{tz}')"),
+            Time => write!(f, "Time"),
+            Time64(precision) => write!(f, "Time64({precision})"),
+            Interval(interval) => write!(f, "Interval{interval}"),
+            IPv4 => write!(f, "IPv4"),
+            IPv6 => write!(f, "IPv6"),
+            Bool => write!(f, "Bool"),
+            Nullable(inner) => write!(f, "Nullable({inner})"),
+            Array(inner) => write!(f, "Array({inner})"),
             Tuple(elements) => {
-                let elements_str = data_types_to_string(elements);
-                format!("Tuple({elements_str})")
+                write!(f, "Tuple(")?;
+                for (i, element) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{element}")?;
+                }
+                write!(f, ")")
             }
             Map([key, value]) => {
-                format!("Map({key}, {value})")
+                write!(f, "Map({key}, {value})")
             }
             LowCardinality(inner) => {
-                format!("LowCardinality({inner})")
+                write!(f, "LowCardinality({inner})")
             }
             Enum(enum_type, values) => {
                 let mut values_vec = values.iter().collect::<Vec<_>>();
                 values_vec.sort_by(|(i1, _), (i2, _)| (*i1).cmp(*i2));
-                let values_str = values_vec
-                    .iter()
-                    .map(|(index, name)| format!("'{name}' = {index}"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{enum_type}({values_str})")
+                write!(f, "{enum_type}(")?;
+                for (i, (index, name)) in values_vec.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "'{name}' = {index}")?;
+                }
+                write!(f, ")")
             }
             AggregateFunction(func_name, args) => {
-                let args_str = data_types_to_string(args);
-                format!("AggregateFunction({func_name}, {args_str})")
+                write!(f, "AggregateFunction({func_name}, ")?;
+                for (i, element) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{element}")?;
+                }
+                write!(f, ")")
             }
             FixedString(size) => {
-                format!("FixedString({size})")
+                write!(f, "FixedString({size})")
             }
             Variant(types) => {
-                let types_str = data_types_to_string(types);
-                format!("Variant({types_str})")
+                write!(f, "Variant(")?;
+                for (i, element) in types.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{element}")?;
+                }
+                write!(f, ")")
             }
-            JSON => "JSON".to_string(),
-            Dynamic => "Dynamic".to_string(),
-            Point => "Point".to_string(),
-            Ring => "Ring".to_string(),
-            LineString => "LineString".to_string(),
-            MultiLineString => "MultiLineString".to_string(),
-            Polygon => "Polygon".to_string(),
-            MultiPolygon => "MultiPolygon".to_string(),
-        };
-        write!(f, "{str}")
+            JSON => write!(f, "JSON"),
+            Dynamic => write!(f, "Dynamic"),
+            Point => write!(f, "Point"),
+            Ring => write!(f, "Ring"),
+            LineString => write!(f, "LineString"),
+            MultiLineString => write!(f, "MultiLineString"),
+            Polygon => write!(f, "Polygon"),
+            MultiPolygon => write!(f, "MultiPolygon"),
+        }
     }
 }
 
@@ -340,9 +372,9 @@ impl DecimalType {
         } else if precision <= 76 {
             Ok(DecimalType::Decimal256)
         } else {
-            return Err(TypesError::TypeParsingError(format!(
+            Err(TypesError::TypeParsingError(format!(
                 "Invalid Decimal precision: {precision}"
-            )));
+            )))
         }
     }
 }
@@ -364,12 +396,63 @@ impl Display for DateTimePrecision {
     }
 }
 
-fn data_types_to_string(elements: &[DataTypeNode]) -> String {
-    elements
-        .iter()
-        .map(|a| a.to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
+/// Represents the type of an interval.
+/// See also: <https://clickhouse.com/docs/sql-reference/data-types/special-data-types/interval>
+#[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
+pub enum IntervalType {
+    Nanosecond,
+    Microsecond,
+    Millisecond,
+    Second,
+    Minute,
+    Hour,
+    Day,
+    Week,
+    Month,
+    Quarter,
+    Year,
+}
+
+impl std::str::FromStr for IntervalType {
+    type Err = TypesError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Nanosecond" => Ok(IntervalType::Nanosecond),
+            "Microsecond" => Ok(IntervalType::Microsecond),
+            "Millisecond" => Ok(IntervalType::Millisecond),
+            "Second" => Ok(IntervalType::Second),
+            "Minute" => Ok(IntervalType::Minute),
+            "Hour" => Ok(IntervalType::Hour),
+            "Day" => Ok(IntervalType::Day),
+            "Week" => Ok(IntervalType::Week),
+            "Month" => Ok(IntervalType::Month),
+            "Quarter" => Ok(IntervalType::Quarter),
+            "Year" => Ok(IntervalType::Year),
+            _ => Err(TypesError::TypeParsingError(format!(
+                "Unknown interval type: {s}"
+            ))),
+        }
+    }
+}
+
+impl Display for IntervalType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nanosecond => write!(f, "Nanosecond"),
+            Self::Microsecond => write!(f, "Microsecond"),
+            Self::Millisecond => write!(f, "Millisecond"),
+            Self::Second => write!(f, "Second"),
+            Self::Minute => write!(f, "Minute"),
+            Self::Hour => write!(f, "Hour"),
+            Self::Day => write!(f, "Day"),
+            Self::Week => write!(f, "Week"),
+            Self::Month => write!(f, "Month"),
+            Self::Quarter => write!(f, "Quarter"),
+            Self::Year => write!(f, "Year"),
+        }
+    }
 }
 
 fn parse_fixed_string(input: &str) -> Result<DataTypeNode, TypesError> {
@@ -488,6 +571,21 @@ fn parse_datetime64(input: &str) -> Result<DataTypeNode, TypesError> {
     }
     Err(TypesError::TypeParsingError(format!(
         "Invalid DateTime format, expected DateTime('timezone'), got {input}"
+    )))
+}
+
+fn parse_time64(input: &str) -> Result<DataTypeNode, TypesError> {
+    if input.len() >= 8 {
+        let mut chars = input[7..input.len() - 1].chars();
+        let precision_char = chars.next().ok_or(TypesError::TypeParsingError(format!(
+            "Invalid Time64 precision, expected a positive number. Input: {input}"
+        )))?;
+        let precision = DateTimePrecision::new(precision_char)?;
+
+        return Ok(DataTypeNode::Time64(precision));
+    }
+    Err(TypesError::TypeParsingError(format!(
+        "Invalid Time64 format, expected Time64(precision, 'timezone'), got {input}"
     )))
 }
 
@@ -722,6 +820,107 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_aggregate_function_display() {
+        let simple = DataTypeNode::AggregateFunction("sum".to_string(), vec![DataTypeNode::UInt64]);
+        assert_eq!(simple.to_string(), "AggregateFunction(sum, UInt64)");
+
+        let complex = DataTypeNode::AggregateFunction(
+            "groupArray".to_string(),
+            vec![
+                DataTypeNode::String,
+                DataTypeNode::UInt32,
+                DataTypeNode::Nullable(Box::new(DataTypeNode::Float64)),
+            ],
+        );
+        assert_eq!(
+            complex.to_string(),
+            "AggregateFunction(groupArray, String, UInt32, Nullable(Float64))"
+        );
+    }
+
+    #[test]
+    fn test_tuple_display() {
+        let empty = DataTypeNode::Tuple(vec![]);
+        assert_eq!(empty.to_string(), "Tuple()");
+
+        let single = DataTypeNode::Tuple(vec![DataTypeNode::String]);
+        assert_eq!(single.to_string(), "Tuple(String)");
+
+        let multiple = DataTypeNode::Tuple(vec![
+            DataTypeNode::UInt64,
+            DataTypeNode::String,
+            DataTypeNode::DateTime(None),
+            DataTypeNode::Array(Box::new(DataTypeNode::Int32)),
+        ]);
+        assert_eq!(
+            multiple.to_string(),
+            "Tuple(UInt64, String, DateTime, Array(Int32))"
+        );
+    }
+
+    #[test]
+    fn test_enum_display() {
+        let mut values1 = HashMap::new();
+        values1.insert(1, "one".to_string());
+        values1.insert(2, "two".to_string());
+        values1.insert(3, "three".to_string());
+
+        let simple_enum = DataTypeNode::Enum(EnumType::Enum8, values1);
+        assert_eq!(
+            simple_enum.to_string(),
+            "Enum8('one' = 1, 'two' = 2, 'three' = 3)"
+        );
+
+        // Enum with unordered values (should sort by index)
+        let mut values2 = HashMap::new();
+        values2.insert(10, "ten".to_string());
+        values2.insert(1, "one".to_string());
+        values2.insert(5, "five".to_string());
+
+        let ordered_enum = DataTypeNode::Enum(EnumType::Enum16, values2);
+        assert_eq!(
+            ordered_enum.to_string(),
+            "Enum16('one' = 1, 'five' = 5, 'ten' = 10)"
+        );
+    }
+
+    #[test]
+    fn test_variant_display() {
+        // Empty variant
+        let empty = DataTypeNode::Variant(vec![]);
+        assert_eq!(empty.to_string(), "Variant()");
+
+        // Single type variant
+        let single = DataTypeNode::Variant(vec![DataTypeNode::String]);
+        assert_eq!(single.to_string(), "Variant(String)");
+
+        // Multiple types variant
+        let multiple = DataTypeNode::Variant(vec![
+            DataTypeNode::UInt64,
+            DataTypeNode::String,
+            DataTypeNode::Nullable(Box::new(DataTypeNode::DateTime(None))),
+            DataTypeNode::Array(Box::new(DataTypeNode::Int32)),
+        ]);
+        assert_eq!(
+            multiple.to_string(),
+            "Variant(UInt64, String, Nullable(DateTime), Array(Int32))"
+        );
+
+        // Nested variant
+        let nested = DataTypeNode::Variant(vec![
+            DataTypeNode::Tuple(vec![DataTypeNode::String, DataTypeNode::UInt64]),
+            DataTypeNode::Map([
+                Box::new(DataTypeNode::String),
+                Box::new(DataTypeNode::Int32),
+            ]),
+        ]);
+        assert_eq!(
+            nested.to_string(),
+            "Variant(Tuple(String, UInt64), Map(String, Int32))"
+        );
+    }
+
+    #[test]
     fn test_data_type_new_simple() {
         assert_eq!(DataTypeNode::new("UInt8").unwrap(), DataTypeNode::UInt8);
         assert_eq!(DataTypeNode::new("UInt16").unwrap(), DataTypeNode::UInt16);
@@ -922,6 +1121,130 @@ mod tests {
         );
         assert!(DataTypeNode::new("DateTime64()").is_err());
         assert!(DataTypeNode::new("DateTime64(x)").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_time() {
+        assert_eq!(DataTypeNode::new("Time").unwrap(), DataTypeNode::Time);
+        assert_eq!(
+            DataTypeNode::new("Time('UTC')").unwrap(),
+            DataTypeNode::Time
+        );
+        assert_eq!(
+            DataTypeNode::new("Time('America/New_York')").unwrap(),
+            DataTypeNode::Time
+        );
+        assert_eq!(DataTypeNode::new("Time()").unwrap(), DataTypeNode::Time);
+    }
+
+    #[test]
+    fn test_data_type_new_time64() {
+        assert_eq!(
+            DataTypeNode::new("Time64(0)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision0)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(1)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision1)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(2)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision2)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(3)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision3)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(4)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision4)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(5)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision5)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(6)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision6)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(7)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision7)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(8)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision8)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(9)").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision9)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision0)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(3, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision3)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision6)
+        );
+        assert_eq!(
+            DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
+            DataTypeNode::Time64(DateTimePrecision::Precision9)
+        );
+        assert!(DataTypeNode::new("Time64()").is_err());
+        assert!(DataTypeNode::new("Time64(x)").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_interval() {
+        assert_eq!(
+            DataTypeNode::new("IntervalNanosecond").unwrap(),
+            DataTypeNode::Interval(IntervalType::Nanosecond)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalMicrosecond").unwrap(),
+            DataTypeNode::Interval(IntervalType::Microsecond)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalMillisecond").unwrap(),
+            DataTypeNode::Interval(IntervalType::Millisecond)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalSecond").unwrap(),
+            DataTypeNode::Interval(IntervalType::Second)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalMinute").unwrap(),
+            DataTypeNode::Interval(IntervalType::Minute)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalHour").unwrap(),
+            DataTypeNode::Interval(IntervalType::Hour)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalDay").unwrap(),
+            DataTypeNode::Interval(IntervalType::Day)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalWeek").unwrap(),
+            DataTypeNode::Interval(IntervalType::Week)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalMonth").unwrap(),
+            DataTypeNode::Interval(IntervalType::Month)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalQuarter").unwrap(),
+            DataTypeNode::Interval(IntervalType::Quarter)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalYear").unwrap(),
+            DataTypeNode::Interval(IntervalType::Year)
+        );
     }
 
     #[test]
@@ -1331,6 +1654,54 @@ mod tests {
     }
 
     #[test]
+    fn test_interval_to_string() {
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Nanosecond).to_string(),
+            "IntervalNanosecond"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Microsecond).to_string(),
+            "IntervalMicrosecond"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Millisecond).to_string(),
+            "IntervalMillisecond"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Second).to_string(),
+            "IntervalSecond"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Minute).to_string(),
+            "IntervalMinute"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Hour).to_string(),
+            "IntervalHour"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Day).to_string(),
+            "IntervalDay"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Week).to_string(),
+            "IntervalWeek"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Month).to_string(),
+            "IntervalMonth"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Quarter).to_string(),
+            "IntervalQuarter"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Year).to_string(),
+            "IntervalYear"
+        );
+    }
+
+    #[test]
     fn test_data_type_node_into_string() {
         let data_type = DataTypeNode::new("Array(Int32)").unwrap();
         let data_type_string: String = data_type.into();
@@ -1362,6 +1733,60 @@ mod tests {
         assert_eq!(DecimalType::Decimal64.to_string(), "Decimal64");
         assert_eq!(DecimalType::Decimal128.to_string(), "Decimal128");
         assert_eq!(DecimalType::Decimal256.to_string(), "Decimal256");
+    }
+
+    #[test]
+    fn test_time_time64_roundtrip_and_edges() {
+        use super::DateTimePrecision::*;
+
+        // Valid "Time" type (no precision, no timezone)
+        assert_eq!(DataTypeNode::new("Time").unwrap(), DataTypeNode::Time);
+
+        // "Time" should ignore timezones – they are parsed but discarded
+        assert_eq!(
+            DataTypeNode::new("Time('UTC')").unwrap(),
+            DataTypeNode::Time
+        );
+        assert_eq!(
+            DataTypeNode::new("Time('Europe/Moscow')").unwrap(),
+            DataTypeNode::Time
+        );
+
+        // Time64 with precision 0 (seconds)
+        assert_eq!(
+            DataTypeNode::new("Time64(0)").unwrap(),
+            DataTypeNode::Time64(Precision0)
+        );
+
+        // Time64 with precision 9 and a timezone (timezone ignored)
+        assert_eq!(
+            DataTypeNode::new("Time64(9, 'Europe/Amsterdam')").unwrap(),
+            DataTypeNode::Time64(Precision9)
+        );
+
+        // Time64 with precision 0 and timezone (again, timezone ignored)
+        assert_eq!(
+            DataTypeNode::new("Time64(0, 'UTC')").unwrap(),
+            DataTypeNode::Time64(Precision0)
+        );
+
+        // Time64 with precision 3 (milliseconds), no timezone
+        assert_eq!(
+            DataTypeNode::new("Time64(3)").unwrap(),
+            DataTypeNode::Time64(Precision3)
+        );
+
+        // Time64 with precision 6 (microseconds), timezone present but ignored
+        assert_eq!(
+            DataTypeNode::new("Time64(6, 'America/New_York')").unwrap(),
+            DataTypeNode::Time64(Precision6)
+        );
+
+        // Invalid: Empty argument list
+        assert!(DataTypeNode::new("Time64()").is_err());
+
+        // Invalid: Non-numeric precision
+        assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
     const ENUM_WITH_ESCAPING_STR: &str =
