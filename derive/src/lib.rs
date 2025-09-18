@@ -1,3 +1,4 @@
+use crate::attributes::Attributes;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use serde_derive_internals::{
@@ -10,24 +11,6 @@ mod attributes;
 
 #[cfg(test)]
 mod tests;
-
-struct Attributes {
-    row: attributes::Row,
-}
-
-impl From<&[syn::Attribute]> for Attributes {
-    fn from(attrs: &[syn::Attribute]) -> Self {
-        let mut row = None;
-        for attr in attrs {
-            if let Ok(r) = attributes::Row::try_from(attr) {
-                row = Some(r);
-            }
-        }
-        Self {
-            row: row.unwrap_or_default(),
-        }
-    }
-}
 
 fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> Result<TokenStream> {
     Ok(match &data.fields {
@@ -58,7 +41,7 @@ fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> Result<T
 
 // TODO: support wrappers `Wrapper(Inner)` and `Wrapper<T>(T)`.
 // TODO: support the `nested` attribute.
-#[proc_macro_derive(Row, attributes(row))]
+#[proc_macro_derive(Row, attributes(clickhouse))]
 pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     row_impl(input)
@@ -68,9 +51,9 @@ pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 fn row_impl(input: DeriveInput) -> Result<TokenStream> {
     let cx = Ctxt::new();
-    let Attributes {
-        row: attributes::Row { crate_path },
-    } = Attributes::from(input.attrs.as_slice());
+
+    let Attributes { crate_path } = input.attrs[..].try_into()?;
+
     let container = Container::from_ast(&cx, &input);
     let name = input.ident;
 
@@ -111,13 +94,13 @@ fn row_impl(input: DeriveInput) -> Result<TokenStream> {
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    let expanded = quote! {
+    Ok(quote! {
         #[automatically_derived]
         impl #impl_generics #crate_path::Row for #name #ty_generics #where_clause {
             const NAME: &'static str = stringify!(#name);
             const COLUMN_NAMES: &'static [&'static str] = #column_names;
-            const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
-            const KIND: clickhouse::_priv::RowKind = clickhouse::_priv::RowKind::Struct;
+            const COLUMN_COUNT: usize = <Self as #crate_path::Row>::COLUMN_NAMES.len();
+            const KIND: #crate_path::_priv::RowKind = #crate_path::_priv::RowKind::Struct;
 
             type Value<'__v> = #value;
         }

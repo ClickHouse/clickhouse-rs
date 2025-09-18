@@ -156,7 +156,7 @@ mod tests {
 
     #[allow(unused)]
     #[derive(Row)]
-    #[row(crate = crate)]
+    #[clickhouse(crate = "crate")]
     struct Row {
         a: u32,
         b: u32,
@@ -164,7 +164,7 @@ mod tests {
 
     #[allow(unused)]
     #[derive(Row)]
-    #[row(crate = crate)]
+    #[clickhouse(crate = "crate")]
     struct Unnamed(u32, u32);
 
     #[test]

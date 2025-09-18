@@ -284,14 +284,14 @@ mod tests {
     #[test]
     fn it_grabs_simple_struct() {
         #[derive(Row)]
-        #[row(crate = crate)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct Simple1 {
             one: u32,
         }
 
         #[derive(Row)]
-        #[row(crate = crate)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct Simple2 {
             one: u32,
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn it_grabs_mix() {
         #[derive(Row)]
-        #[row(crate = crate)]
+        #[clickhouse(crate = "crate")]
         struct SomeRow {
             _a: u32,
         }
@@ -318,7 +318,7 @@ mod tests {
         use serde::Serialize;
 
         #[derive(Row, Serialize)]
-        #[row(crate = crate)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct TopLevel {
             #[serde(rename = "two")]
@@ -333,7 +333,7 @@ mod tests {
         use serde::Serialize;
 
         #[derive(Row, Serialize)]
-        #[row(crate = crate)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct TopLevel {
             one: u32,
@@ -349,7 +349,7 @@ mod tests {
         use serde::Deserialize;
 
         #[derive(Row, Deserialize)]
-        #[row(crate = crate)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct TopLevel {
             one: u32,
@@ -364,7 +364,7 @@ mod tests {
     fn it_rejects_other() {
         #[allow(dead_code)]
         #[derive(Row)]
-        #[row(crate = crate)]
+        #[clickhouse(crate = "crate")]
         struct NamedTuple(u32, u32);
 
         assert_eq!(join_column_names::<u32>(), None);
@@ -377,7 +377,7 @@ mod tests {
         use serde::Serialize;
 
         #[derive(Row, Serialize)]
-        #[row(crate = crate)]
+        #[clickhouse(crate = "crate")]
         #[allow(dead_code)]
         struct MyRow {
             r#type: u32,
