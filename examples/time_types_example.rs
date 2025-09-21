@@ -1,5 +1,6 @@
 use chrono::Duration;
 use clickhouse::Client;
+use jiff::SignedDuration;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, clickhouse::Row)]
@@ -44,9 +45,30 @@ struct TimeExampleChrono {
     time64_nanos: Duration,
 }
 
+#[derive(Debug, Serialize, Deserialize, clickhouse::Row)]
+struct TimeExampleJiff {
+    #[serde(with = "clickhouse::serde::jiff::time")]
+    time_field: SignedDuration,
+
+    #[serde(with = "clickhouse::serde::jiff::time::option")]
+    time_optional: Option<SignedDuration>,
+
+    #[serde(with = "clickhouse::serde::jiff::time64::secs")]
+    time64_seconds: SignedDuration,
+
+    #[serde(with = "clickhouse::serde::jiff::time64::millis")]
+    time64_millis: SignedDuration,
+
+    #[serde(with = "clickhouse::serde::jiff::time64::micros")]
+    time64_micros: SignedDuration,
+
+    #[serde(with = "clickhouse::serde::jiff::time64::nanos")]
+    time64_nanos: SignedDuration,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::default();
+    let client = Client::default().with_url("http://localhost:8123");
 
     let create_table_sql = r#"
         CREATE TABLE IF NOT EXISTS time_example (
@@ -58,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             time64_nanos Time64(9)
         ) ENGINE = MergeTree()
         ORDER BY time_field
+        SETTINGS enable_time_time64_type = 1
     "#;
 
     client.query(create_table_sql).execute().await?;
@@ -115,6 +138,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert.end().await?;
         println!("Inserted edge case #{i}: {edge:?}");
     }
+
+    // Insert data using jiff crate
+    let time_example = TimeExampleJiff {
+        time_field: SignedDuration::new(23 * 3600 + 56 * 60, 0),
+        time_optional: Some(SignedDuration::new(3600 + 2 * 60 + 2, 0)),
+        time64_seconds: SignedDuration::new(3 * 3600 + 4 * 60 + 5, 0),
+        time64_millis: SignedDuration::new(6 * 3600 + 7 * 60 + 8, 123_000_000),
+        time64_micros: SignedDuration::new(9 * 3600 + 10 * 60 + 11, 456_789_000),
+        time64_nanos: SignedDuration::new(12 * 3600 + 13 * 60 + 14, 123_456_789),
+    };
+
+    let mut insert = client.insert::<TimeExampleJiff>("time_example")?;
+    insert.write(&time_example).await?;
+    insert.end().await?;
 
     // Query the data
     let rows: Vec<TimeExample> = client

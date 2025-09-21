@@ -3,6 +3,7 @@ use fixnum::{
     typenum::{U12, U4, U8},
     FixedPoint,
 };
+use jiff::{civil::Date as JiffDate, Timestamp};
 use rand::prelude::IndexedRandom;
 use rand::{distr::Alphanumeric, Rng};
 use std::str::FromStr;
@@ -73,6 +74,16 @@ async fn main() -> Result<()> {
                 chrono_datetime64_6    DateTime64(6),
                 chrono_datetime64_9    DateTime64(9),
                 chrono_datetime64_9_tz DateTime64(9, 'UTC'),
+
+                jiff_date            Date,
+                jiff_date32          Date32,
+                jiff_datetime        DateTime,
+                jiff_datetime_tz     DateTime('UTC'),
+                jiff_datetime64_0    DateTime64(0),
+                jiff_datetime64_3    DateTime64(3),
+                jiff_datetime64_6    DateTime64(6),
+                jiff_datetime64_9    DateTime64(9),
+                jiff_datetime64_9_tz DateTime64(9, 'UTC'),
             ) ENGINE MergeTree ORDER BY ();
         ",
         )
@@ -168,6 +179,25 @@ pub struct Row {
     pub chrono_datetime64_9: DateTime<Utc>,
     #[serde(with = "clickhouse::serde::chrono::datetime64::nanos")]
     pub chrono_datetime64_9_tz: DateTime<Utc>,
+
+    #[serde(with = "clickhouse::serde::jiff::date")]
+    pub jiff_date: JiffDate,
+    #[serde(with = "clickhouse::serde::jiff::date32")]
+    pub jiff_date32: JiffDate,
+    #[serde(with = "clickhouse::serde::jiff::datetime")]
+    pub jiff_datetime: Timestamp,
+    #[serde(with = "clickhouse::serde::jiff::datetime")]
+    pub jiff_datetime_tz: Timestamp,
+    #[serde(with = "clickhouse::serde::jiff::datetime64::secs")]
+    pub jiff_datetime64_0: Timestamp,
+    #[serde(with = "clickhouse::serde::jiff::datetime64::millis")]
+    pub jiff_datetime64_3: Timestamp,
+    #[serde(with = "clickhouse::serde::jiff::datetime64::micros")]
+    pub jiff_datetime64_6: Timestamp,
+    #[serde(with = "clickhouse::serde::jiff::datetime64::nanos")]
+    pub jiff_datetime64_9: Timestamp,
+    #[serde(with = "clickhouse::serde::jiff::datetime64::nanos")]
+    pub jiff_datetime64_9_tz: Timestamp,
 }
 
 // See ClickHouse decimal sizes: https://clickhouse.com/docs/en/sql-reference/data-types/decimal
@@ -255,6 +285,16 @@ impl Row {
             chrono_datetime64_6: Utc::now(),
             chrono_datetime64_9: Utc::now(),
             chrono_datetime64_9_tz: Utc::now(),
+
+            jiff_date: JiffDate::constant(2149, 6, 6),
+            jiff_date32: JiffDate::constant(2299, 12, 31),
+            jiff_datetime: Timestamp::now(),
+            jiff_datetime_tz: Timestamp::now(),
+            jiff_datetime64_0: Timestamp::now(),
+            jiff_datetime64_3: Timestamp::now(),
+            jiff_datetime64_6: Timestamp::now(),
+            jiff_datetime64_9: Timestamp::now(),
+            jiff_datetime64_9_tz: Timestamp::now(),
         }
     }
 }

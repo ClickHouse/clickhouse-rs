@@ -208,6 +208,7 @@ client.query("DROP TABLE IF EXISTS some").execute().await?;
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
 * `chrono` — adds `serde::chrono` to work with [chrono](https://docs.rs/chrono) crate.
+* `jiff` — adds `serde::jiff` to work with [jiff](https://docs.rs/jiff) crate.
 
 ### TLS
 By default, TLS is disabled and one or more following features must be enabled to use HTTPS urls:
@@ -316,6 +317,7 @@ How to choose between all these features? Here are some considerations:
 * `Date` maps to/from `u16` or a newtype around it and represents a number of days elapsed since `1970-01-01`. The following external types are supported: 
     * [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date`, requiring the `time` feature. 
     * [`chrono::NaiveDate`](https://docs.rs/chrono/latest/chrono/struct.NaiveDate.html) is supported by using `serde::chrono::date`, requiring the `chrono` feature. 
+    * [`jiff::civil::Date`](https://docs.rs/jiff/latest/jiff/civil/struct.Date.html) is supported by using `serde::jiff::date`, requiring the `jiff` feature.
     <details>
     <summary>Example</summary>
 
@@ -324,10 +326,13 @@ How to choose between all these features? Here are some considerations:
     struct MyRow {
         days: u16,
         #[serde(with = "clickhouse::serde::time::date")]
-        date: Date,
+        date: time::Date,
         // if you prefer using chrono:
         #[serde(with = "clickhouse::serde::chrono::date")]
         date_chrono: NaiveDate,
+        // if you prefer using jiff:
+        #[serde(with = "clickhouse::serde::jiff::date")]
+        date_jiff: jiff::civil::Date,
     }
 
     ```
@@ -335,6 +340,7 @@ How to choose between all these features? Here are some considerations:
 * `Date32` maps to/from `i32` or a newtype around it and represents a number of days elapsed since `1970-01-01`. The following external types are supported: 
     * [`time::Date`](https://docs.rs/time/latest/time/struct.Date.html) is supported by using `serde::time::date32`, requiring the `time` feature. 
     * [`chrono::NaiveDate`](https://docs.rs/chrono/latest/chrono/struct.NaiveDate.html) is supported by using `serde::chrono::date32`, requiring the `chrono` feature. 
+    * [`jiff::civil::Date`](https://docs.rs/jiff/latest/jiff/civil/struct.Date.html) is supported by using `serde::jiff::date32`, requiring the `jiff` feature.
     <details>
     <summary>Example</summary>
 
@@ -343,11 +349,13 @@ How to choose between all these features? Here are some considerations:
     struct MyRow {
         days: i32,
         #[serde(with = "clickhouse::serde::time::date32")]
-        date: Date,
+        date: time::Date,
         // if you prefer using chrono:
         #[serde(with = "clickhouse::serde::chrono::date32")]
         date_chrono: NaiveDate,
-
+        // if you prefer using jiff:
+        #[serde(with = "clickhouse::serde::jiff::date32")]
+        date_jiff: jiff::civil::Date,
     }
 
     ```
@@ -355,6 +363,7 @@ How to choose between all these features? Here are some considerations:
 * `DateTime` maps to/from `u32` or a newtype around it and represents a number of seconds elapsed since UNIX epoch. The following external types are supported:
     * [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime`, requiring the `time` feature. 
     * [`chrono::DateTime<Utc>`](https://docs.rs/chrono/latest/chrono/struct.DateTime.html) is supported by using `serde::chrono::datetime`, requiring the `chrono` feature. 
+    * [`jiff::Timestamp`](https://docs.rs/jiff/latest/jiff/struct.Timestamp.html) is supported by using `serde::jiff::datetime`, requiring the `jiff` feature.
     <details>
     <summary>Example</summary>
 
@@ -366,13 +375,17 @@ How to choose between all these features? Here are some considerations:
         dt: OffsetDateTime,
         // if you prefer using chrono:
         #[serde(with = "clickhouse::serde::chrono::datetime")]
-        dt_chrono: DateTime<Utc>,        
+        dt_chrono: DateTime<Utc>,
+        // if you prefer using jiff:
+        #[serde(with = "clickhouse::serde::jiff::datetime")]
+        dt_jiff: Timestamp,
     }
     ```
     </details>
 * `DateTime64(_)` maps to/from `i64` or a newtype around it and represents a time elapsed since UNIX epoch. The following external types are supported:
     * [`time::OffsetDateTime`](https://docs.rs/time/latest/time/struct.OffsetDateTime.html) is supported by using `serde::time::datetime64::*`, requiring the `time` feature. 
     * [`chrono::DateTime<Utc>`](https://docs.rs/chrono/latest/chrono/struct.DateTime.html) is supported by using `serde::chrono::datetime64::*`, requiring the `chrono` feature. 
+    * [`jiff::Timestamp`](https://docs.rs/jiff/latest/jiff/struct.Timestamp.html) is supported by using `serde::jiff::datetime64::*`, requiring the `jiff` feature.
     <details>
     <summary>Example</summary>
 
@@ -397,31 +410,24 @@ How to choose between all these features? Here are some considerations:
         dt64us_chrono: DateTime<Utc>, // `DateTime64(6)`
         #[serde(with = "clickhouse::serde::chrono::datetime64::nanos")]
         dt64ns_chrono: DateTime<Utc>, // `DateTime64(9)`
+        // if you prefer using jiff:
+        #[serde(with = "clickhouse::serde::jiff::datetime64::secs")]
+        dt64s_jiff: Timestamp,  // `DateTime64(0)`
+        #[serde(with = "clickhouse::serde::jiff::datetime64::millis")]
+        dt64ms_jiff: Timestamp, // `DateTime64(3)`
+        #[serde(with = "clickhouse::serde::jiff::datetime64::micros")]
+        dt64us_jiff: Timestamp, // `DateTime64(6)`
+        #[serde(with = "clickhouse::serde::jiff::datetime64::nanos")]
+        dt64ns_jiff: Timestamp, // `DateTime64(9)`
     }
 
 
     ```
     </details>
 * `Time` maps to/from i32 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
-    * [`time:Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::*`, requiring the `time` feature.
-    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::*`, which is an alias to `TimeDelta`, requiring the `chrono` feature
-    <details>
-    <summary>Example</summary>
-
-    ```rust,ignore
-    #[derive(Row, Serialize, Deserialize)]
-    struct MyRow {
-        #[serde(with = "clickhouse::serde::chrono::time64::secs")]
-        t0: chrono::Duration,
-        #[serde(with = "clickhouse::serde::chrono::time64::secs::option")]
-        t0_opt: Option<chrono::Duration>,
-    }
-
-    ```
-    </details>
-* `Time64(_)` maps to/from i64 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
-    * [`time:Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::*`, requiring the `time` feature.
-    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::*`, requiring the `chrono` feature
+    * [`time::Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::time`, requiring the `time` feature.
+    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::time`, which is an alias to `TimeDelta`, requiring the `chrono` feature
+    * [`jiff::SignedDuration`](https://docs.rs/jiff/latest/jiff/struct.SignedDuration.html) is is supported by using `serde::jiff::time`, requiring the `jiff` feature.
     <details>
     <summary>Example</summary>
 
@@ -429,7 +435,53 @@ How to choose between all these features? Here are some considerations:
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::time::time")]
-        t0: Time,
+        t: time::Duration,
+        // if you prefer using chrono:
+        #[serde(with = "clickhouse::serde::chrono::time")]
+        t_chrono: chrono::Duration,
+        // if you prefer using jiff:
+        #[serde(with = "clickhouse::serde::jiff::time")]
+        t_jiff: jiff::SignedDuration,
+    }
+
+    ```
+    </details>
+* `Time64(_)` maps to/from i64 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
+    * [`time::Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::time64::*`, requiring the `time` feature.
+    * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::time64::*`, requiring the `chrono` feature
+    * [`jiff::SignedDuration`](https://docs.rs/jiff/latest/jiff/struct.SignedDuration.html) is is supported by using `serde::jiff::time64::*`, requiring the `jiff` feature.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,ignore
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::time::time64::secs")]
+        t64s: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time64::millis")]
+        t64ms: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time64::micros")]
+        t64us: time::Duration,
+        #[serde(with = "clickhouse::serde::time::time64::nanos")]
+        t64ns: time::Duration,
+        // if you prefer using chrono:
+        #[serde(with = "clickhouse::serde::chrono::time64::secs")]
+        t64s_chrono: chrono::Duration,
+        #[serde(with = "clickhouse::serde::chrono::time64::millis")]
+        t64ms_chrono: chrono::Duration,
+        #[serde(with = "clickhouse::serde::chrono::time64::micros")]
+        t64us_chrono: chrono::Duration,
+        #[serde(with = "clickhouse::serde::chrono::time64::nanos")]
+        t64ns_chrono: chrono::Duration,
+        // if you prefer using jiff:
+        #[serde(with = "clickhouse::serde::jiff::time64::secs")]
+        t64s_jiff: jiff::SignedDuration,
+        #[serde(with = "clickhouse::serde::jiff::time64::millis")]
+        t64ms_jiff: jiff::SignedDuration,
+        #[serde(with = "clickhouse::serde::jiff::time64::micros")]
+        t64us_jiff: jiff::SignedDuration,
+        #[serde(with = "clickhouse::serde::jiff::time64::nanos")]
+        t64ns_jiff: jiff::SignedDuration,
     }
 
     ```

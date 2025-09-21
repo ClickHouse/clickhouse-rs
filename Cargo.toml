@@ -72,7 +72,7 @@ required-features = ["rustls-tls"]
 
 [[example]]
 name = "data_types_derive_simple"
-required-features = ["time", "uuid", "chrono"]
+required-features = ["time", "uuid", "chrono", "jiff"]
 
 [[example]]
 name = "data_types_variant"
@@ -80,7 +80,7 @@ required-features = ["time"]
 
 [[example]]
 name = "time_types_example"
-required-features = ["time", "chrono"]
+required-features = ["time", "chrono", "jiff"]
 
 [profile.release]
 debug = true
@@ -94,6 +94,7 @@ uuid = ["dep:uuid"]
 time = ["dep:time"]
 lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
 chrono = ["dep:chrono"]
+jiff = ["dep:jiff"]
 futures03 = []
 
 ##  TLS
@@ -148,6 +149,7 @@ cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
 chrono = { version = "0.4", optional = true, features = ["serde"] }
+jiff = { version = "0.2", optional = true }
 bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
 replace_with = { version = "0.1.7" }
