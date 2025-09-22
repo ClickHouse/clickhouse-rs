@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use bytes::Bytes;
-use futures::channel::oneshot;
+use futures_channel::oneshot;
 use hyper::{Request, Response, StatusCode};
 use sealed::sealed;
 use serde::Serialize;

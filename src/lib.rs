@@ -12,8 +12,11 @@ pub use self::{
 use self::{error::Result, http_client::HttpClient};
 use crate::row_metadata::RowMetadata;
 use crate::sql::Identifier;
+
+#[doc = include_str!("row_derive.md")]
 pub use clickhouse_derive::Row;
 use clickhouse_types::parse_rbwnat_columns_header;
+
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -41,6 +44,12 @@ mod rowbinary;
 mod ticks;
 
 /// A client containing HTTP pool.
+///
+/// ### Cloning behavior
+/// Clones share the same HTTP transport but store their own configurations.
+/// Any `with_*` configuration method (e.g., [`Client::with_option`]) applies
+/// only to future clones, because [`Client::clone`] creates a deep copy
+/// of the [`Client`] configuration, except the transport.
 #[derive(Clone)]
 pub struct Client {
     http: Arc<dyn HttpClient>,
@@ -659,5 +668,19 @@ mod client_tests {
 
         assert_eq!(metadata.columns, SystemRolesRow::columns());
         assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
+    }
+
+    #[test]
+    fn it_does_follow_previous_configuration() {
+        let client = Client::default().with_option("async_insert", "1");
+        assert_eq!(client.options, client.clone().options,);
+    }
+
+    #[test]
+    fn it_does_not_follow_future_configuration() {
+        let client = Client::default();
+        let client_clone = client.clone();
+        let client = client.with_option("async_insert", "1");
+        assert_ne!(client.options, client_clone.options,);
     }
 }
