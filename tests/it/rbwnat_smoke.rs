@@ -1288,7 +1288,6 @@ async fn several_primitives_in_a_tuple() {
     );
 }
 
-
 #[tokio::test]
 async fn interval() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
