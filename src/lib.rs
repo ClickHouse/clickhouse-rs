@@ -10,7 +10,10 @@ pub use self::{
     row::{Row, RowOwned, RowRead, RowWrite},
 };
 use self::{error::Result, http_client::HttpClient};
+
+#[doc = include_str!("row_derive.md")]
 pub use clickhouse_derive::Row;
+
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 pub mod error;
