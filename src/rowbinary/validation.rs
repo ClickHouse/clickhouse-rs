@@ -467,7 +467,8 @@ fn validate_impl<'de, 'cursor, R: Row>(
                 || matches!(
                     data_type,
                     DataTypeNode::Decimal(_, _, DecimalType::Decimal64)
-                ) =>
+                )
+                || matches!(data_type, DataTypeNode::Interval(_)) =>
         {
             None
         }

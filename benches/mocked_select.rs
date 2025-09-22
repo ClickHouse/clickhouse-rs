@@ -5,7 +5,7 @@ use clickhouse::{
 };
 use clickhouse_types::{Column, DataTypeNode};
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use futures::stream::{self, StreamExt as _};
+use futures_util::stream::{self, StreamExt as _};
 use http_body_util::StreamBody;
 use hyper::{
     body::{Body, Frame, Incoming},

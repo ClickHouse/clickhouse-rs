@@ -152,12 +152,11 @@ impl SqlBuilder {
 mod tests {
     use super::*;
 
-    // XXX: need for `derive(Row)`. Provide `row(crate = ..)` instead.
-    use crate as clickhouse;
     use clickhouse_derive::Row;
 
     #[allow(unused)]
     #[derive(Row)]
+    #[clickhouse(crate = "crate")]
     struct Row {
         a: u32,
         b: u32,
@@ -165,6 +164,7 @@ mod tests {
 
     #[allow(unused)]
     #[derive(Row)]
+    #[clickhouse(crate = "crate")]
     struct Unnamed(u32, u32);
 
     #[test]

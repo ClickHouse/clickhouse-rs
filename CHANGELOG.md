@@ -45,12 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RowBinaryWithNamesAndTypes` struct definition validation, as it contains ClickHouse data types AST, as well as
   functions and utilities to parse the types out of the ClickHouse server response. ([#221]).
 - query: support serializing `serde_bytes::Bytes` as hex string literals in query parameters ([#250]).
+- derive: added `#[clickhouse(crate = "...")]` attribute for `#[derive(Row)]` ([#189]/[#292])
 
 ### Fixed
 
 - client: extract the exception code from `X-ClickHouse-Exception-Code` in case of incorrect 200 OK response 
   that could occur with ClickHouse server up to versions 24.x ([#256]).
 
+[#189]: https://github.com/ClickHouse/clickhouse-rs/pull/189
 [#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
 [#229]: https://github.com/ClickHouse/clickhouse-rs/pull/229
 [#232]: https://github.com/ClickHouse/clickhouse-rs/pull/232
@@ -61,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#250]: https://github.com/ClickHouse/clickhouse-rs/pull/250
 [#256]: https://github.com/ClickHouse/clickhouse-rs/pull/256
 [#258]: https://github.com/ClickHouse/clickhouse-rs/pull/258
+[#292]: https://github.com/ClickHouse/clickhouse-rs/pull/292
 
 ## [0.13.3] - 2025-05-29
 ### Added
