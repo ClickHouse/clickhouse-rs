@@ -1,23 +1,57 @@
 use bytes::Bytes;
+use clickhouse::{error::Result, Client, Compression, Row};
+use clickhouse_types::{Column, DataTypeNode};
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use http_body_util::Empty;
+use futures_util::stream;
+use http_body_util::StreamBody;
+use hyper::body::{Body, Frame};
 use hyper::{body::Incoming, Request, Response};
 use serde::Serialize;
+use std::convert::Infallible;
 use std::hint::black_box;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::{
     future::Future,
     mem,
     time::{Duration, Instant},
 };
 
-use clickhouse::{error::Result, Client, Compression, Row};
-
 mod common;
 
-async fn serve(request: Request<Incoming>) -> Response<Empty<Bytes>> {
+async fn serve(
+    request: Request<Incoming>,
+    compression: Compression,
+    with_validation: bool,
+) -> Response<impl Body<Data = Bytes, Error = Infallible>> {
     common::skip_incoming(request).await;
-    Response::new(Empty::new())
+
+    let bytes = if with_validation {
+        let schema = vec![
+            Column::new("a".to_string(), DataTypeNode::UInt64),
+            Column::new("b".to_string(), DataTypeNode::Int64),
+            Column::new("c".to_string(), DataTypeNode::Int32),
+            Column::new("d".to_string(), DataTypeNode::UInt32),
+            Column::new("e".to_string(), DataTypeNode::UInt64),
+            Column::new("f".to_string(), DataTypeNode::UInt32),
+            Column::new("g".to_string(), DataTypeNode::UInt64),
+            Column::new("h".to_string(), DataTypeNode::Int64),
+        ];
+
+        let mut buffer = Vec::new();
+        clickhouse_types::put_rbwnat_columns_header(&schema, &mut buffer).unwrap();
+
+        match compression {
+            Compression::None => Bytes::from(buffer),
+            #[cfg(feature = "lz4")]
+            Compression::Lz4 => clickhouse::_priv::lz4_compress(&buffer).unwrap(),
+            _ => unreachable!(),
+        }
+    } else {
+        Bytes::new()
+    };
+
+    let stream = StreamBody::new(stream::once(async { Ok(Frame::data(bytes)) }));
+    Response::new(stream)
 }
 
 #[derive(Row, Serialize)]
@@ -47,11 +81,18 @@ impl SomeRow {
     }
 }
 
-async fn run_insert(client: Client, addr: SocketAddr, iters: u64) -> Result<Duration> {
-    let _server = common::start_server(addr, serve).await;
+const ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 6524));
+
+async fn run_insert(
+    client: Client,
+    iters: u64,
+    compression: Compression,
+    validation: bool,
+) -> Result<Duration> {
+    let _server = common::start_server(ADDR, move |req| serve(req, compression, validation)).await;
 
     let start = Instant::now();
-    let mut insert = client.insert::<SomeRow>("table")?;
+    let mut insert = client.insert::<SomeRow>("table").await?;
 
     for _ in 0..iters {
         insert.write(&SomeRow::sample()).await?;
@@ -64,13 +105,14 @@ async fn run_insert(client: Client, addr: SocketAddr, iters: u64) -> Result<Dura
 #[cfg(feature = "inserter")]
 async fn run_inserter<const WITH_PERIOD: bool>(
     client: Client,
-    addr: SocketAddr,
     iters: u64,
+    compression: Compression,
+    validation: bool,
 ) -> Result<Duration> {
-    let _server = common::start_server(addr, serve).await;
+    let _server = common::start_server(ADDR, move |req| serve(req, compression, validation)).await;
 
     let start = Instant::now();
-    let mut inserter = client.inserter::<SomeRow>("table")?.with_max_rows(iters);
+    let mut inserter = client.inserter::<SomeRow>("table").with_max_rows(iters);
 
     if WITH_PERIOD {
         // Just to measure overhead, not to actually use it.
@@ -78,7 +120,7 @@ async fn run_inserter<const WITH_PERIOD: bool>(
     }
 
     for _ in 0..iters {
-        inserter.write(&SomeRow::sample())?;
+        inserter.write(&SomeRow::sample()).await?;
         inserter.commit().await?;
     }
 
@@ -86,43 +128,45 @@ async fn run_inserter<const WITH_PERIOD: bool>(
     Ok(start.elapsed())
 }
 
-fn run<F>(c: &mut Criterion, name: &str, port: u16, f: impl Fn(Client, SocketAddr, u64) -> F)
+fn run<F>(c: &mut Criterion, name: &str, f: impl Fn(Client, u64, Compression, bool) -> F)
 where
     F: Future<Output = Result<Duration>> + Send + 'static,
 {
-    let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     let runner = common::start_runner();
-
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Bytes(mem::size_of::<SomeRow>() as u64));
-    group.bench_function("uncompressed", |b| {
-        b.iter_custom(|iters| {
-            let client = Client::default()
-                .with_url(format!("http://{addr}"))
-                .with_compression(Compression::None);
-            runner.run((f)(client, addr, iters))
-        })
-    });
-    #[cfg(feature = "lz4")]
-    group.bench_function("lz4", |b| {
-        b.iter_custom(|iters| {
-            let client = Client::default()
-                .with_url(format!("http://{addr}"))
-                .with_compression(Compression::Lz4);
-            runner.run((f)(client, addr, iters))
-        })
-    });
+    for validation in [true, false] {
+        #[allow(clippy::single_element_loop)]
+        for compression in [
+            Compression::None,
+            #[cfg(feature = "lz4")]
+            Compression::Lz4,
+        ] {
+            group.bench_function(
+                format!("validation={validation}/compression={compression:?}"),
+                |b| {
+                    b.iter_custom(|iters| {
+                        let client = Client::default()
+                            .with_url(format!("http://{ADDR}"))
+                            .with_compression(compression)
+                            .with_validation(validation);
+                        runner.run((f)(client, iters, compression, validation))
+                    })
+                },
+            );
+        }
+    }
     group.finish();
 }
 
 fn insert(c: &mut Criterion) {
-    run(c, "insert", 6543, run_insert);
+    run(c, "insert", run_insert);
 }
 
 #[cfg(feature = "inserter")]
 fn inserter(c: &mut Criterion) {
-    run(c, "inserter", 6544, run_inserter::<false>);
-    run(c, "inserter-period", 6545, run_inserter::<true>);
+    run(c, "inserter", run_inserter::<false>);
+    run(c, "inserter-period", run_inserter::<true>);
 }
 
 #[cfg(not(feature = "inserter"))]

@@ -22,7 +22,7 @@ struct MyRow {
 // In other words, this pattern is applicable for ETL-like tasks.
 async fn dense(client: &Client, mut rx: Receiver<u32>) -> Result<()> {
     let mut inserter = client
-        .inserter::<MyRow>(TABLE_NAME)?
+        .inserter::<MyRow>(TABLE_NAME)
         // We limit the number of rows to be inserted in a single `INSERT` statement.
         // We use small value (100) for the example only.
         // See documentation of `with_max_rows` for details.
@@ -32,7 +32,7 @@ async fn dense(client: &Client, mut rx: Receiver<u32>) -> Result<()> {
         .with_max_bytes(1_048_576);
 
     while let Some(no) = rx.recv().await {
-        inserter.write(&MyRow { no })?;
+        inserter.write(&MyRow { no }).await?;
         inserter.commit().await?;
     }
 
@@ -47,7 +47,7 @@ async fn dense(client: &Client, mut rx: Receiver<u32>) -> Result<()> {
 // Some rows are arriving one by one with delay, some batched.
 async fn sparse(client: &Client, mut rx: Receiver<u32>) -> Result<()> {
     let mut inserter = client
-        .inserter::<MyRow>(TABLE_NAME)?
+        .inserter::<MyRow>(TABLE_NAME)
         // Slice the stream into chunks (one `INSERT` per chunk) by time.
         // See documentation of `with_period` for details.
         .with_period(Some(Duration::from_millis(100)))
@@ -85,7 +85,7 @@ async fn sparse(client: &Client, mut rx: Receiver<u32>) -> Result<()> {
             Err(TryRecvError::Disconnected) => break,
         };
 
-        inserter.write(&MyRow { no })?;
+        inserter.write(&MyRow { no }).await?;
         inserter.commit().await?;
 
         // You can use result of `commit()` to get the number of rows inserted.

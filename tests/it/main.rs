@@ -25,7 +25,7 @@
 //!   the "cloud" environment, it appends the current timestamp to allow
 //!   clean up outdated databases based on its creation time.
 
-use clickhouse::{sql::Identifier, Client, Row, RowOwned, RowRead};
+use clickhouse::{sql::Identifier, Client, Row, RowOwned, RowRead, RowWrite};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
@@ -53,6 +53,25 @@ macro_rules! assert_panic_on_fetch {
         let async_panic =
             std::panic::AssertUnwindSafe(async { client.query($query).fetch_all::<Data>().await });
         let result = async_panic.catch_unwind().await;
+        assert!(
+            result.is_err(),
+            "expected a panic, but got a result instead: {:?}",
+            result.unwrap()
+        );
+        let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
+        for &msg in $msg_parts {
+            assert!(
+                panic_msg.contains(msg),
+                "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
+            );
+        }
+    };
+}
+
+macro_rules! assert_panic_msg {
+    ($unwinded:ident, $msg_parts:expr) => {
+        use futures_util::FutureExt;
+        let result = $unwinded.catch_unwind().await;
         assert!(
             result.is_err(),
             "expected a panic, but got a result instead: {:?}",
@@ -111,7 +130,7 @@ pub(crate) fn get_cloud_url() -> String {
     format!("https://{hostname}:8443")
 }
 
-#[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
 struct SimpleRow {
     id: u64,
     data: String,
@@ -163,6 +182,48 @@ pub(crate) async fn execute_statements(client: &Client, statements: &[&str]) {
     }
 }
 
+pub(crate) async fn insert_and_select<T>(
+    client: &Client,
+    table_name: &str,
+    data: impl IntoIterator<Item = T>,
+) -> Vec<T>
+where
+    T: RowOwned + RowRead + RowWrite,
+{
+    let mut insert = client.insert::<T>(table_name).await.unwrap();
+    for row in data.into_iter() {
+        insert.write(&row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    client
+        .query("SELECT ?fields FROM ? ORDER BY () ASC")
+        .bind(Identifier(table_name))
+        .fetch_all::<T>()
+        .await
+        .unwrap()
+}
+
+pub(crate) mod geo_types {
+    // See https://clickhouse.com/docs/en/sql-reference/data-types/geo
+    pub(crate) type Point = (f64, f64);
+    pub(crate) type Ring = Vec<Point>;
+    pub(crate) type Polygon = Vec<Ring>;
+    pub(crate) type MultiPolygon = Vec<Polygon>;
+    pub(crate) type LineString = Vec<Point>;
+    pub(crate) type MultiLineString = Vec<LineString>;
+}
+
+pub(crate) mod decimals {
+    use fixnum::typenum::{U12, U4, U8};
+    use fixnum::FixedPoint;
+
+    // See ClickHouse decimal sizes: https://clickhouse.com/docs/en/sql-reference/data-types/decimal
+    pub(crate) type Decimal32 = FixedPoint<i32, U4>; // Decimal(9, 4) = Decimal32(4)
+    pub(crate) type Decimal64 = FixedPoint<i64, U8>; // Decimal(18, 8) = Decimal64(8)
+    pub(crate) type Decimal128 = FixedPoint<i128, U12>; // Decimal(38, 12) = Decimal128(12)
+}
+
 mod chrono;
 mod cloud_jwt;
 mod compression;
@@ -177,7 +238,9 @@ mod ip;
 mod mock;
 mod nested;
 mod query;
-mod rbwnat;
+mod rbwnat_header;
+mod rbwnat_smoke;
+mod rbwnat_validation;
 mod time;
 mod user_agent;
 mod uuid;

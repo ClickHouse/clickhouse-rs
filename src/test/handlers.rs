@@ -7,7 +7,7 @@ use sealed::sealed;
 use serde::Serialize;
 
 use super::{Handler, HandlerFn};
-use crate::{rowbinary, RowOwned, RowRead};
+use crate::{rowbinary, Row, RowOwned, RowRead};
 
 const BUFFER_INITIAL_CAPACITY: usize = 1024;
 
@@ -51,11 +51,11 @@ pub fn exception(code: u8) -> impl Handler {
 #[track_caller]
 pub fn provide<T>(rows: impl IntoIterator<Item = T>) -> impl Handler
 where
-    T: Serialize,
+    T: Serialize + Row,
 {
     let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
     for row in rows {
-        rowbinary::serialize_into(&mut buffer, &row).expect("failed to serialize");
+        rowbinary::serialize_row_binary(&mut buffer, &row).expect("failed to serialize");
     }
     Thunk(Response::new(buffer.into()))
 }
