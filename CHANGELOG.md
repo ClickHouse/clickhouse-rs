@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING** inserter: `Inserter::new()` return just `Self` instead of `Result<Self>`. ([#244])
 - **BREAKING** query: `RowBinaryWithNamesAndTypes` is now used by default for query results. This may cause panics if
   the row struct definition does not match the database schema. Use `Client::with_validation(false)` to revert to the
-  previous behavior which uses plain `RowBinary` format for fetching rows. ([#221])
+  previous behavior which uses plain `RowBinary` format for fetching rows. ([#221], [#244])
 - **BREAKING** mock: when using `test-util` feature, it is now required to use `Client::with_mock(&mock)` to set up the
   mock server, so it properly handles the response format and automatically disables parsing
   `RowBinaryWithNamesAndTypes` header parsing and validation. Additionally, it is not required to call `with_url`
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DashMap`, etc.).
 - tls: improved error messages in case of missing TLS features when using HTTPS ([#229]).
 - crate: MSRV is now 1.79 due to borrowed rows support redesign in [#247].
-- crate: bumped dependencies, see [#232] and [#239] for additional details.
+- crate: bumped dependencies, see [#232], [#239] and [#280] for additional details.
 
 ### Added
 
@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RowBinaryWithNamesAndTypes` struct definition validation, as it contains ClickHouse data types AST, as well as
   functions and utilities to parse the types out of the ClickHouse server response. ([#221]).
 - query: support serializing `serde_bytes::Bytes` as hex string literals in query parameters ([#250]).
-- derive: added `#[clickhouse(crate = "...")]` attribute for `#[derive(Row)]` ([#189]/[#292])
+- derive: added `#[clickhouse(crate = "...")]` attribute for `#[derive(Row)]` ([#189], [#292])
 
 ### Fixed
 
@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#250]: https://github.com/ClickHouse/clickhouse-rs/pull/250
 [#256]: https://github.com/ClickHouse/clickhouse-rs/pull/256
 [#258]: https://github.com/ClickHouse/clickhouse-rs/pull/258
+[#280]: https://github.com/ClickHouse/clickhouse-rs/pull/280
 [#292]: https://github.com/ClickHouse/clickhouse-rs/pull/292
 
 ## [0.13.3] - 2025-05-29
