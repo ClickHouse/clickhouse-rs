@@ -177,6 +177,7 @@ mod ip;
 mod mock;
 mod nested;
 mod query;
+mod query_raw;
 mod rbwnat;
 mod time;
 mod user_agent;

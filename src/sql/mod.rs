@@ -74,6 +74,9 @@ impl SqlBuilder {
 
         SqlBuilder::InProgress(parts, None)
     }
+    pub(crate) fn raw(query: &str) -> Self {
+        Self::InProgress(vec![Part::Text(query.to_string())], None)
+    }
 
     pub(crate) fn set_output_format(&mut self, format: impl Into<String>) {
         if let Self::InProgress(_, format_opt) = self {

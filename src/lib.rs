@@ -331,6 +331,24 @@ impl Client {
         query::Query::new(self, query)
     }
 
+    /// Starts a new SELECT/DDL query that will be used as-is without any processing.
+    ///
+    /// # Key Differences from `query()`
+    ///
+    /// - **No parameter binding**: Question marks are treated as literal characters
+    /// - **Raw SQL execution**: The query is sent to ClickHouse exactly as written
+    /// - **No SQL injection protection**: Since no parameter binding occurs, ensure
+    ///   your SQL is safe and doesn't contain user input
+    ///
+    /// # Parameters
+    ///
+    /// - **Input**: `&str` - the raw SQL query to be executed
+    /// - **Output**: [`query::Query`] - the query builder that executes the query
+    ///
+    pub fn query_raw(&self, query: &str) -> query::Query {
+        query::Query::raw(self, query)
+    }
+
     /// Enables or disables [`Row`] data types validation against the database schema
     /// at the cost of performance. Validation is enabled by default, and in this mode,
     /// the client will use `RowBinaryWithNamesAndTypes` format.
