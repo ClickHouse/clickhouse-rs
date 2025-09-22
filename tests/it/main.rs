@@ -70,7 +70,7 @@ macro_rules! assert_panic_on_fetch {
 
 macro_rules! assert_panic_msg {
     ($unwinded:ident, $msg_parts:expr) => {
-        use futures::FutureExt;
+        use futures_util::FutureExt;
         let result = $unwinded.catch_unwind().await;
         assert!(
             result.is_err(),

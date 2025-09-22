@@ -2,7 +2,7 @@ use bytes::Bytes;
 use clickhouse::{error::Result, Client, Compression, Row};
 use clickhouse_types::{Column, DataTypeNode};
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use futures::stream;
+use futures_util::stream;
 use http_body_util::StreamBody;
 use hyper::body::{Body, Frame};
 use hyper::{body::Incoming, Request, Response};
