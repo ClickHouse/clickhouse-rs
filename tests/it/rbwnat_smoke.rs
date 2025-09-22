@@ -1646,7 +1646,6 @@ async fn alias_columns() {
         },
     ];
 
-    // this insert fails
     let mut insert = client.insert::<DataInsert>(table_name).await.unwrap();
     for row in &rows_to_insert {
         insert.write(row).await.unwrap();
