@@ -425,9 +425,9 @@ How to choose between all these features? Here are some considerations:
     ```
     </details>
 * `Time` maps to/from i32 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
-    * [`time::Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::time`, requiring the `time` feature.
+    * [`time::Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is supported by using `serde::time::time`, requiring the `time` feature.
     * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::time`, which is an alias to `TimeDelta`, requiring the `chrono` feature
-    * [`jiff::SignedDuration`](https://docs.rs/jiff/latest/jiff/struct.SignedDuration.html) is is supported by using `serde::jiff::time`, requiring the `jiff` feature.
+    * [`jiff::SignedDuration`](https://docs.rs/jiff/latest/jiff/struct.SignedDuration.html) is supported by using `serde::jiff::time`, requiring the `jiff` feature.
     <details>
     <summary>Example</summary>
 
@@ -447,9 +447,9 @@ How to choose between all these features? Here are some considerations:
     ```
     </details>
 * `Time64(_)` maps to/from i64 or a newtype around it. The Time data type is used to store a time value independent of any calendar date. It is ideal for representing daily schedules, event times, or any situation where only the time component (hours, minutes, seconds) is important.
-    * [`time::Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is is supported by using `serde::time::time64::*`, requiring the `time` feature.
+    * [`time::Duration`](https://docs.rs/time/latest/time/struct.Duration.html) is supported by using `serde::time::time64::*`, requiring the `time` feature.
     * [`chrono::Duration`](https://docs.rs/chrono/latest/chrono/type.Duration.html) is supported by using `serde::chrono::time64::*`, requiring the `chrono` feature
-    * [`jiff::SignedDuration`](https://docs.rs/jiff/latest/jiff/struct.SignedDuration.html) is is supported by using `serde::jiff::time64::*`, requiring the `jiff` feature.
+    * [`jiff::SignedDuration`](https://docs.rs/jiff/latest/jiff/struct.SignedDuration.html) is supported by using `serde::jiff::time64::*`, requiring the `jiff` feature.
     <details>
     <summary>Example</summary>
 

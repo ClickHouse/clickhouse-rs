@@ -260,7 +260,7 @@ impl Distribution<DateWrapper> for StandardUniform {
         //
         // Causing this:
         // ```
-        // Date::MIN + DATE::MAX.duration_since(Date::MIN)
+        // Date::MIN + Date::MAX.duration_since(Date::MIN)
         // ```
         // to fail.
         //
