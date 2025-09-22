@@ -6,7 +6,6 @@ use clickhouse::Row;
 use fxhash::FxHashMap;
 use indexmap::IndexMap;
 use linked_hash_map::LinkedHashMap;
-use serde::__private::from_utf8_lossy;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
@@ -851,8 +850,8 @@ async fn fixed_str() {
 
     let result = insert_and_select(&client, "test", rows.clone()).await;
     assert_eq!(result, rows);
-    assert_eq!(from_utf8_lossy(&result[0].a), "1234");
-    assert_eq!(from_utf8_lossy(&result[0].b), "777");
+    assert_eq!(String::from_utf8_lossy(&result[0].a), "1234");
+    assert_eq!(String::from_utf8_lossy(&result[0].b), "777");
 }
 
 #[tokio::test]
