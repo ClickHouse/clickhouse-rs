@@ -1412,3 +1412,84 @@ async fn interval() {
         }
     );
 }
+
+// See https://clickhouse.com/docs/sql-reference/statements/create/table#ephemeral
+//
+// Ignored cause:
+//
+// #### All struct fields:
+// - id
+// - unhexed
+// #### All schema columns:
+// - id: UInt64
+// - hexed: FixedString(4)
+#[tokio::test]
+#[ignore]
+async fn ephemeral_columns() {
+    #[derive(Clone, Debug, Row, Serialize, PartialEq)]
+    struct DataInsert {
+        id: u64,
+        unhexed: String,
+    }
+
+    #[derive(Clone, Debug, Row, Deserialize, PartialEq)]
+    struct DataSelect {
+        id: u64,
+        hexed: [u8; 4],
+    }
+
+    let client = get_client();
+    client
+        .query(
+            "
+                CREATE OR REPLACE TABLE test
+                (
+                    id      UInt64,
+                    unhexed String         EPHEMERAL,
+                    hexed   FixedString(4) DEFAULT unhex(unhexed)
+                )
+                ENGINE = MergeTree
+                ORDER BY id
+            ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let rows_to_insert = vec![
+        DataInsert {
+            id: 1,
+            unhexed: "41424344".to_string(), // "ABCD" in hex
+        },
+        DataInsert {
+            id: 2,
+            unhexed: "31323334".to_string(), // "1234" in hex
+        },
+    ];
+
+    let mut insert = client.insert::<DataInsert>("test").await.unwrap();
+    for row in rows_to_insert.into_iter() {
+        insert.write(&row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let rows = client
+        .query("SELECT ?fields FROM test ORDER BY () ASC")
+        .fetch_all::<DataSelect>()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        rows,
+        vec![
+            DataSelect {
+                id: 1,
+                hexed: *b"ABCD",
+            },
+            DataSelect {
+                id: 2,
+                hexed: *b"1234",
+            },
+        ]
+    );
+}
