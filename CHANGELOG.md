@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING** insert: the type of `Insert<_>` should now be specified when calling `client.insert::<_>()`. ([#247])
+- **BREAKING** insert: `Client::insert()` is now async. ([#244])
+- **BREAKING** inserter: `Inserter::write()` is now async. ([#244])
+- **BREAKING** inserter: `Inserter::new()` return just `Self` instead of `Result<Self>`. ([#244])
 - **BREAKING** query: `RowBinaryWithNamesAndTypes` is now used by default for query results. This may cause panics if
   the row struct definition does not match the database schema. Use `Client::with_validation(false)` to revert to the
   previous behavior which uses plain `RowBinary` format for fetching rows. ([#221])
@@ -27,20 +31,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Client::with_validation(false)`.
 - serde: it is now possible to deserialize Map ClickHouse type into `HashMap<K, V>` (or `BTreeMap`, `IndexMap`, 
   `DashMap`, etc.).
+- tls: improved error messages in case of missing TLS features when using HTTPS ([#229]).
+- crate: MSRV is now 1.79 due to borrowed rows support redesign in [#247].
+- crate: bumped dependencies, see [#232] and [#239] for additional details.
 
 ### Added
 
+- types: added support for `Time` and `Time64` types ([#258]).
 - client: added `Client::with_validation` builder method. Validation is enabled by default, meaning that
   `RowBinaryWithNamesAndTypes` format will be used to fetch rows from the database. If validation is disabled,
   `RowBinary` format will be used, similarly to the previous versions. ([#221]).
 - types: a new crate `clickhouse-types` was added to the project workspace. This crate is required for
   `RowBinaryWithNamesAndTypes` struct definition validation, as it contains ClickHouse data types AST, as well as
   functions and utilities to parse the types out of the ClickHouse server response. ([#221]).
+- query: support serializing `serde_bytes::Bytes` as hex string literals in query parameters ([#250]).
 - derive: added `#[clickhouse(crate = "...")]` attribute for `#[derive(Row)]` ([#189]/[#292])
+
+### Fixed
+
+- client: extract the exception code from `X-ClickHouse-Exception-Code` in case of incorrect 200 OK response 
+  that could occur with ClickHouse server up to versions 24.x ([#256]).
 
 [#189]: https://github.com/ClickHouse/clickhouse-rs/pull/189
 [#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
+[#229]: https://github.com/ClickHouse/clickhouse-rs/pull/229
+[#232]: https://github.com/ClickHouse/clickhouse-rs/pull/232
+[#239]: https://github.com/ClickHouse/clickhouse-rs/pull/239
+[#244]: https://github.com/ClickHouse/clickhouse-rs/pull/244
 [#245]: https://github.com/ClickHouse/clickhouse-rs/pull/245
+[#247]: https://github.com/ClickHouse/clickhouse-rs/pull/247
+[#250]: https://github.com/ClickHouse/clickhouse-rs/pull/250
+[#256]: https://github.com/ClickHouse/clickhouse-rs/pull/256
+[#258]: https://github.com/ClickHouse/clickhouse-rs/pull/258
 [#292]: https://github.com/ClickHouse/clickhouse-rs/pull/292
 
 ## [0.13.3] - 2025-05-29
