@@ -11,7 +11,7 @@ env:
   RUSTFLAGS: -Dwarnings
   RUSTDOCFLAGS: -Dwarnings
   RUST_BACKTRACE: 1
-  MSRV: 1.79.0
+  # note: MSRV now tracked in `rust-toolchain.toml`
 
 jobs:
   build:
@@ -23,31 +23,21 @@ jobs:
       - run: cargo build --all-targets --no-default-features
       - run: cargo build --all-targets --all-features
 
-  msrv:
+  # Ensure project builds with minimum specified dependency versions
+  minimal-versions:
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "" # remove -Dwarnings
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install ${{ env.MSRV }} --profile minimal
-      - run: rustup override set ${{ env.MSRV }}
       - run: rustup show active-toolchain -v
-      # URL 2.5.4 -> ICU4X 2.x require rustc 1.82
-      # See https://github.com/servo/rust-url?tab=readme-ov-file#alternative-unicode-back-ends
-      #     https://github.com/hsivonen/idna_adapter?tab=readme-ov-file#icu4x-as-the-default
-      - run: cargo update -p idna_adapter --precise 1.2.0
-      - run: cargo update -p native-tls --precise 0.2.13 # 0.2.14 requires rustc 1.80
-      - run: cargo update -p litemap --precise 0.7.4 # 0.7.5 requires rustc 1.81
-      - run: cargo update -p zerofrom --precise 0.1.5 # 0.1.6 requires rustc 1.81
-      - run: cargo update -p lz4_flex --precise 0.11.3 # 0.11.4 requires rustc 1.81
-      - run: cargo update -p url --precise 2.5.0 # 2.5.4 requires rustc 1.82
-      - run: cargo update -p time --precise 0.3.41 # 0.3.43 requires rustc 1.81
-      - run: cargo update -p time-core --precise 0.1.4 # 0.1.6 requires rustc 1.81
-      - run: cargo update -p deranged --precise 0.4.0 # 0.5.x requires rustc 1.81
-      - run: cargo build
-      - run: cargo build --no-default-features
-      - run: cargo build --features uuid,time,chrono
-      - run: cargo build --all-features
+      - run: rustup toolchain install nightly
+      - run: rustup override set nightly
+      - run: rustup show active-toolchain -v
+      - run: cargo generate-lockfile -Z unstable-options -Z direct-minimal-versions
+      - run: cargo build --all-targets
+      - run: cargo build --all-targets --no-default-features
+      - run: cargo build --all-targets --all-features
 
   rustfmt:
     runs-on: ubuntu-latest
