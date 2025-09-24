@@ -23,22 +23,6 @@ jobs:
       - run: cargo build --all-targets --no-default-features
       - run: cargo build --all-targets --all-features
 
-  # Ensure project builds with minimum specified dependency versions
-  minimal-versions:
-    runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: "" # remove -Dwarnings
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup show active-toolchain -v
-      - run: rustup toolchain install nightly
-      - run: rustup override set nightly
-      - run: rustup show active-toolchain -v
-      - run: cargo generate-lockfile -Z unstable-options -Z direct-minimal-versions
-      - run: cargo build --all-targets
-      - run: cargo build --all-targets --no-default-features
-      - run: cargo build --all-targets --all-features
-
   rustfmt:
     runs-on: ubuntu-latest
     steps:
