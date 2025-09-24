@@ -1,4 +1,4 @@
-use clickhouse::{query::BytesCursor, Client};
+use clickhouse::{Client, query::BytesCursor};
 use std::time::Instant;
 use tokio::{fs::File, io::AsyncWriteExt};
 

@@ -1,6 +1,6 @@
 use std::{
     future::{self, Future},
-    pin::{pin, Pin},
+    pin::{Pin, pin},
     task::{Context, Poll},
 };
 
@@ -9,8 +9,8 @@ use bytes::{BufMut, Bytes};
 use futures_util::stream::{self, Stream, TryStreamExt};
 use http_body_util::BodyExt as _;
 use hyper::{
-    body::{Body as _, Incoming},
     StatusCode,
+    body::{Body as _, Incoming},
 };
 use hyper_util::client::legacy::ResponseFuture as HyperResponseFuture;
 
@@ -274,10 +274,10 @@ where
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let res = Pin::new(&mut self.0).poll_next(cx);
 
-        if let Poll::Ready(Some(Ok(chunk))) = &res {
-            if let Some(err) = extract_exception(&chunk.data) {
-                return Poll::Ready(Some(Err(err)));
-            }
+        if let Poll::Ready(Some(Ok(chunk))) = &res
+            && let Some(err) = extract_exception(&chunk.data)
+        {
+            return Poll::Ready(Some(Err(err)));
         }
 
         res

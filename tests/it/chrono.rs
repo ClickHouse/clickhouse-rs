@@ -4,8 +4,8 @@ use std::ops::RangeBounds;
 
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, Timelike, Utc};
 use rand::{
-    distr::{Distribution, StandardUniform},
     Rng,
+    distr::{Distribution, StandardUniform},
 };
 use serde::{Deserialize, Serialize};
 

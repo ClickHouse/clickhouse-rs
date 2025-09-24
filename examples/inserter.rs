@@ -2,11 +2,11 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::mpsc::{self, error::TryRecvError, Receiver},
+    sync::mpsc::{self, Receiver, error::TryRecvError},
     time::timeout,
 };
 
-use clickhouse::{error::Result, sql::Identifier, Client, Row};
+use clickhouse::{Client, Row, error::Result, sql::Identifier};
 
 const TABLE_NAME: &str = "chrs_inserter";
 

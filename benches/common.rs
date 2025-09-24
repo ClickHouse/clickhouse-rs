@@ -15,9 +15,10 @@ use clickhouse::error::Result;
 use futures_util::stream::StreamExt;
 use http_body_util::BodyExt;
 use hyper::{
+    Request, Response,
     body::{Body, Incoming},
     server::conn,
-    service, Request, Response,
+    service,
 };
 use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::{

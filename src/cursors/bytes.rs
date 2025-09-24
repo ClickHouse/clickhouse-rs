@@ -3,7 +3,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use std::{
     io::Result as IoResult,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 

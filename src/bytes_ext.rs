@@ -59,8 +59,10 @@ impl BytesExt {
     pub(crate) unsafe fn extend_by_ref(&self, chunk: Bytes) {
         let new_bytes = merge_bytes(self.slice(), chunk);
 
-        // No active references to `bytes` are held at this point (ensured by the caller).
-        *self.bytes.get() = new_bytes;
+        // SAFETY: no active references to `bytes` are held at this point (ensured by the caller).
+        unsafe {
+            *self.bytes.get() = new_bytes;
+        }
         self.cursor.set(0);
     }
 

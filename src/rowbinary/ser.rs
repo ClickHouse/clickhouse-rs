@@ -1,14 +1,14 @@
+use crate::Row;
 use crate::error::Error::SequenceMustHaveLength;
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
-use crate::Row;
 use bytes::BufMut;
 use clickhouse_types::put_leb128;
 use serde::ser::SerializeMap;
 use serde::{
-    ser::{Impossible, SerializeSeq, SerializeStruct, SerializeTuple, Serializer},
     Serialize,
+    ser::{Impossible, SerializeSeq, SerializeStruct, SerializeTuple, Serializer},
 };
 use std::marker::PhantomData;
 

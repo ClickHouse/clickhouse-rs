@@ -1,10 +1,11 @@
 use crate::row_metadata::RowMetadata;
 use crate::{
+    RowRead,
     bytes_ext::BytesExt,
     cursors::RawCursor,
     error::{Error, Result},
     response::Response,
-    rowbinary, RowRead,
+    rowbinary,
 };
 use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;

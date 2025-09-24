@@ -1,6 +1,6 @@
-use crate::{create_simple_table, flush_query_log, SimpleRow};
-use clickhouse::sql::Identifier;
+use crate::{SimpleRow, create_simple_table, flush_query_log};
 use clickhouse::Client;
+use clickhouse::sql::Identifier;
 
 const PKG_VER: &str = env!("CARGO_PKG_VERSION");
 const RUST_VER: &str = env!("CARGO_PKG_RUST_VERSION");

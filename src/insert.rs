@@ -2,11 +2,11 @@ use crate::headers::{with_authentication, with_request_headers};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::{serialize_row_binary, serialize_with_validation};
 use crate::{
+    Client, Compression, RowWrite,
     error::{Error, Result},
     request_body::{ChunkSender, RequestBody},
     response::Response,
     row::{self, Row},
-    Client, Compression, RowWrite,
 };
 use bytes::{Bytes, BytesMut};
 use clickhouse_types::put_rbwnat_columns_header;

@@ -266,9 +266,10 @@ mod tests {
         let mut sql = SqlBuilder::new("SELECT ?fields");
         sql.bind_fields::<Unnamed>();
         let err = sql.finish().unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("argument ?fields cannot be used with non-struct row types"));
+        assert!(
+            err.to_string()
+                .contains("argument ?fields cannot be used with non-struct row types")
+        );
 
         let mut sql = SqlBuilder::new("SELECT a FROM test WHERE b = ? AND c = ?");
         sql.bind_arg(42);

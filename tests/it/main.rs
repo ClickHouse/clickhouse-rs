@@ -25,7 +25,7 @@
 //!   the "cloud" environment, it appends the current timestamp to allow
 //!   clean up outdated databases based on its creation time.
 
-use clickhouse::{sql::Identifier, Client, Row, RowOwned, RowRead, RowWrite};
+use clickhouse::{Client, Row, RowOwned, RowRead, RowWrite, sql::Identifier};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
@@ -215,8 +215,8 @@ pub(crate) mod geo_types {
 }
 
 pub(crate) mod decimals {
-    use fixnum::typenum::{U12, U4, U8};
     use fixnum::FixedPoint;
+    use fixnum::typenum::{U4, U8, U12};
 
     // See ClickHouse decimal sizes: https://clickhouse.com/docs/en/sql-reference/data-types/decimal
     pub(crate) type Decimal32 = FixedPoint<i32, U4>; // Decimal(9, 4) = Decimal32(4)
@@ -254,7 +254,7 @@ enum TestEnv {
 
 #[allow(clippy::incompatible_msrv)]
 fn test_env() -> TestEnv {
-    use std::env::{var, VarError};
+    use std::env::{VarError, var};
 
     static TEST_ENV: LazyLock<TestEnv> =
         LazyLock::new(|| match var("CLICKHOUSE_TEST_ENVIRONMENT") {

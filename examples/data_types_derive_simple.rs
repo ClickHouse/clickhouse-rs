@@ -1,14 +1,14 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use fixnum::{
-    typenum::{U12, U4, U8},
     FixedPoint,
+    typenum::{U4, U8, U12},
 };
 use rand::prelude::IndexedRandom;
-use rand::{distr::Alphanumeric, Rng};
+use rand::{Rng, distr::Alphanumeric};
 use std::str::FromStr;
 use time::{Date, Month, OffsetDateTime, Time};
 
-use clickhouse::{error::Result, sql::Identifier, Client};
+use clickhouse::{Client, error::Result, sql::Identifier};
 
 // This example covers derivation of _simpler_ ClickHouse data types.
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types

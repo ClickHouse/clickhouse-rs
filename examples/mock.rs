@@ -1,4 +1,4 @@
-use clickhouse::{error::Result, test, Client, Row};
+use clickhouse::{Client, Row, error::Result, test};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
