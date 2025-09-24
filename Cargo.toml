@@ -3,26 +3,27 @@ name = "clickhouse"
 version = "0.13.3"
 description = "Official Rust client for ClickHouse DB"
 keywords = ["clickhouse", "database", "driver", "tokio", "hyper"]
-authors = ["ClickHouse Contributors", "Paul Loyd <pavelko95@gmail.com>"]
-repository = "https://github.com/ClickHouse/clickhouse-rs"
-homepage = "https://clickhouse.com"
-license = "MIT OR Apache-2.0"
 readme = "README.md"
-edition = "2021"
-# update `workspace.package.rust-version` below and CI if changed
-# TODO: after bumping to v1.80, remove `--precise` in the "msrv" CI job
-rust-version = "1.79.0"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [workspace]
 members = ["derive", "types"]
+# `rust-version`-aware dependency resolution;
+# applies to all workspace members
+resolver = "3"
 
 [workspace.package]
 authors = ["ClickHouse Contributors", "Paul Loyd <pavelko95@gmail.com>"]
 repository = "https://github.com/ClickHouse/clickhouse-rs"
 homepage = "https://clickhouse.com"
-edition = "2021"
+edition = "2024" # required by `resolver = "3"`
 license = "MIT OR Apache-2.0"
-rust-version = "1.79.0"
+rust-version = "1.89.0"
 
 [lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
