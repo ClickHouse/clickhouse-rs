@@ -149,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         time64_nanos: SignedDuration::new(12 * 3600 + 13 * 60 + 14, 123_456_789),
     };
 
-    let mut insert = client.insert::<TimeExampleJiff>("time_example")?;
+    let mut insert = client.insert::<TimeExampleJiff>("time_example").await?;
     insert.write(&time_example).await?;
     insert.end().await?;
 

@@ -99,7 +99,7 @@ async fn datetime() {
         dt64ns_opt: Some(dt_ns),
     };
 
-    let mut insert = client.insert::<MyRow>("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").await.unwrap();
     insert.write(&original_row).await.unwrap();
     insert.end().await.unwrap();
 
@@ -169,7 +169,7 @@ async fn date() {
         .await
         .unwrap();
 
-    let mut insert = client.insert::<MyRow>("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").await.unwrap();
 
     let dates = generate_dates(1970..2149, 100);
     for &date in &dates {
@@ -222,7 +222,7 @@ async fn date32() {
         .await
         .unwrap();
 
-    let mut insert = client.insert::<MyRow>("test").unwrap();
+    let mut insert = client.insert::<MyRow>("test").await.unwrap();
 
     let dates = generate_dates(1925..2283, 100); // TODO: 1900..=2299 for newer versions.
     for &date in &dates {
@@ -323,7 +323,7 @@ async fn time_roundtrip() {
         t1: Some(duration),
     };
 
-    let mut insert = client.insert::<TimeRow>("test_time").unwrap();
+    let mut insert = client.insert::<TimeRow>("test_time").await.unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 
@@ -372,6 +372,7 @@ async fn time_negative_roundtrip() {
 
     let mut insert = client
         .insert::<TimeRow>("test_time_chrono_negative")
+        .await
         .unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
@@ -454,7 +455,7 @@ async fn time64_roundtrip() {
         t9_opt: Some(dur_ns),
     };
 
-    let mut insert = client.insert::<MyRow>("test_time64").unwrap();
+    let mut insert = client.insert::<MyRow>("test_time64").await.unwrap();
     insert.write(&original_row).await.unwrap();
     insert.end().await.unwrap();
 
@@ -534,7 +535,10 @@ async fn time64_negative_roundtrip() {
         t9_opt: Some(dur_ns),
     };
 
-    let mut insert = client.insert::<MyRow>("test_time64_negative").unwrap();
+    let mut insert = client
+        .insert::<MyRow>("test_time64_negative")
+        .await
+        .unwrap();
     insert.write(&negative_row).await.unwrap();
     insert.end().await.unwrap();
 
