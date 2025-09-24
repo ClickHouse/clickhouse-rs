@@ -70,8 +70,9 @@ pub fn put_rbwnat_columns_header(
         buffer.put_slice(column.name.as_bytes());
     }
     for column in columns.iter() {
-        put_leb128(&mut buffer, column.data_type.to_string().len() as u64);
-        buffer.put_slice(column.data_type.to_string().as_bytes());
+        let data_type = column.data_type.to_string();
+        put_leb128(&mut buffer, data_type.len() as u64);
+        buffer.put_slice(data_type.as_bytes());
     }
     Ok(())
 }
