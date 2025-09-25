@@ -78,7 +78,7 @@ macro_rules! assert_panic_msg {
             result.unwrap()
         );
         let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
-        for &msg in $msg_parts {
+        for msg in $msg_parts {
             assert!(
                 panic_msg.contains(msg),
                 "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"

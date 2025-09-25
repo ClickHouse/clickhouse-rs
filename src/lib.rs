@@ -145,6 +145,8 @@ impl Client {
 
     /// Specifies a database name.
     ///
+    ///
+    ///
     /// # Examples
     /// ```
     /// # use clickhouse::Client;
@@ -153,7 +155,7 @@ impl Client {
     pub fn with_database(mut self, database: impl Into<String>) -> Self {
         self.database = Some(database.into());
 
-        // If we're looking at a different database, then our cached metadata is invalid.
+        // Assume our cached metadata is invalid.
         self.row_metadata_cache = Default::default();
 
         self
@@ -392,9 +394,12 @@ impl Client {
     /// If the table schema changes, this metadata needs to re-fetched.
     ///
     /// This method clears the metadata cache, causing future insert queries to re-fetch metadata.
+    /// This applies to all cloned instances of this `Client` as well.
     ///
     /// This may need to wait to acquire a lock if a query is concurrently writing into the cache.
-    pub async fn clear_cached_metadata(&mut self) {
+    ///
+    /// Cancel-safe.
+    pub async fn clear_cached_metadata(&self) {
         self.row_metadata_cache.0.write().await.clear();
     }
 

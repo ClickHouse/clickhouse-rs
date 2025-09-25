@@ -1,6 +1,7 @@
 use crate::{SimpleRow, create_simple_table, fetch_rows, flush_query_log};
 use clickhouse::{Row, sql::Identifier};
 use serde::{Deserialize, Serialize};
+use std::panic::AssertUnwindSafe;
 
 #[tokio::test]
 async fn keeps_client_options() {
@@ -238,4 +239,98 @@ async fn insert_from_cursor() {
         Some(&BorrowedRow { id: 1, data: "bar" })
     );
     assert_eq!(cursor.next().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn clear_cached_metadata() {
+    #[derive(clickhouse::Row, serde::Serialize)]
+    struct Foo {
+        bar: i32,
+        baz: String,
+    }
+
+    #[derive(
+        clickhouse::Row,
+        serde::Serialize,
+        serde::Deserialize,
+        PartialEq,
+        Eq,
+        Debug
+    )]
+    struct Foo2 {
+        bar: i32,
+    }
+
+    let client = prepare_database!().with_validation(true);
+
+    client
+        .query("CREATE TABLE foo(bar Int32, baz String) ENGINE = MergeTree PRIMARY KEY(bar)")
+        .execute()
+        .await
+        .unwrap();
+
+    let mut insert = client.insert::<Foo>("foo").await.unwrap();
+
+    insert
+        .write(&Foo {
+            bar: 1,
+            baz: "Hello, world!".to_string(),
+        })
+        .await
+        .unwrap();
+
+    insert.end().await.unwrap();
+
+    client
+        .query("ALTER TABLE foo DROP COLUMN baz")
+        .execute()
+        .await
+        .unwrap();
+
+    let mut insert = client.insert::<Foo>("foo").await.unwrap();
+
+    insert
+        .write(&Foo {
+            bar: 2,
+            baz: "Hello, ClickHouse!".to_string(),
+        })
+        .await
+        .unwrap();
+
+    dbg!(
+        insert
+            .end()
+            .await
+            .expect_err("Insert metadata is invalid; this should error!")
+    );
+
+    client.clear_cached_metadata().await;
+
+    let write_invalid = AssertUnwindSafe(async {
+        let mut insert = client.insert::<Foo>("foo").await.unwrap();
+
+        insert
+            .write(&Foo {
+                bar: 2,
+                baz: "Hello, ClickHouse!".to_string(),
+            })
+            .await
+            .expect_err("`Foo` should no longer be valid for the table");
+    });
+
+    assert_panic_msg!(write_invalid, ["1 columns", "2 fields", "bar", "baz"]);
+
+    let mut insert = client.insert::<Foo2>("foo").await.unwrap();
+
+    insert.write(&Foo2 { bar: 3 }).await.unwrap();
+
+    insert.end().await.unwrap();
+
+    let rows = client
+        .query("SELECT * FROM foo")
+        .fetch_all::<Foo2>()
+        .await
+        .unwrap();
+
+    assert_eq!(*rows, [Foo2 { bar: 1 }, Foo2 { bar: 3 }]);
 }
