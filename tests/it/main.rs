@@ -89,14 +89,16 @@ macro_rules! assert_panic_msg {
 
 macro_rules! prepare_database {
     () => {
-        crate::_priv::prepare_database({
+        crate::_priv::prepare_database(&test_database_name!()).await
+    };
+}
+
+macro_rules! test_database_name {
+    () => {
+        crate::_priv::make_db_name({
             fn f() {}
-            fn type_name_of_val<T>(_: T) -> &'static str {
-                std::any::type_name::<T>()
-            }
-            type_name_of_val(f)
+            std::any::type_name_of_val(&f)
         })
-        .await
     };
 }
 
@@ -168,7 +170,12 @@ where
 }
 
 pub(crate) async fn flush_query_log(client: &Client) {
-    client.query("SYSTEM FLUSH LOGS").execute().await.unwrap();
+    client
+        .query("SYSTEM FLUSH LOGS")
+        .with_option("wait_end_of_query", "1")
+        .execute()
+        .await
+        .unwrap();
 }
 
 pub(crate) async fn execute_statements(client: &Client, statements: &[&str]) {
@@ -274,14 +281,13 @@ mod _priv {
     use super::*;
     use std::time::SystemTime;
 
-    pub(crate) async fn prepare_database(fn_path: &str) -> Client {
-        let db_name = make_db_name(fn_path);
+    pub(crate) async fn prepare_database(db_name: &str) -> Client {
         let client = get_client();
 
         client
             .query("DROP DATABASE IF EXISTS ?")
             .with_option("wait_end_of_query", "1")
-            .bind(Identifier(&db_name))
+            .bind(Identifier(db_name))
             .execute()
             .await
             .unwrap_or_else(|err| panic!("cannot drop db {db_name}, cause: {err}"));
@@ -289,7 +295,7 @@ mod _priv {
         client
             .query("CREATE DATABASE ?")
             .with_option("wait_end_of_query", "1")
-            .bind(Identifier(&db_name))
+            .bind(Identifier(db_name))
             .execute()
             .await
             .unwrap_or_else(|err| panic!("cannot create db {db_name}, cause: {err}"));
@@ -301,7 +307,7 @@ mod _priv {
     // `it::compression::lz4::{{closure}}::f` ->
     // - "local" env: `chrs__compression__lz4`
     // - "cloud" env: `chrs__compression__lz4__{unix_millis}`
-    fn make_db_name(fn_path: &str) -> String {
+    pub(crate) fn make_db_name(fn_path: &str) -> String {
         assert!(fn_path.starts_with("it::"));
         let mut iter = fn_path.split("::").skip(1);
         let module = iter.next().unwrap();
