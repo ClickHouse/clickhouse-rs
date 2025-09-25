@@ -133,6 +133,9 @@ impl Client {
 
     /// Specifies ClickHouse's url. Should point to HTTP endpoint.
     ///
+    /// Automatically [clears the metadata cache][Self::clear_cached_metadata]
+    /// for this instance only.
+    ///
     /// # Examples
     /// ```
     /// # use clickhouse::Client;
@@ -140,12 +143,17 @@ impl Client {
     /// ```
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = url.into();
+
+        // Assume our cached metadata is invalid.
+        self.row_metadata_cache = Default::default();
+
         self
     }
 
     /// Specifies a database name.
     ///
-    ///
+    /// Automatically [clears the metadata cache][Self::clear_cached_metadata]
+    /// for this instance only.
     ///
     /// # Examples
     /// ```
@@ -390,11 +398,12 @@ impl Client {
 
     /// Clear table metadata that was previously received and cached.
     ///
-    /// [`Insert`] uses cached metadata when sending data with validation.
+    /// [`Insert`][crate::insert::Insert] uses cached metadata when sending data with validation.
     /// If the table schema changes, this metadata needs to re-fetched.
     ///
     /// This method clears the metadata cache, causing future insert queries to re-fetch metadata.
-    /// This applies to all cloned instances of this `Client` as well.
+    /// This applies to all cloned instances of this `Client` (using the same URL and database)
+    /// as well.
     ///
     /// This may need to wait to acquire a lock if a query is concurrently writing into the cache.
     ///
@@ -658,32 +667,6 @@ mod client_tests {
             metadata.access_type,
             AccessType::WithMapAccess(vec![1, 2, 0]) // see COLUMN_NAMES above
         );
-    }
-
-    #[tokio::test]
-    async fn cache_row_metadata() {
-        let client = Client::default()
-            .with_url("http://localhost:8123")
-            .with_database("system");
-
-        let metadata = client
-            .get_row_metadata_for_insert::<SystemRolesRow>("roles")
-            .await
-            .unwrap();
-
-        assert_eq!(metadata.columns, SystemRolesRow::columns());
-        assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
-
-        // we can now use a dummy client, cause the metadata is cached,
-        // and no calls to the database will be made
-        client
-            .with_url("whatever")
-            .get_row_metadata_for_insert::<SystemRolesRow>("roles")
-            .await
-            .unwrap();
-
-        assert_eq!(metadata.columns, SystemRolesRow::columns());
-        assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
     }
 
     #[test]

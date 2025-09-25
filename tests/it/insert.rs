@@ -242,6 +242,98 @@ async fn insert_from_cursor() {
 }
 
 #[tokio::test]
+async fn cache_row_metadata() {
+    #[derive(clickhouse::Row, serde::Serialize)]
+    struct Foo {
+        bar: i32,
+        baz: String,
+    }
+
+    let db_name = test_database_name!();
+
+    let client = crate::_priv::prepare_database(&db_name)
+        .await
+        .with_validation(true);
+
+    client
+        .query("CREATE TABLE foo(bar Int32, baz String) ENGINE = MergeTree PRIMARY KEY(bar)")
+        .execute()
+        .await
+        .unwrap();
+
+    // Ensure `system.query_log` is fully written
+    flush_query_log(&client).await;
+
+    let select_query = "SELECT count() \
+         FROM system.query_log \
+         WHERE current_database = ? \
+         AND query LIKE 'SELECT * FROM `foo` LIMIT 0%'";
+
+    let initial_count: u64 = client
+        .query(select_query)
+        .bind(&db_name)
+        .fetch_one()
+        .await
+        .unwrap();
+
+    let mut insert = client.insert::<Foo>("foo").await.unwrap();
+
+    insert
+        .write(&Foo {
+            bar: 1,
+            baz: "Hello, world!".to_string(),
+        })
+        .await
+        .unwrap();
+
+    insert.end().await.unwrap();
+
+    // Ensure `system.query_log` is fully written
+    flush_query_log(&client).await;
+
+    let select_query = "SELECT count() \
+         FROM system.query_log \
+         WHERE current_database = ? \
+         AND query LIKE 'SELECT * FROM `foo` LIMIT 0%'";
+
+    let after_insert: u64 = client
+        .query(select_query)
+        .bind(&db_name)
+        .fetch_one()
+        .await
+        .unwrap();
+
+    // If the database server has not been reset between test runs, `initial_count` will be nonzero.
+    //
+    // Instead, of asserting a specific value, we assert that the count has changed.
+    assert_ne!(after_insert, initial_count);
+
+    let mut insert = client.insert::<Foo>("foo").await.unwrap();
+
+    insert
+        .write(&Foo {
+            bar: 2,
+            baz: "Hello, ClickHouse!".to_string(),
+        })
+        .await
+        .unwrap();
+
+    insert.end().await.unwrap();
+
+    flush_query_log(&client).await;
+
+    let final_count: u64 = client
+        .query(select_query)
+        .bind(&db_name)
+        .fetch_one()
+        .await
+        .unwrap();
+
+    // Insert metadata is cached, so we should not have queried this table again.
+    assert_eq!(final_count, after_insert);
+}
+
+#[tokio::test]
 async fn clear_cached_metadata() {
     #[derive(clickhouse::Row, serde::Serialize)]
     struct Foo {
@@ -327,7 +419,7 @@ async fn clear_cached_metadata() {
     insert.end().await.unwrap();
 
     let rows = client
-        .query("SELECT * FROM foo")
+        .query("SELECT * FROM foo ORDER BY bar")
         .fetch_all::<Foo2>()
         .await
         .unwrap();
