@@ -16,6 +16,7 @@ use crate::sql::Identifier;
 pub use clickhouse_derive::Row;
 use clickhouse_types::parse_rbwnat_columns_header;
 
+use std::time::Duration;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -62,7 +63,7 @@ pub struct Client {
     products_info: Vec<ProductInfo>,
     validation: bool,
     row_metadata_cache: Arc<RowMetadataCache>,
-
+    metadata_ttl: Option<Duration>,
     #[cfg(feature = "test-util")]
     mocked: bool,
 }
@@ -126,6 +127,7 @@ impl Client {
             products_info: Vec::default(),
             validation: true,
             row_metadata_cache: Arc::new(RowMetadataCache::default()),
+            metadata_ttl: Some(Duration::from_secs(60 * 60)), // 1 hour
             #[cfg(feature = "test-util")]
             mocked: false,
         }
@@ -326,6 +328,17 @@ impl Client {
         self
     }
 
+    /// Set or clear the time-to-live for cached metadata.
+    ///
+    /// Any metadata older than this will be re-fetched.
+    ///
+    /// Set to `None` to cache metadata forever. The cache can still be manually cleared with
+    /// [`Client::clear_cached_metadata()`].
+    pub fn with_metadata_ttl(mut self, ttl: impl Into<Option<Duration>>) -> Self {
+        self.metadata_ttl = ttl.into();
+        self
+    }
+
     /// Starts a new INSERT statement.
     ///
     /// # Validation
@@ -437,7 +450,13 @@ impl Client {
             let read_lock = self.row_metadata_cache.0.read().await;
 
             if let Some(metadata) = read_lock.get(table_name) {
-                return Ok(metadata.clone());
+                // FIXME: `Option::is_none_or` isn't available until 1.82
+                if self
+                    .metadata_ttl
+                    .map_or(true, |ttl| metadata.received_at.elapsed() < ttl)
+                {
+                    return Ok(metadata.clone());
+                }
             }
         }
 

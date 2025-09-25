@@ -3,6 +3,7 @@ use crate::row::RowKind;
 use clickhouse_types::Column;
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::time::Instant;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum AccessType {
@@ -22,6 +23,7 @@ pub(crate) struct RowMetadata {
     /// * For selects, it is defined in the same order as in the database schema.
     /// * For inserts, it is adjusted to the order of fields in the struct definition.
     pub(crate) columns: Vec<Column>,
+
     /// This determines whether we can just use [`crate::rowbinary::de::RowBinarySeqAccess`]
     /// or a more sophisticated approach with [`crate::rowbinary::de::RowBinaryStructAsMapAccess`]
     /// to support structs defined with different fields order than in the schema.
@@ -30,6 +32,9 @@ pub(crate) struct RowMetadata {
     /// on the shape of the data. In some cases, there is no noticeable difference,
     /// in others, it could be up to 2-3x slower.
     pub(crate) access_type: AccessType,
+
+    /// The time this row metadata was received. Used for enforcing the TTL when cached.
+    pub(crate) received_at: Instant,
 }
 
 impl RowMetadata {
@@ -118,6 +123,7 @@ impl RowMetadata {
         Self {
             columns,
             access_type,
+            received_at: Instant::now(),
         }
     }
 
@@ -166,6 +172,7 @@ impl RowMetadata {
         Self {
             columns: result_columns,
             access_type: AccessType::WithSeqAccess, // ignored
+            received_at: Instant::now(),
         }
     }
 
