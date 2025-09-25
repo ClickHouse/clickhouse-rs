@@ -21,8 +21,9 @@ resolver = "3"
 authors = ["ClickHouse Contributors", "Paul Loyd <pavelko95@gmail.com>"]
 repository = "https://github.com/ClickHouse/clickhouse-rs"
 homepage = "https://clickhouse.com"
-edition = "2024" # required by `resolver = "3"`
+edition = "2024"
 license = "MIT OR Apache-2.0"
+# N.B. be sure to update this in `rust-toolchain.toml` as well
 rust-version = "1.89.0"
 
 [lints.rust]

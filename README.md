@@ -536,15 +536,15 @@ where it will remain until the beginning of the _next_ release cycle (`0.{x+1}.0
 
 The MSRV for the `0.14.x` release cycle is `1.89.0`.
 
-This guarantees that SQLx will compile with a Rust version that is at _least_ six weeks old, which should be plenty of 
-time for it to make it through any packaging system that is being actively kept up to date.
+This guarantees that `clickhouse-rs` will compile with a Rust version that is at _least_ six weeks old, 
+which should be plenty of time for it to make it through any packaging system that is being actively kept up to date.
 
 Beware when installing Rust through operating system package managers, as it can often be a year or more
 out-of-date. For example, Debian Bookworm (released 10 June 2023) shipped with Rust 1.63.0 (released 11 August 2022).
 
 ### ClickHouse Versions
 
-The supported versions of the ClickHouse database server coincides with the versions currently receiving security
+The supported versions of the ClickHouse database server coincide with the versions currently receiving security
 updates.
 
 For the list of currently supported versions, see <https://github.com/ClickHouse/ClickHouse/blob/master/SECURITY.md#security-change-log-and-support>.
