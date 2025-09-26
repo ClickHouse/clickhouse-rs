@@ -108,13 +108,8 @@ impl Default for Client {
 
 /// Cache for [`RowMetadata`] to avoid allocating it for the same struct more than once
 /// during the application lifecycle. Key: fully qualified table name (e.g. `database.table`).
+#[derive(Default)]
 pub(crate) struct RowMetadataCache(RwLock<HashMap<String, Arc<RowMetadata>>>);
-
-impl Default for RowMetadataCache {
-    fn default() -> Self {
-        RowMetadataCache(RwLock::new(HashMap::default()))
-    }
-}
 
 impl Client {
     /// Creates a new client with a specified underlying HTTP client.
@@ -139,6 +134,9 @@ impl Client {
 
     /// Specifies ClickHouse's url. Should point to HTTP endpoint.
     ///
+    /// Automatically [clears the metadata cache][Self::clear_cached_metadata]
+    /// for this instance only.
+    ///
     /// # Examples
     /// ```
     /// # use clickhouse::Client;
@@ -146,10 +144,17 @@ impl Client {
     /// ```
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = url.into();
+
+        // Assume our cached metadata is invalid.
+        self.row_metadata_cache = Default::default();
+
         self
     }
 
     /// Specifies a database name.
+    ///
+    /// Automatically [clears the metadata cache][Self::clear_cached_metadata]
+    /// for this instance only.
     ///
     /// # Examples
     /// ```
@@ -158,6 +163,10 @@ impl Client {
     /// ```
     pub fn with_database(mut self, database: impl Into<String>) -> Self {
         self.database = Some(database.into());
+
+        // Assume our cached metadata is invalid.
+        self.row_metadata_cache = Default::default();
+
         self
     }
 
@@ -388,6 +397,22 @@ impl Client {
         self
     }
 
+    /// Clear table metadata that was previously received and cached.
+    ///
+    /// [`Insert`][crate::insert::Insert] uses cached metadata when sending data with validation.
+    /// If the table schema changes, this metadata needs to re-fetched.
+    ///
+    /// This method clears the metadata cache, causing future insert queries to re-fetch metadata.
+    /// This applies to all cloned instances of this `Client` (using the same URL and database)
+    /// as well.
+    ///
+    /// This may need to wait to acquire a lock if a query is concurrently writing into the cache.
+    ///
+    /// Cancel-safe.
+    pub async fn clear_cached_metadata(&self) {
+        self.row_metadata_cache.0.write().await.clear();
+    }
+
     /// Used internally to check if the validation mode is enabled,
     /// as it takes into account the `test-util` feature flag.
     #[inline]
@@ -423,34 +448,35 @@ impl Client {
         &self,
         table_name: &str,
     ) -> Result<Arc<RowMetadata>> {
-        let read_lock = self.row_metadata_cache.0.read().await;
-        match read_lock.get(table_name) {
-            Some(metadata) => Ok(metadata.clone()),
-            None => {
-                drop(read_lock);
-                // TODO: should it be moved to a cold function?
-                let mut write_lock = self.row_metadata_cache.0.write().await;
-                let db = match self.database {
-                    Some(ref db) => db,
-                    None => "default",
-                };
-                let mut bytes_cursor = self
-                    .query("SELECT * FROM ? LIMIT 0")
-                    .bind(Identifier(table_name))
-                    // don't allow to override the client database set in the client instance
-                    // with a `.with_option("database", "some_other_db")` call on the app side
-                    .with_option("database", db)
-                    .fetch_bytes("RowBinaryWithNamesAndTypes")?;
-                let mut buffer = Vec::<u8>::new();
-                while let Some(chunk) = bytes_cursor.next().await? {
-                    buffer.extend_from_slice(&chunk);
-                }
-                let columns = parse_rbwnat_columns_header(&mut buffer.as_slice())?;
-                let metadata = Arc::new(RowMetadata::new_for_insert::<T>(columns));
-                write_lock.insert(table_name.to_string(), metadata.clone());
-                Ok(metadata)
+        {
+            let read_lock = self.row_metadata_cache.0.read().await;
+
+            if let Some(metadata) = read_lock.get(table_name) {
+                return Ok(metadata.clone());
             }
         }
+
+        // TODO: should it be moved to a cold function?
+        let mut write_lock = self.row_metadata_cache.0.write().await;
+        let db = match self.database {
+            Some(ref db) => db,
+            None => "default",
+        };
+        let mut bytes_cursor = self
+            .query("SELECT * FROM ? LIMIT 0")
+            .bind(Identifier(table_name))
+            // don't allow to override the client database set in the client instance
+            // with a `.with_option("database", "some_other_db")` call on the app side
+            .with_option("database", db)
+            .fetch_bytes("RowBinaryWithNamesAndTypes")?;
+        let mut buffer = Vec::<u8>::new();
+        while let Some(chunk) = bytes_cursor.next().await? {
+            buffer.extend_from_slice(&chunk);
+        }
+        let columns = parse_rbwnat_columns_header(&mut buffer.as_slice())?;
+        let metadata = Arc::new(RowMetadata::new_for_insert::<T>(columns));
+        write_lock.insert(table_name.to_string(), metadata.clone());
+        Ok(metadata)
     }
 }
 
@@ -642,32 +668,6 @@ mod client_tests {
             metadata.access_type,
             AccessType::WithMapAccess(vec![1, 2, 0]) // see COLUMN_NAMES above
         );
-    }
-
-    #[tokio::test]
-    async fn cache_row_metadata() {
-        let client = Client::default()
-            .with_url("http://localhost:8123")
-            .with_database("system");
-
-        let metadata = client
-            .get_row_metadata_for_insert::<SystemRolesRow>("roles")
-            .await
-            .unwrap();
-
-        assert_eq!(metadata.columns, SystemRolesRow::columns());
-        assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
-
-        // we can now use a dummy client, cause the metadata is cached,
-        // and no calls to the database will be made
-        client
-            .with_url("whatever")
-            .get_row_metadata_for_insert::<SystemRolesRow>("roles")
-            .await
-            .unwrap();
-
-        assert_eq!(metadata.columns, SystemRolesRow::columns());
-        assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
     }
 
     #[test]
