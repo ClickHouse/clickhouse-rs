@@ -7,7 +7,7 @@ use sealed::sealed;
 use serde::Serialize;
 
 use super::{Handler, HandlerFn};
-use crate::{rowbinary, Row, RowOwned, RowRead};
+use crate::{Row, RowOwned, RowRead, rowbinary};
 
 const BUFFER_INITIAL_CAPACITY: usize = 1024;
 

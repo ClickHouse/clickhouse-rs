@@ -1,4 +1,4 @@
-use crate::{row::RowKind, row_metadata::RowMetadata, Row};
+use crate::{Row, row::RowKind, row_metadata::RowMetadata};
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -331,10 +331,10 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                         let (full_name, full_data_type) =
                             inner.root.get_current_column_name_and_type();
                         panic!(
-                                "While processing column {full_name} defined as {full_data_type}: \
+                            "While processing column {full_name} defined as {full_data_type}: \
                                  Variant identifier {value} is out of bounds, max allowed index is {}",
-                                possible_types.len() - 1
-                            );
+                            possible_types.len() - 1
+                        );
                     }
                     let data_type = &possible_types[*value as usize];
                     validate_impl(inner.root, data_type, &serde_type, true)
@@ -353,15 +353,15 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
         if let Some(inner) = self {
             match T::IDENTIFIER_TYPE {
                 IdentifierType::Enum8 | IdentifierType::Enum16 => {
-                    if let Enum(values_map) = &inner.kind {
-                        if !values_map.contains_key(&(value.into_i16())) {
-                            let (full_name, full_data_type) =
-                                inner.root.get_current_column_name_and_type();
-                            panic!(
-                                "While processing column {full_name} defined as {full_data_type}: \
+                    if let Enum(values_map) = &inner.kind
+                        && !values_map.contains_key(&(value.into_i16()))
+                    {
+                        let (full_name, full_data_type) =
+                            inner.root.get_current_column_name_and_type();
+                        panic!(
+                            "While processing column {full_name} defined as {full_data_type}: \
                                 Enum8 value {value} is not present in the database schema"
-                            );
-                        }
+                        );
                     }
                 }
                 IdentifierType::Variant => {
@@ -397,21 +397,21 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
 
 impl<R: Row> Drop for InnerDataTypeValidator<'_, '_, R> {
     fn drop(&mut self) {
-        if let InnerDataTypeValidatorKind::Tuple(elements_types) = self.kind {
-            if !elements_types.is_empty() {
-                let (column_name, column_type) = self.root.get_current_column_name_and_type();
-                panic!(
-                    "While processing column {} defined as {}: tuple was not fully (de)serialized; \
+        if let InnerDataTypeValidatorKind::Tuple(elements_types) = self.kind
+            && !elements_types.is_empty()
+        {
+            let (column_name, column_type) = self.root.get_current_column_name_and_type();
+            panic!(
+                "While processing column {} defined as {}: tuple was not fully (de)serialized; \
                     remaining elements: {}; likely, the field definition is incomplete",
-                    column_name,
-                    column_type,
-                    elements_types
-                        .iter()
-                        .map(|c| c.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                )
-            }
+                column_name,
+                column_type,
+                elements_types
+                    .iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            )
         }
     }
 }

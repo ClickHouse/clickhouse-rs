@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use clickhouse::{error::Result, sql, Client, Row};
+use clickhouse::{Client, Row, error::Result, sql};
 
 #[derive(Debug, Row, Serialize, Deserialize)]
 struct MyRow<'a> {

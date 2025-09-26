@@ -1,15 +1,15 @@
 use bytes::Bytes;
 use clickhouse::{
-    error::{Error, Result},
     Client, Compression, Row,
+    error::{Error, Result},
 };
 use clickhouse_types::{Column, DataTypeNode};
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures_util::stream::{self, StreamExt as _};
 use http_body_util::StreamBody;
 use hyper::{
-    body::{Body, Frame, Incoming},
     Request, Response,
+    body::{Body, Frame, Incoming},
 };
 use serde::Deserialize;
 use std::convert::Infallible;
@@ -56,7 +56,7 @@ async fn serve(
 }
 
 fn prepare_chunk() -> Bytes {
-    use rand::{distr::StandardUniform, rngs::SmallRng, Rng, SeedableRng};
+    use rand::{Rng, SeedableRng, distr::StandardUniform, rngs::SmallRng};
 
     // Generate random data to avoid _real_ compression.
     // TODO: It would be more useful to generate real data.

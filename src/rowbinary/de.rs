@@ -1,14 +1,14 @@
+use crate::Row;
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
-use crate::Row;
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
 use serde::{
-    de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
     Deserialize,
+    de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
 };
 use std::marker::PhantomData;
 use std::{convert::TryFrom, str};

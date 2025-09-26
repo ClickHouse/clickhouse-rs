@@ -1,5 +1,5 @@
 use crate::common_select::{
-    do_select_bench, print_header, print_results, BenchmarkRow, WithAccessType, WithId,
+    BenchmarkRow, WithAccessType, WithId, do_select_bench, print_header, print_results,
 };
 use clickhouse::{Client, Compression, Row};
 use serde::{Deserialize, Serialize};

@@ -1,7 +1,7 @@
 #![cfg(feature = "test-util")]
 
 use crate::SimpleRow;
-use clickhouse::{test, Client};
+use clickhouse::{Client, test};
 use std::time::Duration;
 
 async fn test_provide() {

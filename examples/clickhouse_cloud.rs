@@ -1,5 +1,5 @@
-use clickhouse::sql::Identifier;
 use clickhouse::Client;
+use clickhouse::sql::Identifier;
 use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 use std::env;

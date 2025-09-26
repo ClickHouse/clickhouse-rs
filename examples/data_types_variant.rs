@@ -2,7 +2,7 @@ use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 
 use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client};
+use clickhouse::{Client, error::Result};
 
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types/variant
 

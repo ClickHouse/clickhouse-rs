@@ -3,8 +3,8 @@ use std::time::Duration;
 use hyper::Request;
 use hyper_util::{
     client::legacy::{
-        connect::{Connect, HttpConnector},
         Client, Client as HyperClient, ResponseFuture,
+        connect::{Connect, HttpConnector},
     },
     rt::TokioExecutor,
 };

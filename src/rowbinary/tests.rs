@@ -1,5 +1,5 @@
-use crate::row::Primitive;
 use crate::Row;
+use crate::row::Primitive;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

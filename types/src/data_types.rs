@@ -805,7 +805,11 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
         return Err(TypesError::TypeParsingError(format!(
             "Invalid Enum format - expected the same number of names and indices, got names: {}, indices: {}",
             names.join(", "),
-            indices.iter().map(|index| index.to_string()).collect::<Vec<String>>().join(", "),
+            indices
+                .iter()
+                .map(|index| index.to_string())
+                .collect::<Vec<String>>()
+                .join(", "),
         )));
     }
 

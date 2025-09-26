@@ -496,7 +496,7 @@ pub mod chrono {
 pub mod time {
     use std::convert::TryFrom;
 
-    use ::time::{error::ComponentRange, Date, Duration, OffsetDateTime};
+    use ::time::{Date, Duration, OffsetDateTime, error::ComponentRange};
     use serde::{de::Error as _, ser::Error as _};
 
     use super::*;

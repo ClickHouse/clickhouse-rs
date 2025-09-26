@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use clickhouse::{error::Error, Row};
+use clickhouse::{Row, error::Error};
 
 #[tokio::test]
 async fn smoke() {

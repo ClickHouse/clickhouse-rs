@@ -3,11 +3,11 @@ use std::mem;
 use tokio::time::Duration;
 
 use crate::{
+    Client,
     error::Result,
     insert::Insert,
     row::{Row, RowWrite},
     ticks::Ticks,
-    Client,
 };
 
 /// Performs multiple consecutive `INSERT`s.

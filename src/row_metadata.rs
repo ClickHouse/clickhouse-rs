@@ -1,5 +1,5 @@
-use crate::row::RowKind;
 use crate::Row;
+use crate::row::RowKind;
 use clickhouse_types::Column;
 use std::collections::HashMap;
 use std::fmt::Display;

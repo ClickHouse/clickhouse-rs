@@ -1,8 +1,8 @@
 use crate::decimals::*;
 use crate::geo_types::{LineString, MultiLineString, MultiPolygon, Point, Polygon, Ring};
-use crate::{create_simple_table, get_client, insert_and_select, SimpleRow};
-use clickhouse::sql::Identifier;
+use crate::{SimpleRow, create_simple_table, get_client, insert_and_select};
 use clickhouse::Row;
+use clickhouse::sql::Identifier;
 use fxhash::FxHashMap;
 use indexmap::IndexMap;
 use linked_hash_map::LinkedHashMap;
@@ -677,9 +677,9 @@ async fn serde_skip_struct_field() {
 #[tokio::test]
 #[cfg(feature = "time")]
 async fn date_and_time() {
-    use time::format_description::well_known::Iso8601;
     use time::Month::{February, January};
     use time::OffsetDateTime;
+    use time::format_description::well_known::Iso8601;
 
     #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {

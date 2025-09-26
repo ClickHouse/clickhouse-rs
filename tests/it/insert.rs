@@ -1,5 +1,5 @@
-use crate::{create_simple_table, fetch_rows, flush_query_log, SimpleRow};
-use clickhouse::{sql::Identifier, Row};
+use crate::{SimpleRow, create_simple_table, fetch_rows, flush_query_log};
+use clickhouse::{Row, sql::Identifier};
 use serde::{Deserialize, Serialize};
 
 #[tokio::test]
@@ -44,12 +44,18 @@ async fn keeps_client_options() {
         .unwrap();
 
     assert!(
-        has_insert_setting, "{}",
-        format!("should contain {insert_setting_name} = {insert_setting_value} (from the insert options)")
+        has_insert_setting,
+        "{}",
+        format!(
+            "should contain {insert_setting_name} = {insert_setting_value} (from the insert options)"
+        )
     );
     assert!(
-        has_client_setting, "{}",
-        format!("should contain {client_setting_name} = {client_setting_value} (from the client options)")
+        has_client_setting,
+        "{}",
+        format!(
+            "should contain {client_setting_name} = {client_setting_value} (from the client options)"
+        )
     );
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;

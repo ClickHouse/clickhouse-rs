@@ -9,7 +9,7 @@ use std::{
 
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full};
-use hyper::{body::Incoming, server::conn, service, Request, Response, StatusCode};
+use hyper::{Request, Response, StatusCode, body::Incoming, server::conn, service};
 use hyper_util::rt::TokioIo;
 use tokio::{net::TcpListener, task::AbortHandle};
 
