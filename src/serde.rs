@@ -112,6 +112,7 @@ pub mod chrono {
     use ::chrono::{DateTime, Utc};
     use serde::{de::Error as _, ser::Error as _};
 
+    /// Ser/de `DateTime<Utc>` to/from `DateTime`.
     pub mod datetime {
         use super::*;
 
@@ -262,7 +263,7 @@ pub mod chrono {
         }
     }
 
-    /// Ser/de `time::Date` to/from `Date`.
+    /// Ser/de `chrono::NaiveDate` to/from `Date`.
     pub mod date {
         use super::*;
         use ::chrono::{Duration, NaiveDate};
@@ -301,7 +302,7 @@ pub mod chrono {
         }
     }
 
-    /// Ser/de `time::Date` to/from `Date32`.
+    /// Ser/de `chrono::NaiveDate` to/from `Date32`.
     pub mod date32 {
         use ::chrono::{Duration, NaiveDate};
 
@@ -486,6 +487,390 @@ pub mod chrono {
             {
                 let nanos: i64 = Deserialize::deserialize(deserializer)?;
                 Ok(Duration::nanoseconds(nanos))
+            }
+        }
+    }
+}
+
+#[cfg(feature = "jiff")]
+pub mod jiff {
+    use super::*;
+    use ::jiff::Timestamp;
+    use serde::{de::Error as _, ser::Error as _};
+
+    /// Ser/de `jiff::Timestamp` to/from `DateTime`.
+    pub mod datetime {
+        use super::*;
+
+        option!(
+            Timestamp,
+            "Ser/de `Option<Timestamp>` to/from `Nullable(DateTime)`."
+        );
+
+        pub fn serialize<S>(dt: &Timestamp, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let ts = dt.as_second();
+
+            u32::try_from(ts)
+                .map_err(|_| S::Error::custom(format!("{dt} cannot be represented as DateTime")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Timestamp, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let ts: u32 = Deserialize::deserialize(deserializer)?;
+            Timestamp::from_second(i64::from(ts))
+                .map_err(|_| D::Error::custom(format!("{ts} cannot be converted to Timestamp")))
+        }
+    }
+
+    /// Contains modules to ser/de `jiff::Timestamp` to/from `DateTime64(_)`.
+    pub mod datetime64 {
+        use super::*;
+
+        /// Ser/de `Timestamp` to/from `DateTime64(0)` (seconds).
+        pub mod secs {
+            use super::*;
+
+            option!(
+                Timestamp,
+                "Ser/de `Option<Timestamp>` to/from `Nullable(DateTime64(0))`."
+            );
+
+            pub fn serialize<S>(dt: &Timestamp, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.as_second();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Timestamp, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                Timestamp::from_second(ts)
+                    .map_err(|_| D::Error::custom(format!("Can't create Timestamp from {ts}")))
+            }
+        }
+
+        /// Ser/de `Timestamp` to/from `DateTime64(3)` (milliseconds).
+        pub mod millis {
+            use super::*;
+
+            option!(
+                Timestamp,
+                "Ser/de `Option<Timestamp>` to/from `Nullable(DateTime64(3))`."
+            );
+
+            pub fn serialize<S>(dt: &Timestamp, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.as_millisecond();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Timestamp, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                Timestamp::from_millisecond(ts)
+                    .map_err(|_| D::Error::custom(format!("Can't create Timestamp from {ts}")))
+            }
+        }
+
+        /// Ser/de `Timestamp` to/from `DateTime64(6)` (microseconds).
+        pub mod micros {
+            use super::*;
+
+            option!(
+                Timestamp,
+                "Ser/de `Option<Timestamp>` to/from `Nullable(DateTime64(6))`."
+            );
+
+            pub fn serialize<S>(dt: &Timestamp, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = dt.as_microsecond();
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Timestamp, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                Timestamp::from_microsecond(ts)
+                    .map_err(|_| D::Error::custom(format!("Can't create Timestamp from {ts}")))
+            }
+        }
+
+        /// Ser/de `Timestamp` to/from `DateTime64(9)` (nanoseconds).
+        pub mod nanos {
+            use super::*;
+
+            option!(
+                Timestamp,
+                "Ser/de `Option<Timestamp>` to/from `Nullable(DateTime64(9))`."
+            );
+
+            pub fn serialize<S>(dt: &Timestamp, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let ts = i64::try_from(dt.as_nanosecond()).map_err(|_| {
+                    S::Error::custom(format!("{dt} cannot be represented as DateTime64"))
+                })?;
+                ts.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Timestamp, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ts: i64 = Deserialize::deserialize(deserializer)?;
+                Timestamp::from_nanosecond(i128::from(ts))
+                    .map_err(|_| D::Error::custom(format!("Can't create Timestamp from {ts}")))
+            }
+        }
+    }
+
+    /// Ser/de `jiff::civil::Date` to/from `Date`.
+    pub mod date {
+        use super::*;
+        use ::jiff::{civil::Date, SignedDuration};
+
+        option!(Date, "Ser/de `Option<Date>` to/from `Nullable(Date)`.");
+
+        const ORIGIN: Date = Date::constant(1970, 1, 1);
+
+        pub fn serialize<S>(date: &Date, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            if *date < ORIGIN {
+                let msg = format!("{date} cannot be represented as Date");
+                return Err(S::Error::custom(msg));
+            }
+
+            let elapsed = date.duration_since(ORIGIN); // cannot underflow: checked above
+            let days = elapsed.as_hours() / 24;
+
+            u16::try_from(days)
+                .map_err(|_| S::Error::custom(format!("{date} cannot be represented as Date")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Date, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let days: u16 = Deserialize::deserialize(deserializer)?;
+            Ok(ORIGIN + SignedDuration::from_hours(i64::from(days) * 24)) // cannot overflow: always < `Date::MAX`
+        }
+    }
+
+    /// Ser/de `jiff::civil::Date` to/from `Date32`.
+    pub mod date32 {
+        use super::*;
+        use ::jiff::{civil::Date, SignedDuration};
+
+        option!(Date, "Ser/de `Option<Date>` to/from `Nullable(Date32)`.");
+
+        const ORIGIN: Date = Date::constant(1970, 1, 1);
+
+        // NOTE: actually, it's 1925 and 2283 with a tail for versions before 22.8-lts.
+        const MIN: Date = Date::constant(1900, 1, 1);
+        const MAX: Date = Date::constant(2299, 12, 31);
+
+        pub fn serialize<S>(date: &Date, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            if *date < MIN || *date > MAX {
+                let msg = format!("{date} cannot be represented as Date32");
+                return Err(S::Error::custom(msg));
+            }
+
+            let elapsed = date.duration_since(ORIGIN); // cannot underflow: checked above
+            let days = elapsed.as_hours() / 24;
+
+            i32::try_from(days)
+                .map_err(|_| S::Error::custom(format!("{date} cannot be represented as Date32")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Date, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let days: i32 = Deserialize::deserialize(deserializer)?;
+
+            // It shouldn't overflow, because clamped by CH and < `Date::MAX`.
+            // TODO: ensure CH clamps when an invalid value is inserted in binary format.
+            Ok(ORIGIN + SignedDuration::from_hours(i64::from(days) * 24))
+        }
+    }
+
+    /// Ser/de `jiff::SignedDuration` to/from `Time`.
+    pub mod time {
+        use super::*;
+        use ::jiff::SignedDuration;
+
+        option!(
+            SignedDuration,
+            "Ser/de `Option<SignedDuration>` to/from `Nullable(Time)`."
+        );
+
+        pub fn serialize<S>(time: &SignedDuration, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let seconds = time.as_secs();
+
+            i32::try_from(seconds)
+                .map_err(|_| S::Error::custom(format!("{time} cannot be represented as Time")))?
+                .serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<SignedDuration, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let seconds: i32 = Deserialize::deserialize(deserializer)?;
+            Ok(SignedDuration::from_secs(seconds as i64))
+        }
+    }
+
+    /// Contains modules to ser/de `jiff::SignedDuration` to/from `Time64(_)`.
+    pub mod time64 {
+        use super::*;
+        use ::jiff::SignedDuration;
+
+        /// Ser/de `SignedDuration` to/from `Time64(0)` (seconds).
+        pub mod secs {
+            use super::*;
+
+            option!(
+                SignedDuration,
+                "Ser/de `Option<SignedDuration>` to/from `Nullable(Time64(0))`."
+            );
+
+            pub fn serialize<S>(time: &SignedDuration, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let seconds = time.as_secs();
+                seconds.serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<SignedDuration, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let seconds: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(SignedDuration::from_secs(seconds))
+            }
+        }
+
+        /// Ser/de `SignedDuration` to/from `Time64(3)` (milliseconds).
+        pub mod millis {
+            use super::*;
+
+            option!(
+                SignedDuration,
+                "Ser/de `Option<SignedDuration>` to/from `Nullable(Time64(3))`."
+            );
+
+            pub fn serialize<S>(time: &SignedDuration, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let millis = time.as_millis();
+
+                i64::try_from(millis)
+                    .map_err(|_| {
+                        S::Error::custom(format!("{time} cannot be represented as Time64"))
+                    })?
+                    .serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<SignedDuration, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let millis: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(SignedDuration::from_millis(millis))
+            }
+        }
+
+        /// Ser/de `SignedDuration` to/from `Time64(6)` (microseconds).
+        pub mod micros {
+            use super::*;
+
+            option!(
+                SignedDuration,
+                "Ser/de `Option<SignedDuration>` to/from `Nullable(Time64(6))`."
+            );
+
+            pub fn serialize<S>(time: &SignedDuration, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let micros = time.as_micros();
+
+                i64::try_from(micros)
+                    .map_err(|_| {
+                        S::Error::custom(format!("{time} cannot be represented as Time64"))
+                    })?
+                    .serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<SignedDuration, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let micros: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(SignedDuration::from_micros(micros))
+            }
+        }
+
+        /// Ser/de `SignedDuration` to/from `Time64(9)` (nanoseconds).
+        pub mod nanos {
+            use super::*;
+
+            option!(
+                SignedDuration,
+                "Ser/de `Option<SignedDuration>` to/from `Nullable(Time64(9))`."
+            );
+
+            pub fn serialize<S>(time: &SignedDuration, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let nanos = time.as_nanos();
+
+                i64::try_from(nanos)
+                    .map_err(|_| {
+                        S::Error::custom(format!("{time} cannot be represented as Time64"))
+                    })?
+                    .serialize(serializer)
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<SignedDuration, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let nanos: i64 = Deserialize::deserialize(deserializer)?;
+                Ok(SignedDuration::from_nanos(nanos))
             }
         }
     }

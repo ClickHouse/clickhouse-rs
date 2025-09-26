@@ -235,6 +235,7 @@ mod insert;
 mod inserter;
 mod int128;
 mod ip;
+mod jiff;
 mod mock;
 mod nested;
 mod query;
