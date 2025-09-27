@@ -9,7 +9,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
-  RUSTDOCFLAGS: -Dwarnings
   RUST_BACKTRACE: 1
   # note: MSRV now tracked in `rust-toolchain.toml`
 
@@ -54,14 +53,15 @@ jobs:
   docs:
     needs: build
     runs-on: ubuntu-latest
-    env:
-      RUSTDOCFLAGS: -Dwarnings --cfg docsrs
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install nightly
       - run: rustup override set nightly
       - run: rustup show active-toolchain -v
-      - run: cargo doc --all-features
+      # Serde 1.0.227 fails to build with `--cfg docsrs`, only pass it to our own packages
+      - run: cargo rustdoc -p clickhouse-derive -- -D warnings --cfg docsrs
+      - run: cargo rustdoc -p clickhouse-types -- -D warnings --cfg docsrs
+      - run: cargo rustdoc -p clickhouse -- -D warnings --cfg docsrs
 
   test:
     runs-on: ubuntu-latest
