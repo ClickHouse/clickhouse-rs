@@ -32,6 +32,8 @@ pub struct Inserter<T> {
     ticks: Ticks,
     pending: Quantities,
     in_transaction: bool,
+
+    on_commit: Option<Box<dyn FnMut(&Quantities) + Send + 'static>>,
 }
 
 /// Statistics about pending or inserted data.
@@ -70,6 +72,7 @@ where
             ticks: Ticks::default(),
             pending: Quantities::ZERO,
             in_transaction: false,
+            on_commit: None,
         }
     }
 
@@ -199,6 +202,16 @@ where
         self.ticks.reschedule();
     }
 
+    /// Registers a callback that will be invoked after each successful batch commit.
+    ///
+    /// The callback receives the committed [`Quantities`]. It is invoked only
+    /// when a batch actually commits (i.e., non-zero transactions), and only
+    /// after the commit completes successfully.
+    pub fn with_on_commit(mut self, callback: impl FnMut(&Quantities) + Send + 'static) -> Self {
+        self.on_commit = Some(Box::new(callback));
+        self
+    }
+
     /// How much time we have until the next tick.
     ///
     /// `None` if the period isn't configured.
@@ -264,6 +277,12 @@ where
         let result = self.insert().await;
         self.ticks.reschedule();
         result?;
+
+        if let Some(cb) = &mut self.on_commit {
+            if quantities.transactions > 0 {
+                (cb)(&quantities);
+            }
+        }
         Ok(quantities)
     }
 
@@ -272,7 +291,13 @@ where
     /// If it isn't called, the current `INSERT` is aborted.
     pub async fn end(mut self) -> Result<Quantities> {
         self.insert().await?;
-        Ok(self.pending)
+        let quantities = self.pending;
+        if let Some(mut cb) = self.on_commit {
+            if quantities.transactions > 0 {
+                (cb)(&quantities);
+            }
+        }
+        Ok(quantities)
     }
 
     fn limits_reached(&self) -> bool {
