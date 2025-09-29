@@ -250,6 +250,7 @@ async fn cache_row_metadata() {
     }
 
     let db_name = test_database_name!();
+    let table_name = "foo";
 
     let client = crate::_priv::prepare_database(&db_name)
         .await
@@ -264,19 +265,21 @@ async fn cache_row_metadata() {
     // Ensure `system.query_log` is fully written
     flush_query_log(&client).await;
 
-    let select_query = "SELECT count() \
-         FROM system.query_log \
-         WHERE current_database = ? \
-         AND query LIKE 'SELECT * FROM `foo` LIMIT 0%'";
+    let count_query = "SELECT count() FROM system.query_log WHERE query LIKE ? || '%'";
+
+    let row_insert_metadata_query =
+        clickhouse::_priv::row_insert_metadata_query(&db_name, table_name);
+
+    println!("row_insert_metadata_query: {row_insert_metadata_query:?}");
 
     let initial_count: u64 = client
-        .query(select_query)
-        .bind(&db_name)
+        .query(count_query)
+        .bind(&row_insert_metadata_query)
         .fetch_one()
         .await
         .unwrap();
 
-    let mut insert = client.insert::<Foo>("foo").await.unwrap();
+    let mut insert = client.insert::<Foo>(table_name).await.unwrap();
 
     insert
         .write(&Foo {
@@ -291,14 +294,9 @@ async fn cache_row_metadata() {
     // Ensure `system.query_log` is fully written
     flush_query_log(&client).await;
 
-    let select_query = "SELECT count() \
-         FROM system.query_log \
-         WHERE current_database = ? \
-         AND query LIKE 'SELECT * FROM `foo` LIMIT 0%'";
-
     let after_insert: u64 = client
-        .query(select_query)
-        .bind(&db_name)
+        .query(count_query)
+        .bind(&row_insert_metadata_query)
         .fetch_one()
         .await
         .unwrap();
@@ -308,7 +306,7 @@ async fn cache_row_metadata() {
     // Instead, of asserting a specific value, we assert that the count has changed.
     assert_ne!(after_insert, initial_count);
 
-    let mut insert = client.insert::<Foo>("foo").await.unwrap();
+    let mut insert = client.insert::<Foo>(table_name).await.unwrap();
 
     insert
         .write(&Foo {
@@ -323,8 +321,8 @@ async fn cache_row_metadata() {
     flush_query_log(&client).await;
 
     let final_count: u64 = client
-        .query(select_query)
-        .bind(&db_name)
+        .query(count_query)
+        .bind(&row_insert_metadata_query)
         .fetch_one()
         .await
         .unwrap();
@@ -410,7 +408,7 @@ async fn clear_cached_metadata() {
             .expect_err("`Foo` should no longer be valid for the table");
     });
 
-    assert_panic_msg!(write_invalid, ["1 columns", "2 fields", "bar", "baz"]);
+    assert_panic_msg!(write_invalid, ["bar", "baz"]);
 
     let mut insert = client.insert::<Foo2>("foo").await.unwrap();
 

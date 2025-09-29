@@ -12,7 +12,6 @@ use bytes::{Bytes, BytesMut};
 use clickhouse_types::put_rbwnat_columns_header;
 use hyper::{self, Request};
 use replace_with::replace_with_or_abort;
-use std::sync::Arc;
 use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Duration};
 use tokio::{
     task::JoinHandle,
@@ -48,7 +47,7 @@ const_assert!(BUFFER_SIZE.is_power_of_two()); // to use the whole buffer's capac
 pub struct Insert<T> {
     state: InsertState,
     buffer: BytesMut,
-    row_metadata: Option<Arc<RowMetadata>>,
+    row_metadata: Option<RowMetadata>,
     #[cfg(feature = "lz4")]
     compression: Compression,
     send_timeout: Option<Duration>,
@@ -131,7 +130,7 @@ macro_rules! timeout {
 }
 
 impl<T> Insert<T> {
-    pub(crate) fn new(client: &Client, table: &str, row_metadata: Option<Arc<RowMetadata>>) -> Self
+    pub(crate) fn new(client: &Client, table: &str, row_metadata: Option<RowMetadata>) -> Self
     where
         T: Row,
     {

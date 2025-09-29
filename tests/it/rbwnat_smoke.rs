@@ -9,6 +9,7 @@ use linked_hash_map::LinkedHashMap;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::str::FromStr;
 
 #[tokio::test]
@@ -1414,18 +1415,7 @@ async fn interval() {
 }
 
 // See https://clickhouse.com/docs/sql-reference/statements/create/table#ephemeral
-//
-// Ignored cause:
-//
-// While processing struct DataInsert: database schema has no column named hexed.
-// #### All struct fields:
-// - id
-// - hexed
-// #### All schema columns:
-// - raw: FixedString(3)
-// - id: UInt64
 #[tokio::test]
-#[ignore]
 async fn ephemeral_columns() {
     let table_name = "test_ephemeral_columns";
 
@@ -1441,7 +1431,7 @@ async fn ephemeral_columns() {
         raw: [u8; 3],
     }
 
-    let client = get_client();
+    let client = prepare_database!();
     client
         .query(
             "
@@ -1510,17 +1500,22 @@ async fn ephemeral_columns() {
 // #### All schema columns:
 // - x: Int64
 #[tokio::test]
-#[ignore]
 async fn materialized_columns() {
     let table_name = "test_materialized_columns";
 
     #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         x: i64,
+    }
+
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct DataWithMaterialized {
+        x: i64,
+        // MATERIALIZED columns cannot be inserted into
         s: String,
     }
 
-    let client = get_client();
+    let client = prepare_database!();
     execute_statements(
         &client,
         &[
@@ -1540,44 +1535,52 @@ async fn materialized_columns() {
     let rows = client
         .query("SELECT ?fields FROM ? ORDER BY x ASC")
         .bind(Identifier(table_name))
-        .fetch_all::<Data>()
+        .fetch_all::<DataWithMaterialized>()
         .await
         .unwrap();
 
     let expected_rows = (0..5)
-        .map(|x| Data {
+        .map(|x| DataWithMaterialized {
             x,
             s: x.to_string(),
         })
         .collect::<Vec<_>>();
     assert_eq!(rows, expected_rows);
 
-    let rows_to_insert = vec![
-        Data {
-            x: 5,
-            s: "5".to_string(),
-        },
-        Data {
-            x: 6,
-            s: "6".to_string(),
-        },
-    ];
+    let insert_data = AssertUnwindSafe(async {
+        let _ = client
+            .insert::<DataWithMaterialized>(table_name)
+            .await
+            .unwrap();
+    });
 
-    // fails on this insert
+    assert_panic_msg!(
+        insert_data,
+        ["column s is immutable (declared as `MATERIALIZED`)"]
+    );
+
+    let rows_to_insert = (5..10).map(|x| Data { x });
+
     let mut insert = client.insert::<Data>(table_name).await.unwrap();
-    for row in &rows_to_insert {
-        insert.write(row).await.unwrap();
+    for row in rows_to_insert {
+        insert.write(&row).await.unwrap();
     }
     insert.end().await.unwrap();
 
     let rows_after_insert = client
         .query("SELECT ?fields FROM ? ORDER BY x ASC")
         .bind(Identifier(table_name))
-        .fetch_all::<Data>()
+        .fetch_all::<DataWithMaterialized>()
         .await
         .unwrap();
 
-    let expected_rows_after_insert = [&rows[..], &rows_to_insert[..]].concat();
+    let expected_rows_after_insert = (0..10)
+        .map(|x| DataWithMaterialized {
+            x,
+            s: x.to_string(),
+        })
+        .collect::<Vec<_>>();
+
     assert_eq!(rows_after_insert, expected_rows_after_insert);
 }
 
@@ -1599,7 +1602,7 @@ async fn alias_columns() {
         size_bytes: i64,
     }
 
-    let client = get_client();
+    let client = prepare_database!();
     execute_statements(
         &client,
         &[

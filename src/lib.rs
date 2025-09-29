@@ -9,13 +9,13 @@ pub use self::{
     row::{Row, RowOwned, RowRead, RowWrite},
 };
 use self::{error::Result, http_client::HttpClient};
-use crate::row_metadata::RowMetadata;
-use crate::sql::Identifier;
+use crate::row_metadata::{AccessType, ColumnDefaultKind, InsertMetadata, RowMetadata};
 
 #[doc = include_str!("row_derive.md")]
 pub use clickhouse_derive::Row;
-use clickhouse_types::parse_rbwnat_columns_header;
+use clickhouse_types::{Column, DataTypeNode};
 
+use crate::_priv::row_insert_metadata_query;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -61,7 +61,7 @@ pub struct Client {
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
     validation: bool,
-    row_metadata_cache: Arc<RowMetadataCache>,
+    insert_metadata_cache: Arc<InsertMetadataCache>,
 
     #[cfg(feature = "test-util")]
     mocked: bool,
@@ -108,7 +108,7 @@ impl Default for Client {
 /// Cache for [`RowMetadata`] to avoid allocating it for the same struct more than once
 /// during the application lifecycle. Key: fully qualified table name (e.g. `database.table`).
 #[derive(Default)]
-pub(crate) struct RowMetadataCache(RwLock<HashMap<String, Arc<RowMetadata>>>);
+pub(crate) struct InsertMetadataCache(RwLock<HashMap<String, Arc<InsertMetadata>>>);
 
 impl Client {
     /// Creates a new client with a specified underlying HTTP client.
@@ -125,7 +125,7 @@ impl Client {
             headers: HashMap::new(),
             products_info: Vec::default(),
             validation: true,
-            row_metadata_cache: Arc::new(RowMetadataCache::default()),
+            insert_metadata_cache: Arc::new(InsertMetadataCache::default()),
             #[cfg(feature = "test-util")]
             mocked: false,
         }
@@ -145,7 +145,7 @@ impl Client {
         self.url = url.into();
 
         // Assume our cached metadata is invalid.
-        self.row_metadata_cache = Default::default();
+        self.insert_metadata_cache = Default::default();
 
         self
     }
@@ -164,7 +164,7 @@ impl Client {
         self.database = Some(database.into());
 
         // Assume our cached metadata is invalid.
-        self.row_metadata_cache = Default::default();
+        self.insert_metadata_cache = Default::default();
 
         self
     }
@@ -356,8 +356,12 @@ impl Client {
     /// If `T` has unnamed fields, e.g. tuples.
     pub async fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
         if self.get_validation() {
-            let metadata = self.get_row_metadata_for_insert::<T>(table).await?;
-            return Ok(insert::Insert::new(self, table, Some(metadata)));
+            let metadata = self.get_insert_metadata(table).await?;
+            return Ok(insert::Insert::new(
+                self,
+                table,
+                Some(metadata.to_row::<T>()),
+            ));
         }
         Ok(insert::Insert::new(self, table, None))
     }
@@ -409,7 +413,7 @@ impl Client {
     ///
     /// Cancel-safe.
     pub async fn clear_cached_metadata(&self) {
-        self.row_metadata_cache.0.write().await.clear();
+        self.insert_metadata_cache.0.write().await.clear();
     }
 
     /// Used internally to check if the validation mode is enabled,
@@ -443,37 +447,51 @@ impl Client {
         self
     }
 
-    async fn get_row_metadata_for_insert<T: Row>(
-        &self,
-        table_name: &str,
-    ) -> Result<Arc<RowMetadata>> {
+    async fn get_insert_metadata(&self, table_name: &str) -> Result<Arc<InsertMetadata>> {
         {
-            let read_lock = self.row_metadata_cache.0.read().await;
+            let read_lock = self.insert_metadata_cache.0.read().await;
 
+            // FIXME: `table_name` is not necessarily fully qualified here
             if let Some(metadata) = read_lock.get(table_name) {
                 return Ok(metadata.clone());
             }
         }
 
         // TODO: should it be moved to a cold function?
-        let mut write_lock = self.row_metadata_cache.0.write().await;
+        let mut write_lock = self.insert_metadata_cache.0.write().await;
         let db = match self.database {
             Some(ref db) => db,
             None => "default",
         };
-        let mut bytes_cursor = self
-            .query("SELECT * FROM ? LIMIT 0")
-            .bind(Identifier(table_name))
-            // don't allow to override the client database set in the client instance
-            // with a `.with_option("database", "some_other_db")` call on the app side
-            .with_option("database", db)
-            .fetch_bytes("RowBinaryWithNamesAndTypes")?;
-        let mut buffer = Vec::<u8>::new();
-        while let Some(chunk) = bytes_cursor.next().await? {
-            buffer.extend_from_slice(&chunk);
+
+        let mut columns_cursor = self
+            .query(&row_insert_metadata_query(db, table_name))
+            .fetch::<(String, String, String)>()?;
+
+        let mut columns = Vec::new();
+        let mut column_default_kinds = Vec::new();
+        let mut column_lookup = HashMap::new();
+
+        while let Some((name, type_, default_kind)) = columns_cursor.next().await? {
+            let data_type = DataTypeNode::new(&type_)?;
+            let default_kind = default_kind.parse::<ColumnDefaultKind>()?;
+
+            column_lookup.insert(name.clone(), columns.len());
+
+            columns.push(Column { name, data_type });
+
+            column_default_kinds.push(default_kind);
         }
-        let columns = parse_rbwnat_columns_header(&mut buffer.as_slice())?;
-        let metadata = Arc::new(RowMetadata::new_for_insert::<T>(columns));
+
+        let metadata = Arc::new(InsertMetadata {
+            row_metadata: RowMetadata {
+                columns,
+                access_type: AccessType::WithSeqAccess, // ignored on insert
+            },
+            column_default_kinds,
+            column_lookup,
+        });
+
         write_lock.insert(table_name.to_string(), metadata.clone());
         Ok(metadata)
     }
@@ -488,6 +506,25 @@ pub mod _priv {
     #[cfg(feature = "lz4")]
     pub fn lz4_compress(uncompressed: &[u8]) -> super::Result<bytes::Bytes> {
         crate::compression::lz4::compress(uncompressed)
+    }
+
+    // Also needed by `it::insert::cache_row_metadata()`
+    pub fn row_insert_metadata_query(db: &str, table: &str) -> String {
+        let mut out = "SELECT \
+            name, \
+            type, \
+            default_kind \
+         FROM system.columns \
+         WHERE database = "
+            .to_string();
+
+        crate::sql::escape::string(db, &mut out).unwrap();
+
+        out.push_str(" AND table = ");
+
+        crate::sql::escape::string(table, &mut out).unwrap();
+
+        out
     }
 }
 
