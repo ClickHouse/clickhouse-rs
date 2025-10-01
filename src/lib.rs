@@ -403,6 +403,15 @@ impl Client {
     /// in your specific use case. Additionally, writing smoke tests to ensure that
     /// the row types match the ClickHouse schema is highly recommended,
     /// if you plan to disable validation in your application.
+    ///
+    /// # Note: Mocking
+    /// When using [`test::Mock`] with the `test-util` feature, validation is forced off.
+    ///
+    /// This applies either when using [`Client::with_mock()`], or [`Client::with_url()`]
+    /// with a URL from [`test::Mock::url()`].
+    ///
+    /// As of writing, the mocking facilities are unable to generate the `RowBinaryWithNamesAndTypes`
+    /// header required for validation to function.
     pub fn with_validation(mut self, enabled: bool) -> Self {
         self.validation = enabled;
         self
