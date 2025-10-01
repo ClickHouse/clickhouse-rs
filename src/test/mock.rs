@@ -22,10 +22,10 @@ use super::{Handler, HandlerFn};
 ///
 /// This domain should not resolve otherwise. The `.test` top-level domain
 /// is reserved and cannot be registered on the open Internet.
-const MOCKED_BASE_URL: &'static str = "http://mocked.clickhouse.test";
+const MOCKED_BASE_URL: &str = "http://mocked.clickhouse.test";
 
 /// The real base URL where the mocked server is listening.
-const REAL_BASE_URL: &'static str = "http://127.0.0.1";
+const REAL_BASE_URL: &str = "http://127.0.0.1";
 
 /// A mock server for testing.
 pub struct Mock {

@@ -213,7 +213,7 @@ where
 
     /// This is used to deserialize identifiers for either:
     /// - `Variant` data type
-    /// - [`RowBinaryStructAsMapAccess`] field.
+    /// - out-of-order struct fields using [`MapAccess`].
     #[inline(always)]
     fn deserialize_identifier<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         ensure_size(&mut self.input, size_of::<u8>())?;
