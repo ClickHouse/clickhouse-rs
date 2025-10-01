@@ -144,6 +144,14 @@ impl Client {
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = url.into();
 
+        // `with_mock()` didn't exist previously, so to not break existing usages,
+        // we need to be able to detect a mocked server using nothing but the URL.
+        #[cfg(feature = "test-util")]
+        if let Some(url) = test::Mock::mocked_url_to_real(&self.url) {
+            self.url = url;
+            self.mocked = true;
+        }
+
         // Assume our cached metadata is invalid.
         self.insert_metadata_cache = Default::default();
 
@@ -442,7 +450,7 @@ impl Client {
     /// which is pointless in that kind of tests.
     #[cfg(feature = "test-util")]
     pub fn with_mock(mut self, mock: &test::Mock) -> Self {
-        self.url = mock.url().to_string();
+        self.url = mock.real_url().to_string();
         self.mocked = true;
         self
     }
