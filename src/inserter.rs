@@ -207,7 +207,7 @@ where
     /// The callback receives the committed [`Quantities`]. It is invoked only
     /// when a batch actually commits (i.e., non-zero transactions), and only
     /// after the commit completes successfully.
-    pub fn with_on_commit(mut self, callback: impl FnMut(&Quantities) + Send + 'static) -> Self {
+    pub fn with_commit_callback(mut self, callback: impl FnMut(&Quantities) + Send + 'static) -> Self {
         self.on_commit = Some(Box::new(callback));
         self
     }
