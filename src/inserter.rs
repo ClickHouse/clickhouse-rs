@@ -271,18 +271,8 @@ where
 
     /// Ends the current `INSERT` unconditionally.
     pub async fn force_commit(&mut self) -> Result<Quantities> {
-        self.in_transaction = false;
-
-        let quantities = mem::replace(&mut self.pending, Quantities::ZERO);
-        let result = self.insert().await;
+        let quantities = self.insert().await?;
         self.ticks.reschedule();
-        result?;
-
-        if let Some(cb) = &mut self.on_commit {
-            if quantities.transactions > 0 {
-                (cb)(&quantities);
-            }
-        }
         Ok(quantities)
     }
 
@@ -290,14 +280,7 @@ where
     ///
     /// If it isn't called, the current `INSERT` is aborted.
     pub async fn end(mut self) -> Result<Quantities> {
-        self.insert().await?;
-        let quantities = self.pending;
-        if let Some(mut cb) = self.on_commit {
-            if quantities.transactions > 0 {
-                (cb)(&quantities);
-            }
-        }
-        Ok(quantities)
+        self.insert().await
     }
 
     fn limits_reached(&self) -> bool {
@@ -306,11 +289,21 @@ where
             || self.ticks.reached()
     }
 
-    async fn insert(&mut self) -> Result<()> {
+    async fn insert(&mut self) -> Result<Quantities> {
+        self.in_transaction = false;
+        let quantities = mem::replace(&mut self.pending, Quantities::ZERO);
+        
         if let Some(insert) = self.insert.take() {
             insert.end().await?;
         }
-        Ok(())
+
+        if let Some(cb) = &mut self.on_commit {
+            if quantities.transactions > 0 {
+                (cb)(&quantities);
+            }
+        }
+
+        Ok(quantities)
     }
 
     #[cold]
