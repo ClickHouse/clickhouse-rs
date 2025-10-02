@@ -1490,15 +1490,6 @@ async fn ephemeral_columns() {
 }
 
 // See https://clickhouse.com/docs/sql-reference/statements/alter/column#materialize-column
-//
-// Ignored cause:
-//
-// While processing struct Data: database schema has 1 column(s), but the struct definition has 2 field(s).
-// #### All struct fields:
-// - x
-// - s
-// #### All schema columns:
-// - x: Int64
 #[tokio::test]
 async fn materialized_columns() {
     let table_name = "test_materialized_columns";
