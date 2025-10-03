@@ -12,7 +12,6 @@ use bytes::{Bytes, BytesMut};
 use clickhouse_types::put_rbwnat_columns_header;
 use hyper::{self, Request};
 use replace_with::replace_with_or_abort;
-use std::sync::Arc;
 use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Duration};
 use tokio::{
     task::JoinHandle,
@@ -34,11 +33,21 @@ const_assert!(BUFFER_SIZE.is_power_of_two()); // to use the whole buffer's capac
 /// Otherwise, the whole `INSERT` will be aborted.
 ///
 /// Rows are being sent progressively to spread network load.
+///
+/// # Note: Metadata is Cached
+/// If [validation is enabled][Client::with_validation],
+/// this helper will query the metadata for the target table to learn the column names and types.
+///
+/// To avoid querying this metadata every time, it is cached within the [`Client`].
+///
+/// Any concurrent changes to the table schema may cause insert failures if the metadata
+/// is no longer correct. For correct functioning, call [`Client::clear_cached_metadata()`]
+/// after any changes to the current database schema.
 #[must_use]
 pub struct Insert<T> {
     state: InsertState,
     buffer: BytesMut,
-    row_metadata: Option<Arc<RowMetadata>>,
+    row_metadata: Option<RowMetadata>,
     #[cfg(feature = "lz4")]
     compression: Compression,
     send_timeout: Option<Duration>,
@@ -121,7 +130,7 @@ macro_rules! timeout {
 }
 
 impl<T> Insert<T> {
-    pub(crate) fn new(client: &Client, table: &str, row_metadata: Option<Arc<RowMetadata>>) -> Self
+    pub(crate) fn new(client: &Client, table: &str, row_metadata: Option<RowMetadata>) -> Self
     where
         T: Row,
     {
