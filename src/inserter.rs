@@ -33,6 +33,7 @@ pub struct Inserter<T> {
     pending: Quantities,
     in_transaction: bool,
 
+    #[allow(clippy::type_complexity)]
     on_commit: Option<Box<dyn FnMut(&Quantities) + Send + 'static>>,
 }
 
@@ -207,7 +208,10 @@ where
     /// The callback receives the committed [`Quantities`]. It is invoked only
     /// when a batch actually commits (i.e., non-zero transactions), and only
     /// after the commit completes successfully.
-    pub fn with_commit_callback(mut self, callback: impl FnMut(&Quantities) + Send + 'static) -> Self {
+    pub fn with_commit_callback(
+        mut self,
+        callback: impl FnMut(&Quantities) + Send + 'static,
+    ) -> Self {
         self.on_commit = Some(Box::new(callback));
         self
     }
@@ -292,15 +296,15 @@ where
     async fn insert(&mut self) -> Result<Quantities> {
         self.in_transaction = false;
         let quantities = mem::replace(&mut self.pending, Quantities::ZERO);
-        
+
         if let Some(insert) = self.insert.take() {
             insert.end().await?;
         }
 
-        if let Some(cb) = &mut self.on_commit {
-            if quantities.transactions > 0 {
-                (cb)(&quantities);
-            }
+        if let Some(cb) = &mut self.on_commit
+            && quantities.transactions > 0
+        {
+            (cb)(&quantities);
         }
 
         Ok(quantities)
