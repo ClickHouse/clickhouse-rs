@@ -15,9 +15,22 @@ use tokio::{net::TcpListener, task::AbortHandle};
 
 use super::{Handler, HandlerFn};
 
+/// URL using a special hostname that `Client` can use to detect a mocked server.
+///
+/// This is to avoid breaking existing usages of the mock API which just call
+/// `client.with_url(mock.url)`.
+///
+/// This domain should not resolve otherwise. The `.test` top-level domain
+/// is reserved and cannot be registered on the open Internet.
+const MOCKED_BASE_URL: &str = "http://mocked.clickhouse.test";
+
+/// The real base URL where the mocked server is listening.
+const REAL_BASE_URL: &str = "http://127.0.0.1";
+
 /// A mock server for testing.
 pub struct Mock {
-    url: String,
+    mock_url: String,
+    pub(crate) real_url: String,
     shared: Arc<Mutex<Shared>>,
     non_exhaustive: bool,
     server_handle: AbortHandle,
@@ -51,7 +64,8 @@ impl Mock {
         let server_handle = tokio::spawn(server(listener, shared.clone()));
 
         Self {
-            url: format!("http://{addr}"),
+            mock_url: format!("{MOCKED_BASE_URL}:{}", addr.port()),
+            real_url: format!("{REAL_BASE_URL}:{}", addr.port()),
             non_exhaustive: false,
             server_handle: server_handle.abort_handle(),
             shared,
@@ -62,7 +76,18 @@ impl Mock {
     ///
     /// [`Client`]: crate::Client::with_url
     pub fn url(&self) -> &str {
-        &self.url
+        &self.mock_url
+    }
+
+    pub(crate) fn real_url(&self) -> &str {
+        &self.real_url
+    }
+
+    /// Returns `Some` if `url` was a mocked URL and converted to real, `None` if already real.
+    pub(crate) fn mocked_url_to_real(url: &str) -> Option<String> {
+        url.strip_prefix(MOCKED_BASE_URL)
+            // rest = ":{port}"
+            .map(|rest| format!("{REAL_BASE_URL}{rest}"))
     }
 
     /// Adds a handler to the test server for the next request.

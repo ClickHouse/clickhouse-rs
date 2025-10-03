@@ -531,7 +531,14 @@ async fn issue_109_1() {
     let unwind = std::panic::AssertUnwindSafe(async {
         let _ = client.insert::<Data>("issue_109").await.unwrap();
     });
-    assert_panic_msg!(unwind, &["Data", "4 columns", "3 fields"]);
+
+    assert_panic_msg!(
+        unwind,
+        &[
+            "the following non-default columns are missing",
+            "en_id: String"
+        ]
+    );
 }
 
 #[tokio::test]
