@@ -153,6 +153,7 @@ chrono = { version = "0.4", optional = true, features = ["serde"] }
 bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
 replace_with = { version = "0.1.7" }
+polonius-the-crab = "0.4.2"
 
 [dev-dependencies]
 clickhouse-derive = { version = "0.2.0", path = "derive" }
