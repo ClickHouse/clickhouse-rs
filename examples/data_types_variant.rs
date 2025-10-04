@@ -143,6 +143,7 @@ enum MyRowVariant {
     Array(Vec<u16>),
     Boolean(bool),
     // attributes should work in this case, too
+    #[allow(deprecated)]
     #[serde(with = "clickhouse::serde::time::date")]
     Date(time::Date),
     // NB: by default, fetched as raw bytes

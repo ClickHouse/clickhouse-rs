@@ -19,11 +19,16 @@ use crate::_priv::row_insert_metadata_query;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
+pub mod data_types;
 pub mod error;
 pub mod insert;
 #[cfg(feature = "inserter")]
 pub mod inserter;
 pub mod query;
+#[deprecated(
+    since = "0.14.1",
+    note = "please use wrappers from the `clickhouse::data_types` module instead"
+)]
 pub mod serde;
 pub mod sql;
 #[cfg(feature = "test-util")]

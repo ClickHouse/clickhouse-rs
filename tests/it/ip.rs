@@ -8,6 +8,7 @@ use clickhouse::Row;
 async fn smoke() {
     let client = prepare_database!();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::ipv4")]

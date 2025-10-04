@@ -15,6 +15,7 @@ use clickhouse::Row;
 async fn datetime() {
     let client = prepare_database!();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::chrono::datetime")]
@@ -125,6 +126,7 @@ async fn datetime() {
 async fn date() {
     let client = prepare_database!();
 
+    #[allow(deprecated)]
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::chrono::date")]
@@ -178,6 +180,7 @@ async fn date() {
 async fn date32() {
     let client = prepare_database!();
 
+    #[allow(deprecated)]
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::chrono::date32")]
@@ -277,6 +280,7 @@ async fn time_round_trip() {
         .await
         .unwrap();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
     struct TimeRow {
         #[serde(with = "clickhouse::serde::chrono::time")]
@@ -324,6 +328,7 @@ async fn time_negative_round_trip() {
         .await
         .unwrap();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
     struct TimeRow {
         #[serde(with = "clickhouse::serde::chrono::time")]
@@ -381,6 +386,7 @@ async fn time64_round_trip() {
         .await
         .unwrap();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::chrono::time64::secs")]
@@ -466,6 +472,7 @@ async fn time64_negative_round_trip() {
         .await
         .unwrap();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::chrono::time64::secs")]

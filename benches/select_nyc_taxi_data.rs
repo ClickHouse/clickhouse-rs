@@ -22,7 +22,7 @@ pub enum PaymentType {
 
 /// Uses just `visit_seq` since the order of the fields matches the database schema.
 #[derive(Row, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code, deprecated)]
 struct TripSmallSeqAccess {
     trip_id: u32,
     #[serde(with = "clickhouse::serde::time::datetime")]
@@ -48,7 +48,7 @@ struct TripSmallSeqAccess {
 /// Uses `visit_map` to deserialize instead of `visit_seq`,
 /// since the fields definition is correct, but the order is wrong.
 #[derive(Row, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code, deprecated)]
 struct TripSmallMapAccess {
     pickup_ntaname: String,
     dropoff_ntaname: String,

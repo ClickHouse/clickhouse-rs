@@ -9,6 +9,7 @@ use clickhouse::Row;
 async fn smoke() {
     let client = prepare_database!();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::uuid")]
@@ -54,6 +55,7 @@ async fn smoke() {
 
 #[tokio::test]
 async fn human_readable_smoke() {
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct OursRow {
         #[serde(with = "clickhouse::serde::uuid")]

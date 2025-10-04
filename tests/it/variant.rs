@@ -12,6 +12,7 @@ async fn variant_data_type() {
 
     // NB: Inner Variant types are _always_ sorted alphabetically,
     // and should be defined in _exactly_ the same order in the enum.
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     enum MyRowVariant {
         Array(Vec<i16>),
