@@ -12,6 +12,7 @@ use clickhouse::Row;
 async fn datetime() {
     let client = prepare_database!();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::time::datetime")]
@@ -117,6 +118,7 @@ async fn datetime() {
 async fn date() {
     let client = prepare_database!();
 
+    #[allow(deprecated)]
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::time::date")]
@@ -170,6 +172,7 @@ async fn date() {
 async fn date32() {
     let client = prepare_database!();
 
+    #[allow(deprecated)]
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::time::date32")]
@@ -239,6 +242,7 @@ fn generate_dates(years: Range<i32>, count: usize) -> Vec<Date> {
 async fn time_roundtrip() {
     let client = prepare_database!();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::time::time")]
@@ -285,6 +289,7 @@ async fn time_roundtrip() {
 async fn time_negative_roundtrip() {
     let client = prepare_database!();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::time::time")]
@@ -349,6 +354,7 @@ async fn time64_roundtrip() {
         .await
         .unwrap();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::time::time64::secs")]
@@ -408,6 +414,7 @@ async fn time64_negative_roundtrip() {
         .await
         .unwrap();
 
+    #[allow(deprecated)]
     #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::time::time64::secs")]

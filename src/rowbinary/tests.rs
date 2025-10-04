@@ -239,6 +239,7 @@ fn it_serializes_option_time32_some() {
 }
 
 #[cfg(feature = "chrono")]
+#[allow(deprecated)]
 #[test]
 fn it_serializes_time32_overflow_fails() {
     use crate::serde::chrono::time;
@@ -260,6 +261,7 @@ fn it_serializes_time32_overflow_fails() {
 }
 
 #[cfg(feature = "time")]
+#[allow(deprecated)]
 #[test]
 fn it_time_serializes_time64_millis_overflow_fails() {
     use crate::serde::time::time64::millis;
@@ -282,6 +284,7 @@ fn it_time_serializes_time64_millis_overflow_fails() {
 }
 
 #[cfg(feature = "time")]
+#[allow(deprecated)]
 #[test]
 fn it_time_serializes_time64_micros_overflow_fails() {
     use crate::serde::time::time64::micros;
@@ -303,6 +306,7 @@ fn it_time_serializes_time64_micros_overflow_fails() {
 }
 
 #[cfg(feature = "time")]
+#[allow(deprecated)]
 #[test]
 fn it_time_serializes_time64_nanos_overflow_fails() {
     use crate::serde::time::time64::nanos;

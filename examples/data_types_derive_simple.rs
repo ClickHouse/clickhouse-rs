@@ -94,6 +94,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[allow(deprecated)]
 #[derive(Clone, Debug, PartialEq)]
 #[derive(clickhouse::Row, serde::Serialize, serde::Deserialize)]
 pub struct Row {

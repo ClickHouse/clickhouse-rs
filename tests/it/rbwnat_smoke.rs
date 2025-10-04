@@ -682,6 +682,7 @@ async fn date_and_time() {
     use time::OffsetDateTime;
     use time::format_description::well_known::Iso8601;
 
+    #[allow(deprecated)]
     #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         #[serde(with = "clickhouse::serde::time::date")]
@@ -741,6 +742,7 @@ async fn date_and_time() {
 #[tokio::test]
 #[cfg(feature = "uuid")]
 async fn uuid() {
+    #[allow(deprecated)]
     #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         id: u16,
@@ -785,6 +787,7 @@ async fn uuid() {
 
 #[tokio::test]
 async fn ipv4_ipv6() {
+    #[allow(deprecated)]
     #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         id: u16,

@@ -252,6 +252,7 @@ mod time;
 mod user_agent;
 mod uuid;
 mod variant;
+mod wrappers;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TestEnv {

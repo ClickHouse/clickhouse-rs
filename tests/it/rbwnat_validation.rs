@@ -265,6 +265,7 @@ async fn invalid_nullable_low_cardinality() {
 #[tokio::test]
 #[cfg(feature = "time")]
 async fn invalid_serde_with() {
+    #[allow(deprecated)]
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         #[serde(with = "clickhouse::serde::time::datetime64::millis")]
@@ -603,6 +604,7 @@ async fn issue_113() {
 #[tokio::test]
 #[cfg(feature = "time")]
 async fn issue_114() {
+    #[allow(deprecated)]
     #[derive(Row, Deserialize, Debug, PartialEq)]
     struct Data {
         #[serde(with = "clickhouse::serde::time::date")]
@@ -638,6 +640,7 @@ async fn issue_114() {
 #[tokio::test]
 #[cfg(feature = "time")]
 async fn issue_173() {
+    #[allow(deprecated)]
     #[derive(Debug, Serialize, Deserialize, Row)]
     struct Data {
         log_id: String,

@@ -2,6 +2,7 @@ use chrono::Duration;
 use clickhouse::Client;
 use serde::{Deserialize, Serialize};
 
+#[allow(deprecated)]
 #[derive(Debug, Serialize, Deserialize, clickhouse::Row)]
 struct TimeExample {
     #[serde(with = "clickhouse::serde::time::time")]
@@ -23,6 +24,7 @@ struct TimeExample {
     time64_nanos: time::Duration,
 }
 
+#[allow(deprecated)]
 #[derive(Debug, Serialize, Deserialize, clickhouse::Row)]
 struct TimeExampleChrono {
     #[serde(with = "clickhouse::serde::chrono::time")]
