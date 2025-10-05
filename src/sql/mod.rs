@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Write};
 
 use crate::{
     error::{Error, Result},
+    query::QI,
     row::{self, Row},
 };
 
@@ -113,7 +114,7 @@ impl SqlBuilder {
         }
     }
 
-    pub(crate) fn finish(mut self) -> Result<String> {
+    pub(crate) fn finish(mut self, interp_flags: u8) -> Result<String> {
         let mut sql = String::new();
 
         if let Self::InProgress(parts, _) = &self {
@@ -121,12 +122,31 @@ impl SqlBuilder {
                 match part {
                     Part::Text(text) => sql.push_str(text),
                     Part::Arg => {
-                        self.error("unbound query argument");
-                        break;
+                        if QI::has_bind(interp_flags) {
+                            // Error on unbound arguments when BIND flag is set
+                            self.error("unbound query argument");
+                            break;
+                        } else {
+                            // Push NULL as placeholder when BIND flag is not set
+                            eprintln!(
+                                "warning: bind() called but QI::BIND flag not set, using NULL for query: {}",
+                                self
+                            );
+                            sql.push_str("NULL");
+                        }
                     }
                     Part::Fields => {
-                        self.error("unbound query argument ?fields");
-                        break;
+                        if QI::has_fields(interp_flags) {
+                            self.error("unbound query argument ?fields");
+                            break;
+                        } else {
+                            // Skip ?fields binding entirely when FIELDS flag is not set
+                            eprintln!(
+                                "warning: use QI::FIELDS template flag, ?fields skipped for query: {}",
+                                self
+                            );
+                            // Don't push anything - just skip this part
+                        }
                     }
                 }
             }
@@ -194,9 +214,26 @@ mod tests {
         );
 
         assert_eq!(
-            sql.finish().unwrap(),
+            sql.finish(QI::BIND).unwrap(),
             r"SELECT `a`,`b` FROM test WHERE a = 'foo' AND b < 42"
         );
+    }
+
+    #[test]
+    fn skipped_fields() {
+        // Test that ?fields is skipped when FIELDS flag is not set
+        let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE id = ?");
+        sql.bind_arg(42);
+
+        // Without QI::FIELDS flag, ?fields should be skipped entirely
+        // The bound ? becomes 42 as expected
+        let result = sql.finish(QI::NONE).unwrap();
+        assert_eq!(result, "SELECT  FROM test WHERE id = 42");
+
+        // Test case with unbound ? - should become NULL when BIND flag not set
+        let sql2 = SqlBuilder::new("SELECT ?fields FROM test WHERE id = ?");
+        let result2 = sql2.finish(QI::NONE).unwrap();
+        assert_eq!(result2, "SELECT  FROM test WHERE id = NULL");
     }
 
     #[test]
@@ -205,7 +242,7 @@ mod tests {
             let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE a IN ?");
             sql.bind_arg(arg);
             sql.bind_fields::<Row>();
-            assert_eq!(sql.finish().unwrap(), expected);
+            assert_eq!(sql.finish(QI::BIND).unwrap(), expected);
         }
 
         const ARGS: &[&str] = &["bar", "baz", "foobar"];
@@ -228,7 +265,7 @@ mod tests {
         sql.bind_arg(&["a?b", "c?"][..]);
         sql.bind_arg("a?");
         assert_eq!(
-            sql.finish().unwrap(),
+            sql.finish(QI::BIND).unwrap(),
             r"SELECT 1 FROM test WHERE a IN ['a?b','c?'] AND b = 'a?'"
         );
     }
@@ -237,7 +274,7 @@ mod tests {
     fn question_escape() {
         let sql = SqlBuilder::new("SELECT 1 FROM test WHERE a IN 'a??b'");
         assert_eq!(
-            sql.finish().unwrap(),
+            sql.finish(QI::BIND).unwrap(),
             r"SELECT 1 FROM test WHERE a IN 'a?b'"
         );
     }
@@ -246,39 +283,51 @@ mod tests {
     fn option_as_null() {
         let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a = ?");
         sql.bind_arg(None::<u32>);
-        assert_eq!(sql.finish().unwrap(), r"SELECT 1 FROM test WHERE a = NULL");
+        assert_eq!(
+            sql.finish(QI::BIND).unwrap(),
+            r"SELECT 1 FROM test WHERE a = NULL"
+        );
     }
 
     #[test]
     fn option_as_value() {
         let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a = ?");
         sql.bind_arg(Some(1u32));
-        assert_eq!(sql.finish().unwrap(), r"SELECT 1 FROM test WHERE a = 1");
+        assert_eq!(
+            sql.finish(QI::BIND).unwrap(),
+            r"SELECT 1 FROM test WHERE a = 1"
+        );
     }
 
     #[test]
     fn failures() {
         let mut sql = SqlBuilder::new("SELECT 1");
         sql.bind_arg(42);
-        let err = sql.finish().unwrap_err();
+        let err = sql.finish(QI::BIND).unwrap_err();
         assert!(err.to_string().contains("all arguments are already bound"));
 
         let mut sql = SqlBuilder::new("SELECT ?fields");
         sql.bind_fields::<Unnamed>();
-        let err = sql.finish().unwrap_err();
+        let err = sql.finish(QI::BIND | QI::FIELDS).unwrap_err();
         assert!(
             err.to_string()
                 .contains("argument ?fields cannot be used with non-struct row types")
         );
 
+        //new changes ->
+        // let err = sql.finish().unwrap_err();
+        // assert!(
+        //     err.to_string()
+        //         .contains("argument ?fields cannot be used with non-struct row types")
+        // );
         let mut sql = SqlBuilder::new("SELECT a FROM test WHERE b = ? AND c = ?");
         sql.bind_arg(42);
-        let err = sql.finish().unwrap_err();
+        let err = sql.finish(QI::BIND).unwrap_err();
         assert!(err.to_string().contains("unbound query argument"));
 
         let mut sql = SqlBuilder::new("SELECT ?fields FROM test WHERE b = ?");
         sql.bind_arg(42);
-        let err = sql.finish().unwrap_err();
+        let err = sql.finish(QI::BIND | QI::FIELDS).unwrap_err();
         assert!(err.to_string().contains("unbound query argument ?fields"));
     }
 }

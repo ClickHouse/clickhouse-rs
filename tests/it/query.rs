@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use clickhouse::{Row, error::Error};
-
+use clickhouse::{Row, error::Error, query::QI, sql::Identifier};
+//new changes
+// use clickhouse::{Row, error::Error};
 #[tokio::test]
 async fn smoke() {
     let client = prepare_database!();
@@ -35,7 +36,9 @@ async fn smoke() {
 
     // Read from the table.
     let mut cursor = client
-        .query("SELECT ?fields FROM test WHERE name = ? AND no BETWEEN ? AND ?.2")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>(
+            "SELECT ?fields FROM test WHERE name = ? AND no BETWEEN ? AND ?.2",
+        )
         .bind("foo")
         .bind(500)
         .bind((42, 504))
@@ -137,7 +140,7 @@ async fn long_query() {
     let long_string = "A".repeat(100_000);
 
     let got_string = client
-        .query("select ?")
+        .query_with_flags::<{ QI::BIND }>("select ?")
         .bind(&long_string)
         .fetch_one::<String>()
         .await
@@ -223,7 +226,9 @@ async fn keeps_client_options() {
     let client = prepare_database!().with_option(client_setting_name, client_setting_value);
 
     let value = client
-        .query("SELECT value FROM system.settings WHERE name = ? OR name = ? ORDER BY name")
+        .query_with_flags::<{ QI::BIND }>(
+            "SELECT value FROM system.settings WHERE name = ? OR name = ? ORDER BY name",
+        )
         .bind(query_setting_name)
         .bind(client_setting_name)
         .with_option(query_setting_name, query_setting_value)
@@ -242,7 +247,7 @@ async fn overrides_client_options() {
     let client = prepare_database!().with_option(setting_name, setting_value);
 
     let value = client
-        .query("SELECT value FROM system.settings WHERE name = ?")
+        .query_with_flags::<{ QI::BIND }>("SELECT value FROM system.settings WHERE name = ?")
         .bind(setting_name)
         .with_option(setting_name, override_value)
         .fetch_one::<String>()
@@ -262,4 +267,163 @@ async fn prints_query() {
         format!("{}", q.sql_display()),
         "SELECT ?fields FROM test WHERE a = ? AND b < ?"
     );
+}
+
+#[tokio::test]
+async fn query_flags_normal_query_with_bind_should_error() {
+    let client = prepare_database!();
+
+    // Test that using .bind() with regular .query() should skip binding and produce warning
+    let result = client
+        .query("SELECT ? as value")
+        .bind(42)
+        .fetch_one::<i32>()
+        .await;
+
+    // Should fail because ? becomes NULL and we can't cast NULL to i32
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn query_flags_fields_without_fields_flag_should_error() {
+    let client = prepare_database!();
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct TestRow {
+        value: u8,
+    }
+
+    // Test that using ?fields with only BIND flag should fail when ?fields is not substituted
+    // This tests the SQL generation without fetch auto-binding
+    let result = client
+        .query_with_flags::<{ QI::BIND }>("INSERT INTO test (?fields) VALUES (42)")
+        .execute()
+        .await;
+
+    // Should fail because ?fields is skipped and we get "INSERT INTO test () VALUES (42)" which is invalid SQL
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn query_flags_happy_case_bind_only() {
+    let client = prepare_database!();
+
+    // Test successful binding with BIND flag
+    let result = client
+        .query_with_flags::<{ QI::BIND }>("SELECT ? as value")
+        .bind(42u8)
+        .fetch_one::<u8>()
+        .await
+        .unwrap();
+
+    assert_eq!(result, 42);
+}
+
+#[tokio::test]
+async fn query_flags_happy_case_fields_only() {
+    let client = prepare_database!();
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct TestRow {
+        value: u8,
+    }
+
+    // Test successful fields substitution with FIELDS flag
+    let result = client
+        .query_with_flags::<{ QI::FIELDS }>("SELECT ?fields FROM (SELECT 42 as value)")
+        .fetch_one::<TestRow>()
+        .await
+        .unwrap();
+
+    assert_eq!(result, TestRow { value: 42 });
+}
+
+#[tokio::test]
+async fn query_flags_happy_case_both_flags() {
+    let client = prepare_database!();
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct TestRow {
+        value: u8,
+    }
+
+    // Test successful combination of both ?fields and ? with both flags
+    let result = client
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM (SELECT ? as value)")
+        .bind(42u8)
+        .fetch_one::<TestRow>()
+        .await
+        .unwrap();
+
+    assert_eq!(result, TestRow { value: 42 });
+}
+
+#[tokio::test]
+async fn query_flags_multiple_binds_with_flag() {
+    let client = prepare_database!();
+
+    // Test multiple bind parameters with BIND flag
+    let result = client
+        .query_with_flags::<{ QI::BIND }>("SELECT ? + ? as sum")
+        .bind(10u8)
+        .bind(32u8)
+        .fetch_one::<u16>()
+        .await
+        .unwrap();
+
+    assert_eq!(result, 42);
+}
+
+#[tokio::test]
+async fn query_flags_bind_with_identifier() {
+    let client = prepare_database!();
+    let table_name = "test_table";
+
+    // Create a test table
+    client
+        .query_with_flags::<{ QI::BIND }>(
+            "CREATE TABLE ? (id UInt32, value String) ENGINE = Memory",
+        )
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+
+    // Insert test data
+    client
+        .query_with_flags::<{ QI::BIND }>("INSERT INTO ? VALUES (1, 'test')")
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+
+    // Query with identifier binding
+    let count = client
+        .query_with_flags::<{ QI::BIND }>("SELECT count() FROM ?")
+        .bind(Identifier(table_name))
+        .fetch_one::<u64>()
+        .await
+        .unwrap();
+
+    assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn query_flags_none_with_fields_and_bind() {
+    let client = prepare_database!();
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct TestRow {
+        value: u8,
+    }
+
+    // Test that QI::NONE skips both ?fields and ? - this should fail because ?fields becomes empty
+    let result = client
+        .query_with_flags::<{ QI::NONE }>("SELECT ?fields, ? as extra FROM (SELECT 42 as value)")
+        .bind(999) // This should be ignored
+        .execute() // Use execute to avoid fetch auto-binding fields
+        .await;
+
+    // Should fail because ?fields is skipped making "SELECT , NULL as extra FROM ..." which is invalid SQL
+    assert!(result.is_err());
 }

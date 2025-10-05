@@ -1,7 +1,7 @@
 use rand::random;
 use serde::{Deserialize, Serialize};
 
-use clickhouse::Row;
+use clickhouse::{Row, query::QI};
 
 #[tokio::test]
 async fn u128() {
@@ -51,7 +51,9 @@ async fn u128() {
     insert.end().await.unwrap();
 
     let rows = client
-        .query("SELECT ?fields FROM test WHERE id IN ? ORDER BY value")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>(
+            "SELECT ?fields FROM test WHERE id IN ? ORDER BY value",
+        )
         .bind(vec![id0, id2])
         .fetch_all::<MyRow>()
         .await
@@ -110,7 +112,9 @@ async fn i128() {
     insert.end().await.unwrap();
 
     let rows = client
-        .query("SELECT ?fields FROM test WHERE id IN ? ORDER BY value")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>(
+            "SELECT ?fields FROM test WHERE id IN ? ORDER BY value",
+        )
         .bind(vec![id0, id2])
         .fetch_all::<MyRow>()
         .await

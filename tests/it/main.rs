@@ -25,7 +25,9 @@
 //!   the "cloud" environment, it appends the current timestamp to allow
 //!   clean up outdated databases based on its creation time.
 
-use clickhouse::{Client, Row, RowOwned, RowRead, RowWrite, sql::Identifier};
+use clickhouse::{Client, Row, RowOwned, RowRead, RowWrite, query::QI, sql::Identifier};
+//new changes
+// use clickhouse::{Client, Row, RowOwned, RowRead, RowWrite, sql::Identifier};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
@@ -149,7 +151,9 @@ impl SimpleRow {
 
 pub(crate) async fn create_simple_table(client: &Client, table_name: &str) {
     client
-        .query("CREATE TABLE ?(id UInt64, data String) ENGINE = MergeTree ORDER BY id")
+        .query_with_flags::<{ QI::BIND }>(
+            "CREATE TABLE ?(id UInt64, data String) ENGINE = MergeTree ORDER BY id",
+        )
         .with_option("wait_end_of_query", "1")
         .bind(Identifier(table_name))
         .execute()
@@ -162,7 +166,7 @@ where
     T: RowOwned + RowRead,
 {
     client
-        .query("SELECT ?fields FROM ?")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM ?")
         .bind(Identifier(table_name))
         .fetch_all::<T>()
         .await
@@ -204,7 +208,7 @@ where
     insert.end().await.unwrap();
 
     client
-        .query("SELECT ?fields FROM ? ORDER BY () ASC")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM ? ORDER BY () ASC")
         .bind(Identifier(table_name))
         .fetch_all::<T>()
         .await
@@ -285,7 +289,7 @@ mod _priv {
         let client = get_client();
 
         client
-            .query("DROP DATABASE IF EXISTS ?")
+            .query_with_flags::<{ QI::BIND }>("DROP DATABASE IF EXISTS ?")
             .with_option("wait_end_of_query", "1")
             .bind(Identifier(db_name))
             .execute()
@@ -293,7 +297,7 @@ mod _priv {
             .unwrap_or_else(|err| panic!("cannot drop db {db_name}, cause: {err}"));
 
         client
-            .query("CREATE DATABASE ?")
+            .query_with_flags::<{ QI::BIND }>("CREATE DATABASE ?")
             .with_option("wait_end_of_query", "1")
             .bind(Identifier(db_name))
             .execute()
