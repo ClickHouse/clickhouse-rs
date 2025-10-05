@@ -2,6 +2,7 @@ use crate::decimals::*;
 use crate::geo_types::{LineString, MultiLineString, MultiPolygon, Point, Polygon, Ring};
 use crate::{SimpleRow, create_simple_table, execute_statements, get_client, insert_and_select};
 use clickhouse::Row;
+use clickhouse::query::QI;
 use clickhouse::sql::Identifier;
 use fxhash::FxHashMap;
 use indexmap::IndexMap;
@@ -463,7 +464,7 @@ async fn enums() {
 
     let client = prepare_database!();
     client
-        .query(
+        .query_with_flags::<{ QI::BIND }>(
             "
             CREATE OR REPLACE TABLE ?
             (
@@ -1433,7 +1434,7 @@ async fn ephemeral_columns() {
 
     let client = prepare_database!();
     client
-        .query(
+        .query_with_flags::<{ QI::BIND }>(
             "
                 CREATE OR REPLACE TABLE ?
                 (
@@ -1468,7 +1469,7 @@ async fn ephemeral_columns() {
     insert.end().await.unwrap();
 
     let rows = client
-        .query("SELECT ?fields FROM ? ORDER BY () ASC")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM ? ORDER BY () ASC")
         .bind(Identifier(table_name))
         .fetch_all::<DataSelect>()
         .await
@@ -1524,7 +1525,7 @@ async fn materialized_columns() {
     .await;
 
     let rows = client
-        .query("SELECT ?fields FROM ? ORDER BY x ASC")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM ? ORDER BY x ASC")
         .bind(Identifier(table_name))
         .fetch_all::<DataWithMaterialized>()
         .await
@@ -1559,7 +1560,7 @@ async fn materialized_columns() {
     insert.end().await.unwrap();
 
     let rows_after_insert = client
-        .query("SELECT ?fields FROM ? ORDER BY x ASC")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM ? ORDER BY x ASC")
         .bind(Identifier(table_name))
         .fetch_all::<DataWithMaterialized>()
         .await
@@ -1615,7 +1616,7 @@ async fn alias_columns() {
     .await;
 
     let rows = client
-        .query("SELECT ?fields FROM ?")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM ?")
         .bind(Identifier(table_name))
         .fetch_all::<Data>()
         .await
@@ -1647,7 +1648,7 @@ async fn alias_columns() {
     insert.end().await.unwrap();
 
     let rows_after_insert = client
-        .query("SELECT ?fields FROM ? ORDER BY id ASC")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM ? ORDER BY id ASC")
         .bind(Identifier(table_name))
         .fetch_all::<Data>()
         .await

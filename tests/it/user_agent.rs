@@ -1,7 +1,10 @@
 use crate::{SimpleRow, create_simple_table, flush_query_log};
-use clickhouse::Client;
-use clickhouse::sql::Identifier;
+use clickhouse::{Client, query::QI, sql::Identifier};
 
+//new changes
+// use crate::{SimpleRow, create_simple_table, flush_query_log};
+// use clickhouse::Client;
+// use clickhouse::sql::Identifier;
 const PKG_VER: &str = env!("CARGO_PKG_VERSION");
 const RUST_VER: &str = env!("CARGO_PKG_RUST_VERSION");
 const OS: &str = std::env::consts::OS;
@@ -45,7 +48,7 @@ async fn assert_queries_user_agents(client: &Client, table_name: &str, expected_
     insert.end().await.unwrap();
 
     let rows = client
-        .query("SELECT ?fields FROM ?")
+        .query_with_flags::<{ QI::FIELDS | QI::BIND }>("SELECT ?fields FROM ?")
         .bind(Identifier(table_name))
         .fetch_all::<SimpleRow>()
         .await
