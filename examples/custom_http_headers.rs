@@ -1,4 +1,4 @@
-use clickhouse::{error::Result, Client};
+use clickhouse::{Client, error::Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {

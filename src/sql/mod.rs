@@ -221,12 +221,11 @@ impl SqlBuilder {
 mod tests {
     use super::*;
 
-    // XXX: need for `derive(Row)`. Provide `row(crate = ..)` instead.
-    use crate as clickhouse;
     use clickhouse_derive::Row;
 
     #[allow(unused)]
     #[derive(Row)]
+    #[clickhouse(crate = "crate")]
     struct Row {
         a: u32,
         b: u32,
@@ -234,6 +233,7 @@ mod tests {
 
     #[allow(unused)]
     #[derive(Row)]
+    #[clickhouse(crate = "crate")]
     struct Unnamed(u32, u32);
 
     #[test]
@@ -335,9 +335,10 @@ mod tests {
         let mut sql = SqlBuilder::new("SELECT ?fields");
         sql.bind_fields::<Unnamed>();
         let err = sql.finish().unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("argument ?fields cannot be used with non-struct row types"));
+        assert!(
+            err.to_string()
+                .contains("argument ?fields cannot be used with non-struct row types")
+        );
 
         let mut sql = SqlBuilder::new("SELECT a FROM test WHERE b = ? AND c = ?");
         sql.bind_arg(42);

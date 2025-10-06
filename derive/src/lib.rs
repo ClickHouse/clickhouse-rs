@@ -1,13 +1,26 @@
+use crate::attributes::Attributes;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use serde_derive_internals::{
-    attr::{Container, Default as SerdeDefault, Field},
     Ctxt,
+    attr::{Container, Default as SerdeDefault, Field},
 };
-use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Error, Fields, Lifetime, Result};
+use syn::{Data, DataStruct, DeriveInput, Error, Fields, Lifetime, Result, parse_macro_input};
+
+mod attributes;
 
 #[cfg(test)]
 mod tests;
+
+// TODO: support wrappers `Wrapper(Inner)` and `Wrapper<T>(T)`.
+// TODO: support the `nested` attribute.
+#[proc_macro_derive(Row, attributes(clickhouse))]
+pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    row_impl(input)
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
 
 fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> Result<TokenStream> {
     Ok(match &data.fields {
@@ -36,19 +49,11 @@ fn column_names(data: &DataStruct, cx: &Ctxt, container: &Container) -> Result<T
     })
 }
 
-// TODO: support wrappers `Wrapper(Inner)` and `Wrapper<T>(T)`.
-// TODO: support the `nested` attribute.
-// TODO: support the `crate` attribute.
-#[proc_macro_derive(Row)]
-pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    row_impl(input)
-        .unwrap_or_else(Error::into_compile_error)
-        .into()
-}
-
 fn row_impl(input: DeriveInput) -> Result<TokenStream> {
     let cx = Ctxt::new();
+
+    let Attributes { crate_path } = input.attrs[..].try_into()?;
+
     let container = Container::from_ast(&cx, &input);
     let name = input.ident;
 
@@ -89,14 +94,13 @@ fn row_impl(input: DeriveInput) -> Result<TokenStream> {
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    // TODO: replace `clickhouse` with `::clickhouse` here.
     Ok(quote! {
         #[automatically_derived]
-        impl #impl_generics clickhouse::Row for #name #ty_generics #where_clause {
+        impl #impl_generics #crate_path::Row for #name #ty_generics #where_clause {
             const NAME: &'static str = stringify!(#name);
             const COLUMN_NAMES: &'static [&'static str] = #column_names;
-            const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
-            const KIND: clickhouse::_priv::RowKind = clickhouse::_priv::RowKind::Struct;
+            const COLUMN_COUNT: usize = <Self as #crate_path::Row>::COLUMN_NAMES.len();
+            const KIND: #crate_path::_priv::RowKind = #crate_path::_priv::RowKind::Struct;
 
             type Value<'__v> = #value;
         }

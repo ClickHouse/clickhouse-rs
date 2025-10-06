@@ -25,13 +25,13 @@
 //!   the "cloud" environment, it appends the current timestamp to allow
 //!   clean up outdated databases based on its creation time.
 
-use clickhouse::{sql::Identifier, Client, Row, RowOwned, RowRead};
+use clickhouse::{Client, Row, RowOwned, RowRead, RowWrite, sql::Identifier};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
 macro_rules! assert_panic_on_fetch_with_client {
     ($client:ident, $msg_parts:expr, $query:expr) => {
-        use futures::FutureExt;
+        use futures_util::FutureExt;
         let async_panic =
             std::panic::AssertUnwindSafe(async { $client.query($query).fetch_all::<Data>().await });
         let result = async_panic.catch_unwind().await;
@@ -48,7 +48,7 @@ macro_rules! assert_panic_on_fetch_with_client {
 
 macro_rules! assert_panic_on_fetch {
     ($msg_parts:expr, $query:expr) => {
-        use futures::FutureExt;
+        use futures_util::FutureExt;
         let client = get_client();
         let async_panic =
             std::panic::AssertUnwindSafe(async { client.query($query).fetch_all::<Data>().await });
@@ -68,16 +68,37 @@ macro_rules! assert_panic_on_fetch {
     };
 }
 
+macro_rules! assert_panic_msg {
+    ($unwinded:ident, $msg_parts:expr) => {
+        use futures_util::FutureExt;
+        let result = $unwinded.catch_unwind().await;
+        assert!(
+            result.is_err(),
+            "expected a panic, but got a result instead: {:?}",
+            result.unwrap()
+        );
+        let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
+        for msg in $msg_parts {
+            assert!(
+                panic_msg.contains(msg),
+                "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
+            );
+        }
+    };
+}
+
 macro_rules! prepare_database {
     () => {
-        crate::_priv::prepare_database({
+        crate::_priv::prepare_database(&test_database_name!()).await
+    };
+}
+
+macro_rules! test_database_name {
+    () => {
+        crate::_priv::make_db_name({
             fn f() {}
-            fn type_name_of_val<T>(_: T) -> &'static str {
-                std::any::type_name::<T>()
-            }
-            type_name_of_val(f)
+            std::any::type_name_of_val(&f)
         })
-        .await
     };
 }
 
@@ -111,7 +132,7 @@ pub(crate) fn get_cloud_url() -> String {
     format!("https://{hostname}:8443")
 }
 
-#[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
 struct SimpleRow {
     id: u64,
     data: String,
@@ -149,7 +170,12 @@ where
 }
 
 pub(crate) async fn flush_query_log(client: &Client) {
-    client.query("SYSTEM FLUSH LOGS").execute().await.unwrap();
+    client
+        .query("SYSTEM FLUSH LOGS")
+        .with_option("wait_end_of_query", "1")
+        .execute()
+        .await
+        .unwrap();
 }
 
 pub(crate) async fn execute_statements(client: &Client, statements: &[&str]) {
@@ -161,6 +187,48 @@ pub(crate) async fn execute_statements(client: &Client, statements: &[&str]) {
             .await
             .unwrap_or_else(|err| panic!("cannot execute statement '{statement}', cause: {err}"));
     }
+}
+
+pub(crate) async fn insert_and_select<T>(
+    client: &Client,
+    table_name: &str,
+    data: impl IntoIterator<Item = T>,
+) -> Vec<T>
+where
+    T: RowOwned + RowRead + RowWrite,
+{
+    let mut insert = client.insert::<T>(table_name).await.unwrap();
+    for row in data.into_iter() {
+        insert.write(&row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    client
+        .query("SELECT ?fields FROM ? ORDER BY () ASC")
+        .bind(Identifier(table_name))
+        .fetch_all::<T>()
+        .await
+        .unwrap()
+}
+
+pub(crate) mod geo_types {
+    // See https://clickhouse.com/docs/en/sql-reference/data-types/geo
+    pub(crate) type Point = (f64, f64);
+    pub(crate) type Ring = Vec<Point>;
+    pub(crate) type Polygon = Vec<Ring>;
+    pub(crate) type MultiPolygon = Vec<Polygon>;
+    pub(crate) type LineString = Vec<Point>;
+    pub(crate) type MultiLineString = Vec<LineString>;
+}
+
+pub(crate) mod decimals {
+    use fixnum::FixedPoint;
+    use fixnum::typenum::{U4, U8, U12};
+
+    // See ClickHouse decimal sizes: https://clickhouse.com/docs/en/sql-reference/data-types/decimal
+    pub(crate) type Decimal32 = FixedPoint<i32, U4>; // Decimal(9, 4) = Decimal32(4)
+    pub(crate) type Decimal64 = FixedPoint<i64, U8>; // Decimal(18, 8) = Decimal64(8)
+    pub(crate) type Decimal128 = FixedPoint<i128, U12>; // Decimal(38, 12) = Decimal128(12)
 }
 
 mod chrono;
@@ -178,7 +246,9 @@ mod mock;
 mod nested;
 mod query;
 mod query_syntax;
-mod rbwnat;
+mod rbwnat_header;
+mod rbwnat_smoke;
+mod rbwnat_validation;
 mod time;
 mod user_agent;
 mod uuid;
@@ -192,7 +262,7 @@ enum TestEnv {
 
 #[allow(clippy::incompatible_msrv)]
 fn test_env() -> TestEnv {
-    use std::env::{var, VarError};
+    use std::env::{VarError, var};
 
     static TEST_ENV: LazyLock<TestEnv> =
         LazyLock::new(|| match var("CLICKHOUSE_TEST_ENVIRONMENT") {
@@ -212,14 +282,13 @@ mod _priv {
     use super::*;
     use std::time::SystemTime;
 
-    pub(crate) async fn prepare_database(fn_path: &str) -> Client {
-        let db_name = make_db_name(fn_path);
+    pub(crate) async fn prepare_database(db_name: &str) -> Client {
         let client = get_client();
 
         client
             .query("DROP DATABASE IF EXISTS ?")
             .with_option("wait_end_of_query", "1")
-            .bind(Identifier(&db_name))
+            .bind(Identifier(db_name))
             .execute()
             .await
             .unwrap_or_else(|err| panic!("cannot drop db {db_name}, cause: {err}"));
@@ -227,7 +296,7 @@ mod _priv {
         client
             .query("CREATE DATABASE ?")
             .with_option("wait_end_of_query", "1")
-            .bind(Identifier(&db_name))
+            .bind(Identifier(db_name))
             .execute()
             .await
             .unwrap_or_else(|err| panic!("cannot create db {db_name}, cause: {err}"));
@@ -239,7 +308,7 @@ mod _priv {
     // `it::compression::lz4::{{closure}}::f` ->
     // - "local" env: `chrs__compression__lz4`
     // - "cloud" env: `chrs__compression__lz4__{unix_millis}`
-    fn make_db_name(fn_path: &str) -> String {
+    pub(crate) fn make_db_name(fn_path: &str) -> String {
         assert!(fn_path.starts_with("it::"));
         let mut iter = fn_path.split("::").skip(1);
         let module = iter.next().unwrap();

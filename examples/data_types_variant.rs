@@ -2,7 +2,7 @@ use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 
 use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client};
+use clickhouse::{Client, error::Result};
 
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types/variant
 
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert::<MyRow>(table_name)?;
+    let mut insert = client.insert::<MyRow>(table_name).await?;
     let rows_to_insert = get_rows();
     for row in rows_to_insert {
         insert.write(&row).await?;

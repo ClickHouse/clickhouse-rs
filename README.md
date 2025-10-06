@@ -137,7 +137,7 @@ struct MyRow {
     name: String,
 }
 
-let mut insert = client.insert("some")?;
+let mut insert = client.insert::<MyRow>("some").await?;
 insert.write(&MyRow { no: 0, name: "foo".into() }).await?;
 insert.write(&MyRow { no: 1, name: "bar".into() }).await?;
 insert.end().await?;
@@ -158,14 +158,14 @@ insert.end().await?;
 Requires the `inserter` feature.
 
 ```rust,ignore
-let mut inserter = client.inserter("some")?
+let mut inserter = client.inserter::<MyRow>("some")?
     .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
     .with_max_bytes(50_000_000)
     .with_max_rows(750_000)
     .with_period(Some(Duration::from_secs(15)));
 
-inserter.write(&MyRow { no: 0, name: "foo".into() })?;
-inserter.write(&MyRow { no: 1, name: "bar".into() })?;
+inserter.write(&MyRow { no: 0, name: "foo".into() }).await?;
+inserter.write(&MyRow { no: 1, name: "bar".into() }).await?;
 let stats = inserter.commit().await?;
 if stats.rows > 0 {
     println!(
@@ -526,3 +526,25 @@ The crate provides utils for mocking CH server and testing DDL, `SELECT` and `IN
 The functionality can be enabled with the `test-util` feature. Use it **only** in dev-dependencies.
 
 See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs).
+
+## Support Policies
+
+### Minimum Supported Rust Version (MSRV)
+
+This project's MSRV is the second-to-last stable release as of the beginning of the current release cycle (`0.x.0`),
+where it will remain until the beginning of the _next_ release cycle (`0.{x+1}.0`).
+
+The MSRV for the `0.14.x` release cycle is `1.89.0`.
+
+This guarantees that `clickhouse-rs` will compile with a Rust version that is at _least_ six weeks old, 
+which should be plenty of time for it to make it through any packaging system that is being actively kept up to date.
+
+Beware when installing Rust through operating system package managers, as it can often be a year or more
+out-of-date. For example, Debian Bookworm (released 10 June 2023) shipped with Rust 1.63.0 (released 11 August 2022).
+
+### ClickHouse Versions
+
+The supported versions of the ClickHouse database server coincide with the versions currently receiving security
+updates.
+
+For the list of currently supported versions, see <https://github.com/ClickHouse/ClickHouse/blob/master/SECURITY.md#security-change-log-and-support>.

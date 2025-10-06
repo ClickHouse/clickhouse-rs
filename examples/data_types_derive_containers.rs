@@ -1,8 +1,8 @@
-use rand::distr::Alphanumeric;
 use rand::Rng;
+use rand::distr::Alphanumeric;
 
 use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client};
+use clickhouse::{Client, error::Result};
 
 // This example covers derivation of container-like ClickHouse data types.
 // See also:
@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert::<Row>(table_name)?;
+    let mut insert = client.insert::<Row>(table_name).await?;
     insert.write(&Row::new()).await?;
     insert.end().await?;
 

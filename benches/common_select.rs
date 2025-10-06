@@ -75,7 +75,9 @@ pub(crate) fn print_results<T: WithAccessType>(
         let access_type = T::ACCESS_TYPE;
         &format!("  {access_type:>6}")
     };
-    println!("{compression:>8}  {validation_mode:>10}  {elapsed:>9.3?}  {throughput_mbytes_sec:>4.0} MiB/s  {received_mbytes:>4.0} MiB{access}");
+    println!(
+        "{compression:>8}  {validation_mode:>10}  {elapsed:>9.3?}  {throughput_mbytes_sec:>4.0} MiB/s  {received_mbytes:>4.0} MiB{access}"
+    );
 }
 
 pub(crate) async fn fetch_cursor<T: Row>(

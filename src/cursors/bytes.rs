@@ -3,7 +3,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use std::{
     io::Result as IoResult,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 
@@ -17,8 +17,9 @@ use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 /// Additionally to [`BytesCursor::next`] and [`BytesCursor::collect`],
 /// this cursor implements:
 /// * [`AsyncRead`] and [`AsyncBufRead`] for `tokio`-based ecosystem.
-/// * [`futures::Stream`], [`futures::AsyncRead`] and [`futures::AsyncBufRead`]
-///   for `futures`-based ecosystem. (requires the `futures03` feature)
+/// * [`futures_util::Stream`], [`futures_util::AsyncRead`] and
+///   [`futures_util::AsyncBufRead`] for `futures`-based ecosystem.
+///   (requires the `futures03` feature)
 ///
 /// For instance, if the requested format emits each row on a newline
 /// (e.g. `JSONEachRow`, `CSV`, `TSV`, etc.), the cursor can be read line by
@@ -167,7 +168,7 @@ impl AsyncBufRead for BytesCursor {
 }
 
 #[cfg(feature = "futures03")]
-impl futures::AsyncRead for BytesCursor {
+impl futures_util::AsyncRead for BytesCursor {
     #[inline]
     fn poll_read(
         self: Pin<&mut Self>,
@@ -181,7 +182,7 @@ impl futures::AsyncRead for BytesCursor {
 }
 
 #[cfg(feature = "futures03")]
-impl futures::AsyncBufRead for BytesCursor {
+impl futures_util::AsyncBufRead for BytesCursor {
     #[inline]
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<&[u8]>> {
         AsyncBufRead::poll_fill_buf(self, cx)
@@ -194,7 +195,7 @@ impl futures::AsyncBufRead for BytesCursor {
 }
 
 #[cfg(feature = "futures03")]
-impl futures::stream::Stream for BytesCursor {
+impl futures_util::stream::Stream for BytesCursor {
     type Item = crate::error::Result<bytes::Bytes>;
 
     #[inline]
@@ -209,7 +210,7 @@ impl futures::stream::Stream for BytesCursor {
 }
 
 #[cfg(feature = "futures03")]
-impl futures::stream::FusedStream for BytesCursor {
+impl futures_util::stream::FusedStream for BytesCursor {
     #[inline]
     fn is_terminated(&self) -> bool {
         self.bytes.is_empty() && self.raw.is_terminated()

@@ -1,6 +1,6 @@
-use crate::{create_simple_table, flush_query_log, SimpleRow};
-use clickhouse::sql::Identifier;
+use crate::{SimpleRow, create_simple_table, flush_query_log};
 use clickhouse::Client;
+use clickhouse::sql::Identifier;
 
 const PKG_VER: &str = env!("CARGO_PKG_VERSION");
 const RUST_VER: &str = env!("CARGO_PKG_RUST_VERSION");
@@ -40,7 +40,7 @@ async fn assert_queries_user_agents(client: &Client, table_name: &str, expected_
 
     create_simple_table(client, table_name).await;
 
-    let mut insert = client.insert::<SimpleRow>(table_name).unwrap();
+    let mut insert = client.insert::<SimpleRow>(table_name).await.unwrap();
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
 

@@ -1,4 +1,4 @@
-use clickhouse::{query::BytesCursor, Client};
+use clickhouse::{Client, query::BytesCursor};
 use std::time::Instant;
 use tokio::{fs::File, io::AsyncWriteExt};
 
@@ -45,10 +45,10 @@ async fn cursor_next(filename: &str) {
     }
 }
 
-// Pattern 3: use the `futures::(Try)StreamExt` traits.
+// Pattern 3: use the `futures_util::(Try)StreamExt` traits.
 #[cfg(feature = "futures03")]
 async fn futures03_stream(filename: &str) {
-    use futures::TryStreamExt;
+    use futures_util::TryStreamExt;
 
     let mut cursor = query(NUMBERS);
     let mut file = File::create(filename).await.unwrap();

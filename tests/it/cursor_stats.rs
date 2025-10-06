@@ -1,11 +1,11 @@
 use clickhouse::{Client, Compression};
 
-use crate::{create_simple_table, SimpleRow};
+use crate::{SimpleRow, create_simple_table};
 
 async fn check(client: Client, expected_ratio: f64) {
     create_simple_table(&client, "test").await;
 
-    let mut insert = client.insert::<SimpleRow>("test").unwrap();
+    let mut insert = client.insert::<SimpleRow>("test").await.unwrap();
     for i in 0..1_000 {
         insert.write(&SimpleRow::new(i, "foobar")).await.unwrap();
     }

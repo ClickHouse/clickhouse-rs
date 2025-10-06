@@ -1,16 +1,16 @@
-use hyper::{header::CONTENT_LENGTH, Method, Request};
+use hyper::{Method, Request, header::CONTENT_LENGTH};
 use serde::Serialize;
 use std::fmt::Display;
 use url::Url;
 
 use crate::{
+    Client,
     error::{Error, Result},
     headers::with_request_headers,
     request_body::RequestBody,
     response::Response,
     row::{Row, RowOwned, RowRead},
-    sql::{ser, Bind, SqlBuilder},
-    Client,
+    sql::{Bind, SqlBuilder, ser},
 };
 
 const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;

@@ -3,7 +3,7 @@ use std::time::UNIX_EPOCH;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use clickhouse::{error::Result, Client, Row};
+use clickhouse::{Client, Row, error::Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
         Error = 4,
     }
 
-    let mut insert = client.insert::<Event>("event_log")?;
+    let mut insert = client.insert::<Event>("event_log").await?;
     insert
         .write(&Event {
             timestamp: now(),

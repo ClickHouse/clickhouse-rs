@@ -1,4 +1,4 @@
-use clickhouse::{error::Result, test, Client, Row};
+use clickhouse::{Client, Row, error::Result, test};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,7 +19,7 @@ async fn make_select(client: &Client) -> Result<Vec<SomeRow>> {
 }
 
 async fn make_insert(client: &Client, data: &[SomeRow]) -> Result<()> {
-    let mut insert = client.insert::<SomeRow>("who cares")?;
+    let mut insert = client.insert::<SomeRow>("who cares").await?;
     for row in data {
         insert.write(row).await?;
     }

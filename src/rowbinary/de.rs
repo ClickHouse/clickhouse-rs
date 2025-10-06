@@ -1,14 +1,14 @@
+use crate::Row;
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
-use crate::Row;
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
 use serde::{
-    de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
     Deserialize,
+    de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
 };
 use std::marker::PhantomData;
 use std::{convert::TryFrom, str};
@@ -213,7 +213,7 @@ where
 
     /// This is used to deserialize identifiers for either:
     /// - `Variant` data type
-    /// - [`RowBinaryStructAsMapAccess`] field.
+    /// - out-of-order struct fields using [`MapAccess`].
     #[inline(always)]
     fn deserialize_identifier<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         ensure_size(&mut self.input, size_of::<u8>())?;
@@ -232,7 +232,7 @@ where
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        let deserializer = &mut self.inner(SerdeType::Enum);
+        let deserializer = &mut self.inner(SerdeType::Variant);
         visitor.visit_enum(RowBinaryEnumAccess { deserializer })
     }
 

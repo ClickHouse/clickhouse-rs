@@ -2,7 +2,7 @@ use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 
 use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client};
+use clickhouse::{Client, error::Result};
 
 // Requires ClickHouse 24.10+, as the `input_format_binary_read_json_as_string` and `output_format_binary_write_json_as_string` settings were added in that version.
 // Inserting and selecting a row with a JSON column as a string.
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
         .to_string(),
     };
 
-    let mut insert = client.insert::<Row>(table_name)?;
+    let mut insert = client.insert::<Row>(table_name).await?;
     insert.write(&row).await?;
     insert.end().await?;
 

@@ -1,8 +1,8 @@
 use std::fmt::{self, Write};
 
 use serde::{
-    ser::{self, SerializeSeq, SerializeTuple, Serializer},
     Serialize,
+    ser::{self, SerializeSeq, SerializeTuple, Serializer},
 };
 use thiserror::Error;
 

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use clickhouse::{error::Result, sql, Client, Row};
+use clickhouse::{Client, Row, error::Result, sql};
 
 #[derive(Debug, Row, Serialize, Deserialize)]
 struct MyRow<'a> {
@@ -29,7 +29,7 @@ async fn ddl(client: &Client) -> Result<()> {
 }
 
 async fn insert(client: &Client) -> Result<()> {
-    let mut insert = client.insert::<MyRow<'_>>("some")?;
+    let mut insert = client.insert::<MyRow<'_>>("some").await?;
     for i in 0..1000 {
         insert.write(&MyRow { no: i, name: "foo" }).await?;
     }
@@ -42,12 +42,12 @@ async fn insert(client: &Client) -> Result<()> {
 #[cfg(feature = "inserter")]
 async fn inserter(client: &Client) -> Result<()> {
     let mut inserter = client
-        .inserter::<MyRow<'_>>("some")?
+        .inserter::<MyRow<'_>>("some")
         .with_max_rows(100_000)
         .with_period(Some(std::time::Duration::from_secs(15)));
 
     for i in 0..1000 {
-        inserter.write(&MyRow { no: i, name: "foo" })?;
+        inserter.write(&MyRow { no: i, name: "foo" }).await?;
         inserter.commit().await?;
     }
 

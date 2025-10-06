@@ -14,6 +14,7 @@ If something is missing, or you found a mistake in one of these examples, please
 - [async_insert.rs](async_insert.rs) - using the server-side batching via the [asynchronous inserts](https://clickhouse.com/docs/en/optimize/asynchronous-inserts) ClickHouse feature
 - [clickhouse_cloud.rs](clickhouse_cloud.rs) - using the client with ClickHouse Cloud, highlighting a few relevant settings (`wait_end_of_query`, `select_sequential_consistency`). Cargo features: requires `rustls-tls`; the code also works with `native-tls`.
 - [clickhouse_settings.rs](clickhouse_settings.rs) - applying various ClickHouse settings on the query level
+- [server_side_params.rs](server_side_params.rs) - parametrized queries with server-side parameters
 
 ### Data types
 

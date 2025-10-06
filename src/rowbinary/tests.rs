@@ -1,4 +1,5 @@
 use crate::Row;
+use crate::row::Primitive;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -9,9 +10,13 @@ struct Timestamp64(u64);
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Time32(i32);
+impl Primitive for Time32 {}
+impl Primitive for Option<Time32> {}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Time64(i64);
+impl Primitive for Time64 {}
+impl Primitive for Option<Time64> {}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct FixedPoint64(i64);
@@ -157,7 +162,7 @@ fn sample_serialized() -> Vec<u8> {
 #[test]
 fn it_serializes() {
     let mut actual = Vec::new();
-    super::serialize_into(&mut actual, &sample()).unwrap();
+    super::serialize_row_binary(&mut actual, &sample()).unwrap();
     assert_eq!(actual, sample_serialized());
 }
 
@@ -183,7 +188,7 @@ fn it_serializes_time64() {
     let time64 = Time64(value);
     println!("Time64 value: {}", time64.0);
     let mut actual = Vec::new();
-    super::serialize_into(&mut actual, &time64).unwrap();
+    super::serialize_row_binary(&mut actual, &time64).unwrap();
 
     // Expected: 42000000000 in little-endian
     let expected = value.to_le_bytes();
@@ -203,7 +208,7 @@ fn it_serializes_time32() {
     let value = 42_000;
     let time32 = Time32(value);
     let mut actual = Vec::new();
-    super::serialize_into(&mut actual, &time32).unwrap();
+    super::serialize_row_binary(&mut actual, &time32).unwrap();
     let expected = value.to_le_bytes();
     assert_eq!(actual, expected, "Time32 serialization mismatch");
 }
@@ -220,7 +225,7 @@ fn it_serializes_option_time32_some() {
     let value = 42_000;
     let time: Option<Time32> = Some(Time32(value));
     let mut actual = Vec::new();
-    super::serialize_into(&mut actual, &time).unwrap();
+    super::serialize_row_binary(&mut actual, &time).unwrap();
 
     // Nullable encoding: 0x00 = not null, followed by value
     let mut expected = vec![0x00];

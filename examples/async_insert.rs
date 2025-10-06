@@ -3,7 +3,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client, Row};
+use clickhouse::{Client, Row, error::Result};
 
 // This example demonstrates how to use asynchronous inserts, avoiding client side batching of the incoming data.
 // Suitable for ClickHouse Cloud, too. See https://clickhouse.com/docs/en/optimize/asynchronous-inserts
@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert::<Event>(table_name)?;
+    let mut insert = client.insert::<Event>(table_name).await?;
     insert
         .write(&Event {
             timestamp: now(),

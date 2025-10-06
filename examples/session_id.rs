@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use clickhouse::sql::Identifier;
-use clickhouse::{error::Result, Client};
+use clickhouse::{Client, error::Result};
 
 /// Besides [`Client::with_option`], which will be applied for all requests,
 /// `session_id` (and other settings) can be set separately for a particular `query`, `insert`,
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
         i: i32,
     }
 
-    let mut insert = client.insert::<MyRow>(table_name)?;
+    let mut insert = client.insert::<MyRow>(table_name).await?;
     insert.write(&MyRow { i: 42 }).await?;
     insert.end().await?;
 

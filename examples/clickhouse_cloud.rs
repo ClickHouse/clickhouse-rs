@@ -1,5 +1,5 @@
-use clickhouse::sql::Identifier;
 use clickhouse::Client;
+use clickhouse::sql::Identifier;
 use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -42,7 +42,7 @@ async fn main() -> clickhouse::error::Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert::<Data>(table_name)?;
+    let mut insert = client.insert::<Data>(table_name).await?;
     insert
         .write(&Data {
             id: 42,

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use clickhouse::{error::Error, Row};
+use clickhouse::{Row, error::Error};
 
 #[tokio::test]
 async fn smoke() {
@@ -26,7 +26,7 @@ async fn smoke() {
         .unwrap();
 
     // Write to the table.
-    let mut insert = client.insert::<MyRow<'_>>("test").unwrap();
+    let mut insert = client.insert::<MyRow<'_>>("test").await.unwrap();
     for i in 0..1000 {
         insert.write(&MyRow { no: i, name: "foo" }).await.unwrap();
     }
@@ -73,7 +73,7 @@ async fn fetch_one_and_optional() {
         n: String,
     }
 
-    let mut insert = client.insert::<Row>("test").unwrap();
+    let mut insert = client.insert::<Row>("test").await.unwrap();
     insert.write(&Row { n: "foo".into() }).await.unwrap();
     insert.write(&Row { n: "bar".into() }).await.unwrap();
     insert.end().await.unwrap();
@@ -165,7 +165,7 @@ async fn big_borrowed_str() {
 
     let long_string = "A".repeat(10000);
 
-    let mut insert = client.insert::<MyRow<'_>>("test").unwrap();
+    let mut insert = client.insert::<MyRow<'_>>("test").await.unwrap();
     insert
         .write(&MyRow {
             no: 0,
@@ -201,7 +201,7 @@ async fn all_floats() {
         f: f64,
     }
 
-    let mut insert = client.insert::<Row>("test").unwrap();
+    let mut insert = client.insert::<Row>("test").await.unwrap();
     insert.write(&Row { no: 0, f: 42.5 }).await.unwrap();
     insert.write(&Row { no: 1, f: 43.5 }).await.unwrap();
     insert.end().await.unwrap();

@@ -1,22 +1,23 @@
-use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Duration};
-
+use crate::headers::{with_authentication, with_request_headers};
+use crate::row_metadata::RowMetadata;
+use crate::rowbinary::{serialize_row_binary, serialize_with_validation};
+use crate::{
+    Client, Compression, RowWrite,
+    error::{Error, Result},
+    request_body::{ChunkSender, RequestBody},
+    response::Response,
+    row::{self, Row},
+};
 use bytes::{Bytes, BytesMut};
+use clickhouse_types::put_rbwnat_columns_header;
 use hyper::{self, Request};
 use replace_with::replace_with_or_abort;
+use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Duration};
 use tokio::{
     task::JoinHandle,
     time::{Instant, Sleep},
 };
 use url::Url;
-
-use crate::headers::{with_authentication, with_request_headers};
-use crate::{
-    error::{Error, Result},
-    request_body::{ChunkSender, RequestBody},
-    response::Response,
-    row::{self, Row, RowWrite},
-    rowbinary, Client, Compression,
-};
 
 // The desired max frame size.
 const BUFFER_SIZE: usize = 256 * 1024;
@@ -32,10 +33,21 @@ const_assert!(BUFFER_SIZE.is_power_of_two()); // to use the whole buffer's capac
 /// Otherwise, the whole `INSERT` will be aborted.
 ///
 /// Rows are being sent progressively to spread network load.
+///
+/// # Note: Metadata is Cached
+/// If [validation is enabled][Client::with_validation],
+/// this helper will query the metadata for the target table to learn the column names and types.
+///
+/// To avoid querying this metadata every time, it is cached within the [`Client`].
+///
+/// Any concurrent changes to the table schema may cause insert failures if the metadata
+/// is no longer correct. For correct functioning, call [`Client::clear_cached_metadata()`]
+/// after any changes to the current database schema.
 #[must_use]
 pub struct Insert<T> {
     state: InsertState,
     buffer: BytesMut,
+    row_metadata: Option<RowMetadata>,
     #[cfg(feature = "lz4")]
     compression: Compression,
     send_timeout: Option<Duration>,
@@ -118,8 +130,7 @@ macro_rules! timeout {
 }
 
 impl<T> Insert<T> {
-    // TODO: remove Result
-    pub(crate) fn new(client: &Client, table: &str) -> Result<Self>
+    pub(crate) fn new(client: &Client, table: &str, row_metadata: Option<RowMetadata>) -> Self
     where
         T: Row,
     {
@@ -128,9 +139,14 @@ impl<T> Insert<T> {
 
         // TODO: what about escaping a table name?
         // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
-        let sql = format!("INSERT INTO {table}({fields}) FORMAT RowBinary");
+        let format = if row_metadata.is_some() {
+            "RowBinaryWithNamesAndTypes"
+        } else {
+            "RowBinary"
+        };
+        let sql = format!("INSERT INTO {table}({fields}) FORMAT {format}");
 
-        Ok(Self {
+        Self {
             state: InsertState::NotStarted {
                 client: Box::new(client.clone()),
                 sql,
@@ -142,7 +158,8 @@ impl<T> Insert<T> {
             end_timeout: None,
             sleep: Box::pin(tokio::time::sleep(Duration::new(0, 0))),
             _marker: PhantomData,
-        })
+            row_metadata,
+        }
     }
 
     /// Sets timeouts for different operations.
@@ -193,6 +210,7 @@ impl<T> Insert<T> {
     /// socket.
     ///
     /// Close to:
+    ///
     /// ```ignore
     /// async fn write<T>(&self, row: &T) -> Result<usize>;
     /// ```
@@ -204,6 +222,7 @@ impl<T> Insert<T> {
     /// used anymore.
     ///
     /// # Panics
+    ///
     /// If called after the previous call that returned an error.
     pub fn write<'a>(
         &'a mut self,
@@ -235,7 +254,10 @@ impl<T> Insert<T> {
         }?;
 
         let old_buf_size = self.buffer.len();
-        let result = rowbinary::serialize_into(&mut self.buffer, row);
+        let result = match &self.row_metadata {
+            Some(metadata) => serialize_with_validation(&mut self.buffer, row, metadata),
+            None => serialize_row_binary(&mut self.buffer, row),
+        };
         let written = self.buffer.len() - old_buf_size;
 
         if result.is_err() {
@@ -266,7 +288,6 @@ impl<T> Insert<T> {
         // It's difficult to determine when allocations occur.
         // So, instead we control it manually here and rely on the system allocator.
         let chunk = self.take_and_prepare_chunk()?;
-
         let sender = self.state.sender().unwrap(); // checked above
 
         let is_timed_out = match timeout!(self, send_timeout, sender.send(chunk)) {
@@ -367,6 +388,13 @@ impl<T> Insert<T> {
         // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.
         let handle =
             tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
+
+        match self.row_metadata {
+            None => (), // RowBinary is used, no header is required.
+            Some(ref metadata) => {
+                put_rbwnat_columns_header(&metadata.columns, &mut self.buffer)?;
+            }
+        }
 
         self.state = InsertState::Active { handle, sender };
         Ok(())

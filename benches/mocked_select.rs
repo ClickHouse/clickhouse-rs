@@ -1,15 +1,15 @@
 use bytes::Bytes;
 use clickhouse::{
-    error::{Error, Result},
     Client, Compression, Row,
+    error::{Error, Result},
 };
 use clickhouse_types::{Column, DataTypeNode};
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use futures::stream::{self, StreamExt as _};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use futures_util::stream::{self, StreamExt as _};
 use http_body_util::StreamBody;
 use hyper::{
-    body::{Body, Frame, Incoming},
     Request, Response,
+    body::{Body, Frame, Incoming},
 };
 use serde::Deserialize;
 use std::convert::Infallible;
@@ -21,11 +21,11 @@ mod common;
 async fn serve(
     request: Request<Incoming>,
     compression: Compression,
-    use_rbwnat: bool,
+    with_validation: bool,
 ) -> Response<impl Body<Data = Bytes, Error = Infallible>> {
     common::skip_incoming(request).await;
 
-    let maybe_schema = if use_rbwnat {
+    let maybe_schema = if with_validation {
         let schema = vec![
             Column::new("a".to_string(), DataTypeNode::UInt64),
             Column::new("b".to_string(), DataTypeNode::Int64),
@@ -56,7 +56,7 @@ async fn serve(
 }
 
 fn prepare_chunk() -> Bytes {
-    use rand::{distr::StandardUniform, rngs::SmallRng, Rng, SeedableRng};
+    use rand::{Rng, SeedableRng, distr::StandardUniform, rngs::SmallRng};
 
     // Generate random data to avoid _real_ compression.
     // TODO: It would be more useful to generate real data.
@@ -79,8 +79,8 @@ fn prepare_chunk() -> Bytes {
 const ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 6523));
 
 fn select(c: &mut Criterion) {
-    async fn start_server(compression: Compression, use_rbwnat: bool) -> common::ServerHandle {
-        common::start_server(ADDR, move |req| serve(req, compression, use_rbwnat)).await
+    async fn start_server(compression: Compression, with_validation: bool) -> common::ServerHandle {
+        common::start_server(ADDR, move |req| serve(req, compression, with_validation)).await
     }
 
     let runner = common::start_runner();

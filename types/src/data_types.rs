@@ -71,6 +71,8 @@ pub enum DataTypeNode {
     /// Precision and optional timezone (timezone is ignored in value operations)
     Time64(DateTimePrecision),
 
+    Interval(IntervalType),
+
     IPv4,
     IPv6,
 
@@ -143,6 +145,7 @@ impl DataTypeNode {
             str if str.starts_with("DateTime") => parse_datetime(str),
             str if str.starts_with("Time64") => parse_time64(str),
             str if str.starts_with("Time") => Ok(Self::Time),
+            str if str.starts_with("Interval") => Ok(Self::Interval(str[8..].parse()?)),
 
             str if str.starts_with("Nullable") => parse_nullable(str),
             str if str.starts_with("LowCardinality") => parse_low_cardinality(str),
@@ -208,6 +211,7 @@ impl Display for DataTypeNode {
             DateTime64(precision, Some(tz)) => write!(f, "DateTime64({precision}, '{tz}')"),
             Time => write!(f, "Time"),
             Time64(precision) => write!(f, "Time64({precision})"),
+            Interval(interval) => write!(f, "Interval{interval}"),
             IPv4 => write!(f, "IPv4"),
             IPv6 => write!(f, "IPv6"),
             Bool => write!(f, "Bool"),
@@ -368,9 +372,9 @@ impl DecimalType {
         } else if precision <= 76 {
             Ok(DecimalType::Decimal256)
         } else {
-            return Err(TypesError::TypeParsingError(format!(
+            Err(TypesError::TypeParsingError(format!(
                 "Invalid Decimal precision: {precision}"
-            )));
+            )))
         }
     }
 }
@@ -388,6 +392,65 @@ impl Display for DateTimePrecision {
             DateTimePrecision::Precision7 => write!(f, "7"),
             DateTimePrecision::Precision8 => write!(f, "8"),
             DateTimePrecision::Precision9 => write!(f, "9"),
+        }
+    }
+}
+
+/// Represents the type of an interval.
+/// See also: <https://clickhouse.com/docs/sql-reference/data-types/special-data-types/interval>
+#[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
+pub enum IntervalType {
+    Nanosecond,
+    Microsecond,
+    Millisecond,
+    Second,
+    Minute,
+    Hour,
+    Day,
+    Week,
+    Month,
+    Quarter,
+    Year,
+}
+
+impl std::str::FromStr for IntervalType {
+    type Err = TypesError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Nanosecond" => Ok(IntervalType::Nanosecond),
+            "Microsecond" => Ok(IntervalType::Microsecond),
+            "Millisecond" => Ok(IntervalType::Millisecond),
+            "Second" => Ok(IntervalType::Second),
+            "Minute" => Ok(IntervalType::Minute),
+            "Hour" => Ok(IntervalType::Hour),
+            "Day" => Ok(IntervalType::Day),
+            "Week" => Ok(IntervalType::Week),
+            "Month" => Ok(IntervalType::Month),
+            "Quarter" => Ok(IntervalType::Quarter),
+            "Year" => Ok(IntervalType::Year),
+            _ => Err(TypesError::TypeParsingError(format!(
+                "Unknown interval type: {s}"
+            ))),
+        }
+    }
+}
+
+impl Display for IntervalType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nanosecond => write!(f, "Nanosecond"),
+            Self::Microsecond => write!(f, "Microsecond"),
+            Self::Millisecond => write!(f, "Millisecond"),
+            Self::Second => write!(f, "Second"),
+            Self::Minute => write!(f, "Minute"),
+            Self::Hour => write!(f, "Hour"),
+            Self::Day => write!(f, "Day"),
+            Self::Week => write!(f, "Week"),
+            Self::Month => write!(f, "Month"),
+            Self::Quarter => write!(f, "Quarter"),
+            Self::Year => write!(f, "Year"),
         }
     }
 }
@@ -742,7 +805,11 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
         return Err(TypesError::TypeParsingError(format!(
             "Invalid Enum format - expected the same number of names and indices, got names: {}, indices: {}",
             names.join(", "),
-            indices.iter().map(|index| index.to_string()).collect::<Vec<String>>().join(", "),
+            indices
+                .iter()
+                .map(|index| index.to_string())
+                .collect::<Vec<String>>()
+                .join(", "),
         )));
     }
 
@@ -1134,6 +1201,54 @@ mod tests {
         );
         assert!(DataTypeNode::new("Time64()").is_err());
         assert!(DataTypeNode::new("Time64(x)").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_interval() {
+        assert_eq!(
+            DataTypeNode::new("IntervalNanosecond").unwrap(),
+            DataTypeNode::Interval(IntervalType::Nanosecond)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalMicrosecond").unwrap(),
+            DataTypeNode::Interval(IntervalType::Microsecond)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalMillisecond").unwrap(),
+            DataTypeNode::Interval(IntervalType::Millisecond)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalSecond").unwrap(),
+            DataTypeNode::Interval(IntervalType::Second)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalMinute").unwrap(),
+            DataTypeNode::Interval(IntervalType::Minute)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalHour").unwrap(),
+            DataTypeNode::Interval(IntervalType::Hour)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalDay").unwrap(),
+            DataTypeNode::Interval(IntervalType::Day)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalWeek").unwrap(),
+            DataTypeNode::Interval(IntervalType::Week)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalMonth").unwrap(),
+            DataTypeNode::Interval(IntervalType::Month)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalQuarter").unwrap(),
+            DataTypeNode::Interval(IntervalType::Quarter)
+        );
+        assert_eq!(
+            DataTypeNode::new("IntervalYear").unwrap(),
+            DataTypeNode::Interval(IntervalType::Year)
+        );
     }
 
     #[test]
@@ -1540,6 +1655,54 @@ mod tests {
                 "Expected data type {data_type} to be formatted as {expected_str}"
             );
         }
+    }
+
+    #[test]
+    fn test_interval_to_string() {
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Nanosecond).to_string(),
+            "IntervalNanosecond"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Microsecond).to_string(),
+            "IntervalMicrosecond"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Millisecond).to_string(),
+            "IntervalMillisecond"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Second).to_string(),
+            "IntervalSecond"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Minute).to_string(),
+            "IntervalMinute"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Hour).to_string(),
+            "IntervalHour"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Day).to_string(),
+            "IntervalDay"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Week).to_string(),
+            "IntervalWeek"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Month).to_string(),
+            "IntervalMonth"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Quarter).to_string(),
+            "IntervalQuarter"
+        );
+        assert_eq!(
+            DataTypeNode::Interval(IntervalType::Year).to_string(),
+            "IntervalYear"
+        );
     }
 
     #[test]
