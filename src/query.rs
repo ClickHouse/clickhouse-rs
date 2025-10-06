@@ -144,9 +144,8 @@ impl Query {
     /// bytes containing data in the [provided format].
     ///
     /// [provided format]: https://clickhouse.com/docs/en/interfaces/formats
-    pub fn fetch_bytes(self, format: impl Into<String>) -> Result<BytesCursor> {
-        // FIXME: `format` can be changed to `&str` (breaking)
-        let response = self.do_execute(true, Some(&format.into()))?;
+    pub fn fetch_bytes(self, format: impl AsRef<str>) -> Result<BytesCursor> {
+        let response = self.do_execute(true, Some(format.as_ref()))?;
         Ok(BytesCursor::new(response))
     }
 
