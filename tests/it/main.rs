@@ -278,6 +278,42 @@ fn test_env() -> TestEnv {
     *TEST_ENV
 }
 
+async fn create_readonly_user(client: &Client, database: &str) -> Client {
+    let username = format!("clickhouse-rs_readonly_user_{:X}", rand::random::<u64>());
+    let password = format!("CHRS_{:X}", rand::random::<u64>());
+
+    client
+        .query(
+            "CREATE USER ? IDENTIFIED WITH sha256_password BY ? \
+         DEFAULT DATABASE ? \
+         SETTINGS readonly = 1",
+        )
+        .bind(&username)
+        .bind(&password)
+        .bind(Identifier(database))
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query(
+            "GRANT SHOW TABLES, SELECT \
+         ON ?.* \
+         TO ?",
+        )
+        .bind(Identifier(database))
+        .bind(Identifier(&username))
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .clone()
+        .with_user(username)
+        .with_password(password)
+        .with_database(database)
+}
+
 mod _priv {
     use super::*;
     use std::time::SystemTime;

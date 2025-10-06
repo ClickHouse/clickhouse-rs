@@ -197,3 +197,19 @@ async fn query_with_tail_carriage_return_space() {
     let value = client.query("SELECT 1\r ").fetch_one::<u8>().await.unwrap();
     assert_eq!(value, 1);
 }
+
+#[tokio::test]
+async fn query_with_readonly_user() {
+    let database = test_database_name!();
+
+    let client = crate::_priv::prepare_database(&database).await;
+
+    let client = crate::create_readonly_user(&client, &database).await;
+
+    let value = client
+        .query("--comment\nSELECT *\n--comment\n/*\nпроверка\t;;\r\n;;\n*/\nFROM (select 1)\n;")
+        .fetch_one::<u8>()
+        .await
+        .unwrap();
+    assert_eq!(value, 1);
+}
