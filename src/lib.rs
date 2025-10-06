@@ -514,6 +514,11 @@ impl Client {
     }
 }
 
+mod formats {
+    pub(crate) const ROW_BINARY: &str = "RowBinary";
+    pub(crate) const ROW_BINARY_WITH_NAMES_AND_TYPES: &str = "RowBinaryWithNamesAndTypes";
+}
+
 /// This is a private API exported only for internal purposes.
 /// Do not use it in your code directly, it doesn't follow semver.
 #[doc(hidden)]
