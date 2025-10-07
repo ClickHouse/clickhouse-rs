@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mock server, so it properly handles the response format and automatically disables parsing
   `RowBinaryWithNamesAndTypes` header parsing and validation. Additionally, it is not required to call `with_url`
   explicitly. See the [updated example](./examples/mock.rs).
+- **BREAKING** query: `Query::fetch_bytes()` now expects `impl AsRef<str>` for `format` instead of `Into<String>`. 
+  Most usages should not be affected, however, unless passing a custom type that implements the latter but not the former.
+  ([#311])
 - query: due to `RowBinaryWithNamesAndTypes` format usage, there might be an impact on fetch performance, which largely
   depends on how the dataset is defined. If you notice decreased performance, consider disabling validation by using
   `Client::with_validation(false)`.
@@ -51,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - client: extract the exception code from `X-ClickHouse-Exception-Code` in case of incorrect 200 OK response 
   that could occur with ClickHouse server up to versions 24.x ([#256]).
+- query: pass format as `?default_format` URL parameter instead of using `FORMAT` clause, allowing queries to have
+  trailing comments and/or semicolons ([#267], [#269], [#311]).
 
 [#189]: https://github.com/ClickHouse/clickhouse-rs/pull/189
 [#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
@@ -63,8 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#250]: https://github.com/ClickHouse/clickhouse-rs/pull/250
 [#256]: https://github.com/ClickHouse/clickhouse-rs/pull/256
 [#258]: https://github.com/ClickHouse/clickhouse-rs/pull/258
+[#267]: https://github.com/ClickHouse/clickhouse-rs/pull/267
+[#269]: https://github.com/ClickHouse/clickhouse-rs/pull/269
 [#280]: https://github.com/ClickHouse/clickhouse-rs/pull/280
 [#292]: https://github.com/ClickHouse/clickhouse-rs/pull/292
+[#311]: https://github.com/ClickHouse/clickhouse-rs/pull/311
 
 ## [0.13.3] - 2025-05-29
 ### Added

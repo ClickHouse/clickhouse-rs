@@ -13,7 +13,7 @@ pub(crate) mod ser;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SqlBuilder {
-    InProgress(Vec<Part>, Option<String>),
+    InProgress(Vec<Part>),
     Failed(String),
 }
 
@@ -28,16 +28,13 @@ pub(crate) enum Part {
 impl fmt::Display for SqlBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SqlBuilder::InProgress(parts, output_format_opt) => {
+            SqlBuilder::InProgress(parts) => {
                 for part in parts {
                     match part {
                         Part::Arg => f.write_char('?')?,
                         Part::Fields => f.write_str("?fields")?,
                         Part::Text(text) => f.write_str(text)?,
                     }
-                }
-                if let Some(output_format) = output_format_opt {
-                    f.write_str(&format!(" FORMAT {output_format}"))?
                 }
             }
             SqlBuilder::Failed(err) => f.write_str(err)?,
@@ -72,17 +69,11 @@ impl SqlBuilder {
             parts.push(Part::Text(rest.to_string()));
         }
 
-        SqlBuilder::InProgress(parts, None)
-    }
-
-    pub(crate) fn set_output_format(&mut self, format: impl Into<String>) {
-        if let Self::InProgress(_, format_opt) = self {
-            *format_opt = Some(format.into());
-        }
+        SqlBuilder::InProgress(parts)
     }
 
     pub(crate) fn bind_arg(&mut self, value: impl Bind) {
-        let Self::InProgress(parts, _) = self else {
+        let Self::InProgress(parts) = self else {
             return;
         };
 
@@ -100,7 +91,7 @@ impl SqlBuilder {
     }
 
     pub(crate) fn bind_fields<T: Row>(&mut self) {
-        let Self::InProgress(parts, _) = self else {
+        let Self::InProgress(parts) = self else {
             return;
         };
 
@@ -113,30 +104,27 @@ impl SqlBuilder {
         }
     }
 
-    pub(crate) fn finish(mut self) -> Result<String> {
+    pub(crate) fn finish(self) -> Result<String> {
         let mut sql = String::new();
 
-        if let Self::InProgress(parts, _) = &self {
-            for part in parts {
-                match part {
-                    Part::Text(text) => sql.push_str(text),
-                    Part::Arg => {
-                        self.error("unbound query argument");
-                        break;
-                    }
-                    Part::Fields => {
-                        self.error("unbound query argument ?fields");
-                        break;
-                    }
-                }
-            }
-        }
-
         match self {
-            Self::InProgress(_, output_format_opt) => {
-                if let Some(output_format) = output_format_opt {
-                    sql.push_str(&format!(" FORMAT {output_format}"))
+            Self::InProgress(parts) => {
+                for part in parts {
+                    match part {
+                        Part::Text(text) => sql.push_str(&text),
+                        Part::Arg => {
+                            return Err(Error::InvalidParams(
+                                error_msg("unbound query argument").into(),
+                            ));
+                        }
+                        Part::Fields => {
+                            return Err(Error::InvalidParams(
+                                error_msg("unbound query argument ?fields").into(),
+                            ));
+                        }
+                    }
                 }
+
                 Ok(sql)
             }
             Self::Failed(err) => Err(Error::InvalidParams(err.into())),
@@ -144,8 +132,13 @@ impl SqlBuilder {
     }
 
     fn error(&mut self, err: impl Display) {
-        *self = Self::Failed(format!("invalid SQL: {err}"));
+        *self = Self::Failed(error_msg(err));
     }
+}
+
+#[inline]
+fn error_msg(err: impl Display) -> String {
+    format!("invalid SQL: {err}")
 }
 
 #[cfg(test)]
