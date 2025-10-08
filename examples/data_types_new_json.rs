@@ -1,8 +1,7 @@
-use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 
 use clickhouse::sql::Identifier;
-use clickhouse::{Client, error::Result};
+use clickhouse::{Client, Row, error::Result};
 
 // Requires ClickHouse 24.10+, as the `input_format_binary_read_json_as_string` and `output_format_binary_write_json_as_string` settings were added in that version.
 // Inserting and selecting a row with a JSON column as a string.
@@ -35,7 +34,7 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let row = Row {
+    let row = MyRow {
         id: 1,
         data: r#"
         {
@@ -49,14 +48,14 @@ async fn main() -> Result<()> {
         .to_string(),
     };
 
-    let mut insert = client.insert::<Row>(table_name).await?;
+    let mut insert = client.insert::<MyRow>(table_name).await?;
     insert.write(&row).await?;
     insert.end().await?;
 
     let db_row = client
         .query("SELECT ?fields FROM ? LIMIT 1")
         .bind(Identifier(table_name))
-        .fetch_one::<Row>()
+        .fetch_one::<MyRow>()
         .await?;
 
     println!("{db_row:#?}");
@@ -69,7 +68,7 @@ async fn main() -> Result<()> {
 }
 
 #[derive(Debug, Row, Serialize, Deserialize)]
-pub struct Row {
+pub struct MyRow {
     id: u64,
     data: String,
 }

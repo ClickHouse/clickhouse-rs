@@ -145,7 +145,7 @@ fn error_msg(err: impl Display) -> String {
 mod tests {
     use super::*;
 
-    use clickhouse_derive::Row;
+    use clickhouse_macros::Row;
 
     #[allow(unused)]
     #[derive(Row)]

@@ -1,6 +1,6 @@
 [package]
-name = "clickhouse-derive"
-description = "A macro for deriving clickhouse::Row"
+name = "clickhouse-macros"
+description = "Renamed from clickhouse-derive. A macro for deriving clickhouse::Row"
 version = "0.3.0"
 
 authors.workspace = true

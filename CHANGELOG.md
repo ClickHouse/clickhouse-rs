@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tls: improved error messages in case of missing TLS features when using HTTPS ([#229]).
 - crate: MSRV is now 1.79 due to borrowed rows support redesign in [#247].
 - crate: bumped dependencies, see [#232], [#239] and [#280] for additional details.
+- crate: starting from 0.3.0, `clickhouse-derive` is now published as [`clickhouse-macros` on crates.io](https://crates.io/crates/clickhouse-macros/0.3.0). The former `clickhouse-derive` crate is discontinued. ([#318]).
 
 ### Added
 
@@ -73,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#280]: https://github.com/ClickHouse/clickhouse-rs/pull/280
 [#292]: https://github.com/ClickHouse/clickhouse-rs/pull/292
 [#311]: https://github.com/ClickHouse/clickhouse-rs/pull/311
+[#318]: https://github.com/ClickHouse/clickhouse-rs/pull/318
 
 ## [0.13.3] - 2025-05-29
 ### Added
