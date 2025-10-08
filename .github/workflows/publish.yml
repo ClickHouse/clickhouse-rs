@@ -37,11 +37,12 @@ jobs:
       - name: Install cargo-release
         run: cargo install cargo-release
 
-      - name: Release
+      - name: Dry Run
+        if: github.event.inputs.dry-run == 'true'
         run: |
-          cargo release ${{ github.event.inputs.level }} ${{
-            if eq(github.event.inputs.dry-run, 'false') 
-            then '--execute' 
-            else '' 
-            end
-          }}
+          cargo release ${{ github.event.inputs.level }}
+
+      - name: Release
+        if: github.event.inputs.dry-run == 'false'
+        run: |
+          cargo release ${{ github.event.inputs.level }} --execute
