@@ -1,5 +1,5 @@
 use crate::{execute_statements, get_client};
-use clickhouse_derive::Row;
+use clickhouse_macros::Row;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

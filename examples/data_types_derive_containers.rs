@@ -37,14 +37,14 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert::<Row>(table_name).await?;
-    insert.write(&Row::new()).await?;
+    let mut insert = client.insert::<MyRow>(table_name).await?;
+    insert.write(&MyRow::new()).await?;
     insert.end().await?;
 
     let rows = client
         .query("SELECT ?fields FROM ?")
         .bind(Identifier(table_name))
-        .fetch_all::<Row>()
+        .fetch_all::<MyRow>()
         .await?;
 
     println!("{rows:#?}");
@@ -61,7 +61,7 @@ type MultiLineString = Vec<LineString>;
 
 #[derive(Clone, Debug, PartialEq)]
 #[derive(clickhouse::Row, serde::Serialize, serde::Deserialize)]
-pub struct Row {
+pub struct MyRow {
     arr: Vec<String>,
     arr2: Vec<Vec<String>>,
     map: Vec<(String, u32)>,
@@ -81,10 +81,10 @@ pub struct Row {
     multi_line_string: MultiLineString,
 }
 
-impl Row {
+impl MyRow {
     pub fn new() -> Self {
         let mut rng = rand::rng();
-        Row {
+        MyRow {
             arr: vec![random_str()],
             arr2: vec![vec![random_str()]],
             map: vec![(random_str(), 42)],
@@ -104,7 +104,7 @@ impl Row {
     }
 }
 
-impl Default for Row {
+impl Default for MyRow {
     fn default() -> Self {
         Self::new()
     }

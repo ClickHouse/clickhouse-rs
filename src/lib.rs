@@ -12,7 +12,7 @@ use self::{error::Result, http_client::HttpClient};
 use crate::row_metadata::{AccessType, ColumnDefaultKind, InsertMetadata, RowMetadata};
 
 #[doc = include_str!("row_derive.md")]
-pub use clickhouse_derive::Row;
+pub use clickhouse_macros::Row;
 use clickhouse_types::{Column, DataTypeNode};
 
 use crate::_priv::row_insert_metadata_query;

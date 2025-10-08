@@ -50,7 +50,7 @@ struct Sample<'a> {
     boolean: bool,
 }
 
-// clickhouse_derive is not working here
+// clickhouse_macros is not working here
 impl Row for Sample<'_> {
     const NAME: &'static str = "Sample";
     const COLUMN_NAMES: &'static [&'static str] = &[
