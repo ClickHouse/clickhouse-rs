@@ -81,6 +81,7 @@ impl Response {
                         }
                     }
                 }
+
                 let status = response.status();
                 let exception_code = response.headers().get("X-ClickHouse-Exception-Code");
 
@@ -90,6 +91,7 @@ impl Response {
                     // It still can fail, but we'll handle it in `DetectDbException`.
                     Ok(Chunks::new(response.into_body(), compression, inner_span))
                 } else {
+                    inner_span.record("otel.status_code", "ERROR");
                     // An instantly failed request.
                     Err(collect_bad_response(
                         status,
