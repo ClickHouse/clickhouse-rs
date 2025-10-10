@@ -24,6 +24,7 @@ use crate::headers::with_authentication;
 pub struct Query {
     client: Client,
     sql: SqlBuilder,
+    wait_end_of_query: bool,
 }
 
 impl Query {
@@ -31,6 +32,15 @@ impl Query {
         Self {
             client: client.clone(),
             sql: SqlBuilder::new(template),
+            wait_end_of_query: false,
+        }
+    }
+
+    pub(crate) fn new_buffered(client: &Client, template: &str) -> Self {
+        Self {
+            client: client.clone(),
+            sql: SqlBuilder::new(template),
+            wait_end_of_query: true,
         }
     }
 
@@ -154,7 +164,24 @@ impl Query {
         read_only: bool,
         default_format: Option<&str>,
     ) -> Result<Response> {
+        let query_formatted = format!("{}", self.sql_display());
         let query = self.sql.finish()?;
+
+        let execution_span = tracing::info_span!(
+            "clickhouse.query",
+            status = tracing::field::Empty,
+            otel.status_code = tracing::field::Empty,
+            otel.kind = "CLIENT",
+            db.system.name = "clickhouse",
+            db.query.text = query_formatted,
+            db.response.returned_rows = tracing::field::Empty,
+            db.response.read_bytes = tracing::field::Empty,
+            db.response.read_rows = tracing::field::Empty,
+            db.response.written_bytes = tracing::field::Empty,
+            db.response.written_rows = tracing::field::Empty,
+            clickhouse.wait_end_of_query = self.wait_end_of_query,
+        )
+        .entered();
 
         let mut url =
             Url::parse(&self.client.url).map_err(|err| Error::InvalidParams(Box::new(err)))?;
@@ -186,6 +213,10 @@ impl Query {
             pairs.append_pair("compress", "1");
         }
 
+        if self.wait_end_of_query {
+            pairs.append_pair("wait_end_of_query", "1");
+        }
+
         for (name, value) in &self.client.options {
             pairs.append_pair(name, value);
         }
@@ -206,7 +237,11 @@ impl Query {
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
         let future = self.client.http.request(request);
-        Ok(Response::new(future, self.client.compression))
+        Ok(Response::new(
+            future,
+            self.client.compression,
+            execution_span.exit(),
+        ))
     }
 
     /// Similar to [`Client::with_option`], but for this particular query only.
