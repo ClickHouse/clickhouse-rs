@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse"
-version = "0.13.3"
+version = "0.14.0"
 description = "Official Rust client for ClickHouse DB"
 keywords = ["clickhouse", "database", "driver", "tokio", "hyper"]
 readme = "README.md"
@@ -12,7 +12,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [workspace]
-members = ["derive", "types"]
+members = ["macros", "types"]
 # `rust-version`-aware dependency resolution;
 # applies to all workspace members
 resolver = "3"
@@ -122,7 +122,7 @@ rustls-tls-native-roots = [
 ]
 
 [dependencies]
-clickhouse-derive = { version = "0.2.0", path = "derive" }
+clickhouse-macros = { version = "0.3.0", path = "macros" }
 clickhouse-types = { version = "0.1.0", path = "types" }
 
 thiserror = "2.0"
@@ -155,7 +155,7 @@ quanta = { version = "0.12", optional = true }
 replace_with = { version = "0.1.7" }
 
 [dev-dependencies]
-clickhouse-derive = { version = "0.2.0", path = "derive" }
+clickhouse-macros = { version = "0.3.0", path = "macros" }
 criterion = "0.6"
 serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "1.0.1", features = ["full", "test-util"] }

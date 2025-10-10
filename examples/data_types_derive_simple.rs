@@ -80,14 +80,14 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert::<Row>(table_name).await?;
-    insert.write(&Row::new()).await?;
+    let mut insert = client.insert::<MyRow>(table_name).await?;
+    insert.write(&MyRow::new()).await?;
     insert.end().await?;
 
     let rows = client
         .query("SELECT ?fields FROM ?")
         .bind(Identifier(table_name))
-        .fetch_all::<Row>()
+        .fetch_all::<MyRow>()
         .await?;
 
     println!("{rows:#?}");
@@ -96,7 +96,7 @@ async fn main() -> Result<()> {
 
 #[derive(Clone, Debug, PartialEq)]
 #[derive(clickhouse::Row, serde::Serialize, serde::Deserialize)]
-pub struct Row {
+pub struct MyRow {
     pub int8: i8,
     pub int16: i16,
     pub int32: i32,
@@ -191,10 +191,10 @@ pub enum Enum16 {
     Qux = 255,
 }
 
-impl Row {
+impl MyRow {
     pub fn new() -> Self {
         let mut rng = rand::rng();
-        Row {
+        MyRow {
             int8: rng.random(),
             int16: rng.random(),
             int32: rng.random(),
@@ -259,7 +259,7 @@ impl Row {
     }
 }
 
-impl Default for Row {
+impl Default for MyRow {
     fn default() -> Self {
         Self::new()
     }

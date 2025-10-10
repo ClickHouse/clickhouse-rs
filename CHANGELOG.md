@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.14.0] - 2025-10-08
+
 ### Removed
 
 - **BREAKING** watch: `Client::watch()` API is removed ([#245]).
@@ -37,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tls: improved error messages in case of missing TLS features when using HTTPS ([#229]).
 - crate: MSRV is now 1.79 due to borrowed rows support redesign in [#247].
 - crate: bumped dependencies, see [#232], [#239] and [#280] for additional details.
+- crate: starting from 0.3.0, `clickhouse-derive` is now published as [`clickhouse-macros` on crates.io](https://crates.io/crates/clickhouse-macros/0.3.0). The former `clickhouse-derive` crate is discontinued. ([#318]).
 
 ### Added
 
@@ -73,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#280]: https://github.com/ClickHouse/clickhouse-rs/pull/280
 [#292]: https://github.com/ClickHouse/clickhouse-rs/pull/292
 [#311]: https://github.com/ClickHouse/clickhouse-rs/pull/311
+[#318]: https://github.com/ClickHouse/clickhouse-rs/pull/318
 
 ## [0.13.3] - 2025-05-29
 ### Added
@@ -459,7 +463,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.3...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.3...v0.14.0
 [0.13.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.0...v0.13.1
