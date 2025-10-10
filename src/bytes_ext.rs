@@ -1,12 +1,9 @@
 use bytes::{Bytes, BytesMut};
-use std::cell::{Cell, UnsafeCell};
+use std::cell::Cell;
 
 #[derive(Default)]
 pub(crate) struct BytesExt {
-    // The only reason we use `UnsafeCell` here is to provide `extend_by_ref` method
-    // in the sound way. After stabilization of the polonius borrow checker, it
-    // will be replaced with simple `Bytes`. See `RowCursor::next()` for details.
-    bytes: UnsafeCell<Bytes>,
+    bytes: Bytes,
 
     // Points to the real start of the remaining slice.
     // `Cell` allows us to mutate this value while keeping references to `bytes`.
@@ -44,31 +41,12 @@ impl BytesExt {
     /// Adds the provided chunk into available bytes.
     #[inline(always)]
     pub(crate) fn extend(&mut self, chunk: Bytes) {
-        *self.bytes.get_mut() = merge_bytes(self.slice(), chunk);
-        self.cursor.set(0);
-    }
-
-    /// Adds the provided chunk into available bytes.
-    ///
-    /// See `RowCursor::next()` for details on why this method exists.
-    ///
-    /// # Safety
-    ///
-    /// The caller MUST ensure that there are no active references from `slice()` calls.
-    #[inline(always)]
-    pub(crate) unsafe fn extend_by_ref(&self, chunk: Bytes) {
-        let new_bytes = merge_bytes(self.slice(), chunk);
-
-        // SAFETY: no active references to `bytes` are held at this point (ensured by the caller).
-        unsafe {
-            *self.bytes.get() = new_bytes;
-        }
+        self.bytes = merge_bytes(self.slice(), chunk);
         self.cursor.set(0);
     }
 
     fn bytes(&self) -> &Bytes {
-        // SAFETY: all possible incorrect accesses are ensured by caller's of `extend_by_ref()`.
-        unsafe { &*self.bytes.get() }
+        &self.bytes
     }
 }
 
@@ -130,47 +108,5 @@ mod tests_miri {
         bytes.extend(Bytes::from_static(b"l"));
         assert_eq!(bytes.slice(), b"l");
         assert_eq!(bytes.remaining(), 1);
-    }
-
-    // Unfortunately, we cannot run miri against async code in order to check
-    // the unsafe code in `RowCursor::next()`. However, we can at least
-    // check that the valid usage of `extend_by_ref()` is free of UB.
-    #[test]
-    fn extend_by_ref() {
-        fn next(buffer: &mut BytesExt) -> &[u8] {
-            loop {
-                if let Some(slice) = decode(buffer.slice()) {
-                    buffer.set_remaining(buffer.remaining() - 3);
-                    return slice;
-                }
-
-                let more = read_more();
-
-                // Compilation error:
-                /*
-                buffer.extend(more);
-                */
-
-                // SAFETY: we're checking it right now in miri =)
-                unsafe { buffer.extend_by_ref(more) };
-            }
-        }
-
-        fn decode(buffer: &[u8]) -> Option<&[u8]> {
-            if buffer.len() > 3 {
-                Some(&buffer[..3])
-            } else {
-                None
-            }
-        }
-
-        fn read_more() -> Bytes {
-            Bytes::from_static(b"aaaa")
-        }
-
-        let mut buffer = BytesExt::default();
-        for _ in 0..10 {
-            assert_eq!(next(&mut buffer), b"aaa");
-        }
     }
 }
