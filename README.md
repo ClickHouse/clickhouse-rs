@@ -103,7 +103,7 @@ struct MyRow<'a> {
     name: &'a str,
 }
 
-async fn example(client: clickhouse::Client) -> Result<(), Box<dyn std::error::Error>> {
+async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
     let mut cursor = client
         .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
         .bind(500)
@@ -143,10 +143,10 @@ struct MyRow {
     name: String,
 }
 
-async fn example(client: clickhouse::Client) -> Result<(), Box<dyn std::error::Error>> {
-    let mut insert = client.insert::<MyRow>("some").await?;
-    insert.write(&MyRow { no: 0, name: "foo".to_string() }).await?;
-    insert.write(&MyRow { no: 1, name: "bar".to_string() }).await?;
+async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
+    let mut insert = client.insert("some").await?;
+    insert.write(&MyRow { no: 0, name: "foo".into() }).await?;
+    insert.write(&MyRow { no: 1, name: "bar".into() }).await?;
     insert.end().await?;
     Ok(())
 }
