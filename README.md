@@ -73,7 +73,7 @@ clickhouse = { version = "0.14.0", features = ["test-util"] }
 
 </summary>
 
-```rust,ignore
+```rust,no_run
 use clickhouse::Client;
 
 let client = Client::default()
@@ -93,7 +93,7 @@ let client = Client::default()
 
 </summary>
 
-```rust,ignore
+```rust,no_run
 use serde::Deserialize;
 use clickhouse::Row;
 
@@ -103,13 +103,19 @@ struct MyRow<'a> {
     name: &'a str,
 }
 
-let mut cursor = client
-    .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
-    .bind(500)
-    .bind(504)
-    .fetch::<MyRow<'_>>()?;
+async fn example(client: clickhouse::Client) -> Result<(), Box<dyn std::error::Error>> {
+    let mut cursor = client
+        .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
+        .bind(500)
+        .bind(504)
+        .fetch::<MyRow<'_>>()?;
 
-while let Some(row) = cursor.next().await? { .. }
+    while let Some(row) = cursor.next().await? {
+        println!("no: {}, name: {}", row.no, row.name);
+    }
+    
+    Ok(())
+}
 ```
 
 * Placeholder `?fields` is replaced with `no, name` (fields of `Row`).
@@ -127,7 +133,7 @@ Note that cursors can return an error even after producing some rows. To avoid t
 
 </summary>
 
-```rust,ignore
+```rust,no_run
 use serde::Serialize;
 use clickhouse::Row;
 
@@ -137,10 +143,13 @@ struct MyRow {
     name: String,
 }
 
-let mut insert = client.insert::<MyRow>("some").await?;
-insert.write(&MyRow { no: 0, name: "foo".into() }).await?;
-insert.write(&MyRow { no: 1, name: "bar".into() }).await?;
-insert.end().await?;
+async fn example(client: clickhouse::Client) -> Result<(), Box<dyn std::error::Error>> {
+    let mut insert = client.insert::<MyRow>("some").await?;
+    insert.write(&MyRow { no: 0, name: "foo".to_string() }).await?;
+    insert.write(&MyRow { no: 1, name: "bar".to_string() }).await?;
+    insert.end().await?;
+    Ok(())
+}
 ```
 
 * If `end()` isn't called, the `INSERT` is aborted.
@@ -157,21 +166,35 @@ insert.end().await?;
 
 Requires the `inserter` feature.
 
-```rust,ignore
-let mut inserter = client.inserter::<MyRow>("some")?
-    .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
-    .with_max_bytes(50_000_000)
-    .with_max_rows(750_000)
-    .with_period(Some(Duration::from_secs(15)));
+```rust,no_run
+use serde::Serialize;
+use clickhouse::Row;
+use clickhouse::inserter::Inserter;
+use std::time::Duration;
 
-inserter.write(&MyRow { no: 0, name: "foo".into() }).await?;
-inserter.write(&MyRow { no: 1, name: "bar".into() }).await?;
-let stats = inserter.commit().await?;
-if stats.rows > 0 {
-    println!(
-        "{} bytes, {} rows, {} transactions have been inserted",
-        stats.bytes, stats.rows, stats.transactions,
-    );
+#[derive(Row, Serialize)]
+struct MyRow {
+    no: u32,
+    name: String,
+}
+
+async fn example(client: clickhouse::Client) -> Result<(), Box<dyn std::error::Error>> {
+    let mut inserter = client.inserter::<MyRow>("some")
+        .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
+        .with_max_bytes(50_000_000)
+        .with_max_rows(750_000)
+        .with_period(Some(Duration::from_secs(15)));
+    
+    inserter.write(&MyRow { no: 0, name: "foo".into() }).await?;
+    inserter.write(&MyRow { no: 1, name: "bar".into() }).await?;
+    let stats = inserter.commit().await?;
+    if stats.rows > 0 {
+        println!(
+            "{} bytes, {} rows, {} transactions have been inserted",
+            stats.bytes, stats.rows, stats.transactions,
+        );
+    }
+    Ok(())
 }
 ```
 
@@ -195,8 +218,11 @@ inserter.end().await?;
 
 </summary>
 
-```rust,ignore
-client.query("DROP TABLE IF EXISTS some").execute().await?;
+```rust,no_run
+async fn example(client: clickhouse::Client) -> Result<(), Box<dyn std::error::Error>> {
+    client.query("DROP TABLE IF EXISTS some").execute().await?;
+    Ok(())
+}
 ```
 
 </details>
@@ -242,7 +268,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+
     #[derive(Row, Debug, Serialize, Deserialize)]
     struct MyRow<'a> {
         str: &'a str,
@@ -258,7 +287,9 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
   
-    ```rust,ignore
+    ```rust,no_run
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
     #[derive(Row, Debug, Serialize, Deserialize)]
     struct MyRow {
         fixed_str: [u8; 16], // FixedString(16)
@@ -270,7 +301,9 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
     use serde_repr::{Deserialize_repr, Serialize_repr};
 
     #[derive(Row, Serialize, Deserialize)]
@@ -292,7 +325,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::uuid")]
@@ -305,7 +341,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::ipv4")]
@@ -319,7 +358,12 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+    use time::Date;
+    use chrono::NaiveDate;
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         days: u16,
@@ -338,7 +382,12 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+    use time::Date;
+    use chrono::NaiveDate;
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         days: i32,
@@ -358,7 +407,11 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+    use time::OffsetDateTime;
+    use chrono::{DateTime, Utc};
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         ts: u32,
@@ -376,7 +429,12 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+    use time::OffsetDateTime;
+    use chrono::{DateTime, Utc};
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         ts: i64, // elapsed s/us/ms/ns depending on `DateTime64(X)`
@@ -408,7 +466,9 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::chrono::time64::secs")]
@@ -442,7 +502,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
+    use std::net::Ipv4Addr;
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::ipv4::option")]
@@ -454,8 +517,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
     // CREATE TABLE test(items Nested(name String, count UInt32))
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(rename = "items.name")]
@@ -470,7 +535,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
+
     type Point = (f64, f64);
     type Ring = Vec<Point>;
     type Polygon = Vec<Ring>;
@@ -493,7 +561,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
     
-    ```rust,ignore
+    ```rust,no_run
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
+    use time::Date;
     #[derive(Serialize, Deserialize)]
     enum MyRowVariant {
         Array(Vec<i16>),
