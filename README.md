@@ -178,8 +178,8 @@ struct MyRow {
     name: String,
 }
 
-async fn example(client: clickhouse::Client) -> Result<(), Box<dyn std::error::Error>> {
-    let mut inserter = client.inserter::<MyRow>("some")
+async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
+    let mut inserter = client.inserter("some")
         .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
         .with_max_bytes(50_000_000)
         .with_max_rows(750_000)
