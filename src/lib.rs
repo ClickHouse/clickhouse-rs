@@ -16,6 +16,7 @@ pub use clickhouse_macros::Row;
 use clickhouse_types::{Column, DataTypeNode};
 
 use crate::_priv::row_insert_metadata_query;
+use std::borrow::Cow;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -57,7 +58,7 @@ pub struct Client {
     database: Option<String>,
     authentication: Authentication,
     compression: Compression,
-    options: HashMap<String, String>,
+    options: HashMap<Cow<'static, str>, String>,
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
     validation: bool,
@@ -227,6 +228,30 @@ impl Client {
         self
     }
 
+    /// Set the [role] to use when executing statements with this `Client` instance.
+    ///
+    /// Overrides any role previously set by [`Client::with_role()`] or [`Client::with_option()`].
+    ///
+    /// This setting is copied into cloned clients.
+    ///
+    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_role(mut self, role: impl Into<String>) -> Self {
+        self.set_role(Some(role.into()));
+        self
+    }
+
+    /// Execute subsequent statements with this `Client` instance without any explicit [role] set.
+    ///
+    /// Overrides any role previously set by [`Client::with_role()`] or [`Client::with_option()`].
+    ///
+    /// This setting is copied into cloned clients.
+    ///
+    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_default_role(mut self) -> Self {
+        self.set_role(None);
+        self
+    }
+
     /// A JWT access token to authenticate with ClickHouse.
     /// JWT token authentication is supported in ClickHouse Cloud only.
     /// Should not be called after [`Client::with_user`] or
@@ -278,7 +303,7 @@ impl Client {
     /// Client::default().with_option("allow_nondeterministic_mutations", "1");
     /// ```
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.options.insert(name.into(), value.into());
+        self.options.insert(Cow::Owned(name.into()), value.into());
         self
     }
 
@@ -447,7 +472,22 @@ impl Client {
     /// Used internally to modify the options map of an _already cloned_
     /// [`Client`] instance.
     pub(crate) fn add_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.options.insert(name.into(), value.into());
+        self.options.insert(Cow::Owned(name.into()), value.into());
+    }
+
+    pub(crate) fn set_role(&mut self, role: Option<String>) {
+        // By setting the role via `options`, we can be sure we've overwritten any role
+        // manually set by the user with `with_option()`.
+        let key = Cow::Borrowed("role");
+
+        match role {
+            Some(role) => {
+                self.options.insert(key, role);
+            }
+            None => {
+                self.options.remove(&key);
+            }
+        }
     }
 
     /// Use a mock server for testing purposes.

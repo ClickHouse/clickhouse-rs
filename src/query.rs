@@ -39,6 +39,28 @@ impl Query {
         &self.sql
     }
 
+    /// Perform this query with the given [role] set.
+    ///
+    /// Overrides any role previously set
+    ///
+    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_role(self, role: impl Into<String>) -> Self {
+        Self {
+            client: self.client.with_role(role),
+            ..self
+        }
+    }
+
+    /// Perform this query without any explicit [role] set.
+    ///
+    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_default_role(self) -> Self {
+        Self {
+            client: self.client.with_default_role(),
+            ..self
+        }
+    }
+
     /// Binds `value` to the next `?` in the query.
     ///
     /// The `value`, which must either implement [`Serialize`] or be an

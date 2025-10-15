@@ -95,21 +95,18 @@ impl InsertState {
         }
     }
 
+    fn expect_client_mut(&mut self) -> &mut Client {
+        let Self::NotStarted { client, .. } = self else {
+            panic!("cannot modify client options while an insert is in-progress")
+        };
+
+        client
+    }
+
     fn terminated(&mut self) {
         replace_with_or_abort(self, |_self| match _self {
             InsertState::NotStarted { .. } => InsertState::Completed, // empty insert
             InsertState::Active { handle, .. } => InsertState::Terminated { handle },
-            _ => unreachable!(),
-        });
-    }
-
-    fn with_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        assert!(matches!(self, InsertState::NotStarted { .. }));
-        replace_with_or_abort(self, |_self| match _self {
-            InsertState::NotStarted { mut client, sql } => {
-                client.add_option(name, value);
-                InsertState::NotStarted { client, sql }
-            }
             _ => unreachable!(),
         });
     }
@@ -185,6 +182,32 @@ impl<T> Insert<T> {
         self
     }
 
+    /// Set the [role] to use when executing `INSERT` statements.
+    ///
+    /// Overrides any role previously set by [`Client::with_role()`] or [`Client::with_option()`].
+    ///
+    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
+    ///
+    /// # Panics
+    /// If called after the request is started, e.g., after [`Insert::write`].
+    pub fn with_role(mut self, role: impl Into<String>) -> Self {
+        self.state.expect_client_mut().set_role(Some(role.into()));
+        self
+    }
+
+    /// Perform inserts without any explicit [role] set.
+    ///
+    /// Overrides any role previously set by [`Client::with_role()`] or [`Client::with_option()`].
+    ///
+    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
+    ///
+    /// # Panics
+    /// If called after the request is started, e.g., after [`Insert::write`].
+    pub fn with_default_role(mut self) -> Self {
+        self.state.expect_client_mut().set_role(None);
+        self
+    }
+
     /// Similar to [`Client::with_option`], but for this particular INSERT
     /// statement only.
     ///
@@ -192,7 +215,7 @@ impl<T> Insert<T> {
     /// If called after the request is started, e.g., after [`Insert::write`].
     #[track_caller]
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.state.with_option(name, value);
+        self.state.expect_client_mut().add_option(name, value);
         self
     }
 
