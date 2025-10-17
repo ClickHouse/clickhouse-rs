@@ -234,7 +234,7 @@ impl Client {
     ///
     /// Overrides any roles previously set by this method or [`Client::with_option`].
     ///
-    /// An empty iterator may be passed to clear the set roles.
+    /// Call [`Client::with_default_roles`] to clear any explicitly set roles.
     ///
     /// This setting is copied into cloned clients.
     ///
@@ -245,17 +245,24 @@ impl Client {
     /// ```
     /// # use clickhouse::Client;
     ///
-    /// # Single role
+    /// // Single role
     /// let client = Client::default().with_roles(["foo"]);
     ///
-    /// # Multiple roles
+    /// // Multiple roles
     /// let client = Client::default().with_roles(["foo", "bar", "baz"]);
-    ///
-    /// # Clear all previously set roles
-    /// let client = Client::default().with_roles([]);
     /// ```
     pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.set_roles(roles);
+        self
+    }
+
+    /// Clear any explicitly set [roles] from this `Client` instance.
+    ///
+    /// Overrides any roles previously set by [`Client::with_roles`] or [`Client::with_option`].
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_default_roles(mut self) -> Self {
+        self.clear_roles();
         self
     }
 
@@ -483,11 +490,15 @@ impl Client {
     }
 
     pub(crate) fn set_roles(&mut self, roles: impl IntoIterator<Item = impl Into<String>>) {
+        self.clear_roles();
+        self.roles.extend(roles.into_iter().map(Into::into));
+    }
+
+    #[inline]
+    pub(crate) fn clear_roles(&mut self) {
         // Make sure we overwrite any role manually set by the user via `with_option()`.
         self.options.remove("role");
-
         self.roles.clear();
-        self.roles.extend(roles.into_iter().map(Into::into));
     }
 
     /// Use a mock server for testing purposes.

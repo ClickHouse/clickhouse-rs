@@ -199,6 +199,20 @@ impl<T> Insert<T> {
         self
     }
 
+    /// Clear any explicit [roles] previously set on this `Insert` or inherited from [`Client`].
+    ///
+    /// Overrides any roles previously set by [`Insert::with_roles`], [`Insert::with_option`],
+    /// [`Client::with_roles`] or [`Client::with_option`].
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    ///
+    /// # Panics
+    /// If called after the request is started, e.g., after [`Insert::write`].
+    pub fn with_default_roles(mut self) -> Self {
+        self.state.expect_client_mut().clear_roles();
+        self
+    }
+
     /// Similar to [`Client::with_option`], but for this particular INSERT
     /// statement only.
     ///

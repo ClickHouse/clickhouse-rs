@@ -227,6 +227,19 @@ impl Query {
         }
     }
 
+    /// Clear any explicit [roles] previously set on this `Query` or inherited from [`Client`].
+    ///
+    /// Overrides any roles previously set by [`Query::with_roles`], [`Query::with_option`],
+    /// [`Client::with_roles`] or [`Client::with_option`].
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_default_roles(self) -> Self {
+        Self {
+            client: self.client.with_default_roles(),
+            ..self
+        }
+    }
+
     /// Similar to [`Client::with_option`], but for this particular query only.
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.client.add_option(name, value);

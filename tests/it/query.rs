@@ -327,6 +327,16 @@ async fn query_with_role() {
         .await
         .expect_err("user should not be able to query `foo`");
 
+    // Test `with_default_roles()`
+    user_client
+        .clone()
+        .with_roles([&role])
+        .query("SELECT * FROM foo")
+        .with_default_roles()
+        .execute()
+        .await
+        .expect_err("user should not be able to query `foo`");
+
     user_client
         .query("SELECT * FROM foo")
         .with_roles([&role])

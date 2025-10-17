@@ -176,12 +176,30 @@ where
     /// This does not take effect until the next `INSERT` statement begins
     /// if one is already in-progress.
     ///
-    /// If you have already begun writing data, you may call [`.force_commit()`][Self::force_commit]
-    /// to end the current `INSERT` so this takes effect on the next call to [`.write()`][Self::write].
+    /// If you have already begun writing data, you may call [`Inserter::force_commit`]
+    /// to end the current `INSERT` so this takes effect on the next call to [`Inserter::write`].
     ///
     /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
     pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.client.set_roles(roles);
+        self
+    }
+
+    /// Clear any explicit [roles] previously set on this `Inserter` or inherited from [`Client`].
+    ///
+    /// Overrides any roles previously set by [`Inserter::with_roles`], [`Inserter::with_option`],
+    /// [`Client::with_roles`] or [`Client::with_option`].
+    ///
+    /// # Note
+    /// This does not take effect until the next `INSERT` statement begins
+    /// if one is already in-progress.
+    ///
+    /// If you have already begun writing data, you may call [`Inserter::force_commit`]
+    /// to end the current `INSERT` so this takes effect on the next call to [`Inserter::write`].
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_default_roles(mut self) -> Self {
+        self.client.clear_roles();
         self
     }
 
@@ -192,8 +210,8 @@ where
     /// This does not take effect until the next `INSERT` statement begins
     /// if one is already in-progress.
     ///
-    /// If you have already begun writing data, you may call [`.force_commit()`][Self::force_commit]
-    /// to end the current `INSERT` so this takes effect on the next call to [`.write()`][Self::write].
+    /// If you have already begun writing data, you may call [`Inserter::force_commit`]
+    /// to end the current `INSERT` so this takes effect on the next call to [`Inserter::write`].
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.client.add_option(name, value);
         self
