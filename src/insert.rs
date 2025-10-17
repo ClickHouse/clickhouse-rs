@@ -95,6 +95,7 @@ impl InsertState {
         }
     }
 
+    #[inline]
     fn expect_client_mut(&mut self) -> &mut Client {
         let Self::NotStarted { client, .. } = self else {
             panic!("cannot modify client options while an insert is in-progress")
@@ -182,29 +183,19 @@ impl<T> Insert<T> {
         self
     }
 
-    /// Set the [role] to use when executing `INSERT` statements.
+    /// Configure the [roles] to use when executing `INSERT` statements.
     ///
-    /// Overrides any role previously set by [`Client::with_role()`] or [`Client::with_option()`].
+    /// Overrides any roles previously set by this method, [`Insert::with_option`],
+    /// [`Client::with_roles`] or [`Client::with_option`].
     ///
-    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
+    /// An empty iterator may be passed to clear the set roles.
     ///
-    /// # Panics
-    /// If called after the request is started, e.g., after [`Insert::write`].
-    pub fn with_role(mut self, role: impl Into<String>) -> Self {
-        self.state.expect_client_mut().set_role(Some(role.into()));
-        self
-    }
-
-    /// Perform inserts without any explicit [role] set.
-    ///
-    /// Overrides any role previously set by [`Client::with_role()`] or [`Client::with_option()`].
-    ///
-    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
     ///
     /// # Panics
     /// If called after the request is started, e.g., after [`Insert::write`].
-    pub fn with_default_role(mut self) -> Self {
-        self.state.expect_client_mut().set_role(None);
+    pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.state.expect_client_mut().set_roles(roles);
         self
     }
 

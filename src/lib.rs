@@ -16,7 +16,7 @@ pub use clickhouse_macros::Row;
 use clickhouse_types::{Column, DataTypeNode};
 
 use crate::_priv::row_insert_metadata_query;
-use std::borrow::Cow;
+use std::collections::HashSet;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -58,7 +58,8 @@ pub struct Client {
     database: Option<String>,
     authentication: Authentication,
     compression: Compression,
-    options: HashMap<Cow<'static, str>, String>,
+    roles: HashSet<String>,
+    options: HashMap<String, String>,
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
     validation: bool,
@@ -122,6 +123,7 @@ impl Client {
             database: None,
             authentication: Authentication::default(),
             compression: Compression::default(),
+            roles: HashSet::new(),
             options: HashMap::new(),
             headers: HashMap::new(),
             products_info: Vec::default(),
@@ -228,27 +230,32 @@ impl Client {
         self
     }
 
-    /// Set the [role] to use when executing statements with this `Client` instance.
+    /// Configure the [roles] to use when executing statements with this `Client` instance.
     ///
-    /// Overrides any role previously set by [`Client::with_role()`] or [`Client::with_option()`].
+    /// Overrides any roles previously set by this method or [`Client::with_option`].
     ///
-    /// This setting is copied into cloned clients.
-    ///
-    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
-    pub fn with_role(mut self, role: impl Into<String>) -> Self {
-        self.set_role(Some(role.into()));
-        self
-    }
-
-    /// Execute subsequent statements with this `Client` instance without any explicit [role] set.
-    ///
-    /// Overrides any role previously set by [`Client::with_role()`] or [`Client::with_option()`].
+    /// An empty iterator may be passed to clear the set roles.
     ///
     /// This setting is copied into cloned clients.
     ///
-    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
-    pub fn with_default_role(mut self) -> Self {
-        self.set_role(None);
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use clickhouse::Client;
+    ///
+    /// # Single role
+    /// let client = Client::default().with_roles(["foo"]);
+    ///
+    /// # Multiple roles
+    /// let client = Client::default().with_roles(["foo", "bar", "baz"]);
+    ///
+    /// # Clear all previously set roles
+    /// let client = Client::default().with_roles([]);
+    /// ```
+    pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.set_roles(roles);
         self
     }
 
@@ -303,7 +310,7 @@ impl Client {
     /// Client::default().with_option("allow_nondeterministic_mutations", "1");
     /// ```
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.options.insert(Cow::Owned(name.into()), value.into());
+        self.options.insert(name.into(), value.into());
         self
     }
 
@@ -472,22 +479,15 @@ impl Client {
     /// Used internally to modify the options map of an _already cloned_
     /// [`Client`] instance.
     pub(crate) fn add_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.options.insert(Cow::Owned(name.into()), value.into());
+        self.options.insert(name.into(), value.into());
     }
 
-    pub(crate) fn set_role(&mut self, role: Option<String>) {
-        // By setting the role via `options`, we can be sure we've overwritten any role
-        // manually set by the user with `with_option()`.
-        let key = Cow::Borrowed("role");
+    pub(crate) fn set_roles(&mut self, roles: impl IntoIterator<Item = impl Into<String>>) {
+        // Make sure we overwrite any role manually set by the user via `with_option()`.
+        self.options.remove("role");
 
-        match role {
-            Some(role) => {
-                self.options.insert(key, role);
-            }
-            None => {
-                self.options.remove(&key);
-            }
-        }
+        self.roles.clear();
+        self.roles.extend(roles.into_iter().map(Into::into));
     }
 
     /// Use a mock server for testing purposes.

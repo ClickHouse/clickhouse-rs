@@ -39,28 +39,6 @@ impl Query {
         &self.sql
     }
 
-    /// Perform this query with the given [role] set.
-    ///
-    /// Overrides any role previously set
-    ///
-    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
-    pub fn with_role(self, role: impl Into<String>) -> Self {
-        Self {
-            client: self.client.with_role(role),
-            ..self
-        }
-    }
-
-    /// Perform this query without any explicit [role] set.
-    ///
-    /// [role]: https://clickhouse.com/docs/operations/access-rights#role-management
-    pub fn with_default_role(self) -> Self {
-        Self {
-            client: self.client.with_default_role(),
-            ..self
-        }
-    }
-
     /// Binds `value` to the next `?` in the query.
     ///
     /// The `value`, which must either implement [`Serialize`] or be an
@@ -211,6 +189,9 @@ impl Query {
         for (name, value) in &self.client.options {
             pairs.append_pair(name, value);
         }
+
+        pairs.extend_pairs(self.client.roles.iter().map(|role| ("role", role)));
+
         drop(pairs);
 
         let mut builder = Request::builder().method(method).uri(url.as_str());
@@ -229,6 +210,21 @@ impl Query {
 
         let future = self.client.http.request(request);
         Ok(Response::new(future, self.client.compression))
+    }
+
+    /// Configure the [roles] to use when executing this query.
+    ///
+    /// Overrides any roles previously set by this method, [`Query::with_option`],
+    /// [`Client::with_roles`] or [`Client::with_option`].
+    ///
+    /// An empty iterator may be passed to clear the set roles.
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_roles(self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            client: self.client.with_roles(roles),
+            ..self
+        }
     }
 
     /// Similar to [`Client::with_option`], but for this particular query only.
