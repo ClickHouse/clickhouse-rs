@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- sql: added `QualifiedIdentifier` type to represent qualified identifiers (e.g., `table.column`) safely as client-side bind values
+
 ## [0.14.0] - 2025-10-08
 
 ### Removed
@@ -28,13 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mock server, so it properly handles the response format and automatically disables parsing
   `RowBinaryWithNamesAndTypes` header parsing and validation. Additionally, it is not required to call `with_url`
   explicitly. See the [updated example](./examples/mock.rs).
-- **BREAKING** query: `Query::fetch_bytes()` now expects `impl AsRef<str>` for `format` instead of `Into<String>`. 
+- **BREAKING** query: `Query::fetch_bytes()` now expects `impl AsRef<str>` for `format` instead of `Into<String>`.
   Most usages should not be affected, however, unless passing a custom type that implements the latter but not the former.
   ([#311])
 - query: due to `RowBinaryWithNamesAndTypes` format usage, there might be an impact on fetch performance, which largely
   depends on how the dataset is defined. If you notice decreased performance, consider disabling validation by using
   `Client::with_validation(false)`.
-- serde: it is now possible to deserialize Map ClickHouse type into `HashMap<K, V>` (or `BTreeMap`, `IndexMap`, 
+- serde: it is now possible to deserialize Map ClickHouse type into `HashMap<K, V>` (or `BTreeMap`, `IndexMap`,
   `DashMap`, etc.).
 - tls: improved error messages in case of missing TLS features when using HTTPS ([#229]).
 - crate: MSRV is now 1.79 due to borrowed rows support redesign in [#247].
@@ -55,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- client: extract the exception code from `X-ClickHouse-Exception-Code` in case of incorrect 200 OK response 
+- client: extract the exception code from `X-ClickHouse-Exception-Code` in case of incorrect 200 OK response
   that could occur with ClickHouse server up to versions 24.x ([#256]).
 - query: pass format as `?default_format` URL parameter instead of using `FORMAT` clause, allowing queries to have
   trailing comments and/or semicolons ([#267], [#269], [#311]).
