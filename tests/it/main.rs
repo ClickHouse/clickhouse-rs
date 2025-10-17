@@ -314,6 +314,63 @@ async fn create_readonly_user(client: &Client, database: &str) -> Client {
         .with_database(database)
 }
 
+/// Create a test user and role for `test_db_name` with no default grants.
+///
+/// Returns a `Client` with the user configured, and the role name.
+async fn create_user_and_role(client: &Client, test_db_name: &str) -> (Client, String) {
+    let username = format!("{test_db_name}__user");
+    let password = format!("CHRS_{:X}", rand::random::<u64>());
+
+    client
+        .query(
+            "CREATE USER OR REPLACE ? \
+         IDENTIFIED WITH sha256_password BY ? \
+         DEFAULT DATABASE ?",
+        )
+        .bind(&username)
+        .bind(&password)
+        .bind(Identifier(test_db_name))
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query("REVOKE ALL ON *.* FROM ?")
+        .bind(&username)
+        .execute()
+        .await
+        .unwrap();
+
+    let role = format!("{test_db_name}__role");
+
+    client
+        .query("CREATE ROLE OR REPLACE ?")
+        .bind(Identifier(&role))
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query("GRANT ? TO ?")
+        .bind(Identifier(&role))
+        .bind(Identifier(&username))
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query("SET DEFAULT ROLE NONE TO ?")
+        .bind(Identifier(&username))
+        .execute()
+        .await
+        .unwrap();
+
+    (
+        client.clone().with_user(username).with_password(password),
+        role,
+    )
+}
+
 mod _priv {
     use super::*;
     use std::time::SystemTime;
