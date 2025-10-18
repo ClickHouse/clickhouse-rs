@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use clickhouse::sql::Identifier;
 use clickhouse::{Row, error::Error};
 
 #[tokio::test]
@@ -262,4 +263,84 @@ async fn prints_query() {
         format!("{}", q.sql_display()),
         "SELECT ?fields FROM test WHERE a = ? AND b < ?"
     );
+}
+
+#[tokio::test]
+async fn query_with_role() {
+    let db_name = test_database_name!();
+
+    let admin_client = crate::_priv::prepare_database(&db_name).await;
+
+    let (user_client, role) = crate::create_user_and_role(&admin_client, &db_name).await;
+
+    admin_client
+        .query(
+            "CREATE TABLE foo(\
+            bar DateTime DEFAULT now(), \
+            baz String\
+        ) \
+        ENGINE = MergeTree \
+        PRIMARY KEY(bar)",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    admin_client
+        .query("INSERT INTO foo(baz) VALUES ('lorem ipsum'), ('dolor sit amet')")
+        .execute()
+        .await
+        .unwrap();
+
+    user_client
+        .query("SELECT * FROM foo")
+        .execute()
+        .await
+        .expect_err("user should not be able to query `foo`");
+
+    admin_client
+        .query("GRANT SELECT ON ?.foo TO ?")
+        .bind(Identifier(&db_name))
+        .bind(Identifier(&role))
+        .execute()
+        .await
+        .unwrap();
+
+    user_client
+        .query("SELECT * FROM foo")
+        .execute()
+        .await
+        .expect_err("user should not be able to query `foo`");
+
+    user_client
+        .clone()
+        .with_roles([&role])
+        .query("SELECT * FROM foo")
+        .execute()
+        .await
+        .expect("user should be able to query `foo` now");
+
+    // Roles should not have propagated back to parent instance
+    user_client
+        .query("SELECT * FROM foo")
+        .execute()
+        .await
+        .expect_err("user should not be able to query `foo`");
+
+    // Test `with_default_roles()`
+    user_client
+        .clone()
+        .with_roles([&role])
+        .query("SELECT * FROM foo")
+        .with_default_roles()
+        .execute()
+        .await
+        .expect_err("user should not be able to query `foo`");
+
+    user_client
+        .query("SELECT * FROM foo")
+        .with_roles([&role])
+        .execute()
+        .await
+        .expect("user should be able to query `foo` now");
 }
