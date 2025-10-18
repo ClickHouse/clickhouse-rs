@@ -341,6 +341,15 @@ async fn create_user_and_role(client: &Client, test_db_name: &str) -> (Client, S
         .await
         .unwrap();
 
+    // Needed for metadata queries
+    client
+        .query("GRANT SHOW ON ?.* TO ?")
+        .bind(Identifier(test_db_name))
+        .bind(&username)
+        .execute()
+        .await
+        .unwrap();
+
     let role = format!("{test_db_name}__role");
 
     client

@@ -1,4 +1,5 @@
 use crate::{SimpleRow, create_simple_table, fetch_rows, flush_query_log};
+use clickhouse::insert::Insert;
 use clickhouse::{Row, sql::Identifier};
 use serde::{Deserialize, Serialize};
 use std::panic::AssertUnwindSafe;
@@ -423,4 +424,103 @@ async fn clear_cached_metadata() {
         .unwrap();
 
     assert_eq!(*rows, [Foo2 { bar: 1 }, Foo2 { bar: 3 }]);
+}
+
+#[tokio::test]
+async fn insert_with_role() {
+    #[derive(serde::Serialize, serde::Deserialize, clickhouse::Row)]
+    struct Foo {
+        bar: u64,
+        baz: String,
+    }
+
+    let db_name = test_database_name!();
+
+    let admin_client = crate::_priv::prepare_database(&db_name).await;
+
+    let (user_client, role) = crate::create_user_and_role(&admin_client, &db_name).await;
+
+    admin_client
+        .query(
+            "CREATE TABLE foo(\
+            bar UInt64, \
+            baz String\
+        ) \
+        ENGINE = MergeTree \
+        PRIMARY KEY(bar)",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let foos = [
+        "lorem ipsum",
+        "dolor sit amet",
+        "consectetur adipiscing elit",
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(bar, baz)| Foo {
+        bar: bar as u64,
+        baz: baz.to_string(),
+    })
+    .collect::<Vec<_>>();
+
+    let insert_foos = async |mut insert: Insert<Foo>| {
+        for foo in &foos {
+            insert.write(foo).await?;
+        }
+
+        insert.end().await
+    };
+
+    insert_foos(user_client.insert("foo").await.unwrap())
+        .await
+        .expect_err("user should not be able to insert into `foo`");
+
+    admin_client
+        .query("GRANT INSERT ON ?.foo TO ?")
+        .bind(Identifier(&db_name))
+        .bind(Identifier(&role))
+        .execute()
+        .await
+        .unwrap();
+
+    // We haven't set the role yet
+    insert_foos(user_client.insert("foo").await.unwrap())
+        .await
+        .expect_err("user should not be able to insert into `foo`");
+
+    insert_foos(
+        user_client
+            .clone()
+            .with_roles([&role])
+            .insert("foo")
+            .await
+            .unwrap(),
+    )
+    .await
+    .expect_err("user should be able to insert into `foo` now");
+
+    // Roles should not propagate back to the parent instance
+    insert_foos(user_client.insert("foo").await.unwrap())
+        .await
+        .expect_err("user should not be able to insert into `foo`");
+
+    insert_foos(user_client.insert("foo").await.unwrap().with_roles([&role]))
+        .await
+        .expect_err("user should be able to insert into `foo` now");
+
+    // `with_default_roles` should clear the role
+    insert_foos(
+        user_client
+            .clone()
+            .with_roles([&role])
+            .insert("foo")
+            .await
+            .unwrap()
+            .with_default_roles(),
+    )
+    .await
+    .expect_err("user should not be able to insert into `foo`");
 }
