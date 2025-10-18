@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Display};
 
 use crate::{
     error::{Error, Result},
@@ -13,7 +13,7 @@ pub(crate) mod ser;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SqlBuilder {
-    InProgress(Vec<Part>),
+    InProgress { template: String, parts: Vec<Part> },
     Failed(String),
 }
 
@@ -28,15 +28,7 @@ pub(crate) enum Part {
 impl fmt::Display for SqlBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SqlBuilder::InProgress(parts) => {
-                for part in parts {
-                    match part {
-                        Part::Arg => f.write_char('?')?,
-                        Part::Fields => f.write_str("?fields")?,
-                        Part::Text(text) => f.write_str(text)?,
-                    }
-                }
-            }
+            SqlBuilder::InProgress { template, .. } => f.write_str(template)?,
             SqlBuilder::Failed(err) => f.write_str(err)?,
         }
         Ok(())
@@ -69,11 +61,11 @@ impl SqlBuilder {
             parts.push(Part::Text(rest.to_string()));
         }
 
-        SqlBuilder::InProgress(parts)
+        SqlBuilder::InProgress { template: template.to_owned(), parts }
     }
 
     pub(crate) fn bind_arg(&mut self, value: impl Bind) {
-        let Self::InProgress(parts) = self else {
+        let Self::InProgress { parts , .. }  = self else {
             return;
         };
 
@@ -91,7 +83,7 @@ impl SqlBuilder {
     }
 
     pub(crate) fn bind_fields<T: Row>(&mut self) {
-        let Self::InProgress(parts) = self else {
+        let Self::InProgress { parts , .. } = self else {
             return;
         };
 
@@ -108,7 +100,7 @@ impl SqlBuilder {
         let mut sql = String::new();
 
         match self {
-            Self::InProgress(parts) => {
+            Self::InProgress { parts, .. } => {
                 for part in parts {
                     match part {
                         Part::Text(text) => sql.push_str(&text),
