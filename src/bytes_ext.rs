@@ -44,7 +44,9 @@ impl BytesExt {
     /// Adds the provided chunk into available bytes.
     #[inline(always)]
     pub(crate) fn extend(&mut self, chunk: Bytes) {
-        *self.bytes.get_mut() = merge_bytes(self.slice(), chunk);
+        let cursor = self.cursor.get();
+        let current = std::mem::take(self.bytes.get_mut());
+        *self.bytes.get_mut() = merge_bytes(current, cursor, chunk);
         self.cursor.set(0);
     }
 
@@ -57,12 +59,11 @@ impl BytesExt {
     /// The caller MUST ensure that there are no active references from `slice()` calls.
     #[inline(always)]
     pub(crate) unsafe fn extend_by_ref(&self, chunk: Bytes) {
-        let new_bytes = merge_bytes(self.slice(), chunk);
-
+        let cursor = self.cursor.get();
         // SAFETY: no active references to `bytes` are held at this point (ensured by the caller).
-        unsafe {
-            *self.bytes.get() = new_bytes;
-        }
+        let current = unsafe { std::ptr::read(self.bytes.get()) };
+        let new_bytes = merge_bytes(current, cursor, chunk);
+        unsafe { std::ptr::write(self.bytes.get(), new_bytes) };
         self.cursor.set(0);
     }
 
@@ -72,13 +73,40 @@ impl BytesExt {
     }
 }
 
-fn merge_bytes(lhs: &[u8], rhs: Bytes) -> Bytes {
-    if lhs.is_empty() {
-        // Most of the time, we read the next chunk after consuming the previous one.
-        rhs
-    } else {
-        // Some bytes are left in the buffer, we need to merge them with the next chunk.
-        merge_bytes_slow(lhs, rhs)
+/// Merge `current[cursor..]` (remaining tail) with `rhs` into a single `Bytes`.
+///
+/// Perf goals:
+/// - Avoid copying the already-consumed prefix (drop it in O(1) via `split_off`).
+/// - If the remaining tail is uniquely owned, append `rhs` in place (single copy of `rhs`).
+/// - If shared, allocate exactly once and copy both (same cost as before, but less frequent).
+fn merge_bytes(mut current: Bytes, cursor: usize, rhs: Bytes) -> Bytes {
+    let current_len = current.len();
+    // If all data was consumed, just take the new chunk.
+    if cursor >= current_len {
+        return rhs;
+    }
+
+    // Keep only the remaining tail; drop the consumed prefix without copying.
+    let remaining = current.split_off(cursor);
+    drop(current);
+
+    // Nothing to append.
+    if rhs.is_empty() {
+        return remaining;
+    }
+
+    // Try to get a unique, mutable view of the remaining tail.
+    match remaining.try_into_mut() {
+        // Unique: append `rhs` into the same allocation -> copies only `rhs`.
+        Ok(mut buf) => {
+            buf.reserve(rhs.len());
+            buf.extend_from_slice(&rhs);
+            buf.freeze()
+        }
+        // Shared: allocate once and copy both (fallback to previous behavior).
+        Err(remaining_bytes) => {
+            merge_bytes_slow(remaining_bytes.as_ref(), rhs)
+        }
     }
 }
 
