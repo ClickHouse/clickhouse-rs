@@ -382,6 +382,21 @@ impl<T> Insert<T> {
         debug_assert!(matches!(self.state, InsertState::NotStarted { .. }));
         let (client, sql) = self.state.client_with_sql().unwrap(); // checked above
 
+        let span = tracing::info_span!(
+            "clickhouse.insert",
+            status = tracing::field::Empty,
+            otel.status_code = tracing::field::Empty,
+            otel.kind = "CLIENT",
+            db.system.name = "clickhouse",
+            db.query.text = sql,
+            db.response.returned_rows = tracing::field::Empty,
+            db.response.read_bytes = tracing::field::Empty,
+            db.response.read_rows = tracing::field::Empty,
+            db.response.written_bytes = tracing::field::Empty,
+            db.response.written_rows = tracing::field::Empty,
+        )
+        .entered();
+
         let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -413,9 +428,13 @@ impl<T> Insert<T> {
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
         let future = client.http.request(request);
+        let span = span.exit();
         // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.
-        let handle =
-            tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
+        let handle = tokio::spawn(async move {
+            Response::new(future, Compression::None, span)
+                .finish()
+                .await
+        });
 
         match self.row_metadata {
             None => (), // RowBinary is used, no header is required.
