@@ -104,9 +104,7 @@ fn merge_bytes(mut current: Bytes, cursor: usize, rhs: Bytes) -> Bytes {
             buf.freeze()
         }
         // Shared: allocate once and copy both (fallback to previous behavior).
-        Err(remaining_bytes) => {
-            merge_bytes_slow(remaining_bytes.as_ref(), rhs)
-        }
+        Err(remaining_bytes) => merge_bytes_slow(remaining_bytes.as_ref(), rhs),
     }
 }
 
