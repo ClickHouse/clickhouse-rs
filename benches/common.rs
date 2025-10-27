@@ -49,32 +49,45 @@ impl Drop for ServerHandle {
     }
 }
 
-pub(crate) async fn start_server<S, F, B>(addr: SocketAddr, serve: S) -> ServerHandle
+pub(crate) async fn start_server<B>(
+    addr: SocketAddr,
+    serve: impl Fn(Request<Incoming>) -> Pin<Box<dyn Future<Output = Response<B>> + Send + 'static>>
+    + Send
+    + Sync
+    + 'static,
+) -> ServerHandle
 where
-    S: Fn(Request<Incoming>) -> F + Send + Sync + 'static,
-    F: Future<Output = Response<B>> + Send,
     B: Body<Data = Bytes, Error = Infallible> + Send + 'static,
 {
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
     let (ready_tx, ready_rx) = oneshot::channel::<()>();
+
+    let serve = std::sync::Arc::new(serve);
 
     let serving = async move {
         let listener = TcpListener::bind(addr).await.unwrap();
         ready_tx.send(()).unwrap();
 
         loop {
-            let (stream, _) = listener.accept().await.unwrap();
-            let server_future = conn::http1::Builder::new()
-                .timer(TokioTimer::new())
-                .serve_connection(
-                    TokioIo::new(stream),
-                    service::service_fn(|request| async {
-                        Ok::<_, Infallible>(serve(request).await)
-                    }),
-                );
             tokio::select! {
-                _ = server_future => {}
-                _ = &mut shutdown_rx => { break; }
+                _ = &mut shutdown_rx => break,
+                Ok((stream, _)) = listener.accept() => {
+                          let serve = serve.clone();
+                          let svc = service::service_fn(move |request| {
+                              let fut = (serve)(request);
+                              async move { Ok::<_, Infallible>(fut.await) }
+                          });
+
+                          let conn = conn::http1::Builder::new()
+                              .timer(TokioTimer::new())
+                              .serve_connection(TokioIo::new(stream), svc);
+
+                          tokio::spawn(async move {
+                              if let Err(err) = conn.await {
+                                  eprintln!("connection error: {err}");
+                              }
+                          });
+                }
             }
         }
     };
