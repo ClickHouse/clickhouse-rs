@@ -60,6 +60,10 @@ harness = false
 name = "mocked_select"
 harness = false
 
+[[bench]]
+name = "merge_bytes"
+harness = false
+
 [[example]]
 name = "inserter"
 required-features = ["inserter"]
