@@ -16,6 +16,7 @@ pub use clickhouse_macros::Row;
 use clickhouse_types::{Column, DataTypeNode};
 
 use crate::_priv::row_insert_metadata_query;
+use std::collections::HashSet;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -57,6 +58,7 @@ pub struct Client {
     database: Option<String>,
     authentication: Authentication,
     compression: Compression,
+    roles: HashSet<String>,
     options: HashMap<String, String>,
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
@@ -121,6 +123,7 @@ impl Client {
             database: None,
             authentication: Authentication::default(),
             compression: Compression::default(),
+            roles: HashSet::new(),
             options: HashMap::new(),
             headers: HashMap::new(),
             products_info: Vec::default(),
@@ -224,6 +227,42 @@ impl Client {
                 };
             }
         }
+        self
+    }
+
+    /// Configure the [roles] to use when executing statements with this `Client` instance.
+    ///
+    /// Overrides any roles previously set by this method or [`Client::with_option`].
+    ///
+    /// Call [`Client::with_default_roles`] to clear any explicitly set roles.
+    ///
+    /// This setting is copied into cloned clients.
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use clickhouse::Client;
+    ///
+    /// // Single role
+    /// let client = Client::default().with_roles(["foo"]);
+    ///
+    /// // Multiple roles
+    /// let client = Client::default().with_roles(["foo", "bar", "baz"]);
+    /// ```
+    pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.set_roles(roles);
+        self
+    }
+
+    /// Clear any explicitly set [roles] from this `Client` instance.
+    ///
+    /// Overrides any roles previously set by [`Client::with_roles`] or [`Client::with_option`].
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_default_roles(mut self) -> Self {
+        self.clear_roles();
         self
     }
 
@@ -448,6 +487,18 @@ impl Client {
     /// [`Client`] instance.
     pub(crate) fn add_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
         self.options.insert(name.into(), value.into());
+    }
+
+    pub(crate) fn set_roles(&mut self, roles: impl IntoIterator<Item = impl Into<String>>) {
+        self.clear_roles();
+        self.roles.extend(roles.into_iter().map(Into::into));
+    }
+
+    #[inline]
+    pub(crate) fn clear_roles(&mut self) {
+        // Make sure we overwrite any role manually set by the user via `with_option()`.
+        self.options.remove("role");
+        self.roles.clear();
     }
 
     /// Use a mock server for testing purposes.
