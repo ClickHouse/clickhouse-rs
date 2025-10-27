@@ -20,7 +20,7 @@ async fn serve(
     common::skip_incoming(request).await;
 
     let mut data = Vec::new();
-    let pp = format!("/Users/abalaian/github/REASY/waf-rs/waf-core/response.bin").to_string();
+    let pp = format!("data.bin").to_string();
     let p = std::path::Path::new(pp.as_str());
     let bytes = Bytes::from(fs::read(p).unwrap());
     data.push(bytes);
