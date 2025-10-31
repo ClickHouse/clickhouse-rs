@@ -1,9 +1,8 @@
-use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use clickhouse::sql::Identifier;
-use clickhouse::{Client, error::Result};
+use clickhouse::{Client, Row, error::Result};
 
 /// Besides [`Client::with_option`], which will be applied for all requests,
 /// `session_id` (and other settings) can be set separately for a particular `query`, `insert`,

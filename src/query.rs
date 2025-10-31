@@ -6,6 +6,7 @@ use url::Url;
 use crate::{
     Client,
     error::{Error, Result},
+    formats,
     headers::with_request_headers,
     request_body::RequestBody,
     response::Response,
@@ -59,7 +60,7 @@ impl Query {
 
     /// Executes the query.
     pub async fn execute(self) -> Result<()> {
-        self.do_execute(false)?.finish().await
+        self.do_execute(false, None)?.finish().await
     }
 
     /// Executes the query, returning a [`RowCursor`] to obtain results.
@@ -87,13 +88,13 @@ impl Query {
         self.sql.bind_fields::<T>();
 
         let validation = self.client.get_validation();
-        if validation {
-            self.sql.set_output_format("RowBinaryWithNamesAndTypes");
+        let format = if validation {
+            formats::ROW_BINARY_WITH_NAMES_AND_TYPES
         } else {
-            self.sql.set_output_format("RowBinary");
-        }
+            formats::ROW_BINARY
+        };
 
-        let response = self.do_execute(true)?;
+        let response = self.do_execute(true, Some(format))?;
         Ok(RowCursor::new(response, validation))
     }
 
@@ -143,19 +144,26 @@ impl Query {
     /// bytes containing data in the [provided format].
     ///
     /// [provided format]: https://clickhouse.com/docs/en/interfaces/formats
-    pub fn fetch_bytes(mut self, format: impl Into<String>) -> Result<BytesCursor> {
-        self.sql.set_output_format(format);
-        let response = self.do_execute(true)?;
+    pub fn fetch_bytes(self, format: impl AsRef<str>) -> Result<BytesCursor> {
+        let response = self.do_execute(true, Some(format.as_ref()))?;
         Ok(BytesCursor::new(response))
     }
 
-    pub(crate) fn do_execute(self, read_only: bool) -> Result<Response> {
+    pub(crate) fn do_execute(
+        self,
+        read_only: bool,
+        default_format: Option<&str>,
+    ) -> Result<Response> {
         let query = self.sql.finish()?;
 
         let mut url =
             Url::parse(&self.client.url).map_err(|err| Error::InvalidParams(Box::new(err)))?;
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
+
+        if let Some(format) = default_format {
+            pairs.append_pair("default_format", format);
+        }
 
         if let Some(database) = &self.client.database {
             pairs.append_pair("database", database);
@@ -181,6 +189,9 @@ impl Query {
         for (name, value) in &self.client.options {
             pairs.append_pair(name, value);
         }
+
+        pairs.extend_pairs(self.client.roles.iter().map(|role| ("role", role)));
+
         drop(pairs);
 
         let mut builder = Request::builder().method(method).uri(url.as_str());
@@ -199,6 +210,34 @@ impl Query {
 
         let future = self.client.http.request(request);
         Ok(Response::new(future, self.client.compression))
+    }
+
+    /// Configure the [roles] to use when executing this query.
+    ///
+    /// Overrides any roles previously set by this method, [`Query::with_option`],
+    /// [`Client::with_roles`] or [`Client::with_option`].
+    ///
+    /// An empty iterator may be passed to clear the set roles.
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_roles(self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            client: self.client.with_roles(roles),
+            ..self
+        }
+    }
+
+    /// Clear any explicit [roles] previously set on this `Query` or inherited from [`Client`].
+    ///
+    /// Overrides any roles previously set by [`Query::with_roles`], [`Query::with_option`],
+    /// [`Client::with_roles`] or [`Client::with_option`].
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_default_roles(self) -> Self {
+        Self {
+            client: self.client.with_default_roles(),
+            ..self
+        }
     }
 
     /// Similar to [`Client::with_option`], but for this particular query only.

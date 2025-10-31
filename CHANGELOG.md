@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.14.0] - 2025-10-08
+
 ### Removed
 
 - **BREAKING** watch: `Client::watch()` API is removed ([#245]).
@@ -26,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mock server, so it properly handles the response format and automatically disables parsing
   `RowBinaryWithNamesAndTypes` header parsing and validation. Additionally, it is not required to call `with_url`
   explicitly. See the [updated example](./examples/mock.rs).
+- **BREAKING** query: `Query::fetch_bytes()` now expects `impl AsRef<str>` for `format` instead of `Into<String>`. 
+  Most usages should not be affected, however, unless passing a custom type that implements the latter but not the former.
+  ([#311])
 - query: due to `RowBinaryWithNamesAndTypes` format usage, there might be an impact on fetch performance, which largely
   depends on how the dataset is defined. If you notice decreased performance, consider disabling validation by using
   `Client::with_validation(false)`.
@@ -34,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tls: improved error messages in case of missing TLS features when using HTTPS ([#229]).
 - crate: MSRV is now 1.79 due to borrowed rows support redesign in [#247].
 - crate: bumped dependencies, see [#232], [#239] and [#280] for additional details.
+- crate: starting from 0.3.0, `clickhouse-derive` is now published as [`clickhouse-macros` on crates.io](https://crates.io/crates/clickhouse-macros/0.3.0). The former `clickhouse-derive` crate is discontinued. ([#318]).
 
 ### Added
 
@@ -51,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - client: extract the exception code from `X-ClickHouse-Exception-Code` in case of incorrect 200 OK response 
   that could occur with ClickHouse server up to versions 24.x ([#256]).
+- query: pass format as `?default_format` URL parameter instead of using `FORMAT` clause, allowing queries to have
+  trailing comments and/or semicolons ([#267], [#269], [#311]).
 
 [#189]: https://github.com/ClickHouse/clickhouse-rs/pull/189
 [#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
@@ -63,8 +71,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#250]: https://github.com/ClickHouse/clickhouse-rs/pull/250
 [#256]: https://github.com/ClickHouse/clickhouse-rs/pull/256
 [#258]: https://github.com/ClickHouse/clickhouse-rs/pull/258
+[#267]: https://github.com/ClickHouse/clickhouse-rs/pull/267
+[#269]: https://github.com/ClickHouse/clickhouse-rs/pull/269
 [#280]: https://github.com/ClickHouse/clickhouse-rs/pull/280
 [#292]: https://github.com/ClickHouse/clickhouse-rs/pull/292
+[#311]: https://github.com/ClickHouse/clickhouse-rs/pull/311
+[#318]: https://github.com/ClickHouse/clickhouse-rs/pull/318
 
 ## [0.13.3] - 2025-05-29
 ### Added
@@ -451,7 +463,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.3...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.3...v0.14.0
 [0.13.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.0...v0.13.1

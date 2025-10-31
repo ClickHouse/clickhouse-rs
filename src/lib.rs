@@ -1,6 +1,5 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 #[macro_use]
 extern crate static_assertions;
@@ -10,13 +9,14 @@ pub use self::{
     row::{Row, RowOwned, RowRead, RowWrite},
 };
 use self::{error::Result, http_client::HttpClient};
-use crate::row_metadata::RowMetadata;
-use crate::sql::Identifier;
+use crate::row_metadata::{AccessType, ColumnDefaultKind, InsertMetadata, RowMetadata};
 
 #[doc = include_str!("row_derive.md")]
-pub use clickhouse_derive::Row;
-use clickhouse_types::parse_rbwnat_columns_header;
+pub use clickhouse_macros::Row;
+use clickhouse_types::{Column, DataTypeNode};
 
+use crate::_priv::row_insert_metadata_query;
+use std::collections::HashSet;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -58,11 +58,12 @@ pub struct Client {
     database: Option<String>,
     authentication: Authentication,
     compression: Compression,
+    roles: HashSet<String>,
     options: HashMap<String, String>,
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
     validation: bool,
-    row_metadata_cache: Arc<RowMetadataCache>,
+    insert_metadata_cache: Arc<InsertMetadataCache>,
 
     #[cfg(feature = "test-util")]
     mocked: bool,
@@ -108,13 +109,8 @@ impl Default for Client {
 
 /// Cache for [`RowMetadata`] to avoid allocating it for the same struct more than once
 /// during the application lifecycle. Key: fully qualified table name (e.g. `database.table`).
-pub(crate) struct RowMetadataCache(RwLock<HashMap<String, Arc<RowMetadata>>>);
-
-impl Default for RowMetadataCache {
-    fn default() -> Self {
-        RowMetadataCache(RwLock::new(HashMap::default()))
-    }
-}
+#[derive(Default)]
+pub(crate) struct InsertMetadataCache(RwLock<HashMap<String, Arc<InsertMetadata>>>);
 
 impl Client {
     /// Creates a new client with a specified underlying HTTP client.
@@ -127,17 +123,21 @@ impl Client {
             database: None,
             authentication: Authentication::default(),
             compression: Compression::default(),
+            roles: HashSet::new(),
             options: HashMap::new(),
             headers: HashMap::new(),
             products_info: Vec::default(),
             validation: true,
-            row_metadata_cache: Arc::new(RowMetadataCache::default()),
+            insert_metadata_cache: Arc::new(InsertMetadataCache::default()),
             #[cfg(feature = "test-util")]
             mocked: false,
         }
     }
 
     /// Specifies ClickHouse's url. Should point to HTTP endpoint.
+    ///
+    /// Automatically [clears the metadata cache][Self::clear_cached_metadata]
+    /// for this instance only.
     ///
     /// # Examples
     /// ```
@@ -146,10 +146,25 @@ impl Client {
     /// ```
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = url.into();
+
+        // `with_mock()` didn't exist previously, so to not break existing usages,
+        // we need to be able to detect a mocked server using nothing but the URL.
+        #[cfg(feature = "test-util")]
+        if let Some(url) = test::Mock::mocked_url_to_real(&self.url) {
+            self.url = url;
+            self.mocked = true;
+        }
+
+        // Assume our cached metadata is invalid.
+        self.insert_metadata_cache = Default::default();
+
         self
     }
 
     /// Specifies a database name.
+    ///
+    /// Automatically [clears the metadata cache][Self::clear_cached_metadata]
+    /// for this instance only.
     ///
     /// # Examples
     /// ```
@@ -158,6 +173,10 @@ impl Client {
     /// ```
     pub fn with_database(mut self, database: impl Into<String>) -> Self {
         self.database = Some(database.into());
+
+        // Assume our cached metadata is invalid.
+        self.insert_metadata_cache = Default::default();
+
         self
     }
 
@@ -208,6 +227,42 @@ impl Client {
                 };
             }
         }
+        self
+    }
+
+    /// Configure the [roles] to use when executing statements with this `Client` instance.
+    ///
+    /// Overrides any roles previously set by this method or [`Client::with_option`].
+    ///
+    /// Call [`Client::with_default_roles`] to clear any explicitly set roles.
+    ///
+    /// This setting is copied into cloned clients.
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use clickhouse::Client;
+    ///
+    /// // Single role
+    /// let client = Client::default().with_roles(["foo"]);
+    ///
+    /// // Multiple roles
+    /// let client = Client::default().with_roles(["foo", "bar", "baz"]);
+    /// ```
+    pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.set_roles(roles);
+        self
+    }
+
+    /// Clear any explicitly set [roles] from this `Client` instance.
+    ///
+    /// Overrides any roles previously set by [`Client::with_roles`] or [`Client::with_option`].
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    pub fn with_default_roles(mut self) -> Self {
+        self.clear_roles();
         self
     }
 
@@ -348,8 +403,12 @@ impl Client {
     /// If `T` has unnamed fields, e.g. tuples.
     pub async fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
         if self.get_validation() {
-            let metadata = self.get_row_metadata_for_insert::<T>(table).await?;
-            return Ok(insert::Insert::new(self, table, Some(metadata)));
+            let metadata = self.get_insert_metadata(table).await?;
+            return Ok(insert::Insert::new(
+                self,
+                table,
+                Some(metadata.to_row::<T>()),
+            ));
         }
         Ok(insert::Insert::new(self, table, None))
     }
@@ -383,9 +442,34 @@ impl Client {
     /// in your specific use case. Additionally, writing smoke tests to ensure that
     /// the row types match the ClickHouse schema is highly recommended,
     /// if you plan to disable validation in your application.
+    ///
+    /// # Note: Mocking
+    /// When using [`test::Mock`] with the `test-util` feature, validation is forced off.
+    ///
+    /// This applies either when using [`Client::with_mock()`], or [`Client::with_url()`]
+    /// with a URL from [`test::Mock::url()`].
+    ///
+    /// As of writing, the mocking facilities are unable to generate the `RowBinaryWithNamesAndTypes`
+    /// header required for validation to function.
     pub fn with_validation(mut self, enabled: bool) -> Self {
         self.validation = enabled;
         self
+    }
+
+    /// Clear table metadata that was previously received and cached.
+    ///
+    /// [`Insert`][crate::insert::Insert] uses cached metadata when sending data with validation.
+    /// If the table schema changes, this metadata needs to re-fetched.
+    ///
+    /// This method clears the metadata cache, causing future insert queries to re-fetch metadata.
+    /// This applies to all cloned instances of this `Client` (using the same URL and database)
+    /// as well.
+    ///
+    /// This may need to wait to acquire a lock if a query is concurrently writing into the cache.
+    ///
+    /// Cancel-safe.
+    pub async fn clear_cached_metadata(&self) {
+        self.insert_metadata_cache.0.write().await.clear();
     }
 
     /// Used internally to check if the validation mode is enabled,
@@ -405,6 +489,18 @@ impl Client {
         self.options.insert(name.into(), value.into());
     }
 
+    pub(crate) fn set_roles(&mut self, roles: impl IntoIterator<Item = impl Into<String>>) {
+        self.clear_roles();
+        self.roles.extend(roles.into_iter().map(Into::into));
+    }
+
+    #[inline]
+    pub(crate) fn clear_roles(&mut self) {
+        // Make sure we overwrite any role manually set by the user via `with_option()`.
+        self.options.remove("role");
+        self.roles.clear();
+    }
+
     /// Use a mock server for testing purposes.
     ///
     /// # Note
@@ -414,44 +510,64 @@ impl Client {
     /// which is pointless in that kind of tests.
     #[cfg(feature = "test-util")]
     pub fn with_mock(mut self, mock: &test::Mock) -> Self {
-        self.url = mock.url().to_string();
+        self.url = mock.real_url().to_string();
         self.mocked = true;
         self
     }
 
-    async fn get_row_metadata_for_insert<T: Row>(
-        &self,
-        table_name: &str,
-    ) -> Result<Arc<RowMetadata>> {
-        let read_lock = self.row_metadata_cache.0.read().await;
-        match read_lock.get(table_name) {
-            Some(metadata) => Ok(metadata.clone()),
-            None => {
-                drop(read_lock);
-                // TODO: should it be moved to a cold function?
-                let mut write_lock = self.row_metadata_cache.0.write().await;
-                let db = match self.database {
-                    Some(ref db) => db,
-                    None => "default",
-                };
-                let mut bytes_cursor = self
-                    .query("SELECT * FROM ? LIMIT 0")
-                    .bind(Identifier(table_name))
-                    // don't allow to override the client database set in the client instance
-                    // with a `.with_option("database", "some_other_db")` call on the app side
-                    .with_option("database", db)
-                    .fetch_bytes("RowBinaryWithNamesAndTypes")?;
-                let mut buffer = Vec::<u8>::new();
-                while let Some(chunk) = bytes_cursor.next().await? {
-                    buffer.extend_from_slice(&chunk);
-                }
-                let columns = parse_rbwnat_columns_header(&mut buffer.as_slice())?;
-                let metadata = Arc::new(RowMetadata::new_for_insert::<T>(columns));
-                write_lock.insert(table_name.to_string(), metadata.clone());
-                Ok(metadata)
+    async fn get_insert_metadata(&self, table_name: &str) -> Result<Arc<InsertMetadata>> {
+        {
+            let read_lock = self.insert_metadata_cache.0.read().await;
+
+            // FIXME: `table_name` is not necessarily fully qualified here
+            if let Some(metadata) = read_lock.get(table_name) {
+                return Ok(metadata.clone());
             }
         }
+
+        // TODO: should it be moved to a cold function?
+        let mut write_lock = self.insert_metadata_cache.0.write().await;
+        let db = match self.database {
+            Some(ref db) => db,
+            None => "default",
+        };
+
+        let mut columns_cursor = self
+            .query(&row_insert_metadata_query(db, table_name))
+            .fetch::<(String, String, String)>()?;
+
+        let mut columns = Vec::new();
+        let mut column_default_kinds = Vec::new();
+        let mut column_lookup = HashMap::new();
+
+        while let Some((name, type_, default_kind)) = columns_cursor.next().await? {
+            let data_type = DataTypeNode::new(&type_)?;
+            let default_kind = default_kind.parse::<ColumnDefaultKind>()?;
+
+            column_lookup.insert(name.clone(), columns.len());
+
+            columns.push(Column { name, data_type });
+
+            column_default_kinds.push(default_kind);
+        }
+
+        let metadata = Arc::new(InsertMetadata {
+            row_metadata: RowMetadata {
+                columns,
+                access_type: AccessType::WithSeqAccess, // ignored on insert
+            },
+            column_default_kinds,
+            column_lookup,
+        });
+
+        write_lock.insert(table_name.to_string(), metadata.clone());
+        Ok(metadata)
     }
+}
+
+mod formats {
+    pub(crate) const ROW_BINARY: &str = "RowBinary";
+    pub(crate) const ROW_BINARY_WITH_NAMES_AND_TYPES: &str = "RowBinaryWithNamesAndTypes";
 }
 
 /// This is a private API exported only for internal purposes.
@@ -463,6 +579,25 @@ pub mod _priv {
     #[cfg(feature = "lz4")]
     pub fn lz4_compress(uncompressed: &[u8]) -> super::Result<bytes::Bytes> {
         crate::compression::lz4::compress(uncompressed)
+    }
+
+    // Also needed by `it::insert::cache_row_metadata()`
+    pub fn row_insert_metadata_query(db: &str, table: &str) -> String {
+        let mut out = "SELECT \
+            name, \
+            type, \
+            default_kind \
+         FROM system.columns \
+         WHERE database = "
+            .to_string();
+
+        crate::sql::escape::string(db, &mut out).unwrap();
+
+        out.push_str(" AND table = ");
+
+        crate::sql::escape::string(table, &mut out).unwrap();
+
+        out
     }
 }
 
@@ -642,32 +777,6 @@ mod client_tests {
             metadata.access_type,
             AccessType::WithMapAccess(vec![1, 2, 0]) // see COLUMN_NAMES above
         );
-    }
-
-    #[tokio::test]
-    async fn cache_row_metadata() {
-        let client = Client::default()
-            .with_url("http://localhost:8123")
-            .with_database("system");
-
-        let metadata = client
-            .get_row_metadata_for_insert::<SystemRolesRow>("roles")
-            .await
-            .unwrap();
-
-        assert_eq!(metadata.columns, SystemRolesRow::columns());
-        assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
-
-        // we can now use a dummy client, cause the metadata is cached,
-        // and no calls to the database will be made
-        client
-            .with_url("whatever")
-            .get_row_metadata_for_insert::<SystemRolesRow>("roles")
-            .await
-            .unwrap();
-
-        assert_eq!(metadata.columns, SystemRolesRow::columns());
-        assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
     }
 
     #[test]

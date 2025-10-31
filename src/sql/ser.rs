@@ -37,6 +37,7 @@ type Impossible = ser::Impossible<(), SerializerError>;
 
 struct SqlSerializer<'a, W> {
     writer: &'a mut W,
+    in_param: bool,
 }
 
 macro_rules! unsupported {
@@ -117,13 +118,24 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     #[inline]
     fn serialize_i128(self, value: i128) -> Result {
-        write!(self.writer, "{value}::Int128")?;
+        if self.in_param {
+            // Casts aren't allowed in parameters, but the type is already fixed anyway.
+            write!(self.writer, "{value}")?;
+        } else {
+            write!(self.writer, "{value}::Int128")?;
+        }
+
         Ok(())
     }
 
     #[inline]
     fn serialize_u128(self, value: u128) -> Result {
-        write!(self.writer, "{value}::UInt128")?;
+        if self.in_param {
+            write!(self.writer, "{value}")?;
+        } else {
+            write!(self.writer, "{value}::UInt128")?;
+        }
+
         Ok(())
     }
 
@@ -138,6 +150,7 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
         self.writer.write_char('[')?;
         Ok(SqlListSerializer {
             writer: self.writer,
+            in_param: self.in_param,
             has_items: false,
             closing_char: ']',
         })
@@ -148,6 +161,7 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
         self.writer.write_char('(')?;
         Ok(SqlListSerializer {
             writer: self.writer,
+            in_param: self.in_param,
             has_items: false,
             closing_char: ')',
         })
@@ -237,6 +251,7 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
 struct SqlListSerializer<'a, W> {
     writer: &'a mut W,
+    in_param: bool,
     has_items: bool,
     closing_char: char,
 }
@@ -258,6 +273,7 @@ impl<W: Write> SerializeSeq for SqlListSerializer<'_, W> {
 
         value.serialize(SqlSerializer {
             writer: self.writer,
+            in_param: self.in_param,
         })
     }
 
@@ -344,6 +360,7 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
         self.writer.write_char('[')?;
         Ok(SqlListSerializer {
             writer: self.writer,
+            in_param: true,
             has_items: false,
             closing_char: ']',
         })
@@ -354,6 +371,7 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
         self.writer.write_char('(')?;
         Ok(SqlListSerializer {
             writer: self.writer,
+            in_param: true,
             has_items: false,
             closing_char: ')',
         })
@@ -443,7 +461,10 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
 
 pub(crate) fn write_arg(writer: &mut impl Write, value: &impl Serialize) -> Result<(), String> {
     value
-        .serialize(SqlSerializer { writer })
+        .serialize(SqlSerializer {
+            writer,
+            in_param: false,
+        })
         .map_err(|err| err.to_string())
 }
 

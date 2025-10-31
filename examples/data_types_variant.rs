@@ -1,8 +1,7 @@
-use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 
 use clickhouse::sql::Identifier;
-use clickhouse::{Client, error::Result};
+use clickhouse::{Client, Row, error::Result};
 
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types/variant
 

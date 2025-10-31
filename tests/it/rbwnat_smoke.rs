@@ -1,6 +1,6 @@
 use crate::decimals::*;
 use crate::geo_types::{LineString, MultiLineString, MultiPolygon, Point, Polygon, Ring};
-use crate::{SimpleRow, create_simple_table, get_client, insert_and_select};
+use crate::{SimpleRow, create_simple_table, execute_statements, get_client, insert_and_select};
 use clickhouse::Row;
 use clickhouse::sql::Identifier;
 use fxhash::FxHashMap;
@@ -9,6 +9,7 @@ use linked_hash_map::LinkedHashMap;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::str::FromStr;
 
 #[tokio::test]
@@ -1411,4 +1412,264 @@ async fn interval() {
             interval_year: i64::MAX,
         }
     );
+}
+
+// See https://clickhouse.com/docs/sql-reference/statements/create/table#ephemeral
+#[tokio::test]
+async fn ephemeral_columns() {
+    let table_name = "test_ephemeral_columns";
+
+    #[derive(Clone, Debug, Row, Serialize, PartialEq)]
+    struct DataInsert {
+        id: u64,
+        hexed: String,
+    }
+
+    #[derive(Clone, Debug, Row, Deserialize, PartialEq)]
+    struct DataSelect {
+        id: u64,
+        raw: [u8; 3],
+    }
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+                CREATE OR REPLACE TABLE ?
+                (
+                    id    UInt64,
+                    hexed String         EPHEMERAL,
+                    raw   FixedString(3) DEFAULT unhex(hexed)
+                )
+                ENGINE = MergeTree
+                ORDER BY id
+            ",
+        )
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+
+    let rows_to_insert = vec![
+        DataInsert {
+            id: 1,
+            hexed: "666F6F".to_string(), // "foo" in hex
+        },
+        DataInsert {
+            id: 2,
+            hexed: "626172".to_string(), // "bar" in hex
+        },
+    ];
+
+    let mut insert = client.insert::<DataInsert>(table_name).await.unwrap();
+    for row in rows_to_insert.into_iter() {
+        insert.write(&row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let rows = client
+        .query("SELECT ?fields FROM ? ORDER BY () ASC")
+        .bind(Identifier(table_name))
+        .fetch_all::<DataSelect>()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        rows,
+        vec![
+            DataSelect {
+                id: 1,
+                raw: *b"foo",
+            },
+            DataSelect {
+                id: 2,
+                raw: *b"bar",
+            }
+        ]
+    );
+}
+
+// See https://clickhouse.com/docs/sql-reference/statements/alter/column#materialize-column
+#[tokio::test]
+async fn materialized_columns() {
+    let table_name = "test_materialized_columns";
+
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        x: i64,
+    }
+
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct DataWithMaterialized {
+        x: i64,
+        // MATERIALIZED columns cannot be inserted into
+        s: String,
+    }
+
+    let client = prepare_database!();
+    execute_statements(
+        &client,
+        &[
+            &format!(
+                "
+                    CREATE OR REPLACE TABLE {table_name} (x Int64)
+                    ENGINE = MergeTree ORDER BY () PARTITION BY ()
+                "
+            ),
+            &format!("INSERT INTO {table_name} SELECT * FROM system.numbers LIMIT 5"),
+            &format!("ALTER TABLE {table_name} ADD COLUMN s String MATERIALIZED toString(x)"),
+            &format!("ALTER TABLE {table_name} MATERIALIZE COLUMN s"),
+        ],
+    )
+    .await;
+
+    let rows = client
+        .query("SELECT ?fields FROM ? ORDER BY x ASC")
+        .bind(Identifier(table_name))
+        .fetch_all::<DataWithMaterialized>()
+        .await
+        .unwrap();
+
+    let expected_rows = (0..5)
+        .map(|x| DataWithMaterialized {
+            x,
+            s: x.to_string(),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rows, expected_rows);
+
+    let insert_data = AssertUnwindSafe(async {
+        let _ = client
+            .insert::<DataWithMaterialized>(table_name)
+            .await
+            .unwrap();
+    });
+
+    assert_panic_msg!(
+        insert_data,
+        ["column s is immutable (declared as `MATERIALIZED`)"]
+    );
+
+    let rows_to_insert = (5..10).map(|x| Data { x });
+
+    let mut insert = client.insert::<Data>(table_name).await.unwrap();
+    for row in rows_to_insert {
+        insert.write(&row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let rows_after_insert = client
+        .query("SELECT ?fields FROM ? ORDER BY x ASC")
+        .bind(Identifier(table_name))
+        .fetch_all::<DataWithMaterialized>()
+        .await
+        .unwrap();
+
+    let expected_rows_after_insert = (0..10)
+        .map(|x| DataWithMaterialized {
+            x,
+            s: x.to_string(),
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(rows_after_insert, expected_rows_after_insert);
+}
+
+// See https://clickhouse.com/docs/sql-reference/statements/create/table#alias
+#[tokio::test]
+async fn alias_columns() {
+    let table_name = "test_alias_columns";
+
+    #[derive(Clone, Debug, Row, Deserialize, PartialEq)]
+    struct Data {
+        id: u64,
+        size_bytes: i64,
+        size: String,
+    }
+
+    #[derive(Clone, Debug, Row, Serialize, PartialEq)]
+    struct DataInsert {
+        id: u64,
+        size_bytes: i64,
+    }
+
+    let client = prepare_database!();
+    execute_statements(
+        &client,
+        &[
+            &format!(
+                "
+                    CREATE OR REPLACE TABLE {table_name}
+                    (
+                        id         UInt64,
+                        size_bytes Int64,
+                        size       String ALIAS formatReadableSize(size_bytes)
+                    )
+                    ENGINE = MergeTree
+                    ORDER BY id;
+                ",
+            ),
+            &format!("INSERT INTO {table_name} VALUES (1, 4678899)"),
+        ],
+    )
+    .await;
+
+    let rows = client
+        .query("SELECT ?fields FROM ?")
+        .bind(Identifier(table_name))
+        .fetch_all::<Data>()
+        .await
+        .unwrap();
+
+    let expected_rows = vec![Data {
+        id: 1,
+        size_bytes: 4678899,
+        size: "4.46 MiB".to_string(),
+    }];
+
+    assert_eq!(rows, expected_rows);
+
+    let rows_to_insert = vec![
+        DataInsert {
+            id: 2,
+            size_bytes: 123456,
+        },
+        DataInsert {
+            id: 3,
+            size_bytes: 987654321,
+        },
+    ];
+
+    let mut insert = client.insert::<DataInsert>(table_name).await.unwrap();
+    for row in &rows_to_insert {
+        insert.write(row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let rows_after_insert = client
+        .query("SELECT ?fields FROM ? ORDER BY id ASC")
+        .bind(Identifier(table_name))
+        .fetch_all::<Data>()
+        .await
+        .unwrap();
+
+    let expected_rows_after_insert = vec![
+        Data {
+            id: 1,
+            size_bytes: 4678899,
+            size: "4.46 MiB".to_string(),
+        },
+        Data {
+            id: 2,
+            size_bytes: 123456,
+            size: "120.56 KiB".to_string(),
+        },
+        Data {
+            id: 3,
+            size_bytes: 987654321,
+            size: "941.90 MiB".to_string(),
+        },
+    ];
+
+    assert_eq!(rows_after_insert, expected_rows_after_insert);
 }

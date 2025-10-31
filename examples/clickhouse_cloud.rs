@@ -1,6 +1,6 @@
 use clickhouse::Client;
+use clickhouse::Row;
 use clickhouse::sql::Identifier;
-use clickhouse_derive::Row;
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -42,9 +42,9 @@ async fn main() -> clickhouse::error::Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert::<Data>(table_name).await?;
+    let mut insert = client.insert::<MyRow>(table_name).await?;
     insert
-        .write(&Data {
+        .write(&MyRow {
             id: 42,
             name: "foo".into(),
         })
@@ -57,7 +57,7 @@ async fn main() -> clickhouse::error::Result<()> {
         // This setting is optional; use it when you need strong consistency guarantees on the reads
         // See https://clickhouse.com/docs/en/cloud/reference/shared-merge-tree#consistency
         .with_option("select_sequential_consistency", "1")
-        .fetch_all::<Data>()
+        .fetch_all::<MyRow>()
         .await?;
 
     println!("Stored data: {data:?}");
@@ -65,7 +65,7 @@ async fn main() -> clickhouse::error::Result<()> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Row)]
-struct Data {
+struct MyRow {
     id: i32,
     name: String,
 }
