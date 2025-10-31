@@ -48,8 +48,12 @@ impl<T> RowCursor<T> {
     {
         loop {
             if self.bytes.remaining() > 0 {
-                match parse_rbwnat_columns_header(&mut self.bytes) {
+                let mut slice = self.bytes.slice();
+
+                // Can't pass `&mut self.bytes` because the parsing may partially consume the buffer
+                match parse_rbwnat_columns_header(&mut slice) {
                     Ok(columns) if !columns.is_empty() => {
+                        self.bytes.set_remaining(slice.len());
                         self.row_metadata = Some(RowMetadata::new_for_cursor::<T>(columns));
                         return Poll::Ready(Ok(()));
                     }
