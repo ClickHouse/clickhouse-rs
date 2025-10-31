@@ -1,5 +1,6 @@
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use std::cell::Cell;
+use std::mem;
 
 #[derive(Default)]
 pub(crate) struct BytesExt {
@@ -15,20 +16,20 @@ impl BytesExt {
     /// Returns a remaining slice of bytes.
     #[inline(always)]
     pub(crate) fn slice(&self) -> &[u8] {
-        &self.bytes()[self.cursor.get()..]
+        &self.bytes[self.cursor.get()..]
     }
 
     /// Returns the number of remaining bytes.
     #[inline(always)]
     pub(crate) fn remaining(&self) -> usize {
-        self.bytes().len() - self.cursor.get()
+        self.bytes.len() - self.cursor.get()
     }
 
     /// Overrides the number of remaining bytes by moving the cursor.
     /// Note: it's valid to call this method while holding `slice()` reference.
     #[inline(always)]
     pub(crate) fn set_remaining(&self, n: usize) {
-        self.cursor.set(self.bytes().len() - n);
+        self.cursor.set(self.bytes.len() - n);
     }
 
     #[cfg(any(test, feature = "lz4"))]
@@ -41,35 +42,44 @@ impl BytesExt {
     /// Adds the provided chunk into available bytes.
     #[inline(always)]
     pub(crate) fn extend(&mut self, chunk: Bytes) {
-        self.bytes = merge_bytes(self.slice(), chunk);
+        if self.bytes.is_empty() {
+            self.bytes = chunk;
+            self.cursor.set(0);
+        } else {
+            self.extend_slow(chunk);
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn extend_slow(&mut self, chunk: Bytes) {
+        let mut remaining = mem::take(&mut self.bytes);
+        remaining.advance(self.cursor.get());
+
+        // Try to reuse the capacity, if possible.
+        let mut remaining = BytesMut::from(remaining);
+        remaining.extend_from_slice(&chunk);
+
+        self.bytes = remaining.freeze();
         self.cursor.set(0);
     }
-
-    fn bytes(&self) -> &Bytes {
-        &self.bytes
-    }
 }
 
-fn merge_bytes(lhs: &[u8], rhs: Bytes) -> Bytes {
-    if lhs.is_empty() {
-        // Most of the time, we read the next chunk after consuming the previous one.
-        rhs
-    } else {
-        // Some bytes are left in the buffer, we need to merge them with the next chunk.
-        merge_bytes_slow(lhs, rhs)
+impl Buf for BytesExt {
+    #[inline(always)]
+    fn remaining(&self) -> usize {
+        self.remaining()
     }
-}
 
-#[cold]
-#[inline(never)]
-fn merge_bytes_slow(lhs: &[u8], rhs: Bytes) -> Bytes {
-    let new_len = lhs.len() + rhs.len();
-    let mut new_bytes = BytesMut::with_capacity(new_len);
-    let capacity = new_bytes.capacity();
-    new_bytes.extend_from_slice(lhs);
-    new_bytes.extend_from_slice(&rhs);
-    debug_assert_eq!(new_bytes.capacity(), capacity);
-    new_bytes.freeze()
+    #[inline(always)]
+    fn chunk(&self) -> &[u8] {
+        self.slice()
+    }
+
+    #[inline(always)]
+    fn advance(&mut self, cnt: usize) {
+        self.advance(cnt);
+    }
 }
 
 #[cfg(test)]

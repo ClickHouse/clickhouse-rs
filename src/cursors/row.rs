@@ -9,6 +9,7 @@ use crate::{
     response::Response,
     rowbinary,
 };
+use bytes::Buf;
 use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
 use polonius_the_crab::prelude::*;
@@ -47,10 +48,8 @@ impl<T> RowCursor<T> {
     {
         loop {
             if self.bytes.remaining() > 0 {
-                let mut slice = self.bytes.slice();
-                match parse_rbwnat_columns_header(&mut slice) {
+                match parse_rbwnat_columns_header(&mut self.bytes) {
                     Ok(columns) if !columns.is_empty() => {
-                        self.bytes.set_remaining(slice.len());
                         self.row_metadata = Some(RowMetadata::new_for_cursor::<T>(columns));
                         return Poll::Ready(Ok(()));
                     }
