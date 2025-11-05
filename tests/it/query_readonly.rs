@@ -1,7 +1,5 @@
 use crate::get_client;
-use bstr::ByteSlice;
-use clickhouse::query::{BytesCursor, Query};
-use std::str::from_utf8;
+use clickhouse::query::Query;
 
 #[tokio::test]
 async fn fetch_one() {
