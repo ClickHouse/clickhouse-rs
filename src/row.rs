@@ -115,7 +115,7 @@ pub trait Row {
 pub trait RowRead: for<'a> Row<Value<'a>: Deserialize<'a>> {}
 impl<R> RowRead for R where R: for<'a> Row<Value<'a>: Deserialize<'a>> {}
 
-/// Represents a row that can be writted into the database.
+/// Represents a row that can be written into the database.
 ///
 /// This trait is implemented automatically for all `Row + Serialize` types.
 ///
