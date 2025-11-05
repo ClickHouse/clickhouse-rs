@@ -4,9 +4,11 @@ use crate::rowbinary::{serialize_row_binary, serialize_with_validation};
 use crate::{
     Client, Compression, RowWrite,
     error::{Error, Result},
+    formats,
     request_body::{ChunkSender, RequestBody},
     response::Response,
     row::{self, Row},
+    settings,
 };
 use bytes::{Bytes, BytesMut};
 use clickhouse_types::put_rbwnat_columns_header;
@@ -138,9 +140,9 @@ impl<T> Insert<T> {
         // TODO: what about escaping a table name?
         // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
         let format = if row_metadata.is_some() {
-            "RowBinaryWithNamesAndTypes"
+            formats::ROW_BINARY_WITH_NAMES_AND_TYPES
         } else {
-            "RowBinary"
+            formats::ROW_BINARY
         };
         let sql = format!("INSERT INTO {table}({fields}) FORMAT {format}");
 
@@ -387,13 +389,13 @@ impl<T> Insert<T> {
         pairs.clear();
 
         if let Some(database) = &client.database {
-            pairs.append_pair("database", database);
+            pairs.append_pair(settings::DATABASE, database);
         }
 
-        pairs.append_pair("query", sql);
+        pairs.append_pair(settings::QUERY, sql);
 
         if client.compression.is_lz4() {
-            pairs.append_pair("decompress", "1");
+            pairs.append_pair(settings::DECOMPRESS, "1");
         }
 
         for (name, value) in &client.options {

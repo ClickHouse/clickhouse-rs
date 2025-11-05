@@ -14,10 +14,9 @@ use crate::{
     sql::{Bind, SqlBuilder, ser},
 };
 
-const MAX_QUERY_LEN_TO_USE_GET: usize = 8192;
-
 pub use crate::cursors::{BytesCursor, RowCursor};
 use crate::headers::with_authentication;
+use crate::settings;
 
 #[must_use]
 #[derive(Clone)]
@@ -151,7 +150,7 @@ impl Query {
 
     pub(crate) fn do_execute(
         self,
-        read_only: bool,
+        readonly: bool,
         default_format: Option<&str>,
     ) -> Result<Response> {
         let query = self.sql.finish()?;
@@ -162,50 +161,45 @@ impl Query {
         pairs.clear();
 
         if let Some(format) = default_format {
-            pairs.append_pair("default_format", format);
+            pairs.append_pair(settings::DEFAULT_FORMAT, format);
         }
 
         if let Some(database) = &self.client.database {
-            pairs.append_pair("database", database);
+            pairs.append_pair(settings::DATABASE, database);
         }
 
-        let use_post = !read_only || query.len() > MAX_QUERY_LEN_TO_USE_GET;
-
-        let (method, body, content_length) = if use_post {
-            if read_only {
-                pairs.append_pair("readonly", "1");
-            }
-            let len = query.len();
-            (Method::POST, RequestBody::full(query), len)
-        } else {
-            pairs.append_pair("query", &query);
-            (Method::GET, RequestBody::empty(), 0)
-        };
+        // Normally, we enforce `readonly` for all `fetch_*` operations.
+        // However, we still allow overriding it to support several niche use-cases,
+        // e.g., temporary tables usage. See https://github.com/ClickHouse/clickhouse-rs/issues/230
+        if readonly {
+            let readonly_value = match self.client.options.get(settings::READONLY) {
+                None => "1",
+                Some(value) => value,
+            };
+            pairs.append_pair(settings::READONLY, readonly_value);
+        }
 
         if self.client.compression.is_lz4() {
-            pairs.append_pair("compress", "1");
+            pairs.append_pair(settings::COMPRESS, "1");
         }
 
         for (name, value) in &self.client.options {
             pairs.append_pair(name, value);
         }
 
-        pairs.extend_pairs(self.client.roles.iter().map(|role| ("role", role)));
+        pairs.extend_pairs(self.client.roles.iter().map(|role| (settings::ROLE, role)));
 
         drop(pairs);
 
-        let mut builder = Request::builder().method(method).uri(url.as_str());
+        let mut builder = Request::builder().method(Method::POST).uri(url.as_str());
         builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
         builder = with_authentication(builder, &self.client.authentication);
 
-        if content_length == 0 {
-            builder = builder.header(CONTENT_LENGTH, "0");
-        } else {
-            builder = builder.header(CONTENT_LENGTH, content_length.to_string());
-        }
+        let content_length = query.len();
+        builder = builder.header(CONTENT_LENGTH, content_length.to_string());
 
         let request = builder
-            .body(body)
+            .body(RequestBody::full(query))
             .map_err(|err| Error::InvalidParams(Box::new(err)))?;
 
         let future = self.client.http.request(request);
@@ -248,7 +242,7 @@ impl Query {
 
     /// Specify server side parameter for query.
     ///
-    /// In queries you can reference params as {name: type} e.g. {val: Int32}.
+    /// In queries, you can reference params as {name: type} e.g. {val: Int32}.
     pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
         let mut param = String::from("");
         if let Err(err) = ser::write_param(&mut param, &value) {
