@@ -16,7 +16,7 @@ async fn fetch_primitive_row() {
 #[tokio::test]
 async fn fetch_primitive_row_schema_mismatch() {
     type Data = i32; // expected type is UInt64
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["primitive", "UInt64", "i32"],
         "SELECT count() FROM (SELECT * FROM system.numbers LIMIT 3)"
     );
@@ -35,7 +35,7 @@ async fn fetch_vector_row() {
 #[tokio::test]
 async fn fetch_vector_row_schema_mismatch_nested_type() {
     type Data = Vec<i128>; // expected type for Array(UInt32) is Vec<u32>
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["vector", "UInt32", "i128"],
         "SELECT [1, 2, 3] :: Array(UInt32)"
     );
@@ -54,7 +54,7 @@ async fn fetch_tuple_row() {
 #[tokio::test]
 async fn fetch_tuple_row_schema_mismatch_first_element() {
     type Data = (i128, String); // expected u32 instead of i128
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["tuple", "UInt32", "i128"],
         "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b"
     );
@@ -63,7 +63,7 @@ async fn fetch_tuple_row_schema_mismatch_first_element() {
 #[tokio::test]
 async fn fetch_tuple_row_schema_mismatch_second_element() {
     type Data = (u32, i64); // expected String instead of i64
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["tuple", "String", "i64"],
         "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b"
     );
@@ -72,7 +72,7 @@ async fn fetch_tuple_row_schema_mismatch_second_element() {
 #[tokio::test]
 async fn fetch_tuple_row_schema_mismatch_missing_element() {
     type Data = (u32, String); // expected to have the third element as i64
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &[
             "database schema has 3 columns",
             "tuple definition has 2 fields"
@@ -84,7 +84,7 @@ async fn fetch_tuple_row_schema_mismatch_missing_element() {
 #[tokio::test]
 async fn fetch_tuple_row_schema_mismatch_too_many_elements() {
     type Data = (u32, String, i128); // i128 should not be there
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &[
             "database schema has 2 columns",
             "tuple definition has 3 fields"
@@ -126,7 +126,7 @@ async fn fetch_tuple_row_with_struct_schema_mismatch() {
         b: String,
     }
     type Data = (_Data, u64);
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["tuple", "UInt32", "u64"],
         "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c"
     );
@@ -141,7 +141,7 @@ async fn fetch_tuple_row_with_struct_schema_mismatch_too_many_struct_fields() {
         c: u64, // this field should not be here
     }
     type Data = (_Data, u64);
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["3 columns", "4 fields"],
         "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c"
     );
@@ -155,7 +155,7 @@ async fn fetch_tuple_row_with_struct_schema_mismatch_too_many_fields() {
         b: String,
     }
     type Data = (_Data, u64, u64); // one too many u64
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["3 columns", "4 fields"],
         "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c"
     );
@@ -168,7 +168,7 @@ async fn fetch_tuple_row_with_struct_schema_mismatch_too_few_struct_fields() {
         a: u32, // the second field is missing now
     }
     type Data = (_Data, u64);
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["3 columns", "2 fields"],
         "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c"
     );
@@ -182,7 +182,7 @@ async fn fetch_tuple_row_with_struct_schema_mismatch_too_few_fields() {
         b: String,
     }
     type Data = (_Data, u64); // another u64 is missing here
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["4 columns", "3 fields"],
         "SELECT 42 :: UInt32 AS a, 'foo' :: String AS b, 144 :: UInt64 AS c, 255 :: UInt64 AS d"
     );
@@ -195,7 +195,7 @@ async fn map_as_vec_of_tuples_schema_mismatch() {
         m: Vec<(u16, Vec<(String, i32)>)>,
     }
 
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["Data.m", "Map(Int64, String)", "Int64", "u16"],
         "SELECT map(100, 'value1', 200, 'value2') :: Map(Int64, String) AS m"
     );
@@ -210,7 +210,7 @@ async fn map_as_vec_of_tuples_schema_mismatch_nested() {
         m: Vec<(u16, Vec<(String, Inner)>)>,
     }
 
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &[
             "Data.m",
             "Map(UInt16, Map(String, Map(Int32, Int128)))",
@@ -228,7 +228,7 @@ async fn invalid_nullable() {
     struct Data {
         n: Option<u32>,
     }
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["Data.n", "Array(UInt32)", "Option<T>"],
         "SELECT array(42) :: Array(UInt32) AS n"
     );
@@ -241,7 +241,7 @@ async fn invalid_low_cardinality() {
         a: u32,
     }
     let client = get_client().with_option("allow_suspicious_low_cardinality_types", "1");
-    assert_panic_on_fetch_with_client!(
+    assert_err_on_fetch_with_client!(
         client,
         &["Data.a", "LowCardinality(Int32)", "u32"],
         "SELECT 144 :: LowCardinality(Int32) AS a"
@@ -255,7 +255,7 @@ async fn invalid_nullable_low_cardinality() {
         a: Option<u32>,
     }
     let client = get_client().with_option("allow_suspicious_low_cardinality_types", "1");
-    assert_panic_on_fetch_with_client!(
+    assert_err_on_fetch_with_client!(
         client,
         &["Data.a", "LowCardinality(Nullable(Int32))", "u32"],
         "SELECT 144 :: LowCardinality(Nullable(Int32)) AS a"
@@ -270,7 +270,7 @@ async fn invalid_serde_with() {
         #[serde(with = "clickhouse::serde::time::datetime64::millis")]
         n1: time::OffsetDateTime, // underlying is still Int64; should not compose it from two (U)Int32
     }
-    assert_panic_on_fetch!(&["Data.n1", "UInt32", "i64"], "SELECT 42 :: UInt32 AS n1");
+    assert_err_on_fetch!(&["Data.n1", "UInt32", "i64"], "SELECT 42 :: UInt32 AS n1");
 }
 
 #[tokio::test]
@@ -281,7 +281,7 @@ async fn too_many_struct_fields() {
         b: u32,
         c: u32,
     }
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["2 columns", "3 fields"],
         "SELECT 42 :: UInt32 AS a, 144 :: UInt32 AS b"
     );
@@ -294,7 +294,7 @@ async fn fixed_str_too_long() {
         a: [u8; 4],
         b: [u8; 3],
     }
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["Data.a", "FixedString(5)", "with length 4"],
         "SELECT '12345' :: FixedString(5) AS a, '777' :: FixedString(3) AS b"
     );
@@ -308,7 +308,7 @@ async fn tuple_invalid_definition() {
         b: (i128, HashMap<u16, String>),
     }
     // Map key is UInt64 instead of UInt16 requested in the struct
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &[
             "Data.b",
             "Tuple(Int128, Map(UInt64, String))",
@@ -330,11 +330,11 @@ async fn tuple_too_many_elements_in_the_schema() {
         b: (i128, HashMap<u16, String>),
     }
     // too many elements in the db type definition
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &[
             "Data.a",
             "Tuple(UInt32, String, Bool)",
-            "remaining elements: Bool"
+            "missing elements: Bool"
         ],
         "
         SELECT
@@ -352,7 +352,7 @@ async fn tuple_too_many_elements_in_the_struct() {
         b: (i128, HashMap<u16, String>),
     }
     // too many elements in the struct enum
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["Data.a", "Tuple(UInt32, String)", "bool"],
         "
         SELECT
@@ -370,7 +370,7 @@ async fn deeply_nested_validation_incorrect_fixed_string() {
         col: Vec<Vec<HashMap<u32, Vec<[u8; 2]>>>>,
     }
     // Struct has FixedString(2) instead of FixedString(1)
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["Data.col", "FixedString(1)", "with length 2"],
         "
         SELECT
@@ -391,7 +391,7 @@ async fn geo_invalid_point() {
         id: u32,
         pt: (i32, i32),
     }
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["Data.pt", "Point", "Float64 as i32"],
         "
             SELECT
@@ -469,7 +469,7 @@ async fn issue_100() {
         struct Data {
             n: i8,
         }
-        assert_panic_on_fetch!(
+        assert_err_on_fetch!(
             &["Data.n", "Nullable(Bool)", "i8"],
             "SELECT NULL :: Nullable(Bool) AS n"
         );
@@ -480,7 +480,7 @@ async fn issue_100() {
         struct Data {
             n: u8,
         }
-        assert_panic_on_fetch!(
+        assert_err_on_fetch!(
             &["Data.n", "Nullable(Bool)", "u8"],
             "SELECT NULL :: Nullable(Bool) AS n"
         );
@@ -491,7 +491,7 @@ async fn issue_100() {
         struct Data {
             n: bool,
         }
-        assert_panic_on_fetch!(
+        assert_err_on_fetch!(
             &["Data.n", "Nullable(Bool)", "bool"],
             "SELECT NULL :: Nullable(Bool) AS n"
         );
@@ -549,7 +549,7 @@ async fn issue_112() {
         b: bool,
     }
 
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["Data.a", "Nullable(Bool)", "bool"],
         "WITH (SELECT true) AS a, (SELECT true) AS b SELECT ?fields"
     );
@@ -586,7 +586,7 @@ async fn issue_113() {
     ]).await;
 
     // Struct should have had Option<f64> instead of f64
-    assert_panic_on_fetch_with_client!(
+    assert_err_on_fetch_with_client!(
         client,
         &["Data.b", "Nullable(Float64)", "f64"],
         "
@@ -615,7 +615,7 @@ async fn issue_114() {
         .query(
             "
             SELECT
-                '2023-05-01'                           :: Date                       AS date,
+                '2023-05-01'                            :: Date                       AS date,
                 array(map('k1', 'v1'), map('k2', 'v2')) :: Array(Map(String, String)) AS arr
             ",
         )
@@ -662,7 +662,7 @@ async fn issue_173() {
 
     // panics as we fetch `ts` two times: one from `?fields` macro, and the second time explicitly
     // the resulting dataset will, in fact, contain 3 columns instead of 2:
-    assert_panic_on_fetch_with_client!(
+    assert_err_on_fetch_with_client!(
         client,
         &["3 columns", "2 fields"],
         "SELECT ?fields, toUnixTimestamp(timestamp) AS ts FROM logs ORDER by ts DESC"
@@ -694,7 +694,7 @@ async fn issue_185() {
     )
     .await;
 
-    assert_panic_on_fetch_with_client!(
+    assert_err_on_fetch_with_client!(
         client,
         &["Data.decimal_col", "Decimal(10, 4)", "String"],
         "SELECT ?fields FROM issue_185"
@@ -724,7 +724,7 @@ async fn issue_218() {
     // FIXME: It is not a super clear panic as it hints about `&str`,
     //  and not about the missing attribute for `chrono::DateTime`.
     //  Still better than a `premature end of input` error, though.
-    assert_panic_on_fetch_with_client!(
+    assert_err_on_fetch_with_client!(
         client,
         &["Data.max_time", "DateTime64(3, 'UTC')", "&str"],
         "SELECT max(my_time) AS max_time FROM issue_218"
@@ -747,7 +747,7 @@ async fn variant_wrong_definition() {
 
     let client = get_client().with_option("allow_experimental_variant_type", "1");
 
-    assert_panic_on_fetch_with_client!(
+    assert_err_on_fetch_with_client!(
         client,
         &["Data.var", "Variant(String, UInt16)", "u32"],
         "
@@ -767,7 +767,7 @@ async fn decimal32_wrong_size() {
         decimal32: i16,
     }
 
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["Data.decimal32", "Decimal(9, 4)", "i16"],
         "SELECT 42 :: Decimal32(4) AS decimal32"
     );
@@ -780,7 +780,7 @@ async fn decimal64_wrong_size() {
         decimal64: i32,
     }
 
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["Data.decimal64", "Decimal(18, 8)", "i32"],
         "SELECT 144 :: Decimal64(8) AS decimal64"
     );
@@ -793,7 +793,7 @@ async fn decimal128_wrong_size() {
         decimal128: i64,
     }
 
-    assert_panic_on_fetch!(
+    assert_err_on_fetch!(
         &["Data.decimal128", "Decimal(38, 12)", "i64"],
         "SELECT -17014118346046923173168730.37158841057 :: Decimal128(12) AS decimal128"
     );

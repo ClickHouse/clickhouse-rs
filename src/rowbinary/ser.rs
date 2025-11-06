@@ -62,7 +62,7 @@ macro_rules! impl_num {
     ($ty:ty, $ser_method:ident, $writer_method:ident, $serde_type:expr) => {
         #[inline]
         fn $ser_method(self, v: $ty) -> Result<()> {
-            self.validator.validate($serde_type);
+            self.validator.validate($serde_type)?;
             self.buffer.$writer_method(v);
             Ok(())
         }
@@ -74,8 +74,8 @@ macro_rules! impl_num_or_enum {
         #[inline]
         fn $ser_method(self, v: $ty) -> Result<()> {
             self.validator
-                .validate($serde_type)
-                .validate_identifier::<$ty>(v);
+                .validate($serde_type)?
+                .validate_identifier::<$ty>(v)?;
             self.buffer.$writer_method(v);
             Ok(())
         }
@@ -114,7 +114,7 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
 
     #[inline]
     fn serialize_bool(self, v: bool) -> Result<()> {
-        self.validator.validate(SerdeType::Bool);
+        self.validator.validate(SerdeType::Bool)?;
         self.buffer.put_u8(v as _);
         Ok(())
     }
@@ -126,7 +126,7 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
 
     #[inline]
     fn serialize_str(self, v: &str) -> Result<()> {
-        self.validator.validate(SerdeType::Str);
+        self.validator.validate(SerdeType::Str)?;
         put_leb128(&mut self.buffer, v.len() as u64);
         self.buffer.put_slice(v.as_bytes());
         Ok(())
@@ -135,7 +135,7 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
     #[inline]
     fn serialize_bytes(self, v: &[u8]) -> Result<()> {
         let size = v.len();
-        self.validator.validate(SerdeType::Bytes(size));
+        self.validator.validate(SerdeType::Bytes(size))?;
         put_leb128(&mut self.buffer, size as u64);
         self.buffer.put_slice(v);
         Ok(())
@@ -143,15 +143,15 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
 
     #[inline]
     fn serialize_none(self) -> Result<()> {
-        self.validator.validate(SerdeType::Option);
+        self.validator.validate(SerdeType::Option)?;
         self.buffer.put_u8(1);
         Ok(())
     }
 
     #[inline]
     fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<()> {
-        let mut inner =
-            RowBinarySerializer::new(&mut self.buffer, self.validator.validate(SerdeType::Option));
+        let opt_validator = self.validator.validate(SerdeType::Option)?;
+        let mut inner = RowBinarySerializer::new(&mut self.buffer, opt_validator);
         inner.buffer.put_u8(0);
         value.serialize(&mut inner)
     }
@@ -202,8 +202,8 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
             );
         }
         let idx = variant_index as u8; // safe cast due to the check above
-        let mut inner = self.validator.validate(SerdeType::Variant);
-        inner.validate_identifier(idx);
+        let mut inner = self.validator.validate(SerdeType::Variant)?;
+        inner.validate_identifier(idx)?;
         self.buffer.put_u8(idx);
         value.serialize(&mut RowBinarySerializer::new(&mut self.buffer, inner))
     }
@@ -211,17 +211,15 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
     #[inline]
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
         let len = len.ok_or(SequenceMustHaveLength)?;
-        let inner = self.validator.validate(SerdeType::Seq(len));
+        let inner = self.validator.validate(SerdeType::Seq(len))?;
         put_leb128(&mut self.buffer, len as u64);
         Ok(RowBinarySerializer::new(&mut self.buffer, inner))
     }
 
     #[inline]
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
-        Ok(RowBinarySerializer::new(
-            &mut self.buffer,
-            self.validator.validate(SerdeType::Tuple(len)),
-        ))
+        let inner = self.validator.validate(SerdeType::Tuple(len))?;
+        Ok(RowBinarySerializer::new(&mut self.buffer, inner))
     }
 
     #[inline]
@@ -248,10 +246,8 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap> {
         let len = len.ok_or(SequenceMustHaveLength)?;
         put_leb128(&mut self.buffer, len as u64);
-        Ok(RowBinarySerializer::new(
-            &mut self.buffer,
-            self.validator.validate(SerdeType::Map(len)),
-        ))
+        let inner = self.validator.validate(SerdeType::Map(len))?;
+        Ok(RowBinarySerializer::new(&mut self.buffer, inner))
     }
 
     #[inline]

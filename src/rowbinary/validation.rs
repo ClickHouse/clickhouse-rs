@@ -1,3 +1,4 @@
+use crate::error::{Error, Result};
 use crate::{Row, row::RowKind, row_metadata::RowMetadata};
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
@@ -15,10 +16,10 @@ pub(crate) trait SchemaValidator<R: Row>: Sized {
     /// For container types (nullable, array, map, tuple, variant, etc.),
     /// it will return an [`InnerDataTypeValidator`] instance (see [`InnerDataTypeValidatorKind`]),
     /// which has its own implementation of this method, allowing recursive validation.
-    fn validate(&mut self, serde_type: SerdeType) -> Self::Inner<'_>;
+    fn validate(&mut self, serde_type: SerdeType) -> Result<Self::Inner<'_>>;
     /// Validates that an identifier exists in the values map for enums,
     /// or stores the variant identifier for the next serde call.
-    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, value: T);
+    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, value: T) -> Result<()>;
     /// Having the database schema from RBWNAT, the crate can detect that
     /// while the field names and the types are correct, the field order in the struct
     /// does not match the column order in the database schema, and we should use
@@ -27,7 +28,10 @@ pub(crate) trait SchemaValidator<R: Row>: Sized {
     /// Returns the "restored" index of the schema column for the given struct field index.
     /// It is used only if the crate detects that while the field names and the types are correct,
     /// the field order in the struct does not match the column order in the database schema.
-    fn get_schema_index(&self, struct_idx: usize) -> usize;
+    fn get_schema_index(&self, struct_idx: usize) -> Result<usize>;
+    // If the database schema contains a tuple with more elements than it is defined in the struct,
+    // this method will emit an error indicating that the struct definition is incomplete.
+    fn check_tuple_fully_validated(&self) -> Result<()>;
 }
 
 pub(crate) struct DataTypeValidator<'caller, R: Row> {
@@ -45,63 +49,58 @@ impl<'caller, R: Row> DataTypeValidator<'caller, R> {
         }
     }
 
-    fn get_current_column(&self) -> Option<&Column> {
+    fn get_current_column(&self) -> Result<Option<&Column>> {
         if self.current_column_idx > 0 && self.current_column_idx <= self.metadata.columns.len() {
             // index is immediately moved to the next column after the root validator is called
-            let schema_index = self.get_schema_index(self.current_column_idx - 1);
-            Some(&self.metadata.columns[schema_index])
+            let schema_index = self.get_schema_index(self.current_column_idx - 1)?;
+            Ok(Some(&self.metadata.columns[schema_index]))
         } else {
-            None
+            Ok(None)
         }
     }
 
-    fn get_current_column_name_and_type(&self) -> (String, &DataTypeNode) {
-        self.get_current_column()
+    fn get_current_column_name_and_type(&self) -> Result<(String, &DataTypeNode)> {
+        let current_column = self.get_current_column()?;
+        Ok(current_column
             .map(|c| (format!("{}.{}", R::NAME, c.name), &c.data_type))
             // both should be defined at this point
-            .unwrap_or(("Struct".to_string(), &DataTypeNode::Bool))
+            .unwrap_or(("Struct".to_string(), &DataTypeNode::Bool)))
     }
 
-    fn panic_on_schema_mismatch<'serde>(
+    fn err_on_schema_mismatch<'serde>(
         &'serde self,
         data_type: &DataTypeNode,
         serde_type: &SerdeType,
         is_inner: bool,
-    ) -> Option<InnerDataTypeValidator<'serde, 'caller, R>> {
+    ) -> Result<Option<InnerDataTypeValidator<'serde, 'caller, R>>> {
         match R::KIND {
-            RowKind::Primitive => {
-                panic!(
-                    "While processing row as a primitive: attempting to (de)serialize \
-                    ClickHouse type {data_type} as {serde_type} which is not compatible"
-                )
-            }
-            RowKind::Vec => {
-                panic!(
-                    "While processing row as a vector: attempting to (de)serialize \
-                    ClickHouse type {data_type} as {serde_type} which is not compatible"
-                )
-            }
-            RowKind::Tuple => {
-                panic!(
-                    "While processing row as a tuple: attempting to (de)serialize \
-                    ClickHouse type {data_type} as {serde_type} which is not compatible"
-                )
-            }
+            RowKind::Primitive => Err(Error::SchemaMismatch(format!(
+                "While processing row as a primitive: attempting to (de)serialize \
+                 ClickHouse type {data_type} as {serde_type} which is not compatible"
+            ))),
+            RowKind::Vec => Err(Error::SchemaMismatch(format!(
+                "While processing row as a vector: attempting to (de)serialize \
+                 ClickHouse type {data_type} as {serde_type} which is not compatible"
+            ))),
+            RowKind::Tuple => Err(Error::SchemaMismatch(format!(
+                "While processing row as a tuple: attempting to (de)serialize \
+                 ClickHouse type {data_type} as {serde_type} which is not compatible"
+            ))),
             RowKind::Struct => {
                 if is_inner {
-                    let (full_name, full_data_type) = self.get_current_column_name_and_type();
-                    panic!(
+                    let (full_name, full_data_type) = self.get_current_column_name_and_type()?;
+                    Err(Error::SchemaMismatch(format!(
                         "While processing column {full_name} defined as {full_data_type}: attempting to (de)serialize \
                         nested ClickHouse type {data_type} as {serde_type} which is not compatible"
-                    )
+                    )))
                 } else {
-                    panic!(
+                    Err(Error::SchemaMismatch(format!(
                         "While processing column {}: attempting to (de)serialize \
                         ClickHouse type {} as {} which is not compatible",
-                        self.get_current_column_name_and_type().0,
+                        self.get_current_column_name_and_type()?.0,
                         data_type,
                         serde_type
-                    )
+                    )))
                 }
             }
         }
@@ -115,7 +114,7 @@ impl<'caller, R: Row> SchemaValidator<R> for DataTypeValidator<'caller, R> {
         Self: 'serde;
 
     #[inline]
-    fn validate(&'_ mut self, serde_type: SerdeType) -> Self::Inner<'_> {
+    fn validate(&'_ mut self, serde_type: SerdeType) -> Result<Self::Inner<'_>> {
         match R::KIND {
             // `fetch::<i32>` for a "primitive row" type
             RowKind::Primitive => {
@@ -123,40 +122,40 @@ impl<'caller, R: Row> SchemaValidator<R> for DataTypeValidator<'caller, R> {
                     let data_type = &self.metadata.columns[0].data_type;
                     validate_impl(self, data_type, &serde_type, false)
                 } else {
-                    panic!(
+                    Err(Error::SchemaMismatch(format!(
                         "Primitive row is expected to be a single value, got columns: {:?}",
                         self.metadata.columns
-                    );
+                    )))
                 }
             }
             // `fetch::<(i16, i32)>` or `fetch::<(T, u64)>` for a "tuple row" type
             RowKind::Tuple => {
                 match serde_type {
-                    SerdeType::Tuple(_) => Some(InnerDataTypeValidator {
+                    SerdeType::Tuple(_) => Ok(Some(InnerDataTypeValidator {
                         root: self,
                         kind: InnerDataTypeValidatorKind::RootTuple(&self.metadata.columns, 0),
-                    }),
+                    })),
                     _ => {
                         // should be unreachable
-                        panic!(
+                        Err(Error::SchemaMismatch(format!(
                             "While processing tuple row: expected serde type Tuple(N), got {serde_type}"
-                        );
+                        )))
                     }
                 }
             }
             // `fetch::<Vec<i32>>` for a "vector row" type
             RowKind::Vec => {
                 let data_type = &self.metadata.columns[0].data_type;
-                let kind = match data_type {
+                match data_type {
                     DataTypeNode::Array(inner_type) => {
-                        InnerDataTypeValidatorKind::RootArray(inner_type)
+                        let kind = InnerDataTypeValidatorKind::RootArray(inner_type);
+                        Ok(Some(InnerDataTypeValidator { root: self, kind }))
                     }
-                    _ => panic!(
+                    _ => Err(Error::SchemaMismatch(format!(
                         "Expected Array type when validating root level sequence, but got {}",
                         self.metadata.columns[0].data_type
-                    ),
-                };
-                Some(InnerDataTypeValidator { root: self, kind })
+                    ))),
+                }
             }
             // `fetch::<T>` for a "struct row" type, which is supposed to be the default flow
             RowKind::Struct => {
@@ -165,10 +164,10 @@ impl<'caller, R: Row> SchemaValidator<R> for DataTypeValidator<'caller, R> {
                     self.current_column_idx += 1;
                     validate_impl(self, &current_column.data_type, &serde_type, false)
                 } else {
-                    panic!(
+                    Err(Error::SchemaMismatch(format!(
                         "Struct {} has more fields than columns in the database schema",
                         R::NAME
-                    )
+                    )))
                 }
             }
         }
@@ -180,12 +179,17 @@ impl<'caller, R: Row> SchemaValidator<R> for DataTypeValidator<'caller, R> {
     }
 
     #[inline]
-    fn get_schema_index(&self, struct_idx: usize) -> usize {
+    fn get_schema_index(&self, struct_idx: usize) -> Result<usize> {
         self.metadata.get_schema_index(struct_idx)
     }
 
     #[cold]
-    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, _value: T) {
+    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, _value: T) -> Result<()> {
+        unreachable!()
+    }
+
+    #[cold]
+    fn check_tuple_fully_validated(&self) -> Result<()> {
         unreachable!()
     }
 }
@@ -246,8 +250,12 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
         Self: 'serde;
 
     #[inline]
-    fn validate(&mut self, serde_type: SerdeType) -> Self {
-        let inner = self.as_mut()?;
+    fn validate(&mut self, serde_type: SerdeType) -> Result<Self> {
+        if self.is_none() {
+            return Ok(None);
+        }
+
+        let inner = self.as_mut().unwrap(); // checked above
         match &mut inner.kind {
             InnerDataTypeValidatorKind::Map(kv, state) => match state {
                 MapValidatorState::Key => {
@@ -267,7 +275,7 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                     // will be called again for the Key and then the Value types
                     MapAsSequenceValidatorState::Tuple => {
                         *state = MapAsSequenceValidatorState::Key;
-                        self.take()
+                        Ok(self.take())
                     }
                     MapAsSequenceValidatorState::Key => {
                         let result = validate_impl(inner.root, &kv[0], &serde_type, true);
@@ -295,28 +303,32 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                     }
                     None => {
                         let (full_name, full_data_type) =
-                            inner.root.get_current_column_name_and_type();
-                        panic!(
+                            inner.root.get_current_column_name_and_type()?;
+
+                        Err(Error::SchemaMismatch(format!(
                             "While processing column {full_name} defined as {full_data_type}: \
-                                attempting to (de)serialize {serde_type} while no more elements are allowed"
-                        )
+                            attempting to (de)serialize {serde_type} while no more elements are allowed"
+                        )))
                     }
                 }
             }
             InnerDataTypeValidatorKind::FixedString(_len) => {
-                None // actually unreachable
+                Ok(None) // actually unreachable
             }
             InnerDataTypeValidatorKind::RootTuple(columns, current_index) => {
                 if *current_index < columns.len() {
                     let data_type = &columns[*current_index].data_type;
                     *current_index += 1;
+
                     validate_impl(inner.root, data_type, &serde_type, true)
                 } else {
-                    let (full_name, full_data_type) = inner.root.get_current_column_name_and_type();
-                    panic!(
+                    let (full_name, full_data_type) =
+                        inner.root.get_current_column_name_and_type()?;
+
+                    Err(Error::SchemaMismatch(format!(
                         "While processing root tuple element {full_name} defined as {full_data_type}: \
-                             attempting to (de)serialize {serde_type} while no more elements are allowed"
-                    )
+                         attempting to (de)serialize {serde_type} while no more elements are allowed"
+                    )))
                 }
             }
             InnerDataTypeValidatorKind::RootArray(inner_data_type) => {
@@ -329,13 +341,15 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                 VariantValidationState::Identifier(value) => {
                     if *value as usize >= possible_types.len() {
                         let (full_name, full_data_type) =
-                            inner.root.get_current_column_name_and_type();
-                        panic!(
+                            inner.root.get_current_column_name_and_type()?;
+
+                        return Err(Error::SchemaMismatch(format!(
                             "While processing column {full_name} defined as {full_data_type}: \
-                                 Variant identifier {value} is out of bounds, max allowed index is {}",
+                             Variant identifier {value} is out of bounds, max allowed index is {}",
                             possible_types.len() - 1
-                        );
+                        )));
                     }
+
                     let data_type = &possible_types[*value as usize];
                     validate_impl(inner.root, data_type, &serde_type, true)
                 }
@@ -348,7 +362,7 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
         }
     }
 
-    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, value: T) {
+    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, value: T) -> Result<()> {
         use InnerDataTypeValidatorKind::{Enum, Variant};
         if let Some(inner) = self {
             match T::IDENTIFIER_TYPE {
@@ -357,11 +371,12 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                         && !values_map.contains_key(&(value.into_i16()))
                     {
                         let (full_name, full_data_type) =
-                            inner.root.get_current_column_name_and_type();
-                        panic!(
+                            inner.root.get_current_column_name_and_type()?;
+
+                        return Err(Error::SchemaMismatch(format!(
                             "While processing column {full_name} defined as {full_data_type}: \
-                                Enum8 value {value} is not present in the database schema"
-                        );
+                            Enum8 value {value} is not present in the database schema"
+                        )));
                     }
                 }
                 IdentifierType::Variant => {
@@ -371,17 +386,20 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                             *state = VariantValidationState::Identifier(value.into_u8());
                         } else {
                             let (full_name, full_data_type) =
-                                inner.root.get_current_column_name_and_type();
-                            panic!(
+                                inner.root.get_current_column_name_and_type()?;
+
+                            return Err(Error::SchemaMismatch(format!(
                                 "While processing column {full_name} defined as {full_data_type}: \
                                  Variant identifier {value} is out of bounds, max allowed index is {}",
                                 possible_types.len() - 1
-                            );
+                            )));
                         }
                     }
                 }
             }
         }
+
+        Ok(())
     }
 
     #[inline(always)]
@@ -390,20 +408,23 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
     }
 
     #[cold]
-    fn get_schema_index(&self, _struct_idx: usize) -> usize {
+    fn get_schema_index(&self, _struct_idx: usize) -> Result<usize> {
         unreachable!()
     }
-}
 
-impl<R: Row> Drop for InnerDataTypeValidator<'_, '_, R> {
-    fn drop(&mut self) {
-        if let InnerDataTypeValidatorKind::Tuple(elements_types) = self.kind
+    fn check_tuple_fully_validated(&self) -> Result<()> {
+        if let Some(inner) = self
+            && let InnerDataTypeValidatorKind::Tuple(elements_types) = inner.kind
             && !elements_types.is_empty()
         {
-            let (column_name, column_type) = self.root.get_current_column_name_and_type();
-            panic!(
+            let (column_name, column_type) = inner
+                .root
+                .get_current_column_name_and_type()
+                .expect("correct columns for InnerDataTypeValidator::drop");
+
+            return Err(Error::SchemaMismatch(format!(
                 "While processing column {} defined as {}: tuple was not fully (de)serialized; \
-                    remaining elements: {}; likely, the field definition is incomplete",
+                 missing elements: {}; likely, the struct definition for this field is incomplete",
                 column_name,
                 column_type,
                 elements_types
@@ -411,8 +432,10 @@ impl<R: Row> Drop for InnerDataTypeValidator<'_, '_, R> {
                     .map(|c| c.to_string())
                     .collect::<Vec<String>>()
                     .join(", ")
-            )
+            )));
         }
+
+        Ok(())
     }
 }
 
@@ -425,29 +448,29 @@ fn validate_impl<'serde, 'caller, R: Row>(
     column_data_type: &'caller DataTypeNode,
     serde_type: &SerdeType,
     is_inner: bool,
-) -> Option<InnerDataTypeValidator<'serde, 'caller, R>> {
+) -> Result<Option<InnerDataTypeValidator<'serde, 'caller, R>>> {
     let data_type = column_data_type.remove_low_cardinality();
     match serde_type {
         SerdeType::Bool
             if data_type == &DataTypeNode::Bool || data_type == &DataTypeNode::UInt8 =>
         {
-            None
+            Ok(None)
         }
         SerdeType::I8 => match data_type {
-            DataTypeNode::Int8 => None,
-            DataTypeNode::Enum(EnumType::Enum8, values_map) => Some(InnerDataTypeValidator {
+            DataTypeNode::Int8 => Ok(None),
+            DataTypeNode::Enum(EnumType::Enum8, values_map) => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Enum(values_map),
-            }),
-            _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
+            })),
+            _ => root.err_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::I16 => match data_type {
-            DataTypeNode::Int16 => None,
-            DataTypeNode::Enum(EnumType::Enum16, values_map) => Some(InnerDataTypeValidator {
+            DataTypeNode::Int16 => Ok(None),
+            DataTypeNode::Enum(EnumType::Enum16, values_map) => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Enum(values_map),
-            }),
-            _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
+            })),
+            _ => root.err_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::I32
             if data_type == &DataTypeNode::Int32
@@ -458,7 +481,7 @@ fn validate_impl<'serde, 'caller, R: Row>(
                     DataTypeNode::Decimal(_, _, DecimalType::Decimal32)
                 ) =>
         {
-            None
+            Ok(None)
         }
         SerdeType::I64
             if data_type == &DataTypeNode::Int64
@@ -470,7 +493,7 @@ fn validate_impl<'serde, 'caller, R: Row>(
                 )
                 || matches!(data_type, DataTypeNode::Interval(_)) =>
         {
-            None
+            Ok(None)
         }
         SerdeType::I128
             if data_type == &DataTypeNode::Int128
@@ -479,139 +502,145 @@ fn validate_impl<'serde, 'caller, R: Row>(
                     DataTypeNode::Decimal(_, _, DecimalType::Decimal128)
                 ) =>
         {
-            None
+            Ok(None)
         }
-        SerdeType::U8 if data_type == &DataTypeNode::UInt8 => None,
+        SerdeType::U8 if data_type == &DataTypeNode::UInt8 => Ok(None),
         SerdeType::U16
             if data_type == &DataTypeNode::UInt16 || data_type == &DataTypeNode::Date =>
         {
-            None
+            Ok(None)
         }
         SerdeType::U32
             if data_type == &DataTypeNode::UInt32
                 || matches!(data_type, DataTypeNode::DateTime(_))
                 || data_type == &DataTypeNode::IPv4 =>
         {
-            None
+            Ok(None)
         }
-        SerdeType::U64 if data_type == &DataTypeNode::UInt64 => None,
-        SerdeType::U128 if data_type == &DataTypeNode::UInt128 => None,
-        SerdeType::F32 if data_type == &DataTypeNode::Float32 => None,
-        SerdeType::F64 if data_type == &DataTypeNode::Float64 => None,
+        SerdeType::U64 if data_type == &DataTypeNode::UInt64 => Ok(None),
+        SerdeType::U128 if data_type == &DataTypeNode::UInt128 => Ok(None),
+        SerdeType::F32 if data_type == &DataTypeNode::Float32 => Ok(None),
+        SerdeType::F64 if data_type == &DataTypeNode::Float64 => Ok(None),
         SerdeType::Str | SerdeType::String
             if data_type == &DataTypeNode::String || data_type == &DataTypeNode::JSON =>
         {
-            None
+            Ok(None)
         }
         // allows to work with BLOB strings as well
-        SerdeType::Bytes(_) | SerdeType::ByteBuf(_) if data_type == &DataTypeNode::String => None,
+        SerdeType::Bytes(_) | SerdeType::ByteBuf(_) if data_type == &DataTypeNode::String => {
+            Ok(None)
+        }
         SerdeType::Option => {
             if let DataTypeNode::Nullable(inner_type) = data_type {
-                Some(InnerDataTypeValidator {
+                Ok(Some(InnerDataTypeValidator {
                     root,
                     kind: InnerDataTypeValidatorKind::Nullable(inner_type),
-                })
+                }))
             } else {
-                root.panic_on_schema_mismatch(data_type, serde_type, is_inner)
+                root.err_on_schema_mismatch(data_type, serde_type, is_inner)
             }
         }
         SerdeType::Seq(_) => match data_type {
-            DataTypeNode::Array(inner_type) => Some(InnerDataTypeValidator {
+            DataTypeNode::Array(inner_type) => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(inner_type),
-            }),
+            })),
             // A map can be defined as `Vec<(K, V)>` in the struct
-            DataTypeNode::Map(kv) => Some(InnerDataTypeValidator {
+            DataTypeNode::Map(kv) => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::MapAsSequence(
                     kv,
                     MapAsSequenceValidatorState::Tuple,
                 ),
-            }),
-            DataTypeNode::Ring => Some(InnerDataTypeValidator {
+            })),
+            DataTypeNode::Ring => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Point),
-            }),
-            DataTypeNode::Polygon => Some(InnerDataTypeValidator {
+            })),
+            DataTypeNode::Polygon => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Ring),
-            }),
-            DataTypeNode::MultiPolygon => Some(InnerDataTypeValidator {
+            })),
+            DataTypeNode::MultiPolygon => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Polygon),
-            }),
-            DataTypeNode::LineString => Some(InnerDataTypeValidator {
+            })),
+            DataTypeNode::LineString => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::Point),
-            }),
-            DataTypeNode::MultiLineString => Some(InnerDataTypeValidator {
+            })),
+            DataTypeNode::MultiLineString => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::LineString),
-            }),
-            _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
+            })),
+            _ => root.err_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::Tuple(len) => match data_type {
             DataTypeNode::FixedString(n) => {
                 if n == len {
-                    Some(InnerDataTypeValidator {
+                    Ok(Some(InnerDataTypeValidator {
                         root,
                         kind: InnerDataTypeValidatorKind::FixedString(*n),
-                    })
+                    }))
                 } else {
-                    let (full_name, full_data_type) = root.get_current_column_name_and_type();
-                    panic!(
+                    let (full_name, full_data_type) = root.get_current_column_name_and_type()?;
+                    Err(Error::SchemaMismatch(format!(
                         "While processing column {full_name} defined as {full_data_type}: attempting to (de)serialize \
                         nested ClickHouse type {data_type} as {serde_type}",
-                    )
+                    )))
                 }
             }
-            DataTypeNode::Tuple(elements) => Some(InnerDataTypeValidator {
+            DataTypeNode::Tuple(elements) => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Tuple(elements),
-            }),
-            DataTypeNode::Array(inner_type) => Some(InnerDataTypeValidator {
+            })),
+            DataTypeNode::Array(inner_type) => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(inner_type),
-            }),
-            DataTypeNode::IPv6 => Some(InnerDataTypeValidator {
+            })),
+            DataTypeNode::IPv6 => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Array(&DataTypeNode::UInt8),
-            }),
-            DataTypeNode::UUID => Some(InnerDataTypeValidator {
+            })),
+            DataTypeNode::UUID => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Tuple(UUID_TUPLE_ELEMENTS),
-            }),
-            DataTypeNode::Point => Some(InnerDataTypeValidator {
+            })),
+            DataTypeNode::Point => Ok(Some(InnerDataTypeValidator {
                 root,
                 kind: InnerDataTypeValidatorKind::Tuple(POINT_TUPLE_ELEMENTS),
-            }),
-            _ => root.panic_on_schema_mismatch(data_type, serde_type, is_inner),
+            })),
+            _ => root.err_on_schema_mismatch(data_type, serde_type, is_inner),
         },
         SerdeType::Map(_) => {
             if let DataTypeNode::Map(kv) = data_type {
-                Some(InnerDataTypeValidator {
+                Ok(Some(InnerDataTypeValidator {
                     root,
                     kind: InnerDataTypeValidatorKind::Map(kv, MapValidatorState::Key),
-                })
+                }))
             } else {
-                panic!("Expected Map for {serde_type} call, but got {data_type}",)
+                Err(Error::SchemaMismatch(format!(
+                    "Expected Map for {serde_type} call, but got {data_type}"
+                )))
             }
         }
         SerdeType::Variant => {
             if let DataTypeNode::Variant(possible_types) = data_type {
-                Some(InnerDataTypeValidator {
+                Ok(Some(InnerDataTypeValidator {
                     root,
                     kind: InnerDataTypeValidatorKind::Variant(
                         possible_types,
                         VariantValidationState::Pending,
                     ),
-                })
+                }))
             } else {
-                panic!("Expected Variant for {serde_type} call, but got {data_type}")
+                Err(Error::SchemaMismatch(format!(
+                    "Expected Variant for {serde_type} call, but got {data_type}"
+                )))
             }
         }
 
-        _ => root.panic_on_schema_mismatch(
+        _ => root.err_on_schema_mismatch(
             data_type,
             serde_type,
             is_inner || matches!(column_data_type, DataTypeNode::LowCardinality { .. }),
@@ -623,7 +652,9 @@ impl<R: Row> SchemaValidator<R> for () {
     type Inner<'serde> = ();
 
     #[inline(always)]
-    fn validate(&mut self, _serde_type: SerdeType) {}
+    fn validate(&mut self, _serde_type: SerdeType) -> Result<()> {
+        Ok(())
+    }
 
     #[inline(always)]
     fn is_field_order_wrong(&self) -> bool {
@@ -632,11 +663,18 @@ impl<R: Row> SchemaValidator<R> for () {
     }
 
     #[inline(always)]
-    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, _value: T) {}
+    fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, _value: T) -> Result<()> {
+        Ok(())
+    }
 
     #[cold]
-    fn get_schema_index(&self, _struct_idx: usize) -> usize {
+    fn get_schema_index(&self, _struct_idx: usize) -> Result<usize> {
         unreachable!()
+    }
+
+    #[inline(always)]
+    fn check_tuple_fully_validated(&self) -> Result<()> {
+        Ok(())
     }
 }
 
