@@ -240,7 +240,7 @@ where
     #[inline(always)]
     fn deserialize_tuple<V: Visitor<'data>>(self, len: usize, visitor: V) -> Result<V::Value> {
         let deserializer = &mut self.inner(SerdeType::Tuple(len))?;
-        visitor.visit_seq(RowBinarySeqAccess { deserializer, len })
+        visitor.visit_seq(RowBinaryTupleSeqAccess { deserializer, len })
     }
 
     #[inline(always)]
@@ -334,6 +334,44 @@ where
     #[inline(always)]
     fn is_human_readable(&self) -> bool {
         false
+    }
+}
+
+struct RowBinaryTupleSeqAccess<'de, 'cursor, 'data, R: Row, Validator>
+where
+    Validator: SchemaValidator<R>,
+{
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, R, Validator>,
+    len: usize,
+}
+
+impl<'data, R: Row, Validator> SeqAccess<'data>
+    for RowBinaryTupleSeqAccess<'_, '_, 'data, R, Validator>
+where
+    Validator: SchemaValidator<R>,
+{
+    type Error = Error;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
+    where
+        T: DeserializeSeed<'data>,
+    {
+        if self.len > 0 {
+            self.len -= 1;
+            let value = DeserializeSeed::deserialize(seed, &mut *self.deserializer)?;
+
+            if self.len == 0 {
+                self.deserializer.validator.check_tuple_fully_validated()?;
+            }
+
+            Ok(Some(value))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.len)
     }
 }
 

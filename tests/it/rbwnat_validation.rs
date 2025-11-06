@@ -322,8 +322,6 @@ async fn tuple_invalid_definition() {
     );
 }
 
-// FIXME: remove panic from drop
-#[ignore]
 #[tokio::test]
 async fn tuple_too_many_elements_in_the_schema() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
@@ -336,7 +334,7 @@ async fn tuple_too_many_elements_in_the_schema() {
         &[
             "Data.a",
             "Tuple(UInt32, String, Bool)",
-            "remaining elements: Bool"
+            "missing elements: Bool"
         ],
         "
         SELECT
@@ -617,7 +615,7 @@ async fn issue_114() {
         .query(
             "
             SELECT
-                '2023-05-01'                           :: Date                       AS date,
+                '2023-05-01'                            :: Date                       AS date,
                 array(map('k1', 'v1'), map('k2', 'v2')) :: Array(Map(String, String)) AS arr
             ",
         )

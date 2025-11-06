@@ -29,6 +29,9 @@ pub(crate) trait SchemaValidator<R: Row>: Sized {
     /// It is used only if the crate detects that while the field names and the types are correct,
     /// the field order in the struct does not match the column order in the database schema.
     fn get_schema_index(&self, struct_idx: usize) -> Result<usize>;
+    // If the database schema contains a tuple with more elements than it is defined in the struct,
+    // this method will emit an error indicating that the struct definition is incomplete.
+    fn check_tuple_fully_validated(&self) -> Result<()>;
 }
 
 pub(crate) struct DataTypeValidator<'caller, R: Row> {
@@ -182,6 +185,11 @@ impl<'caller, R: Row> SchemaValidator<R> for DataTypeValidator<'caller, R> {
 
     #[cold]
     fn validate_identifier<T: EnumOrVariantIdentifier>(&mut self, _value: T) -> Result<()> {
+        unreachable!()
+    }
+
+    #[cold]
+    fn check_tuple_fully_validated(&self) -> Result<()> {
         unreachable!()
     }
 }
@@ -403,23 +411,20 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
     fn get_schema_index(&self, _struct_idx: usize) -> Result<usize> {
         unreachable!()
     }
-}
 
-// FIXME: remove panic in Drop impl
-impl<R: Row> Drop for InnerDataTypeValidator<'_, '_, R> {
-    fn drop(&mut self) {
-        if let InnerDataTypeValidatorKind::Tuple(elements_types) = self.kind
+    fn check_tuple_fully_validated(&self) -> Result<()> {
+        if let Some(inner) = self
+            && let InnerDataTypeValidatorKind::Tuple(elements_types) = inner.kind
             && !elements_types.is_empty()
         {
-            let (column_name, column_type) = self
+            let (column_name, column_type) = inner
                 .root
                 .get_current_column_name_and_type()
                 .expect("correct columns for InnerDataTypeValidator::drop");
 
-            // FIXME
-            panic!(
+            return Err(Error::SchemaMismatch(format!(
                 "While processing column {} defined as {}: tuple was not fully (de)serialized; \
-                remaining elements: {}; likely, the field definition is incomplete",
+                 missing elements: {}; likely, the struct definition for this field is incomplete",
                 column_name,
                 column_type,
                 elements_types
@@ -427,8 +432,10 @@ impl<R: Row> Drop for InnerDataTypeValidator<'_, '_, R> {
                     .map(|c| c.to_string())
                     .collect::<Vec<String>>()
                     .join(", ")
-            )
+            )));
         }
+
+        Ok(())
     }
 }
 
@@ -663,6 +670,11 @@ impl<R: Row> SchemaValidator<R> for () {
     #[cold]
     fn get_schema_index(&self, _struct_idx: usize) -> Result<usize> {
         unreachable!()
+    }
+
+    #[inline(always)]
+    fn check_tuple_fully_validated(&self) -> Result<()> {
+        Ok(())
     }
 }
 
