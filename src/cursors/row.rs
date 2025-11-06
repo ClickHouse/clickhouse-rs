@@ -54,7 +54,8 @@ impl<T> RowCursor<T> {
                 match parse_rbwnat_columns_header(&mut slice) {
                     Ok(columns) if !columns.is_empty() => {
                         self.bytes.set_remaining(slice.len());
-                        self.row_metadata = Some(RowMetadata::new_for_cursor::<T>(columns));
+                        let row_metadata = RowMetadata::new_for_cursor::<T>(columns)?;
+                        self.row_metadata = Some(row_metadata);
                         return Poll::Ready(Ok(()));
                     }
                     Ok(_) => {

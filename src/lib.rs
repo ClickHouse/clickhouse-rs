@@ -404,11 +404,8 @@ impl Client {
     pub async fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
         if self.get_validation() {
             let metadata = self.get_insert_metadata(table).await?;
-            return Ok(insert::Insert::new(
-                self,
-                table,
-                Some(metadata.to_row::<T>()),
-            ));
+            let row = metadata.to_row::<T>()?;
+            return Ok(insert::Insert::new(self, table, Some(row)));
         }
         Ok(insert::Insert::new(self, table, None))
     }
@@ -771,7 +768,8 @@ mod client_tests {
 
     #[test]
     fn get_row_metadata() {
-        let metadata = RowMetadata::new_for_cursor::<SystemRolesRow>(SystemRolesRow::columns());
+        let metadata =
+            RowMetadata::new_for_cursor::<SystemRolesRow>(SystemRolesRow::columns()).unwrap();
         assert_eq!(metadata.columns, SystemRolesRow::columns());
         assert_eq!(metadata.access_type, AccessType::WithSeqAccess);
 
@@ -781,7 +779,7 @@ mod client_tests {
             Column::new("storage".to_string(), DataTypeNode::String),
             Column::new("name".to_string(), DataTypeNode::String),
         ];
-        let metadata = RowMetadata::new_for_cursor::<SystemRolesRow>(columns.clone());
+        let metadata = RowMetadata::new_for_cursor::<SystemRolesRow>(columns.clone()).unwrap();
         assert_eq!(metadata.columns, columns);
         assert_eq!(
             metadata.access_type,

@@ -29,40 +29,41 @@ use clickhouse::{Client, Row, RowOwned, RowRead, RowWrite, sql::Identifier};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-macro_rules! assert_panic_on_fetch_with_client {
+macro_rules! assert_err_on_fetch_with_client {
     ($client:ident, $msg_parts:expr, $query:expr) => {
-        use futures_util::FutureExt;
-        let async_panic =
-            std::panic::AssertUnwindSafe(async { $client.query($query).fetch_all::<Data>().await });
-        let result = async_panic.catch_unwind().await;
-        assert!(result.is_err());
-        let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
+        let err = $client.query($query).fetch_all::<Data>().await;
+        assert!(
+            err.is_err(),
+            "expected an error, but got a result instead: {:?}",
+            err.unwrap()
+        );
+
+        let err_msg = format!("{}", err.unwrap_err());
         for &msg in $msg_parts {
             assert!(
-                panic_msg.contains(msg),
-                "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
+                err_msg.contains(msg),
+                "error message:\n{err_msg}\ndid not contain the expected part:\n{msg}"
             );
         }
     };
 }
 
-macro_rules! assert_panic_on_fetch {
+macro_rules! assert_err_on_fetch {
     ($msg_parts:expr, $query:expr) => {
-        use futures_util::FutureExt;
         let client = get_client();
-        let async_panic =
-            std::panic::AssertUnwindSafe(async { client.query($query).fetch_all::<Data>().await });
-        let result = async_panic.catch_unwind().await;
+
+        let err = client.query($query).fetch_all::<Data>().await;
         assert!(
-            result.is_err(),
-            "expected a panic, but got a result instead: {:?}",
-            result.unwrap()
+            err.is_err(),
+            "expected an error, but got a result instead: {:?}",
+            err.unwrap()
         );
-        let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
+
+        let err_msg = format!("{}", err.unwrap_err());
         for &msg in $msg_parts {
             assert!(
-                panic_msg.contains(msg),
-                "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
+                err_msg.contains(msg),
+                "error message:\n{err_msg}\ndid not contain the expected part:\n{msg}"
             );
         }
     };
