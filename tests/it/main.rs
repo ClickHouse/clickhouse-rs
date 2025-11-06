@@ -38,7 +38,14 @@ macro_rules! assert_err_on_fetch_with_client {
             err.unwrap()
         );
 
-        let err_msg = format!("{}", err.unwrap_err());
+        let err = err.unwrap_err();
+        assert!(
+            matches!(err, clickhouse::error::Error::SchemaMismatch(_)),
+            "expected a SchemaMismatch error, but got: {:?}",
+            err,
+        );
+
+        let err_msg = err.to_string();
         for &msg in $msg_parts {
             assert!(
                 err_msg.contains(msg),
@@ -59,7 +66,14 @@ macro_rules! assert_err_on_fetch {
             err.unwrap()
         );
 
-        let err_msg = format!("{}", err.unwrap_err());
+        let err = err.unwrap_err();
+        assert!(
+            matches!(err, clickhouse::error::Error::SchemaMismatch(_)),
+            "expected a SchemaMismatch error, but got: {:?}",
+            err,
+        );
+
+        let err_msg = err.to_string();
         for &msg in $msg_parts {
             assert!(
                 err_msg.contains(msg),
