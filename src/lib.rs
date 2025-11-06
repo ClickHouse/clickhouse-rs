@@ -497,7 +497,7 @@ impl Client {
     #[inline]
     pub(crate) fn clear_roles(&mut self) {
         // Make sure we overwrite any role manually set by the user via `with_option()`.
-        self.options.remove("role");
+        self.options.remove(settings::ROLE);
         self.roles.clear();
     }
 
@@ -568,6 +568,16 @@ impl Client {
 mod formats {
     pub(crate) const ROW_BINARY: &str = "RowBinary";
     pub(crate) const ROW_BINARY_WITH_NAMES_AND_TYPES: &str = "RowBinaryWithNamesAndTypes";
+}
+
+mod settings {
+    pub(crate) const DATABASE: &str = "database";
+    pub(crate) const DEFAULT_FORMAT: &str = "default_format";
+    pub(crate) const COMPRESS: &str = "compress";
+    pub(crate) const DECOMPRESS: &str = "decompress";
+    pub(crate) const READONLY: &str = "readonly";
+    pub(crate) const ROLE: &str = "role";
+    pub(crate) const QUERY: &str = "query";
 }
 
 /// This is a private API exported only for internal purposes.
