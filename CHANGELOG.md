@@ -15,10 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Optimize `RowCursor` by reusing buffer capacity where possible ([#340])
 * All `Query::fetch*` methods will always use POST instead of GET. It is now allowed to change `readonly` value via 
   `Query::with_option`. ([#342])
+* In case of a schema mismatch, the client now emits `clickhouse::error::Error::SchemaMismatch` instead of panicking. 
+  ([#346])
 
 [#283]: https://github.com/ClickHouse/clickhouse-rs/pull/283
 [#340]: https://github.com/ClickHouse/clickhouse-rs/pull/340
 [#342]: https://github.com/ClickHouse/clickhouse-rs/pull/342
+[#346]: https://github.com/ClickHouse/clickhouse-rs/pull/346
 
 ## [0.14.0] - 2025-10-08
 
