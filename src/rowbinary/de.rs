@@ -3,6 +3,7 @@ use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
+use crate::types::{Int256, UInt256};
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
@@ -61,6 +62,7 @@ where
 {
     input: &'cursor mut &'data [u8],
     validator: V,
+    next_is_int256: bool,
     _marker: PhantomData<R>,
 }
 
@@ -72,6 +74,7 @@ where
         Self {
             input,
             validator,
+            next_is_int256: false,
             _marker: PhantomData,
         }
     }
@@ -84,6 +87,7 @@ where
         Ok(RowBinaryDeserializer {
             validator,
             input: self.input,
+            next_is_int256: false,
             _marker: PhantomData,
         })
     }
@@ -199,7 +203,13 @@ where
 
     #[inline(always)]
     fn deserialize_bytes<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        let size = self.read_size()?;
+        let size = if self.next_is_int256 {
+            self.next_is_int256 = false;
+            32
+        } else {
+            self.read_size()?
+        };
+
         self.validator.validate(SerdeType::Bytes(size))?;
         let slice = self.read_slice(size)?;
         visitor.visit_borrowed_bytes(slice)
@@ -296,9 +306,13 @@ where
     #[inline(always)]
     fn deserialize_newtype_struct<V: Visitor<'data>>(
         self,
-        _name: &str,
+        name: &str,
         visitor: V,
     ) -> Result<V::Value> {
+        if matches!(name, Int256::SERDE_NAME | UInt256::SERDE_NAME) {
+            self.next_is_int256 = true;
+        }
+
         visitor.visit_newtype_struct(self)
     }
 

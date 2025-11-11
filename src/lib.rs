@@ -30,6 +30,8 @@ pub mod sql;
 #[cfg(feature = "test-util")]
 pub mod test;
 
+pub mod types;
+
 mod bytes_ext;
 mod compression;
 mod cursors;

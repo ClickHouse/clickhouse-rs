@@ -3,6 +3,7 @@ use crate::error::Error::SequenceMustHaveLength;
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
+use crate::types::{Int256, UInt256};
 use bytes::BufMut;
 use clickhouse_types::put_leb128;
 use serde::ser::SerializeMap;
@@ -43,6 +44,7 @@ pub(crate) fn serialize_with_validation<B: BufMut, R: Row + Serialize>(
 struct RowBinarySerializer<B: BufMut, R: Row, V: SchemaValidator<R> = ()> {
     buffer: B,
     validator: V,
+    skip_next_len_prefix: bool,
     _marker: PhantomData<R>,
 }
 
@@ -53,6 +55,7 @@ impl<B: BufMut, R: Row, V: SchemaValidator<R>> RowBinarySerializer<B, R, V> {
         Self {
             buffer,
             validator,
+            skip_next_len_prefix: false,
             _marker: PhantomData,
         }
     }
@@ -136,7 +139,14 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
     fn serialize_bytes(self, v: &[u8]) -> Result<()> {
         let size = v.len();
         self.validator.validate(SerdeType::Bytes(size))?;
-        put_leb128(&mut self.buffer, size as u64);
+
+        if self.skip_next_len_prefix {
+            // The value is actually a `UInt256` or `Int256` and should not have a length prefix.
+            self.skip_next_len_prefix = false;
+        } else {
+            put_leb128(&mut self.buffer, size as u64);
+        }
+
         self.buffer.put_slice(v);
         Ok(())
     }
@@ -179,9 +189,13 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
     #[inline]
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
         self,
-        _name: &'static str,
+        name: &'static str,
         value: &T,
     ) -> Result<()> {
+        if matches!(name, UInt256::SERDE_NAME | Int256::SERDE_NAME) {
+            self.skip_next_len_prefix = true;
+        }
+
         value.serialize(self)
     }
 
