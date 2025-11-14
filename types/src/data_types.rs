@@ -955,7 +955,10 @@ mod tests {
         assert_eq!(DataTypeNode::new("Bool").unwrap(), DataTypeNode::Bool);
         assert_eq!(DataTypeNode::new("Dynamic").unwrap(), DataTypeNode::Dynamic);
         assert_eq!(DataTypeNode::new("JSON").unwrap(), DataTypeNode::JSON);
-        assert_eq!(DataTypeNode::new("JSON(max_dynamic_types=8, max_dynamic_paths=64)").unwrap(), DataTypeNode::JSON);
+        assert_eq!(
+            DataTypeNode::new("JSON(max_dynamic_types=8, max_dynamic_paths=64)").unwrap(),
+            DataTypeNode::JSON
+        );
         assert!(DataTypeNode::new("SomeUnknownType").is_err());
     }
 
