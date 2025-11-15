@@ -8,8 +8,8 @@ use rand::{Rng, distr::Alphanumeric};
 use std::str::FromStr;
 use time::{Date, Month, OffsetDateTime, Time};
 
+use clickhouse::types::{Int256, UInt256};
 use clickhouse::{Client, error::Result, sql::Identifier};
-
 // This example covers derivation of _simpler_ ClickHouse data types.
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types
 
@@ -131,6 +131,10 @@ pub struct MyRow {
     pub decimal32_9_4: Decimal32,
     pub decimal64_18_8: Decimal64,
     pub decimal128_38_12: Decimal128,
+
+    pub int256: Int256,
+    pub uint256: UInt256,
+
     #[serde(with = "clickhouse::serde::time::date")]
     pub time_date: Date,
     #[serde(with = "clickhouse::serde::time::date32")]
@@ -230,6 +234,12 @@ impl MyRow {
             decimal64_18_8: Decimal64::from_str("9999999999.99999999").unwrap(),
             decimal128_38_12: Decimal128::from_str("99999999999999999999999999.999999999999")
                 .unwrap(),
+
+            // `Int256` and `UInt256` are intended for input and output only,
+            // so they don't support `rand` directly.
+            int256: rng.random::<i128>().into(),
+            uint256: rng.random::<u128>().into(),
+
             // Allowed values ranges:
             // - Date   = [1970-01-01, 2149-06-06]
             // - Date32 = [1900-01-01, 2299-12-31]

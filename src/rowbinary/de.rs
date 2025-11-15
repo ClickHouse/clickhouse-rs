@@ -3,9 +3,11 @@ use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
+use crate::types::int256;
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
+use serde::de::value::BytesDeserializer;
 use serde::{
     Deserialize,
     de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
@@ -296,10 +298,18 @@ where
     #[inline(always)]
     fn deserialize_newtype_struct<V: Visitor<'data>>(
         self,
-        _name: &str,
+        name: &str,
         visitor: V,
     ) -> Result<V::Value> {
-        visitor.visit_newtype_struct(self)
+        if name.starts_with(int256::MODULE_PATH) {
+            self.validator
+                .validate(SerdeType::Bytes(int256::BYTE_LEN))?;
+
+            let slice = self.read_slice(int256::BYTE_LEN)?;
+            BytesDeserializer::new(slice).deserialize_bytes(visitor)
+        } else {
+            visitor.visit_newtype_struct(self)
+        }
     }
 
     #[inline(always)]

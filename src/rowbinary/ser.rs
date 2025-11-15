@@ -3,6 +3,7 @@ use crate::error::Error::SequenceMustHaveLength;
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
+use crate::types::int256;
 use bytes::BufMut;
 use clickhouse_types::put_leb128;
 use serde::ser::SerializeMap;
@@ -179,10 +180,19 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
     #[inline]
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
         self,
-        _name: &'static str,
+        name: &'static str,
         value: &T,
     ) -> Result<()> {
-        value.serialize(self)
+        if name.starts_with(int256::MODULE_PATH) {
+            self.validator
+                .validate(SerdeType::Bytes(int256::BYTE_LEN))?;
+
+            value.serialize(WithoutLenPrefix {
+                buffer: &mut self.buffer,
+            })
+        } else {
+            value.serialize(self)
+        }
     }
 
     #[inline]
@@ -360,5 +370,194 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> SerializeMap
     #[inline]
     fn end(self) -> Result<()> {
         Ok(())
+    }
+}
+
+struct WithoutLenPrefix<B> {
+    buffer: B,
+}
+
+impl<B: BufMut> Serializer for WithoutLenPrefix<B> {
+    type Ok = ();
+    type Error = Error;
+    type SerializeSeq = Impossible<Self::Ok, Self::Error>;
+    type SerializeTuple = Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleStruct = Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleVariant = Impossible<Self::Ok, Self::Error>;
+    type SerializeMap = Impossible<Self::Ok, Self::Error>;
+    type SerializeStruct = Impossible<Self::Ok, Self::Error>;
+    type SerializeStructVariant = Impossible<Self::Ok, Self::Error>;
+
+    fn is_human_readable(&self) -> bool {
+        false
+    }
+
+    fn serialize_bool(self, _v: bool) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_i8(self, _v: i8) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_i16(self, _v: i16) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_i32(self, _v: i32) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_i64(self, _v: i64) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_u8(self, _v: u8) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_u16(self, _v: u16) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_u32(self, _v: u32) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_u64(self, _v: u64) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_f32(self, _v: f32) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_f64(self, _v: f64) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_char(self, _v: char) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_str(self, _v: &str) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_bytes(mut self, v: &[u8]) -> std::result::Result<Self::Ok, Self::Error> {
+        self.buffer.put_slice(v);
+        Ok(())
+    }
+
+    fn serialize_none(self) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_some<T>(self, _value: &T) -> std::result::Result<Self::Ok, Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        unimplemented!()
+    }
+
+    fn serialize_unit(self) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_unit_struct(
+        self,
+        _name: &'static str,
+    ) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_unit_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+    ) -> std::result::Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_newtype_struct<T>(
+        self,
+        _name: &'static str,
+        _value: &T,
+    ) -> std::result::Result<Self::Ok, Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        unimplemented!()
+    }
+
+    fn serialize_newtype_variant<T>(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _value: &T,
+    ) -> std::result::Result<Self::Ok, Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        unimplemented!()
+    }
+
+    fn serialize_seq(
+        self,
+        _len: Option<usize>,
+    ) -> std::result::Result<Self::SerializeSeq, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_tuple(
+        self,
+        _len: usize,
+    ) -> std::result::Result<Self::SerializeTuple, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_tuple_struct(
+        self,
+        _name: &'static str,
+        _len: usize,
+    ) -> std::result::Result<Self::SerializeTupleStruct, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_tuple_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> std::result::Result<Self::SerializeTupleVariant, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_map(
+        self,
+        _len: Option<usize>,
+    ) -> std::result::Result<Self::SerializeMap, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_struct(
+        self,
+        _name: &'static str,
+        _len: usize,
+    ) -> std::result::Result<Self::SerializeStruct, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_struct_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> std::result::Result<Self::SerializeStructVariant, Self::Error> {
+        unimplemented!()
     }
 }
