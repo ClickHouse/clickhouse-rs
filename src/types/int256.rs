@@ -2,6 +2,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 
+pub(crate) const MODULE_PATH: &str = module_path!();
+pub(crate) const BYTE_LEN: usize = 32;
+
 /// A 256-bit unsigned integer.
 ///
 /// See [the `UInt256` type in the ClickHouse reference](https://clickhouse.com/docs/sql-reference/data-types/int-uint)
@@ -68,7 +71,7 @@ impl UInt256 {
         le_bytes: [0xFF; 32],
     };
 
-    pub(crate) const SERDE_NAME: &'static str = "clickhouse::types::int256::UInt256";
+    pub(crate) const SERDE_NAME: &'static str = concat!(module_path!(), "::UInt256");
 
     #[inline]
     fn widen_from_le_bytes(bytes: &[u8]) -> Self {
@@ -319,7 +322,7 @@ impl Int256 {
         },
     };
 
-    pub(crate) const SERDE_NAME: &'static str = "clickhouse::types::int256::Int256";
+    pub(crate) const SERDE_NAME: &'static str = concat!(module_path!(), "::Int256");
 
     #[inline]
     fn widen_from_le_bytes(bytes: &[u8]) -> Self {
@@ -519,7 +522,7 @@ impl<'de> serde::de::Visitor<'de> for VisitBytes32 {
         deserializer.deserialize_bytes(self)
     }
 
-    fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
@@ -595,6 +598,13 @@ mod tests {
             UInt256::MAX.to_string(),
             "115792089237316195423570985008687907853269984665640564039457584007913129639935"
         );
+
+        assert!(
+            UInt256::SERDE_NAME.starts_with(super::MODULE_PATH),
+            "expected `UInt256::SERDE_NAME` ({:?}) to start with `super::MODULE_PATH` ({:?})",
+            UInt256::SERDE_NAME,
+            super::MODULE_PATH,
+        )
     }
 
     #[test]
@@ -624,6 +634,13 @@ mod tests {
             Int256::MAX.to_string(),
             "57896044618658097711785492504343953926634992332820282019728792003956564819967"
         );
+
+        assert!(
+            Int256::SERDE_NAME.starts_with(super::MODULE_PATH),
+            "expected `Int256::SERDE_NAME` ({:?}) to start with `super::MODULE_PATH` ({:?})",
+            Int256::SERDE_NAME,
+            super::MODULE_PATH,
+        )
     }
 
     #[test]

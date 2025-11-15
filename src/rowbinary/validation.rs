@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::types::int256;
 use crate::{Row, row::RowKind, row_metadata::RowMetadata};
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
@@ -531,7 +532,7 @@ fn validate_impl<'serde, 'caller, R: Row>(
             Ok(None)
         }
         // Serde's data model doesn't have `(u)int256` so instead we just try to deserialize `[u8; 32]`
-        SerdeType::Bytes(32)
+        SerdeType::Bytes(int256::BYTE_LEN)
             if data_type == &DataTypeNode::Int256 || data_type == &DataTypeNode::UInt256 =>
         {
             Ok(None)

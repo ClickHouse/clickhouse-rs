@@ -3,10 +3,11 @@ use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
-use crate::types::{Int256, UInt256};
+use crate::types::int256;
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
+use serde::de::value::BytesDeserializer;
 use serde::{
     Deserialize,
     de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
@@ -62,7 +63,6 @@ where
 {
     input: &'cursor mut &'data [u8],
     validator: V,
-    next_is_int256: bool,
     _marker: PhantomData<R>,
 }
 
@@ -74,7 +74,6 @@ where
         Self {
             input,
             validator,
-            next_is_int256: false,
             _marker: PhantomData,
         }
     }
@@ -87,7 +86,6 @@ where
         Ok(RowBinaryDeserializer {
             validator,
             input: self.input,
-            next_is_int256: false,
             _marker: PhantomData,
         })
     }
@@ -203,13 +201,7 @@ where
 
     #[inline(always)]
     fn deserialize_bytes<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        let size = if self.next_is_int256 {
-            self.next_is_int256 = false;
-            32
-        } else {
-            self.read_size()?
-        };
-
+        let size = self.read_size()?;
         self.validator.validate(SerdeType::Bytes(size))?;
         let slice = self.read_slice(size)?;
         visitor.visit_borrowed_bytes(slice)
@@ -309,11 +301,15 @@ where
         name: &str,
         visitor: V,
     ) -> Result<V::Value> {
-        if matches!(name, Int256::SERDE_NAME | UInt256::SERDE_NAME) {
-            self.next_is_int256 = true;
-        }
+        if name.starts_with(int256::MODULE_PATH) {
+            self.validator
+                .validate(SerdeType::Bytes(int256::BYTE_LEN))?;
 
-        visitor.visit_newtype_struct(self)
+            let slice = self.read_slice(int256::BYTE_LEN)?;
+            BytesDeserializer::new(slice).deserialize_bytes(visitor)
+        } else {
+            visitor.visit_newtype_struct(self)
+        }
     }
 
     #[inline(always)]

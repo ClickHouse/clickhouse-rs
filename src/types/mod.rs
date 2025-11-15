@@ -2,4 +2,4 @@
 
 pub use int256::{Int256, TryFromInt256Error, TryFromUInt256Error, UInt256};
 
-mod int256;
+pub(crate) mod int256;
