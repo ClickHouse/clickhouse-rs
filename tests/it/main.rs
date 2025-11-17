@@ -256,6 +256,7 @@ mod https_errors;
 mod insert;
 mod inserter;
 mod int128;
+mod int256;
 mod ip;
 mod mock;
 mod nested;
