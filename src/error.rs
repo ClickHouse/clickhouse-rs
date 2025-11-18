@@ -51,8 +51,6 @@ pub enum Error {
     Other(BoxedError),
 }
 
-assert_impl_all!(Error: StdError, Send, Sync);
-
 impl From<clickhouse_types::error::TypesError> for Error {
     fn from(err: clickhouse_types::error::TypesError) -> Self {
         Self::InvalidColumnsHeader(Box::new(err))
@@ -114,17 +112,30 @@ impl From<io::Error> for Error {
     }
 }
 
-#[test]
-fn roundtrip_io_error() {
-    let orig = Error::NotEnoughData;
+#[cfg(tests)]
+mod tests {
+    use crate::error::Error;
+    use std::io;
 
-    // Error -> io::Error
-    let orig_str = orig.to_string();
-    let io = io::Error::from(orig);
-    assert_eq!(io.kind(), io::ErrorKind::Other);
-    assert_eq!(io.to_string(), orig_str);
+    #[test]
+    fn roundtrip_io_error() {
+        let orig = Error::NotEnoughData;
 
-    // io::Error -> Error
-    let orig = Error::from(io);
-    assert!(matches!(orig, Error::NotEnoughData));
+        // Error -> io::Error
+        let orig_str = orig.to_string();
+        let io = io::Error::from(orig);
+        assert_eq!(io.kind(), io::ErrorKind::Other);
+        assert_eq!(io.to_string(), orig_str);
+
+        // io::Error -> Error
+        let orig = Error::from(io);
+        assert!(matches!(orig, Error::NotEnoughData));
+    }
+
+    #[test]
+    fn error_traits() {
+        fn assert_traits<T: std::error::Error + Send + Sync>() {}
+
+        assert_traits::<Error>();
+    }
 }

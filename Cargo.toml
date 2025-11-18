@@ -141,8 +141,6 @@ hyper-rustls = { version = "0.27.3", default-features = false, features = [
 url = "2.1.1"
 futures-util = { version = "0.3.5", default-features = false, features = ["sink", "io"] }
 futures-channel = { version = "0.3.30", features = ["sink"] }
-static_assertions = "1.1"
-sealed = "0.6"
 lz4_flex = { version = "0.11.3", default-features = false, features = [
     "std",
 ], optional = true }
@@ -152,7 +150,6 @@ time = { version = "0.3", optional = true }
 chrono = { version = "0.4", optional = true, features = ["serde"] }
 bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
-replace_with = { version = "0.1.7" }
 polonius-the-crab = "0.5.0"
 
 bnum = "0.13.0"

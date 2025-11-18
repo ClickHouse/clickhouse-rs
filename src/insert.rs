@@ -13,7 +13,6 @@ use crate::{
 use bytes::{Bytes, BytesMut};
 use clickhouse_types::put_rbwnat_columns_header;
 use hyper::{self, Request};
-use replace_with::replace_with_or_abort;
 use std::{future::Future, marker::PhantomData, mem, panic, pin::Pin, time::Duration};
 use tokio::{
     task::JoinHandle,
@@ -25,9 +24,11 @@ use url::Url;
 const BUFFER_SIZE: usize = 256 * 1024;
 // Threshold to send a chunk. Should be slightly less than `BUFFER_SIZE`
 // to avoid extra reallocations in case of a big last row.
-const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 2048;
-
-const_assert!(BUFFER_SIZE.is_power_of_two()); // to use the whole buffer's capacity
+const MIN_CHUNK_SIZE: usize = const {
+    // to use the whole buffer's capacity
+    assert!(BUFFER_SIZE.is_power_of_two());
+    BUFFER_SIZE - 2048
+};
 
 /// Performs one `INSERT`.
 ///
@@ -107,11 +108,15 @@ impl InsertState {
     }
 
     fn terminated(&mut self) {
-        replace_with_or_abort(self, |_self| match _self {
-            InsertState::NotStarted { .. } => InsertState::Completed, // empty insert
-            InsertState::Active { handle, .. } => InsertState::Terminated { handle },
-            _ => unreachable!(),
-        });
+        match mem::replace(self, InsertState::Completed) {
+            InsertState::NotStarted { .. } | InsertState::Completed => (),
+            InsertState::Active { handle, .. } => {
+                *self = InsertState::Terminated { handle };
+            }
+            InsertState::Terminated { handle } => {
+                *self = InsertState::Terminated { handle };
+            }
+        }
     }
 }
 
