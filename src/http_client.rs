@@ -8,7 +8,6 @@ use hyper_util::{
     },
     rt::TokioExecutor,
 };
-use sealed::sealed;
 
 use crate::request_body::RequestBody;
 
@@ -21,12 +20,10 @@ use crate::request_body::RequestBody;
 /// Secondly, although it's stable in terms of semver, it will be changed in the
 /// future (e.g. to support more runtimes, not only tokio). Thus, prefer to open
 /// a feature request instead of implementing this trait manually.
-#[sealed]
-pub trait HttpClient: Send + Sync + 'static {
+pub trait HttpClient: sealed::Sealed + Send + Sync + 'static {
     fn request(&self, req: Request<RequestBody>) -> ResponseFuture;
 }
 
-#[sealed]
 impl<C> HttpClient for Client<C, RequestBody>
 where
     C: Connect + Clone + Send + Sync + 'static,
@@ -35,6 +32,8 @@ where
         self.request(req)
     }
 }
+
+impl<C> sealed::Sealed for Client<C, RequestBody> {}
 
 // === Default ===
 
@@ -106,4 +105,8 @@ fn prepare_hyper_rustls_connector(
         .https_or_http()
         .enable_http1()
         .wrap_connector(connector)
+}
+
+mod sealed {
+    pub trait Sealed {}
 }

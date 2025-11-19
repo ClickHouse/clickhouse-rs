@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 use bytes::Bytes;
 use futures_channel::oneshot;
 use hyper::{Request, Response, StatusCode};
-use sealed::sealed;
 use serde::Serialize;
 
 use super::{Handler, HandlerFn};
@@ -15,7 +14,8 @@ const BUFFER_INITIAL_CAPACITY: usize = 1024;
 
 struct Thunk(Response<Bytes>);
 
-#[sealed]
+impl super::sealed::Sealed for Thunk {}
+
 impl super::Handler for Thunk {
     type Control = ();
 
@@ -64,7 +64,8 @@ where
 
 struct RecordHandler<T>(PhantomData<T>);
 
-#[sealed]
+impl<T> super::sealed::Sealed for RecordHandler<T> {}
+
 impl<T> super::Handler for RecordHandler<T> {
     type Control = RecordControl<T>;
 
@@ -120,7 +121,8 @@ pub fn record<T>() -> impl Handler<Control = RecordControl<T>> {
 
 struct RecordDdlHandler;
 
-#[sealed]
+impl super::sealed::Sealed for RecordDdlHandler {}
+
 impl super::Handler for RecordDdlHandler {
     type Control = RecordDdlControl;
 

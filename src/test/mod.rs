@@ -1,14 +1,12 @@
 use bytes::Bytes;
 use hyper::{Request, Response, StatusCode};
-use sealed::sealed;
 
 pub use self::mock::Mock;
 
 pub mod handlers;
 mod mock;
 
-#[sealed]
-pub trait Handler {
+pub trait Handler: sealed::Sealed {
     type Control;
 
     #[doc(hidden)]
@@ -30,4 +28,8 @@ pub mod status {
     pub const SERVICE_UNAVAILABLE: StatusCode = StatusCode::SERVICE_UNAVAILABLE;
     pub const LENGTH_REQUIRED: StatusCode = StatusCode::LENGTH_REQUIRED;
     pub const INTERNAL_SERVER_ERROR: StatusCode = StatusCode::INTERNAL_SERVER_ERROR;
+}
+
+mod sealed {
+    pub trait Sealed {}
 }
