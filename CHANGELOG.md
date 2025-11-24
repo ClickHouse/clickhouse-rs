@@ -8,20 +8,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Removed
+
+* Removed [replace_with], [static_assertions], and [sealed] from the crate dependencies. ([#353])
+
 ### Added
-* Implement `Stream` for `RowCursor` ([#283], [#340])
+
+* Implement `Stream` for `RowCursor`. ([#283], [#340])
+* Added an optional `on_commit` callback to `Inserter`. ([#307])
+* Added `with_role` and `with_default_roles` methods to `Client`, `Query`, `Insert`, and `Inserter`, allowing to
+  explicitly set the [roles for executed queries]. ([#326])
+* Added `Int256` and `UInt256` ClickHouse types support. The client now provides two new convenience wrappers over 
+  `[u8; 32]`: `clickhouse::types::Int256` and `clickhouse::types::UInt256`. See the [updated derive example]. ([#352])
 
 ### Fixed
-* Optimize `RowCursor` by reusing buffer capacity where possible ([#340])
-* All `Query::fetch*` methods will always use POST instead of GET. It is now allowed to change `readonly` value via 
+
+* When binding `u128`/`i128` values to SQL queries using server-side params, the client now correctly serializes them as
+  strings without adding an unnecessary cast. ([#322])
+* Fixed an issue where the schema validation could fail with custom `JSON` types such as 
+  `JSON(max_dynamic_paths=64, max_dynamic_types=8)`. ([#350], [Steffen911])
+
+### Changed
+
+* Optimize `RowCursor` by reusing buffer capacity where possible. ([#340])
+* All `Query::fetch*` methods will always use POST instead of GET. It is now allowed to change `readonly` value via
   `Query::with_option`. ([#342])
-* In case of a schema mismatch, the client now emits `clickhouse::error::Error::SchemaMismatch` instead of panicking. 
+* In case of a schema mismatch, the client now emits `clickhouse::error::Error::SchemaMismatch` instead of panicking.
   ([#346])
 
 [#283]: https://github.com/ClickHouse/clickhouse-rs/pull/283
+[#307]: https://github.com/ClickHouse/clickhouse-rs/pull/307
+[#322]: https://github.com/ClickHouse/clickhouse-rs/pull/322
+[#326]: https://github.com/ClickHouse/clickhouse-rs/pull/326
 [#340]: https://github.com/ClickHouse/clickhouse-rs/pull/340
 [#342]: https://github.com/ClickHouse/clickhouse-rs/pull/342
 [#346]: https://github.com/ClickHouse/clickhouse-rs/pull/346
+[#350]: https://github.com/ClickHouse/clickhouse-rs/pull/350
+[#352]: https://github.com/ClickHouse/clickhouse-rs/pull/352
+[#353]: https://github.com/ClickHouse/clickhouse-rs/pull/353
+
+[Steffen911]: https://github.com/Steffen911
+
+[roles for executed queries]: https://clickhouse.com/docs/interfaces/http#setting-role-with-query-parameters
+[updated derive example]: examples/data_types_derive_simple.rs
+
+[replace_with]: https://crates.io/crates/replace_with
+[static_assertions]: https://crates.io/crates/static_assertions
+[sealed]: https://crates.io/crates/sealed
 
 ## [0.14.0] - 2025-10-08
 

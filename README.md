@@ -259,8 +259,18 @@ How to choose between all these features? Here are some considerations:
 [rustls-native-certs]: https://docs.rs/rustls-native-certs
 
 ## Data Types
+
+Usage of all mentioned data types are covered in the following examples:
+
+* [Simple ClickHouse data types](examples/data_types_derive_simple.rs)
+* [Container-like ClickHouse data types](examples/data_types_derive_containers.rs)
+* [Variant data type](examples/data_types_variant.rs)
+* [JSON data type](examples/data_types_new_json.rs)
+
+### Overview
+
 * `(U)Int(8|16|32|64|128)` maps to/from corresponding `(u|i)(8|16|32|64|128)` types or newtypes around them.
-* `(U)Int256` aren't supported directly, but there is [a workaround for it](https://github.com/ClickHouse/clickhouse-rs/issues/48).
+* `(U)Int256` are supported with convenience wrappers over `[u8; 32]`: `clickhouse::types::Int256` and `clickhouse::types::UInt256`. See the [derive example](./examples/data_types_derive_simple.rs).
 * `Float(32|64)` maps to/from corresponding `f(32|64)` or newtypes around them.
 * `Decimal(32|64|128)` maps to/from corresponding `i(32|64|128)` or newtypes around them. It's more convenient to use [fixnum](https://github.com/loyd/fixnum) or another implementation of signed fixed-point numbers.
 * `Boolean` maps to/from `bool` or newtypes around it.
@@ -582,14 +592,8 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* [New `JSON` data type](https://clickhouse.com/docs/en/sql-reference/data-types/newjson) is currently supported as a string when using ClickHouse 24.10+. See [this example](examples/data_types_new_json.rs) for more details.
+* [New `JSON` data type](https://clickhouse.com/docs/en/sql-reference/data-types/newjson) is currently supported as a string when using ClickHouse 24.10+. 
 * `Dynamic` data type is not supported for now.
-
-See also the additional examples:
-
-* [Simpler ClickHouse data types](examples/data_types_derive_simple.rs)
-* [Container-like ClickHouse data types](examples/data_types_derive_containers.rs)
-* [Variant data type](examples/data_types_variant.rs)
 
 ## Mocking
 The crate provides utils for mocking CH server and testing DDL, `SELECT` and `INSERT` queries.
