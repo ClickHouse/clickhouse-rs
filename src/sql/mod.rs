@@ -9,6 +9,7 @@ pub use bind::{Bind, Identifier};
 
 mod bind;
 pub(crate) mod escape;
+mod qualify;
 pub(crate) mod ser;
 
 #[derive(Debug, Clone)]

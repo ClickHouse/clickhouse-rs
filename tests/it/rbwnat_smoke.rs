@@ -1673,3 +1673,60 @@ async fn alias_columns() {
 
     assert_eq!(rows_after_insert, expected_rows_after_insert);
 }
+
+/// See https://github.com/ClickHouse/clickhouse-rs/issues/331
+#[tokio::test]
+async fn qualified_table_name() {
+    let db_name = "rbwnat_smoke_qualified_database";
+    let table_name = "my_table";
+
+    let qualified = format!("{db_name}.{table_name}");
+
+    #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Data {
+        id: u64,
+        data: String,
+    }
+
+    let client = crate::_priv::prepare_database(db_name).await;
+    client
+        .query(&format!(
+            "
+                CREATE OR REPLACE TABLE {qualified}
+                (
+                    id   UInt64,
+                    data String
+                )
+                ENGINE = MergeTree
+                ORDER BY id;
+            "
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let rows_to_insert = vec![
+        Data {
+            id: 42,
+            data: "foo".to_string(),
+        },
+        Data {
+            id: 144,
+            data: "bar".to_string(),
+        },
+    ];
+
+    let mut insert = client.insert::<Data>(&qualified).await.unwrap();
+    for row in &rows_to_insert {
+        insert.write(row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let rows = client
+        .query(&format!("SELECT ?fields FROM {qualified}"))
+        .fetch_all::<Data>()
+        .await
+        .unwrap();
+
+    assert_eq!(rows, rows_to_insert);
+}
