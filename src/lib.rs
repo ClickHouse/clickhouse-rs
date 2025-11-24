@@ -1,9 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-#[macro_use]
-extern crate static_assertions;
-
 pub use self::{
     compression::Compression,
     row::{Row, RowOwned, RowRead, RowWrite},
