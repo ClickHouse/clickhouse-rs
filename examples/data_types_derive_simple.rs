@@ -28,13 +28,16 @@ async fn main() -> Result<()> {
                 int32                Int32,
                 int64                Int64,
                 int128               Int128,
-                -- int256               Int256,
+
                 uint8                UInt8,
                 uint16               UInt16,
                 uint32               UInt32,
                 uint64               UInt64,
                 uint128              UInt128,
-                -- uint256              UInt256,
+
+                int256               Int256,
+                uint256              UInt256,
+
                 float32              Float32,
                 float64              Float64,
                 boolean              Boolean,
@@ -102,14 +105,21 @@ pub struct MyRow {
     pub int32: i32,
     pub int64: i64,
     pub int128: i128,
+
     pub uint8: u8,
     pub uint16: u16,
     pub uint32: u32,
     pub uint64: u64,
     pub uint128: u128,
+
+    pub int256: Int256,
+    pub uint256: UInt256,
+
     pub float32: f32,
     pub float64: f64,
+
     pub boolean: bool,
+
     pub str: String,
     // Avoiding reading/writing strings as UTF-8 for blobs stored in a string column
     #[serde(with = "serde_bytes")]
@@ -131,9 +141,6 @@ pub struct MyRow {
     pub decimal32_9_4: Decimal32,
     pub decimal64_18_8: Decimal64,
     pub decimal128_38_12: Decimal128,
-
-    pub int256: Int256,
-    pub uint256: UInt256,
 
     #[serde(with = "clickhouse::serde::time::date")]
     pub time_date: Date,
