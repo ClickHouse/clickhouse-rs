@@ -123,7 +123,7 @@ rustls-tls-native-roots = [
 
 [dependencies]
 clickhouse-macros = { version = "0.3.0", path = "macros" }
-clickhouse-types = { version = "0.1.0", path = "types" }
+clickhouse-types = { version = "0.1.1", path = "types" }
 
 thiserror = "2.0"
 serde = "1.0.106"
