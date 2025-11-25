@@ -8,10 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
-### Removed
-
-* Removed [replace_with], [static_assertions], and [sealed] from the crate dependencies. ([#353])
-
 ### Added
 
 * Implement `Stream` for `RowCursor`. ([#283], [#340])
@@ -35,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Query::with_option`. ([#342])
 * In case of a schema mismatch, the client now emits `clickhouse::error::Error::SchemaMismatch` instead of panicking.
   ([#346])
+* Removed [replace_with], [static_assertions], and [sealed] from the crate dependencies. ([#353])
 
 [#283]: https://github.com/ClickHouse/clickhouse-rs/pull/283
 [#307]: https://github.com/ClickHouse/clickhouse-rs/pull/307
