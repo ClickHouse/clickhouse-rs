@@ -4,7 +4,7 @@ use super::escape;
 use crate::types::{Int256, UInt256};
 use serde::{
     Serialize,
-    ser::{self, SerializeSeq, SerializeTuple, Serializer},
+    ser::{self, SerializeSeq, SerializeTuple, SerializeTupleStruct, Serializer},
 };
 use thiserror::Error;
 
@@ -82,7 +82,7 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
     type SerializeStruct = Impossible;
     type SerializeStructVariant = Impossible;
     type SerializeTuple = SqlListSerializer<'a, W>;
-    type SerializeTupleStruct = Impossible;
+    type SerializeTupleStruct = SqlListSerializer<'a, W>;
     type SerializeTupleVariant = Impossible;
 
     unsupported!(
@@ -246,8 +246,13 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
     }
 
     #[inline]
-    fn serialize_tuple_struct(self, _name: &'static str, _len: usize) -> Result<Impossible> {
-        Err(SerializerError::Unsupported("serialize_tuple_struct"))
+    fn serialize_tuple_struct(self, _name: &'static str, _len: usize) -> Result<SqlListSerializer<'a, W>> {
+        self.writer.write_char('(')?;
+        Ok(SqlListSerializer {
+            writer: self.writer,
+            has_items: false,
+            closing_char: ')',
+        })
     }
 
     #[inline]
@@ -327,6 +332,24 @@ impl<W: Write> SerializeTuple for SqlListSerializer<'_, W> {
 
     #[inline]
     fn serialize_element<T>(&mut self, value: &T) -> Result
+    where
+        T: Serialize + ?Sized,
+    {
+        SerializeSeq::serialize_element(self, value)
+    }
+
+    #[inline]
+    fn end(self) -> Result {
+        SerializeSeq::end(self)
+    }
+}
+
+impl<W: Write> SerializeTupleStruct for SqlListSerializer<'_, W> {
+    type Error = SerializerError;
+    type Ok = ();
+
+    #[inline]
+    fn serialize_field<T>(&mut self, value: &T) -> Result
     where
         T: Serialize + ?Sized,
     {
@@ -611,6 +634,13 @@ mod tests {
     }
 
     #[test]
+    fn it_writes_tuple_structs() {
+        #[derive(Serialize)]
+        struct T(u32, u32);
+        assert_eq!(check(T(42, 43)), "(42,43)");
+    }
+
+    #[test]
     fn it_writes_options() {
         assert_eq!(check(None::<i32>), "NULL");
         assert_eq!(check(Some(32)), "32");
@@ -632,10 +662,6 @@ mod tests {
             a: u32,
         }
         assert!(write_arg(&mut out, &Struct { a: 42 }).is_err());
-
-        #[derive(Serialize)]
-        struct TupleStruct(u32, u32);
-        assert!(write_arg(&mut out, &TupleStruct(42, 42)).is_err());
 
         #[derive(Serialize)]
         enum Enum {
