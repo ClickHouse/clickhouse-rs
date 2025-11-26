@@ -60,10 +60,10 @@ To use the crate, add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-clickhouse = "0.14.0"
+clickhouse = "0.14.1"
 
 [dev-dependencies]
-clickhouse = { version = "0.14.0", features = ["test-util"] }
+clickhouse = { version = "0.14.1", features = ["test-util"] }
 ```
 
 <details>
