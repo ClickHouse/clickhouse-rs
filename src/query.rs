@@ -171,8 +171,12 @@ impl Query {
         // Normally, we enforce `readonly` for all `fetch_*` operations.
         // However, we still allow overriding it to support several niche use-cases,
         // e.g., temporary tables usage. See https://github.com/ClickHouse/clickhouse-rs/issues/230
-        if readonly && !self.client.options.contains_key(settings::READONLY) {
-            pairs.append_pair(settings::READONLY, "1");
+        if readonly {
+            let readonly_value = match self.client.options.get(settings::READONLY) {
+                None => "1",
+                Some(value) => value,
+            };
+            pairs.append_pair(settings::READONLY, readonly_value);
         }
 
         if self.client.compression.is_lz4() {
