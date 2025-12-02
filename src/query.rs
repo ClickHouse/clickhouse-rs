@@ -171,12 +171,8 @@ impl Query {
         // Normally, we enforce `readonly` for all `fetch_*` operations.
         // However, we still allow overriding it to support several niche use-cases,
         // e.g., temporary tables usage. See https://github.com/ClickHouse/clickhouse-rs/issues/230
-        if readonly {
-            let readonly_value = match self.client.options.get(settings::READONLY) {
-                None => "1",
-                Some(value) => value,
-            };
-            pairs.append_pair(settings::READONLY, readonly_value);
+        if readonly && !self.client.options.contains_key(settings::READONLY) {
+            pairs.append_pair(settings::READONLY, "1");
         }
 
         if self.client.compression.is_lz4() {
@@ -241,9 +237,10 @@ impl Query {
     }
     
     /// Set read-only option for this query.
-    pub fn readonly(self, enabled: bool) -> Self {
+    pub fn readonly(mut self, enabled: bool) -> Self {
         let value = if enabled { "1" } else { "0" };
-        self.with_option("readonly", value)
+        self.client.options.insert(settings::READONLY.to_string(), value.to_string());
+        self
     }
 
     /// Specify server side parameter for query.
