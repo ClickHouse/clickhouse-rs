@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * Optimize `RowCursor` by reusing buffer capacity where possible. ([#340])
 * All `Query::fetch*` methods will always use POST instead of GET. It is now allowed to change `readonly` value via
-  `Query::with_option`. ([#342])
+  `Query::readonly`. ([#342])
 * In case of a schema mismatch, the client now emits `clickhouse::error::Error::SchemaMismatch` instead of panicking.
   ([#346])
 * Removed [replace_with], [static_assertions], and [sealed] from the crate dependencies. ([#353])
