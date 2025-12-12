@@ -1,14 +1,13 @@
+use bytes::Bytes;
+use futures_channel::mpsc;
+use futures_util::{SinkExt, Stream};
+use hyper::body::{Body, Frame, SizeHint};
 use std::{
     error::Error as StdError,
     mem,
     pin::Pin,
     task::{Context, Poll},
 };
-
-use bytes::Bytes;
-use futures_channel::mpsc;
-use futures_util::{SinkExt, Stream};
-use hyper::body::{Body, Frame, SizeHint};
 
 // === RequestBody ===
 
@@ -80,6 +79,16 @@ pub(crate) struct ChunkSender(mpsc::Sender<Message>);
 impl ChunkSender {
     pub(crate) async fn send(&mut self, chunk: Bytes) -> bool {
         self.0.send(Message::Chunk(chunk)).await.is_ok()
+    }
+
+    #[inline(always)]
+    pub(crate) fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<bool> {
+        self.0.poll_ready(cx).map(|res| res.is_ok())
+    }
+
+    #[inline(always)]
+    pub(crate) fn try_send(&mut self, chunk: Bytes) -> bool {
+        self.0.start_send(Message::Chunk(chunk)).is_ok()
     }
 
     pub(crate) fn abort(&self) {
