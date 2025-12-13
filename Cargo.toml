@@ -158,7 +158,7 @@ bnum = "0.13.0"
 clickhouse-macros = { version = "0.3.0", path = "macros" }
 criterion = "0.6"
 serde = { version = "1.0.106", features = ["derive"] }
-tokio = { version = "1.0.1", features = ["full", "test-util"] }
+tokio = { version = "1.0.1", features = ["full", "test-util", "io-util"] }
 hyper = { version = "1.1", features = ["server"] }
 indexmap = { version = "2.10.0", features = ["serde"] }
 linked-hash-map = { version = "0.5.6", features = ["serde_impl"] }
