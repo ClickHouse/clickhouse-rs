@@ -19,6 +19,7 @@ use tokio::sync::RwLock;
 
 pub mod error;
 pub mod insert;
+pub mod insert_formatted;
 #[cfg(feature = "inserter")]
 pub mod inserter;
 pub mod query;
@@ -413,6 +414,19 @@ impl Client {
     #[cfg(feature = "inserter")]
     pub fn inserter<T: Row>(&self, table: &str) -> inserter::Inserter<T> {
         inserter::Inserter::new(self, table)
+    }
+
+    /// Start an `INSERT` statement sending pre-formatted data.
+    ///
+    /// `sql` should be an `INSERT INTO ... FORMAT <format name>` statement.
+    /// Any other type of statement may produce incorrect results.
+    ///
+    /// The statement is not issued until the first call to `.poll_write()`.
+    pub fn insert_formatted_with(
+        &self,
+        sql: impl Into<String>,
+    ) -> insert_formatted::InsertFormatted {
+        insert_formatted::InsertFormatted::new(self, sql.into())
     }
 
     /// Starts a new SELECT/DDL query.
