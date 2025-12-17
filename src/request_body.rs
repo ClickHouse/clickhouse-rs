@@ -2,13 +2,13 @@ use bytes::Bytes;
 use futures_channel::mpsc;
 use futures_util::{SinkExt, Stream};
 use hyper::body::{Body, Frame, SizeHint};
+use std::ops::ControlFlow;
 use std::{
     error::Error as StdError,
     mem,
     pin::Pin,
     task::{Context, Poll},
 };
-
 // === RequestBody ===
 
 pub struct RequestBody(Inner);
@@ -87,8 +87,24 @@ impl ChunkSender {
     }
 
     #[inline(always)]
-    pub(crate) fn try_send(&mut self, chunk: Bytes) -> bool {
-        self.0.start_send(Message::Chunk(chunk)).is_ok()
+    pub(crate) fn try_send(
+        &mut self,
+        chunk: Bytes,
+    ) -> ControlFlow<Result<(), &'static str>, Bytes> {
+        self.0.try_send(Message::Chunk(chunk)).map_or_else(
+            |e| {
+                if e.is_full() {
+                    let Message::Chunk(bytes) = e.into_inner() else {
+                        unreachable!()
+                    };
+
+                    ControlFlow::Continue(bytes)
+                } else {
+                    ControlFlow::Break(Err("channel closed"))
+                }
+            },
+            |()| ControlFlow::Break(Ok(())),
+        )
     }
 
     pub(crate) fn abort(&self) {
