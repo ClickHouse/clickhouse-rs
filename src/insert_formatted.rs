@@ -8,8 +8,9 @@ use crate::{
 };
 use bytes::{Bytes, BytesMut};
 use hyper::{self, Request};
+use std::ops::ControlFlow;
 use std::task::{Context, Poll, ready};
-use std::{future::Future, io, mem, panic, pin::Pin, time::Duration};
+use std::{cmp, future::Future, io, mem, panic, pin::Pin, time::Duration};
 use tokio::io::AsyncWrite;
 use tokio::{
     task::JoinHandle,
@@ -20,15 +21,11 @@ use url::Url;
 #[cfg(doc)]
 use tokio::io::AsyncWriteExt;
 
+#[cfg(feature = "lz4")]
+pub use compression::CompressedData;
+
 // The desired max frame size.
 const BUFFER_SIZE: usize = 256 * 1024;
-// Threshold to send a chunk. Should be slightly less than `BUFFER_SIZE`
-// to avoid extra reallocations in case of a big last row.
-const MIN_CHUNK_SIZE: usize = const {
-    // to use the whole buffer's capacity
-    assert!(BUFFER_SIZE.is_power_of_two());
-    BUFFER_SIZE - 2048
-};
 
 /// Performs one `INSERT`, sending pre-formatted data.
 ///
@@ -39,7 +36,8 @@ const MIN_CHUNK_SIZE: usize = const {
 #[must_use]
 pub struct InsertFormatted {
     state: InsertState,
-    buffer: Buffer,
+    #[cfg(feature = "lz4")]
+    compression: Compression,
     send_timeout: Option<Timeout>,
     end_timeout: Option<Timeout>,
     // Use boxed `Sleep` to reuse a timer entry, it improves performance.
@@ -50,12 +48,6 @@ pub struct InsertFormatted {
 struct Timeout {
     duration: Duration,
     is_set: bool,
-}
-
-struct Buffer {
-    buffer: BytesMut,
-    #[cfg(feature = "lz4")]
-    compression: Compression,
 }
 
 enum InsertState {
@@ -74,6 +66,11 @@ enum InsertState {
 }
 
 impl InsertState {
+    #[inline(always)]
+    fn is_not_started(&self) -> bool {
+        matches!(self, Self::NotStarted { .. })
+    }
+
     fn sender(&mut self) -> Option<&mut ChunkSender> {
         match self {
             InsertState::Active { sender, .. } => Some(sender),
@@ -124,7 +121,8 @@ impl InsertFormatted {
                 client: Box::new(client.clone()),
                 sql,
             },
-            buffer: Buffer::new(client),
+            #[cfg(feature = "lz4")]
+            compression: client.compression,
             send_timeout: None,
             end_timeout: None,
             sleep: Box::pin(tokio::time::sleep(Duration::new(0, 0))),
@@ -204,6 +202,98 @@ impl InsertFormatted {
         self.end_timeout = Timeout::new_opt(end_timeout);
     }
 
+    /// Wrap this `InsertFormatted` with a buffer of a default size.
+    ///
+    /// The returned type also implements [`AsyncWrite`].
+    pub fn buffered(self) -> BufInsertFormatted {
+        self.buffered_with_capacity(BUFFER_SIZE)
+    }
+
+    /// Wrap this `InsertFormatted` with a buffer of a given size.
+    ///
+    /// The returned type also implements [`AsyncWrite`].
+    pub fn buffered_with_capacity(self, capacity: usize) -> BufInsertFormatted {
+        BufInsertFormatted::new(self, capacity)
+    }
+
+    /// Send a chunk of data.
+    ///
+    /// If compression is enabled, the data is compressed first.
+    ///
+    /// To pre-compress the data, use [`Self::send_compressed()`] instead.
+    ///
+    /// # Note: Unbuffered
+    /// This immediately compresses and queues the data to be sent on the connection
+    /// without waiting for more chunks. For best performance, chunks should not be too small.
+    ///
+    /// Use [`Self::buffered()`] for a buffered implementation which also implements [`AsyncWrite`].
+    pub async fn send(&mut self, data: Bytes) -> Result<()> {
+        #[cfg(feature = "lz4")]
+        let data = if self.compression.is_lz4() {
+            CompressedData::from_slice(&data).0
+        } else {
+            data
+        };
+
+        self.send_inner(data).await
+    }
+
+    async fn send_inner(&mut self, mut data: Bytes) -> Result<()> {
+        std::future::poll_fn(move |cx| {
+            loop {
+                ready!(self.poll_ready(cx))?;
+
+                // Potentially cheaper than cloning `data` which touches the refcount
+                match self.try_send(mem::take(&mut data)) {
+                    ControlFlow::Break(res) => return Poll::Ready(res),
+                    ControlFlow::Continue(unsent) => {
+                        data = unsent;
+                    }
+                }
+            }
+        })
+        .await
+    }
+
+    #[inline]
+    pub(crate) fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
+        if self.state.is_not_started() {
+            self.init_request()?;
+        }
+
+        let Some(sender) = self.state.sender() else {
+            return Poll::Ready(Err(Error::Network("channel closed".into())));
+        };
+
+        match sender.poll_ready(cx) {
+            Poll::Ready(true) => {
+                Timeout::reset_opt(self.send_timeout.as_mut());
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(false) => Poll::Ready(Err(Error::Network("channel closed".into()))),
+            Poll::Pending => {
+                ready!(Timeout::poll_opt(
+                    self.send_timeout.as_mut(),
+                    self.sleep.as_mut(),
+                    cx
+                ));
+                self.abort();
+                Poll::Ready(Err(Error::TimedOut))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn try_send(&mut self, bytes: Bytes) -> ControlFlow<Result<()>, Bytes> {
+        let Some(sender) = self.state.sender() else {
+            return ControlFlow::Break(Err(Error::Network("channel closed".into())));
+        };
+
+        sender
+            .try_send(bytes)
+            .map_break(|res| res.map_err(|e| Error::Network(e.into())))
+    }
+
     /// Ends `INSERT`, the server starts processing the data.
     ///
     /// Succeeds if the server returns 200, that means the `INSERT` was handled
@@ -217,52 +307,9 @@ impl InsertFormatted {
         std::future::poll_fn(|cx| self.poll_end(cx)).await
     }
 
-    fn poll_end(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
-        if !self.buffer.is_empty() {
-            ready!(self.poll_send_chunk(cx))?;
-        }
-
+    pub(crate) fn poll_end(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
         self.state.terminated();
         self.poll_wait_handle(cx)
-    }
-
-    fn poll_send_chunk(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
-        if self.buffer.is_empty() {
-            return Poll::Ready(Ok(()));
-        }
-
-        let Some(sender) = self.state.sender() else {
-            return Poll::Ready(Err(Error::Network("channel closed".into())));
-        };
-
-        match sender.poll_ready(cx) {
-            Poll::Ready(true) => (),
-            Poll::Ready(false) => {
-                return Poll::Ready(Err(Error::Network("channel closed".into())));
-            }
-            Poll::Pending => {
-                ready!(Timeout::poll_opt(
-                    self.send_timeout.as_mut(),
-                    self.sleep.as_mut(),
-                    cx
-                ));
-                self.abort();
-                return Err(Error::TimedOut).into();
-            }
-        }
-
-        Timeout::reset_opt(self.send_timeout.as_mut());
-
-        let chunk = self
-            .buffer
-            .take_and_prepare_chunk()
-            .map_err(io::Error::other)?;
-
-        if sender.try_send(chunk) {
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Ready(Err(Error::Network("channel closed".into())))
-        }
     }
 
     fn poll_wait_handle(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
@@ -346,83 +393,145 @@ impl InsertFormatted {
     }
 }
 
-impl AsyncWrite for InsertFormatted {
-    #[inline]
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<std::result::Result<usize, io::Error>> {
-        if matches!(self.state, InsertState::NotStarted { .. }) {
-            self.init_request()?;
-        }
-
-        if self.buffer.len() >= MIN_CHUNK_SIZE {
-            ready!(self.as_mut().poll_flush(cx))?;
-        }
-
-        self.buffer.extend_from_slice(buf);
-
-        Poll::Ready(Ok(buf.len()))
-    }
-
-    #[inline]
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::result::Result<(), io::Error>> {
-        self.poll_send_chunk(cx).map_err(Into::into)
-    }
-
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::result::Result<(), io::Error>> {
-        self.poll_end(cx).map_err(Into::into)
-    }
-}
-
 impl Drop for InsertFormatted {
     fn drop(&mut self) {
         self.abort();
     }
 }
 
-impl Buffer {
-    #[cfg_attr(not(feature = "lz4"), allow(unused_variables))]
-    fn new(client: &Client) -> Self {
+/// A wrapper around [`InsertFormatted`] which buffers writes.
+pub struct BufInsertFormatted {
+    insert: InsertFormatted,
+    buffer: BytesMut,
+    capacity: usize,
+}
+
+impl BufInsertFormatted {
+    fn new(insert: InsertFormatted, capacity: usize) -> Self {
         Self {
-            buffer: BytesMut::with_capacity(BUFFER_SIZE),
-            #[cfg(feature = "lz4")]
-            compression: client.compression,
+            insert,
+            buffer: BytesMut::with_capacity(capacity),
+            capacity,
         }
     }
 
+    /// Write data to the buffer without waiting for it to be flushed.
+    ///
+    /// May cause the buffer to resize to fit the data.
     #[inline(always)]
-    fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
+    pub fn write_buffered(&mut self, data: &[u8]) {
+        self.buffer.extend_from_slice(data);
+    }
+
+    // `#[inline]` is *supposed* to work
+    // https://doc.rust-lang.org/reference/attributes/codegen.html#r-attributes.codegen.inline.async
+    // but it's apparently not implemented yet: https://github.com/rust-lang/rust/pull/149245
+    #[inline(always)]
+    pub async fn write_all(&mut self, mut data: &[u8]) -> Result<()> {
+        std::future::poll_fn(|cx| {
+            while !data.is_empty() {
+                let written = ready!(self.poll_write_inner(data, cx))?;
+                data = &data[written..];
+            }
+
+            Poll::Ready(Ok(()))
+        })
+        .await
+    }
+
+    // `poll_write` but it returns `crate::Result` instead of `io::Result`
+    #[inline(always)]
+    fn poll_write_inner(&mut self, data: &[u8], cx: &mut Context<'_>) -> Poll<Result<usize>> {
+        if self.insert.state.is_not_started() {
+            // We don't want to wait for the buffer to be full before we start the request,
+            // in the event of an error.
+            self.insert.init_request()?;
+        }
+
+        if self.buffer.len() >= self.capacity {
+            ready!(self.poll_flush_inner(cx))?;
+            debug_assert!(self.buffer.is_empty());
+        }
+
+        if self.buffer.capacity() == 0 {
+            self.buffer.reserve(self.capacity);
+        }
+
+        let write_len = cmp::min(self.buffer.capacity(), data.len());
+
+        self.buffer.extend_from_slice(&data[..write_len]);
+        Poll::Ready(Ok(write_len))
     }
 
     #[inline(always)]
-    fn len(&self) -> usize {
-        self.buffer.len()
+    pub async fn flush(&mut self) -> Result<()> {
+        std::future::poll_fn(|cx| self.poll_flush_inner(cx)).await
     }
 
-    #[inline]
-    fn extend_from_slice(&mut self, slice: &[u8]) {
-        self.buffer.extend_from_slice(slice);
-    }
+    #[inline(always)]
+    fn poll_flush_inner(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
+        if self.buffer.is_empty() {
+            return Poll::Ready(Ok(()));
+        }
 
-    #[inline]
-    fn take_and_prepare_chunk(&mut self) -> Result<Bytes> {
+        ready!(self.insert.poll_ready(cx))?;
+
+        let data = self.buffer.split().freeze();
+
         #[cfg(feature = "lz4")]
-        if self.compression.is_lz4() {
-            let compressed = crate::compression::lz4::compress(&self.buffer)?;
-            self.buffer.clear();
-            return Ok(compressed);
+        let data = if self.insert.compression.is_lz4() {
+            CompressedData::from(data).0
+        } else {
+            data
+        };
+
+        let ControlFlow::Break(res) = self.insert.try_send(data) else {
+            unreachable!("BUG: we just checked that `ChunkSender` was ready")
+        };
+
+        Poll::Ready(res)
+    }
+
+    #[inline(always)]
+    pub async fn end(&mut self) -> Result<()> {
+        std::future::poll_fn(|cx| self.poll_end(cx)).await
+    }
+
+    #[inline(always)]
+    fn poll_end(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
+        if !self.buffer.is_empty() {
+            ready!(self.poll_flush_inner(cx))?;
+            debug_assert!(self.buffer.is_empty());
         }
 
-        Ok(mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE)).freeze())
+        self.insert.poll_end(cx)
+    }
+}
+
+impl AsyncWrite for BufInsertFormatted {
+    #[inline(always)]
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::result::Result<usize, io::Error>> {
+        self.poll_write_inner(buf, cx).map_err(Into::into)
+    }
+
+    #[inline(always)]
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::result::Result<(), io::Error>> {
+        self.poll_flush_inner(cx).map_err(Into::into)
+    }
+
+    #[inline(always)]
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::result::Result<(), io::Error>> {
+        self.poll_end(cx).map_err(Into::into)
     }
 }
 
@@ -463,6 +572,56 @@ impl Timeout {
     fn reset_opt(this: Option<&mut Self>) {
         if let Some(this) = this {
             this.is_set = false;
+        }
+    }
+}
+
+// Just so I don't have to repeat this feature flag a hundred times.
+#[cfg(feature = "lz4")]
+mod compression {
+    use crate::error::{Error, Result};
+    use crate::insert_formatted::InsertFormatted;
+    use bytes::Bytes;
+
+    /// A chunk of pre-compressed data.
+    #[cfg_attr(docsrs, doc(cfg(feature = "lz4")))]
+    pub struct CompressedData(pub(crate) Bytes);
+
+    impl CompressedData {
+        /// Compress a slice of bytes.
+        #[inline(always)]
+        pub fn from_slice(slice: &[u8]) -> Self {
+            Self(
+                crate::compression::lz4::compress(slice)
+                    .expect("BUG: `lz4::compress()` should not error"),
+            )
+        }
+    }
+
+    impl<T> From<T> for CompressedData
+    where
+        T: AsRef<[u8]>,
+    {
+        #[inline(always)]
+        fn from(value: T) -> Self {
+            Self::from_slice(value.as_ref())
+        }
+    }
+
+    impl InsertFormatted {
+        /// Send a chunk of pre-compressed data.
+        ///
+        /// # Errors
+        /// In addition to network errors, this will return [`Error::Compression`] if the
+        /// [`Client`][crate::Client] does not have compression enabled.
+        pub async fn send_compressed(&mut self, data: CompressedData) -> Result<()> {
+            if !self.compression.is_lz4() {
+                return Err(Error::Compression(
+                    "attempting to send compressed data, but compression is not enabled".into(),
+                ));
+            }
+
+            self.send_inner(data.0).await
         }
     }
 }
