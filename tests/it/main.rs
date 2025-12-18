@@ -254,6 +254,7 @@ mod cursor_stats;
 mod fetch_bytes;
 mod https_errors;
 mod insert;
+mod insert_formatted;
 mod inserter;
 mod int128;
 mod int256;
