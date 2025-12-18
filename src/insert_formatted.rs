@@ -33,6 +33,15 @@ const BUFFER_SIZE: usize = 256 * 1024;
 /// Otherwise, the whole `INSERT` will be aborted.
 ///
 /// Rows are sent progressively to spread network load.
+///
+/// # Note: Not Validated
+/// Unlike [`Insert`][crate::insert::Insert] and [`Inserter`][crate::insert::Inserter],
+/// this does not perform any validation on the submitted data.
+///
+/// Only the use of self-describing formats (e.g. CSV, TabSeparated, JSON) is recommended.
+///
+/// See the [list of supported formats](https://clickhouse.com/docs/interfaces/formats)
+/// for details.
 #[must_use]
 pub struct InsertFormatted {
     state: InsertState,
@@ -205,6 +214,8 @@ impl InsertFormatted {
     /// Wrap this `InsertFormatted` with a buffer of a default size.
     ///
     /// The returned type also implements [`AsyncWrite`].
+    ///
+    /// To set the capacity, use [`Self::buffered_with_capacity()`].
     pub fn buffered(self) -> BufInsertFormatted {
         self.buffered_with_capacity(BUFFER_SIZE)
     }
@@ -299,10 +310,7 @@ impl InsertFormatted {
     /// Succeeds if the server returns 200, that means the `INSERT` was handled
     /// successfully, including all materialized views and quorum writes.
     ///
-    /// NOTE: If it isn't called, the whole `INSERT` is aborted.
-    ///
-    /// This is the equivalent of calling [`AsyncWrite::poll_shutdown()`]
-    /// or [`AsyncWriteExt::shutdown()`].
+    /// NOTE: If this isn't called, the whole `INSERT` is aborted.
     pub async fn end(mut self) -> Result<()> {
         std::future::poll_fn(|cx| self.poll_end(cx)).await
     }
@@ -415,6 +423,24 @@ impl BufInsertFormatted {
         }
     }
 
+    /// Return the number of buffered bytes.
+    #[inline(always)]
+    pub fn buf_len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    /// Return the current capacity of the buffer.
+    ///
+    /// Note: Size is Not Constant
+    /// This may be smaller than the original capacity if part of the buffer
+    /// is still being used by the connection.
+    ///
+    /// This may be larger if a call to [`Self::write_buffered()`] caused the buffer to expand.
+    #[inline(always)]
+    pub fn capacity(&self) -> usize {
+        self.buffer.capacity()
+    }
+
     /// Write data to the buffer without waiting for it to be flushed.
     ///
     /// May cause the buffer to resize to fit the data.
@@ -463,6 +489,11 @@ impl BufInsertFormatted {
         Poll::Ready(Ok(write_len))
     }
 
+    /// Flush the buffer to the server as a single chunk.
+    ///
+    /// If [compression is enabled][Client::compression], the full buffer will be compressed.
+    ///
+    ///
     #[inline(always)]
     pub async fn flush(&mut self) -> Result<()> {
         std::future::poll_fn(|cx| self.poll_flush_inner(cx)).await
@@ -492,6 +523,9 @@ impl BufInsertFormatted {
         Poll::Ready(res)
     }
 
+    /// Flushes the buffer, then calls [`InsertFormatted::end()`].
+    ///
+    /// Cancel-safe.
     #[inline(always)]
     pub async fn end(&mut self) -> Result<()> {
         std::future::poll_fn(|cx| self.poll_end(cx)).await
