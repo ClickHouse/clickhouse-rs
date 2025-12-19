@@ -18,9 +18,6 @@ use tokio::{
 };
 use url::Url;
 
-#[cfg(doc)]
-use tokio::io::AsyncWriteExt;
-
 #[cfg(feature = "lz4")]
 pub use compression::CompressedData;
 
@@ -35,7 +32,7 @@ const BUFFER_SIZE: usize = 256 * 1024;
 /// Rows are sent progressively to spread network load.
 ///
 /// # Note: Not Validated
-/// Unlike [`Insert`][crate::insert::Insert] and [`Inserter`][crate::insert::Inserter],
+/// Unlike [`Insert`][crate::insert::Insert] and [`Inserter`][crate::inserter::Inserter],
 /// this does not perform any validation on the submitted data.
 ///
 /// Only the use of self-describing formats (e.g. CSV, TabSeparated, JSON) is recommended.
@@ -171,7 +168,7 @@ impl InsertFormatted {
     /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
     ///
     /// # Panics
-    /// If called after the request is started, e.g., after [`InsertFormatted::write`].
+    /// If called after the request is started, e.g., after [`InsertFormatted::send`].
     pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.state.expect_client_mut().set_roles(roles);
         self
@@ -185,7 +182,7 @@ impl InsertFormatted {
     /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
     ///
     /// # Panics
-    /// If called after the request is started, e.g., after [`InsertFormatted::write`].
+    /// If called after the request is started, e.g., after [`InsertFormatted::send`].
     pub fn with_default_roles(mut self) -> Self {
         self.state.expect_client_mut().clear_roles();
         self
@@ -195,7 +192,7 @@ impl InsertFormatted {
     /// statement only.
     ///
     /// # Panics
-    /// If called after the request is started, e.g., after [`InsertFormatted::write`].
+    /// If called after the request is started, e.g., after [`InsertFormatted::send`].
     #[track_caller]
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.state.expect_client_mut().add_option(name, value);
@@ -491,9 +488,7 @@ impl BufInsertFormatted {
 
     /// Flush the buffer to the server as a single chunk.
     ///
-    /// If [compression is enabled][Client::compression], the full buffer will be compressed.
-    ///
-    ///
+    /// If [compression is enabled][Client::with_compression], the full buffer will be compressed.
     #[inline(always)]
     pub async fn flush(&mut self) -> Result<()> {
         std::future::poll_fn(|cx| self.poll_flush_inner(cx)).await
