@@ -1,6 +1,6 @@
 use crate::{SimpleRow, create_simple_table, fetch_rows};
 use bytes::Bytes;
-use clickhouse::Client;
+use clickhouse::{Client, Compression};
 use clickhouse_macros::Row;
 use serde::Deserialize;
 use std::cmp;
@@ -32,7 +32,7 @@ async fn empty_insert() {
 async fn insert() {
     let client = prepare_database!()
         // Separate test for compression
-        .with_compression(clickhouse::Compression::None);
+        .with_compression(Compression::None);
 
     create_table(&client).await;
 
@@ -53,7 +53,9 @@ async fn insert() {
 async fn insert_compressed() {
     use clickhouse::insert_formatted::CompressedData;
 
-    let client = prepare_database!();
+    let client = prepare_database!()
+        // `test-util` turns compression off
+        .with_compression(Compression::Lz4);
 
     create_table(&client).await;
 

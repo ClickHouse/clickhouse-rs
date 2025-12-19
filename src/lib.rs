@@ -425,7 +425,7 @@ impl Client {
     /// [`.send()`][insert_formatted::InsertFormatted::send].
     ///
     /// # Note: Not Validated
-    /// Unlike [`Insert`][insert::Insert] and [`Inserter`][insert::Inserter],
+    /// Unlike [`Insert`][insert::Insert] and [`Inserter`][inserter::Inserter],
     /// this does not perform any validation on the submitted data.
     ///
     /// Only the use of self-describing formats (e.g. CSV, TabSeparated, JSON) is recommended.
