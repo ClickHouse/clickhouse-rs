@@ -82,6 +82,7 @@ jobs:
   test-local:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         clickhouse: [ latest, head ]
         include:
