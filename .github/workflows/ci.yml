@@ -108,11 +108,11 @@ jobs:
       # coverage upload requires access to secrets, so skip on community PRs
 
       - name: Generate Codecov report
-        if: ${{ matrix.coverage && secrets.CODECOV_TOKEN != '' }}
+        if: ${{ matrix.coverage && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'ClickHouse/clickhouse-rs') }}
         run: cargo llvm-cov report --codecov --output-path codecov.json
 
       - name: Upload coverage to Codecov
-        if: ${{ matrix.coverage && secrets.CODECOV_TOKEN != '' }}
+        if: ${{ matrix.coverage && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'ClickHouse/clickhouse-rs') }}
         uses: codecov/codecov-action@v5
         with:
           files: codecov.json
