@@ -363,14 +363,9 @@ fn extract_exception_new(chunk: &[u8], tag: &[u8]) -> Option<Error> {
         ));
     };
 
-    Some(str::from_utf8(msg).map_or_else(
-        |e| {
-            Error::Other(
-                format!("found exception tag in response but message was not valid UTF-8: {e}")
-                    .into(),
-            )
-        },
-        |msg| Error::BadResponse(msg.into()),
+    // We shouldn't discard the exception message if it fails to validate as UTF-8
+    Some(Error::BadResponse(
+        String::from_utf8_lossy(msg).trim().into(),
     ))
 }
 
@@ -410,7 +405,7 @@ fn it_extracts_exception_old() {
 fn it_extracts_exception_new() {
     let tag = b"rnywyenlaeqynhmu";
     let chunk = b"\r\n__exception__\r\nrnywyenlaeqynhmu\r\nCode: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))\n142 rnywyenlaeqynhmu\r\n__exception__\r\n";
-    let error = "Code: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))\n";
+    let error = "Code: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))";
 
     let err = extract_exception(chunk, Some(tag)).expect("failed to extract exception");
     assert_eq!(err.to_string(), format!("bad response: {error}"));
