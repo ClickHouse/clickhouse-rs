@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+  schedule:
+    # Run at 05:00 UTC every day
+    - cron: '0 5 * * *'
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
@@ -13,31 +17,18 @@ env:
   # note: MSRV now tracked in `rust-toolchain.toml`
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup show active-toolchain -v
-      - run: cargo build --all-targets
-      - run: cargo build --all-targets --no-default-features
-      - run: cargo build --all-targets --all-features
-
-  rustfmt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup show active-toolchain -v
-      - run: rustup component add rustfmt
-      - run: cargo fmt --version
-      - run: cargo fmt -- --check
-
+  # Clippy ensures successful compilation as well,
+  # so we do not need a separate build check
   clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+
       - run: rustup show active-toolchain -v
       - run: rustup component add clippy
       - run: cargo clippy --version
+
       - run: cargo clippy
       - run: cargo clippy --all-targets --no-default-features
       - run: cargo clippy --all-targets --all-features
@@ -50,11 +41,23 @@ jobs:
       - run: cargo clippy --features rustls-tls-aws-lc,rustls-tls-webpki-roots
       - run: cargo clippy --features rustls-tls-aws-lc,rustls-tls-native-roots
 
-  docs:
-    needs: build
+  rustfmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # no cache - it does not compile anything
+
+      - run: rustup show active-toolchain -v
+      - run: rustup component add rustfmt
+      - run: cargo fmt --version
+      - run: cargo fmt -- --check
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # no cache since it uses nightly toolchain
+
       - run: rustup toolchain install nightly
       - run: rustup override set nightly
       - run: rustup show active-toolchain -v
@@ -63,77 +66,91 @@ jobs:
       - run: cargo rustdoc -p clickhouse-types --all-features -- -D warnings --cfg docsrs
       - run: cargo rustdoc -p clickhouse --all-features -- -D warnings --cfg docsrs
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Start ClickHouse in Docker
-        uses: hoverkraft-tech/compose-action@v2.2.0
-        with:
-          compose-file: 'docker-compose.yml'
-          down-flags: '--volumes'
-
-      - run: rustup show active-toolchain -v
-      # TODO: --workspace won't be required after splitting workspace and the main crate
-      - name: Run tests
-        run: cargo llvm-cov test --workspace --no-report
-      - name: Run tests without default features
-        run: cargo llvm-cov test --workspace --no-report --no-default-features
-      - name: Run tests with all features
-        run: cargo llvm-cov test --workspace --no-report --all-features
-
-      - name: Check access to GitHub secrets
-        id: check-secrets-access
-        run: |
-          if [[ "${{ github.actor }}" == "loyd" ]]; then
-            echo "has-access=true" >> $GITHUB_OUTPUT
-            echo "Paul Loyd is our VIP"
-          elif gh api orgs/ClickHouse/members/${{ github.actor }} --silent; then
-            echo "has-access=true" >> $GITHUB_OUTPUT
-          else
-            echo "has-access=false" >> $GITHUB_OUTPUT
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-
-      - name: Run tests with ClickHouse Cloud
-        if: steps.check-secrets-access.outputs.has-access == 'true'
-        env:
-          CLICKHOUSE_TEST_ENVIRONMENT: cloud
-          CLICKHOUSE_CLOUD_HOST: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_HOST_SMT }}
-          CLICKHOUSE_CLOUD_PASSWORD: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_PASSWORD_SMT }}
-          CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_JWT_DESERT_VM_43 }}
-        # Temporary runs tests with `cloud_` prefix only until we validate that the rest of the tests are working
-        # `https_errors` should assert ClickHouse Cloud connection errors without enabled TLS features
-        run: |
-          cargo llvm-cov test cloud_ --no-report --features rustls-tls -- --nocapture
-          cargo llvm-cov test https_errors --no-report -- --nocapture
-
-      - name: Generate code coverage
-        if: steps.check-secrets-access.outputs.has-access == 'true'
-        run: cargo llvm-cov report --codecov --output-path codecov.json
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        if: steps.check-secrets-access.outputs.has-access == 'true'
-        with:
-          files: codecov.json
-          token: ${{ secrets.CODECOV_TOKEN }}
-          slug: ClickHouse/clickhouse-rs
-          fail_ci_if_error: true
-
   miri:
-    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # no cache since Miri uses nightly and its own special instrumentation
+
       - run: rustup toolchain install nightly --component miri
       - run: rustup override set nightly
       - run: rustup show active-toolchain -v
       - run: cargo miri setup
       - run: cargo miri test --all-features -- _miri
+
+  # uses a single local Docker container with a few ClickHouse versions
+  test-local:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        clickhouse: [ latest, head ]
+        include:
+          - clickhouse: latest
+            coverage: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Start ClickHouse in Docker
+        uses: hoverkraft-tech/compose-action@v2.2.0
+        with:
+          compose-file: docker-compose.yml
+          down-flags: --volumes
+        env:
+          CLICKHOUSE_VERSION: ${{ matrix.clickhouse }}
+
+      - run: cargo llvm-cov test --workspace --no-report
+      - run: cargo llvm-cov test --workspace --no-report --no-default-features
+      - run: cargo llvm-cov test --workspace --no-report --all-features
+
+      # coverage upload requires access to secrets, so skip on community PRs
+
+      - name: Generate Codecov report
+        if: ${{ matrix.coverage && secrets.CODECOV_TOKEN != '' }}
+        run: cargo llvm-cov report --codecov --output-path codecov.json
+
+      - name: Upload coverage to Codecov
+        if: ${{ matrix.coverage && secrets.CODECOV_TOKEN != '' }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: codecov.json
+          flags: test-local-${{ matrix.clickhouse }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: ClickHouse/clickhouse-rs
+          fail_ci_if_error: false  # don't fail on community PRs
+
+  # uses a shared ClickHouse Cloud instance, but that requires access to secrets
+  # it is not possible for community PRs, as well as coverage upload in `test-local` job
+  test-cloud:
+    runs-on: ubuntu-latest
+
+    # skipped for PRs from forks (no access to secrets)
+    # allowing for merge commits, scheduled runs, etc.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'ClickHouse/clickhouse-rs'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run Cloud tests
+        env:
+          CLICKHOUSE_TEST_ENVIRONMENT: cloud
+          CLICKHOUSE_CLOUD_HOST: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_HOST_SMT }}
+          CLICKHOUSE_CLOUD_PASSWORD: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_PASSWORD_SMT }}
+          CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN: ${{ secrets.INTEGRATIONS_TEAM_TESTS_CLOUD_JWT_DESERT_VM_43 }}
+        run: |
+          cargo llvm-cov test cloud_ --no-report --features rustls-tls -- --nocapture
+          cargo llvm-cov test https_errors --no-report -- --nocapture
+
+      - run: cargo llvm-cov report --codecov --output-path codecov.json
+      - uses: codecov/codecov-action@v5
+        with:
+          files: codecov.json
+          flags: test-cloud
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: ClickHouse/clickhouse-rs
+          fail_ci_if_error: true
