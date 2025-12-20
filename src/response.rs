@@ -1,9 +1,3 @@
-use std::{
-    future::{self, Future},
-    pin::{Pin, pin},
-    task::{Context, Poll},
-};
-
 use bstr::ByteSlice;
 use bytes::{BufMut, Bytes};
 use futures_util::stream::{self, Stream, TryStreamExt};
@@ -13,6 +7,11 @@ use hyper::{
     body::{Body as _, Incoming},
 };
 use hyper_util::client::legacy::ResponseFuture as HyperResponseFuture;
+use std::{
+    future::{self, Future},
+    pin::{Pin, pin},
+    task::{Context, Poll},
+};
 
 #[cfg(feature = "lz4")]
 use crate::compression::lz4::Lz4Decoder;
@@ -42,9 +41,14 @@ impl Response {
             let exception_code = response.headers().get("X-ClickHouse-Exception-Code");
 
             if status == StatusCode::OK && exception_code.is_none() {
+                let tag = response
+                    .headers()
+                    .get("X-ClickHouse-Exception-Tag")
+                    .map(|value| value.as_bytes().into());
+
                 // More likely to be successful, start streaming.
                 // It still can fail, but we'll handle it in `DetectDbException`.
-                Ok(Chunks::new(response.into_body(), compression))
+                Ok(Chunks::new(response.into_body(), compression, tag))
             } else {
                 // An instantly failed request.
                 Err(collect_bad_response(
@@ -156,10 +160,13 @@ pub(crate) struct Chunk {
 pub(crate) struct Chunks(Option<Box<DetectDbException<Decompress<IncomingStream>>>>);
 
 impl Chunks {
-    fn new(stream: Incoming, compression: Compression) -> Self {
+    fn new(stream: Incoming, compression: Compression, exception_tag: Option<Box<[u8]>>) -> Self {
         let stream = IncomingStream(stream);
         let stream = Decompress::new(stream, compression);
-        let stream = DetectDbException(stream);
+        let stream = DetectDbException {
+            stream,
+            exception_tag,
+        };
         Self(Some(Box::new(stream)))
     }
 
@@ -263,7 +270,10 @@ where
 
 // === DetectDbException ===
 
-struct DetectDbException<S>(S);
+struct DetectDbException<S> {
+    stream: S,
+    exception_tag: Option<Box<[u8]>>,
+}
 
 impl<S> Stream for DetectDbException<S>
 where
@@ -272,10 +282,10 @@ where
     type Item = Result<Chunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let res = Pin::new(&mut self.0).poll_next(cx);
+        let res = Pin::new(&mut self.stream).poll_next(cx);
 
         if let Poll::Ready(Some(Ok(chunk))) = &res
-            && let Some(err) = extract_exception(&chunk.data)
+            && let Some(err) = extract_exception(&chunk.data, self.exception_tag.as_deref())
         {
             return Poll::Ready(Some(Err(err)));
         }
@@ -284,23 +294,29 @@ where
     }
 }
 
-// Format:
-// ```
-//   <data>Code: <code>. DB::Exception: <desc> (version <version> (official build))\n
-// ```
-fn extract_exception(chunk: &[u8]) -> Option<Error> {
-    // `))\n` is very rare in real data, so it's fast dirty check.
-    // In random data, it occurs with a probability of ~6*10^-8 only.
-    if chunk.ends_with(b"))\n") {
-        extract_exception_slow(chunk)
+fn extract_exception(chunk: &[u8], tag: Option<&[u8]>) -> Option<Error> {
+    // 25.11 introduced a new exception tagging format that's incompatible with the previous
+    // https://github.com/ClickHouse/clickhouse-rs/issues/359
+    if let Some(tag) = tag
+        && chunk.ends_with(b"__exception__\r\n")
+    {
+        extract_exception_new(chunk, tag)
+    } else if chunk.ends_with(b"))\n") {
+        // `))\n` is very rare in real data, so it's fast dirty check.
+        // In random data, it occurs with a probability of ~6*10^-8 only.
+        extract_exception_old(chunk)
     } else {
         None
     }
 }
 
+// Format:
+// ```
+//   <data>Code: <code>. DB::Exception: <desc> (version <version> (official build))\n
+// ```
 #[cold]
 #[inline(never)]
-fn extract_exception_slow(chunk: &[u8]) -> Option<Error> {
+fn extract_exception_old(chunk: &[u8]) -> Option<Error> {
     let index = chunk.rfind(b"Code:")?;
 
     if !(chunk[index..].contains_str(b"DB::") && chunk[index..].contains_str(b"Exception:")) {
@@ -311,8 +327,73 @@ fn extract_exception_slow(chunk: &[u8]) -> Option<Error> {
     Some(Error::BadResponse(exception.into()))
 }
 
+// https://github.com/ClickHouse/ClickHouse/blob/4eaa92852bac117e95f28abe61237b0257d939d6/src/Server/HTTP/WriteBufferFromHTTPServerResponse.cpp#L347-L357
+#[cold]
+#[inline(never)]
+fn extract_exception_new(chunk: &[u8], tag: &[u8]) -> Option<Error> {
+    // Strip the chunk backwards until we get to the `<message length>`
+    let rem = chunk
+        .strip_suffix(b"\r\n__exception__\r\n")?
+        .strip_suffix(tag)?
+        .strip_suffix(b" ")?;
+
+    // `<message length>` is *NOT* 8 bytes, because it's actually an integer formatted as text:
+    // https://github.com/ClickHouse/ClickHouse/blob/4eaa92852bac117e95f28abe61237b0257d939d6/src/Server/HTTP/WriteBufferFromHTTPServerResponse.cpp#L376
+    //
+    // This means we actually need to search for the `\n` that's added to terminate the message:
+    // https://github.com/ClickHouse/ClickHouse/blob/4eaa92852bac117e95f28abe61237b0257d939d6/src/Server/HTTP/WriteBufferFromHTTPServerResponse.cpp#L373-L374
+    let msg_len_start = rem.rfind(b"\n")? + 1;
+
+    // `msg_len_start` should always be either in-bounds or just past the end
+    let msg_len = match parse_msg_len(&rem[msg_len_start..]) {
+        Ok(msg_len) => msg_len,
+        // At this point we can be fairly certain we've found the exception tag,
+        // so it's better to fail with an error than continue.
+        Err(e) => return Some(e),
+    };
+
+    // Note: checked operations in case `msg_len` is incorrect
+    let Some(msg) = msg_len_start
+        .checked_sub(msg_len)
+        .and_then(|msg_start| rem.get(msg_start..msg_len_start))
+    else {
+        return Some(Error::Other(
+            format!("found exception tag in response but message length was invalid: {msg_len} (chunk len: {})", chunk.len())
+                .into(),
+        ));
+    };
+
+    Some(str::from_utf8(msg).map_or_else(
+        |e| {
+            Error::Other(
+                format!("found exception tag in response but message was not valid UTF-8: {e}")
+                    .into(),
+            )
+        },
+        |msg| Error::BadResponse(msg.into()),
+    ))
+}
+
+// FIXME: this can be replaced with `usize::from_ascii()` when stable
+// https://github.com/rust-lang/rust/issues/134821
+fn parse_msg_len(len_bytes: &[u8]) -> Result<usize, Error> {
+    let len_utf8 = str::from_utf8(len_bytes).map_err(|e| {
+        Error::Other(
+            format!("found exception tag in response but failed to parse message length: {e}")
+                .into(),
+        )
+    })?;
+
+    len_utf8.parse().map_err(|e| {
+        Error::Other(
+            format!("found exception tag in response but failed to parse message length {len_utf8:?}: {e}")
+                .into(),
+        )
+    })
+}
+
 #[test]
-fn it_extracts_exception() {
+fn it_extracts_exception_old() {
     let errors = [
         "Code: 159. DB::Exception: Timeout exceeded: elapsed 1.2 seconds, maximum: 0.1. (TIMEOUT_EXCEEDED) (version 24.10.1.2812 (official build))",
         "Code: 210. DB::NetException: I/O error: Broken pipe, while writing to socket (127.0.0.1:9000 -> 127.0.0.1:54646). (NETWORK_ERROR) (version 23.8.8.20 (official build))",
@@ -320,7 +401,17 @@ fn it_extracts_exception() {
 
     for error in errors {
         let chunk = format!("{error}\n");
-        let err = extract_exception(chunk.as_bytes()).expect("failed to extract exception");
+        let err = extract_exception(chunk.as_bytes(), None).expect("failed to extract exception");
         assert_eq!(err.to_string(), format!("bad response: {error}"));
     }
+}
+
+#[test]
+fn it_extracts_exception_new() {
+    let tag = b"rnywyenlaeqynhmu";
+    let chunk = b"\r\n__exception__\r\nrnywyenlaeqynhmu\r\nCode: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))\n142 rnywyenlaeqynhmu\r\n__exception__\r\n";
+    let error = "Code: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))\n";
+
+    let err = extract_exception(chunk, Some(tag)).expect("failed to extract exception");
+    assert_eq!(err.to_string(), format!("bad response: {error}"));
 }
