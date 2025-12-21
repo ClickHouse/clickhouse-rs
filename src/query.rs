@@ -239,6 +239,13 @@ impl Query {
         self.client.add_option(name, value);
         self
     }
+    
+    /// Set read-only option for this query.
+    pub fn readonly(mut self, enabled: bool) -> Self {
+        let value = if enabled { "1" } else { "0" };
+        self.client.options.insert(settings::READONLY.to_string(), value.to_string());
+        self
+    }
 
     /// Specify server side parameter for query.
     ///
