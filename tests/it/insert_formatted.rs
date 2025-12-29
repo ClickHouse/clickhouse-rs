@@ -4,7 +4,6 @@ use clickhouse::{Client, Compression};
 use clickhouse_macros::Row;
 use serde::Deserialize;
 use std::cmp;
-use tokio::io::AsyncWriteExt;
 
 /// First 1000 records of the [NYC taxi dataset] in `TabSeparated` format.
 ///

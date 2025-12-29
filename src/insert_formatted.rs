@@ -220,6 +220,8 @@ impl InsertFormatted {
     /// Wrap this `InsertFormatted` with a buffer of a given size.
     ///
     /// The returned type also implements [`AsyncWrite`].
+    ///
+    /// If `capacity == 0`, the buffer is flushed between every write regardless of size.
     pub fn buffered_with_capacity(self, capacity: usize) -> BufInsertFormatted {
         BufInsertFormatted::new(self, capacity)
     }
@@ -391,7 +393,7 @@ impl InsertFormatted {
         Ok(())
     }
 
-    fn abort(&mut self) {
+    pub(crate) fn abort(&mut self) {
         if let Some(sender) = self.state.sender() {
             sender.abort();
         }
@@ -408,6 +410,7 @@ impl Drop for InsertFormatted {
 pub struct BufInsertFormatted {
     insert: InsertFormatted,
     buffer: BytesMut,
+    /// Nominal capacity, stored separately because [`Self::write_buffered()`] can grow the buffer.
     capacity: usize,
 }
 
@@ -438,6 +441,23 @@ impl BufInsertFormatted {
         self.buffer.capacity()
     }
 
+    #[inline(always)]
+    pub(crate) fn buffer_mut(&mut self) -> &mut BytesMut {
+        &mut self.buffer
+    }
+
+    pub(crate) fn expect_client_mut(&mut self) -> &mut Client {
+        self.insert.state.expect_client_mut()
+    }
+
+    pub(crate) fn set_timeouts(
+        &mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) {
+        self.insert.set_timeouts(send_timeout, end_timeout);
+    }
+
     /// Write data to the buffer without waiting for it to be flushed.
     ///
     /// May cause the buffer to resize to fit the data.
@@ -446,14 +466,37 @@ impl BufInsertFormatted {
         self.buffer.extend_from_slice(data);
     }
 
-    // `#[inline]` is *supposed* to work
+    /// Write some data to the buffer, flushing first if it is already full.
+    ///
+    /// Returns the number of bytes written, which may be less than `data.len()` if the remaining
+    /// capacity was smaller.
+    ///
+    /// Cancel-safe. Until this returns `Ok(n)`, the contents of `data` are not yet written to the
+    /// buffer.
+    // `#[inline]` is *supposed* to work on `async fn`
     // https://doc.rust-lang.org/reference/attributes/codegen.html#r-attributes.codegen.inline.async
     // but it's apparently not implemented yet: https://github.com/rust-lang/rust/pull/149245
+    #[inline(always)]
+    pub async fn write(&mut self, data: &[u8]) -> Result<usize> {
+        std::future::poll_fn(|cx| self.poll_write_inner(data, cx)).await
+    }
+
+    /// Write all of `data` to the connection, flushing the buffer when it becomes full.
+    ///
+    /// # Not Cancel-Safe
+    /// This method is not cancel-safe because data may be partially written to the connection
+    /// between yield points.
     #[inline(always)]
     pub async fn write_all(&mut self, mut data: &[u8]) -> Result<()> {
         std::future::poll_fn(|cx| {
             while !data.is_empty() {
                 let written = ready!(self.poll_write_inner(data, cx))?;
+
+                debug_assert_ne!(
+                    written, 0,
+                    "BUG: `poll_write_inner` should never return a zero write"
+                );
+
                 data = &data[written..];
             }
 
@@ -465,22 +508,28 @@ impl BufInsertFormatted {
     // `poll_write` but it returns `crate::Result` instead of `io::Result`
     #[inline(always)]
     fn poll_write_inner(&mut self, data: &[u8], cx: &mut Context<'_>) -> Poll<Result<usize>> {
-        if self.insert.state.is_not_started() {
-            // We don't want to wait for the buffer to be full before we start the request,
-            // in the event of an error.
-            self.insert.init_request()?;
-        }
+        // We don't want to wait for the buffer to be full before we start the request,
+        // in the event of an error.
+        self.init_request_if_required()?;
 
+        // Capacity calculations change a little bit from those in, e.g., `tokio::io::BufWriter`
+        // since we always need to copy into the buffer to send chunks on the connection.
         if self.buffer.len() >= self.capacity {
             ready!(self.poll_flush_inner(cx))?;
             debug_assert!(self.buffer.is_empty());
         }
 
-        if self.buffer.capacity() == 0 {
-            self.buffer.reserve(self.capacity);
+        // Eliminates the need for a special check in `write_all()`;
+        // we need to copy to *some* buffer anyway because of how this type works.
+        if self.capacity == 0 {
+            self.buffer.extend_from_slice(data);
+            return Poll::Ready(Ok(data.len()));
         }
 
-        let write_len = cmp::min(self.buffer.capacity(), data.len());
+        // Guaranteed to be >= 1 by the above checks.
+        let remaining_capacity = self.capacity - self.buffer.len();
+
+        let write_len = cmp::min(remaining_capacity, data.len());
 
         self.buffer.extend_from_slice(&data[..write_len]);
         Poll::Ready(Ok(write_len))
@@ -534,6 +583,21 @@ impl BufInsertFormatted {
         }
 
         self.insert.poll_end(cx)
+    }
+
+    /// Returns `Ok(true)` if the request was freshly started, `Err(...)` on error,
+    /// or `Ok(false)` otherwise.
+    #[inline]
+    pub(crate) fn init_request_if_required(&mut self) -> Result<bool> {
+        if self.insert.state.is_not_started() {
+            self.insert.init_request().map(|_| true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub(crate) fn abort(&mut self) {
+        self.insert.abort();
     }
 }
 
