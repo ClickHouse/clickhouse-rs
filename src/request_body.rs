@@ -77,6 +77,7 @@ impl Body for RequestBody {
 pub(crate) struct ChunkSender(mpsc::Sender<Message>);
 
 impl ChunkSender {
+    #[allow(dead_code)] // YAGNI?
     pub(crate) async fn send(&mut self, chunk: Bytes) -> bool {
         self.0.send(Message::Chunk(chunk)).await.is_ok()
     }
