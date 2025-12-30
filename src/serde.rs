@@ -262,7 +262,7 @@ pub mod chrono {
         }
     }
 
-    /// Ser/de `time::Date` to/from `Date`.
+    /// Ser/de `serde::NaiveDate` to/from `Date`.
     pub mod date {
         use super::*;
         use ::chrono::{Duration, NaiveDate};
@@ -301,7 +301,7 @@ pub mod chrono {
         }
     }
 
-    /// Ser/de `time::Date` to/from `Date32`.
+    /// Ser/de `chrono::NaiveDate` to/from `Date32`.
     pub mod date32 {
         use ::chrono::{Duration, NaiveDate};
 
