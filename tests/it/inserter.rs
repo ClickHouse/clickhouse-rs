@@ -1,5 +1,3 @@
-#![cfg(feature = "inserter")]
-
 use std::string::ToString;
 
 use serde::Serialize;
