@@ -178,6 +178,7 @@ impl<T> Insert<T> {
         }
     }
 
+    /// Returns the number of bytes written, not including the RBWNAT header.
     #[inline(always)]
     pub(crate) fn do_write(&mut self, row: &T::Value<'_>) -> Result<usize>
     where
@@ -185,22 +186,14 @@ impl<T> Insert<T> {
     {
         // We don't want to wait for the buffer to be full before we start the request,
         // in the event of an error.
-        let fresh_request = self.insert.init_request_if_required()?;
+        self.init_request_if_required()?;
 
         // The following calls need an `impl BufMut`
         let buffer = self.insert.buffer_mut();
 
         let old_buf_size = buffer.len();
         let result = match &self.row_metadata {
-            Some(metadata) => {
-                let res = if fresh_request {
-                    put_rbwnat_columns_header(&metadata.columns, &mut *buffer).map_err(Into::into)
-                } else {
-                    Ok(())
-                };
-
-                res.and_then(|_| serialize_with_validation(&mut *buffer, row, metadata))
-            }
+            Some(metadata) => serialize_with_validation(&mut *buffer, row, metadata),
             None => serialize_row_binary(&mut *buffer, row),
         };
         let written = buffer.len() - old_buf_size;
@@ -220,6 +213,17 @@ impl<T> Insert<T> {
     /// NOTE: If it isn't called, the whole `INSERT` is aborted.
     pub async fn end(mut self) -> Result<()> {
         self.insert.end().await
+    }
+
+    fn init_request_if_required(&mut self) -> Result<()> {
+        let fresh_request = self.insert.init_request_if_required()?;
+
+        if fresh_request && let Some(metadata) = &self.row_metadata {
+            put_rbwnat_columns_header(&metadata.columns, self.insert.buffer_mut())
+                .inspect_err(|_| self.abort())?;
+        }
+
+        Ok(())
     }
 
     fn abort(&mut self) {
