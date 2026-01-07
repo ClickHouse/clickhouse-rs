@@ -481,30 +481,6 @@ impl BufInsertFormatted {
         std::future::poll_fn(|cx| self.poll_write_inner(data, cx)).await
     }
 
-    /// Write all of `data` to the connection, flushing the buffer when it becomes full.
-    ///
-    /// # Not Cancel-Safe
-    /// This method is not cancel-safe because data may be partially written to the connection
-    /// between yield points.
-    #[inline(always)]
-    pub async fn write_all(&mut self, mut data: &[u8]) -> Result<()> {
-        std::future::poll_fn(|cx| {
-            while !data.is_empty() {
-                let written = ready!(self.poll_write_inner(data, cx))?;
-
-                debug_assert_ne!(
-                    written, 0,
-                    "BUG: `poll_write_inner` should never return a zero write"
-                );
-
-                data = &data[written..];
-            }
-
-            Poll::Ready(Ok(()))
-        })
-        .await
-    }
-
     // `poll_write` but it returns `crate::Result` instead of `io::Result`
     #[inline(always)]
     fn poll_write_inner(&mut self, data: &[u8], cx: &mut Context<'_>) -> Poll<Result<usize>> {
