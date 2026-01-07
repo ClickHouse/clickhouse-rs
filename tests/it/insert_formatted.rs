@@ -1,9 +1,10 @@
 use crate::{SimpleRow, create_simple_table, fetch_rows};
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use clickhouse::{Client, Compression};
 use clickhouse_macros::Row;
 use serde::Deserialize;
 use std::cmp;
+use tokio::io::AsyncWriteExt;
 
 /// First 1000 records of the [NYC taxi dataset] in `TabSeparated` format.
 ///
@@ -102,6 +103,41 @@ async fn insert_buffered() {
     }
 
     insert.end().await.unwrap();
+
+    verify_insert(&client).await;
+}
+
+#[tokio::test]
+async fn insert_buffered_async_write() {
+    let client = prepare_database!();
+
+    create_table(&client).await;
+
+    let mut data = TAXI_DATA_TSV;
+    let capacity = 8192;
+
+    let mut insert = client
+        .insert_formatted_with("INSERT INTO nyc_taxi_trips_small FORMAT TabSeparated")
+        .buffered_with_capacity(capacity);
+
+    // Cycle different read sizes in an attempt to break the buffer
+    let read_sizes = [1, 10, 100, 1000, 1024, capacity];
+
+    while !data.is_empty() {
+        for size in read_sizes {
+            if data.is_empty() {
+                break;
+            }
+
+            insert
+                .write_buf(&mut Buf::take(&mut data, size))
+                .await
+                .unwrap();
+        }
+    }
+
+    AsyncWriteExt::flush(&mut insert).await.unwrap();
+    AsyncWriteExt::shutdown(&mut insert).await.unwrap();
 
     verify_insert(&client).await;
 }
