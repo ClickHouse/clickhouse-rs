@@ -249,15 +249,23 @@ impl InsertFormatted {
     }
 
     async fn send_inner(&mut self, mut data: Bytes) -> Result<()> {
+        if self.state.is_not_started() {
+            self.init_request()?;
+        }
+
         std::future::poll_fn(move |cx| {
             loop {
-                ready!(self.poll_ready(cx))?;
-
                 // Potentially cheaper than cloning `data` which touches the refcount
                 match self.try_send(mem::take(&mut data)) {
-                    ControlFlow::Break(res) => return Poll::Ready(res),
+                    ControlFlow::Break(Ok(())) => return Poll::Ready(Ok(())),
+                    ControlFlow::Break(Err(_)) => {
+                        // If the channel is closed, we should return the actual error
+                        return self.poll_wait_handle(cx);
+                    }
                     ControlFlow::Continue(unsent) => {
                         data = unsent;
+                        // Shorter code-path if we just try to send the data first
+                        ready!(self.poll_ready(cx))?;
                     }
                 }
             }

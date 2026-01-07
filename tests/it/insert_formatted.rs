@@ -49,6 +49,29 @@ async fn insert() {
 }
 
 #[tokio::test]
+async fn insert_small_chunks() {
+    let client = prepare_database!()
+        // Separate test for compression
+        .with_compression(Compression::None);
+
+    create_table(&client).await;
+
+    let mut bytes = Bytes::copy_from_slice(TAXI_DATA_TSV);
+
+    let mut insert =
+        client.insert_formatted_with("INSERT INTO nyc_taxi_trips_small FORMAT TabSeparated");
+
+    while !bytes.is_empty() {
+        let chunk = bytes.split_to(cmp::min(16, bytes.len()));
+        insert.send(chunk).await.unwrap();
+    }
+
+    insert.end().await.unwrap();
+
+    verify_insert(&client).await;
+}
+
+#[tokio::test]
 #[cfg(feature = "lz4")]
 async fn insert_compressed() {
     use clickhouse::insert_formatted::CompressedData;
