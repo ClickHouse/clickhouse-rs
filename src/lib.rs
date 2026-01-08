@@ -19,6 +19,7 @@ use tokio::sync::RwLock;
 
 pub mod error;
 pub mod insert;
+pub mod insert_formatted;
 #[cfg(feature = "inserter")]
 pub mod inserter;
 pub mod query;
@@ -413,6 +414,29 @@ impl Client {
     #[cfg(feature = "inserter")]
     pub fn inserter<T: Row>(&self, table: &str) -> inserter::Inserter<T> {
         inserter::Inserter::new(self, table)
+    }
+
+    /// Start an `INSERT` statement sending pre-formatted data.
+    ///
+    /// `sql` should be an `INSERT INTO ... FORMAT <format name>` statement.
+    /// Any other type of statement may produce incorrect results.
+    ///
+    /// The statement is not issued until the first call to
+    /// [`.send()`][insert_formatted::InsertFormatted::send].
+    ///
+    /// # Note: Not Validated
+    /// Unlike [`Insert`][insert::Insert] and [`Inserter`][inserter::Inserter],
+    /// this does not perform any validation on the submitted data.
+    ///
+    /// Only the use of self-describing formats (e.g. CSV, TabSeparated, JSON) is recommended.
+    ///
+    /// See the [list of supported formats](https://clickhouse.com/docs/interfaces/formats)
+    /// for details.
+    pub fn insert_formatted_with(
+        &self,
+        sql: impl Into<String>,
+    ) -> insert_formatted::InsertFormatted {
+        insert_formatted::InsertFormatted::new(self, sql.into())
     }
 
     /// Starts a new SELECT/DDL query.

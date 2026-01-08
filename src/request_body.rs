@@ -1,15 +1,14 @@
+use bytes::Bytes;
+use futures_channel::mpsc;
+use futures_util::{SinkExt, Stream};
+use hyper::body::{Body, Frame, SizeHint};
+use std::ops::ControlFlow;
 use std::{
     error::Error as StdError,
     mem,
     pin::Pin,
     task::{Context, Poll},
 };
-
-use bytes::Bytes;
-use futures_channel::mpsc;
-use futures_util::{SinkExt, Stream};
-use hyper::body::{Body, Frame, SizeHint};
-
 // === RequestBody ===
 
 pub struct RequestBody(Inner);
@@ -78,8 +77,35 @@ impl Body for RequestBody {
 pub(crate) struct ChunkSender(mpsc::Sender<Message>);
 
 impl ChunkSender {
+    #[allow(dead_code)] // YAGNI?
     pub(crate) async fn send(&mut self, chunk: Bytes) -> bool {
         self.0.send(Message::Chunk(chunk)).await.is_ok()
+    }
+
+    #[inline(always)]
+    pub(crate) fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<bool> {
+        self.0.poll_ready(cx).map(|res| res.is_ok())
+    }
+
+    #[inline(always)]
+    pub(crate) fn try_send(
+        &mut self,
+        chunk: Bytes,
+    ) -> ControlFlow<Result<(), &'static str>, Bytes> {
+        self.0.try_send(Message::Chunk(chunk)).map_or_else(
+            |e| {
+                if e.is_full() {
+                    let Message::Chunk(bytes) = e.into_inner() else {
+                        unreachable!()
+                    };
+
+                    ControlFlow::Continue(bytes)
+                } else {
+                    ControlFlow::Break(Err("channel closed"))
+                }
+            },
+            |()| ControlFlow::Break(Ok(())),
+        )
     }
 
     pub(crate) fn abort(&self) {
