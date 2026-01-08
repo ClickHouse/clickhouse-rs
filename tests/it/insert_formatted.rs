@@ -114,23 +114,13 @@ async fn insert_send_timeout() {
         .insert_formatted_with("INSERT INTO nyc_taxi_trips_small FORMAT TabSeparated")
         .with_timeouts(Some(send_timeout), None);
 
-    // First send actually initiates the request.
-    if let Err(e) = insert.send(bytes.clone()).await {
-        assert!(
-            matches!(e, Error::TimedOut),
-            "expected `Err(TimedOut)`, got {e:?}"
-        );
-    }
-
-    // We have to accept the socket
-    let _socket = listener.accept().await.unwrap();
-
     for _ in 0..1024 {
-        // It might take a few sends to fill up the TCP send window.
+        // First send actually initiates the request,
+        // then it might take a few more sends to fill up the TCP send window.
         if let Err(e) = insert.send(bytes.clone()).await {
             assert!(
                 matches!(e, Error::TimedOut),
-                "expected `Err(TimedOut)`, got {e:?}"
+                "expected `Error::TimedOut`, got {e:?}"
             );
             return;
         }
@@ -164,15 +154,12 @@ async fn insert_end_timeout() {
         );
     }
 
-    // We have to accept the socket
-    let _socket = listener.accept().await.unwrap();
+    let res = insert.end().await;
 
-    if let Err(e) = insert.end().await {
-        assert!(
-            matches!(e, Error::TimedOut),
-            "expected `Err(TimedOut)`, got {e:?}"
-        );
-    }
+    assert!(
+        matches!(res, Err(Error::TimedOut)),
+        "expected `Err(TimedOut)`, got {res:?}"
+    );
 }
 
 #[tokio::test]
