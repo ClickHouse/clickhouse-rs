@@ -39,7 +39,7 @@ async fn insert() {
 
     create_table(&client).await;
 
-    let bytes = Bytes::copy_from_slice(TAXI_DATA_TSV);
+    let bytes = Bytes::from_static(TAXI_DATA_TSV);
 
     let mut insert =
         client.insert_formatted_with("INSERT INTO nyc_taxi_trips_small FORMAT TabSeparated");
@@ -59,7 +59,7 @@ async fn insert_small_chunks() {
 
     create_table(&client).await;
 
-    let mut bytes = Bytes::copy_from_slice(TAXI_DATA_TSV);
+    let mut bytes = Bytes::from_static(TAXI_DATA_TSV);
 
     let mut insert =
         client.insert_formatted_with("INSERT INTO nyc_taxi_trips_small FORMAT TabSeparated");
@@ -106,7 +106,7 @@ async fn insert_send_timeout() {
 
     let client = Client::default().with_url(format!("http://{local_addr}"));
 
-    let bytes = Bytes::copy_from_slice(TAXI_DATA_TSV);
+    let bytes = Bytes::from_static(TAXI_DATA_TSV);
 
     let send_timeout = Duration::from_millis(100);
 
@@ -148,7 +148,7 @@ async fn insert_end_timeout() {
 
     let client = Client::default().with_url(format!("http://{local_addr}"));
 
-    let bytes = Bytes::copy_from_slice(TAXI_DATA_TSV);
+    let bytes = Bytes::from_static(TAXI_DATA_TSV);
 
     let end_timeout = Duration::from_millis(100);
 
