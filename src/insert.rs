@@ -129,7 +129,7 @@ impl<T> Insert<T> {
     /// If called after the request is started, e.g., after [`Insert::write`].
     #[track_caller]
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.insert.expect_client_mut().add_option(name, value);
+        self.insert.expect_client_mut().set_option(name, value);
         self
     }
 
