@@ -45,14 +45,14 @@ async fn test_fetch(client: &Client) {
         "initial `fetch` readonly setting value should be 1"
     );
 
-    let query = select_readonly_setting_query(client).with_option("readonly", "0");
+    let query = select_readonly_setting_query(client).readonly(false);
     let disabled_readonly_row = run_fetch(query).await;
     assert_eq!(
         disabled_readonly_row.value, "0",
         "`fetch` modified readonly setting value should be 0"
     );
 
-    let query = select_readonly_setting_query(client).with_option("readonly", "1");
+    let query = select_readonly_setting_query(client).readonly(true);
     let same_readonly_row = run_fetch(query).await;
     assert_eq!(
         same_readonly_row.value, "1",
@@ -68,14 +68,14 @@ async fn test_fetch_bytes(client: &Client) {
         "initial `fetch_bytes` readonly setting value should be 1"
     );
 
-    let query = select_readonly_setting_query(client).with_option("readonly", "0");
+    let query = select_readonly_setting_query(client).readonly(false);
     let disabled_readonly_value = run_fetch_bytes(query).await;
     assert_eq!(
         disabled_readonly_value, b"0\n",
         "`fetch_bytes` modified readonly setting value should be 0"
     );
 
-    let query = select_readonly_setting_query(client).with_option("readonly", "1");
+    let query = select_readonly_setting_query(client).readonly(true);
     let same_readonly_value = run_fetch_bytes(query).await;
     assert_eq!(
         same_readonly_value, b"1\n",
@@ -91,14 +91,14 @@ async fn test_fetch_one(client: &Client) {
         "initial `fetch_one` readonly setting value should be 1"
     );
 
-    let query = select_readonly_setting_query(client).with_option("readonly", "0");
+    let query = select_readonly_setting_query(client).readonly(false);
     let disabled_readonly_value: String = run_fetch_one(query).await;
     assert_eq!(
         disabled_readonly_value, "0",
         "`fetch_one` modified readonly setting value should be 0"
     );
 
-    let query = select_readonly_setting_query(client).with_option("readonly", "1");
+    let query = select_readonly_setting_query(client).readonly(true);
     let same_readonly_value: String = run_fetch_one(query).await;
     assert_eq!(
         same_readonly_value, "1",
@@ -115,7 +115,7 @@ async fn test_fetch_optional(client: &Client) {
         "initial `fetch_optional` readonly setting value should be 1"
     );
 
-    let query = select_readonly_setting_query(client).with_option("readonly", "0");
+    let query = select_readonly_setting_query(client).readonly(false);
     let disabled_readonly_value: Option<String> = run_fetch_optional(query).await;
     assert_eq!(
         disabled_readonly_value.as_deref(),
@@ -123,7 +123,7 @@ async fn test_fetch_optional(client: &Client) {
         "`fetch_optional` modified readonly setting value should be 0"
     );
 
-    let query = select_readonly_setting_query(client).with_option("readonly", "1");
+    let query = select_readonly_setting_query(client).readonly(true);
     let same_readonly_value: Option<String> = run_fetch_optional(query).await;
     assert_eq!(
         same_readonly_value.as_deref(),
@@ -141,7 +141,7 @@ async fn test_fetch_all(client: &Client) {
         "initial `fetch_all` readonly setting value should be 1"
     );
 
-    let query = select_readonly_setting_query(client).with_option("readonly", "0");
+    let query = select_readonly_setting_query(client).readonly(false);
     let disabled_readonly_value: Vec<String> = run_fetch_all(query).await;
     assert_eq!(
         disabled_readonly_value,
@@ -149,7 +149,7 @@ async fn test_fetch_all(client: &Client) {
         "`fetch_all` modified readonly setting value should be 0"
     );
 
-    let query = select_readonly_setting_query(client).with_option("readonly", "1");
+    let query = select_readonly_setting_query(client).readonly(true);
     let same_readonly_value: Vec<String> = run_fetch_all(query).await;
     assert_eq!(
         same_readonly_value,
