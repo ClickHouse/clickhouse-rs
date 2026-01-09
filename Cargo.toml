@@ -127,7 +127,7 @@ clickhouse-types = { version = "0.1.1", path = "types" }
 
 thiserror = "2.0"
 serde = "1.0.106"
-bytes = "1.5.0"
+bytes = { version = "1.5.0", features = ["serde"] }
 tokio = { version = "1.0.1", features = ["rt", "macros"] }
 http-body-util = "0.1.2"
 hyper = "1.4"

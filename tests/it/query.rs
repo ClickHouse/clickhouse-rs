@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use clickhouse::sql::Identifier;
@@ -122,6 +123,16 @@ async fn server_side_param() {
         .await
         .expect("failed to fetch string");
     assert_eq!(result, &["a", "bc"]);
+
+    // Should not be valid UTF-8
+    let bytes = Bytes::from_static(b"Hello, world!\\\0\t\r\n\x00\x01\xFF\xFE\xFD");
+    let result = client
+        .query("SELECT {val1: String} AS result")
+        .param("val1", &bytes)
+        .fetch_one::<Bytes>()
+        .await
+        .expect("failed to fetch bytes");
+    assert_eq!(result, bytes);
 }
 
 // See #19.
