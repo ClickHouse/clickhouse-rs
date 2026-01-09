@@ -395,7 +395,7 @@ impl Client {
     }
 
     /// Get an option that was previously set on this `Client`.
-    pub fn get_option(&mut self, name: impl AsRef<str>) -> Option<&str> {
+    pub fn get_option(&self, name: impl AsRef<str>) -> Option<&str> {
         self.options.get(name.as_ref()).map(String::as_str)
     }
 
@@ -835,14 +835,17 @@ mod client_tests {
     }
 
     #[test]
-    fn it_gets_options() {
+    fn it_gets_and_sets_options() {
         let mut client = Client::default();
 
-        client.set_option("foo", "foo");
-        client.set_option("bar", "bar");
+        assert_eq!(client.set_option("foo", "foo"), None);
+        assert_eq!(client.set_option("bar", "bar"), None);
 
         assert_eq!(client.get_option("foo"), Some("foo"));
         assert_eq!(client.get_option("bar"), Some("bar"));
         assert_eq!(client.get_option("baz"), None);
+
+        assert_eq!(client.set_option("foo", "foo_2"), Some("foo".to_string()));
+        assert_eq!(client.set_option("bar", "bar_2"), Some("bar".to_string()));
     }
 }
