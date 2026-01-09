@@ -383,6 +383,22 @@ impl Client {
         self
     }
 
+    /// Set an option on this instance of [`Client`].
+    ///
+    /// Returns the previous value for the option, if one was set.
+    pub fn set_option(
+        &mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Option<String> {
+        self.options.insert(name.into(), value.into())
+    }
+
+    /// Get an option that was previously set on this `Client`.
+    pub fn get_option(&mut self, name: impl AsRef<str>) -> Option<&str> {
+        self.options.get(name.as_ref()).map(String::as_str)
+    }
+
     /// Starts a new INSERT statement.
     ///
     /// # Validation
@@ -501,12 +517,6 @@ impl Client {
             return false;
         }
         self.validation
-    }
-
-    /// Used internally to modify the options map of an _already cloned_
-    /// [`Client`] instance.
-    pub(crate) fn add_option(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.options.insert(name.into(), value.into());
     }
 
     pub(crate) fn set_roles(&mut self, roles: impl IntoIterator<Item = impl Into<String>>) {
@@ -822,5 +832,17 @@ mod client_tests {
         let client_clone = client.clone();
         let client = client.with_option("async_insert", "1");
         assert_ne!(client.options, client_clone.options,);
+    }
+
+    #[test]
+    fn it_gets_options() {
+        let mut client = Client::default();
+
+        client.set_option("foo", "foo");
+        client.set_option("bar", "bar");
+
+        assert_eq!(client.get_option("foo"), Some("foo"));
+        assert_eq!(client.get_option("bar"), Some("bar"));
+        assert_eq!(client.get_option("baz"), None);
     }
 }

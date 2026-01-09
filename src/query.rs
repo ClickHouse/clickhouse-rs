@@ -236,7 +236,7 @@ impl Query {
 
     /// Similar to [`Client::with_option`], but for this particular query only.
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.client.add_option(name, value);
+        self.client.set_option(name, value);
         self
     }
 

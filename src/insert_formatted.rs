@@ -195,7 +195,7 @@ impl InsertFormatted {
     /// If called after the request is started, e.g., after [`InsertFormatted::send`].
     #[track_caller]
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.state.expect_client_mut().add_option(name, value);
+        self.state.expect_client_mut().set_option(name, value);
         self
     }
 

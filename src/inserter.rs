@@ -213,7 +213,7 @@ where
     /// If you have already begun writing data, you may call [`Inserter::force_commit`]
     /// to end the current `INSERT` so this takes effect on the next call to [`Inserter::write`].
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.client.add_option(name, value);
+        self.client.set_option(name, value);
         self
     }
 
