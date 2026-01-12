@@ -204,7 +204,24 @@ macro_rules! impl_primitive_for {
 
 // TODO: char? &str? SocketAddr? Path? Duration? NonZero*?
 impl_primitive_for![
-    bool, String, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64,
+    bool,
+    String,
+    u8,
+    u16,
+    u32,
+    u64,
+    u128,
+    usize,
+    i8,
+    i16,
+    i32,
+    i64,
+    i128,
+    isize,
+    f32,
+    f64,
+    bytes::Bytes,
+    bytes::BytesMut,
 ];
 
 macro_rules! count_tokens {
