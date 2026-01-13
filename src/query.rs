@@ -59,7 +59,7 @@ impl Query {
 
     /// Executes the query.
     pub async fn execute(self) -> Result<()> {
-        self.do_execute(false, None)?.finish().await
+        self.do_execute(None)?.finish().await
     }
 
     /// Executes the query, returning a [`RowCursor`] to obtain results.
@@ -93,7 +93,7 @@ impl Query {
             formats::ROW_BINARY
         };
 
-        let response = self.do_execute(true, Some(format))?;
+        let response = self.do_execute(Some(format))?;
         Ok(RowCursor::new(response, validation))
     }
 
@@ -144,15 +144,11 @@ impl Query {
     ///
     /// [provided format]: https://clickhouse.com/docs/en/interfaces/formats
     pub fn fetch_bytes(self, format: impl AsRef<str>) -> Result<BytesCursor> {
-        let response = self.do_execute(true, Some(format.as_ref()))?;
+        let response = self.do_execute(Some(format.as_ref()))?;
         Ok(BytesCursor::new(response))
     }
 
-    pub(crate) fn do_execute(
-        self,
-        readonly: bool,
-        default_format: Option<&str>,
-    ) -> Result<Response> {
+    pub(crate) fn do_execute(self, default_format: Option<&str>) -> Result<Response> {
         let query = self.sql.finish()?;
 
         let mut url =
@@ -166,17 +162,6 @@ impl Query {
 
         if let Some(database) = &self.client.database {
             pairs.append_pair(settings::DATABASE, database);
-        }
-
-        // Normally, we enforce `readonly` for all `fetch_*` operations.
-        // However, we still allow overriding it to support several niche use-cases,
-        // e.g., temporary tables usage. See https://github.com/ClickHouse/clickhouse-rs/issues/230
-        if readonly {
-            let readonly_value = match self.client.options.get(settings::READONLY) {
-                None => "1",
-                Some(value) => value,
-            };
-            pairs.append_pair(settings::READONLY, readonly_value);
         }
 
         if self.client.compression.is_lz4() {

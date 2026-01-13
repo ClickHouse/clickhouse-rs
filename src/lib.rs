@@ -605,7 +605,6 @@ mod settings {
     pub(crate) const DEFAULT_FORMAT: &str = "default_format";
     pub(crate) const COMPRESS: &str = "compress";
     pub(crate) const DECOMPRESS: &str = "decompress";
-    pub(crate) const READONLY: &str = "readonly";
     pub(crate) const ROLE: &str = "role";
     pub(crate) const QUERY: &str = "query";
 }
