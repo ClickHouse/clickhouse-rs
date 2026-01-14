@@ -8,6 +8,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.14.2] - 2026-01-14
+
+### Added
+
+* Added `Client::insert_formatted_with()` and `InsertFormatted` for inserting data in a chosen format with a specified SQL query. ([#364])
+  * `InsertFormatted` does not buffer data by default, allowing precise control over when the data is sent. For best performance, ensure data is sent in larger chunks or use `.buffered()` to get `BufInsertFormatted` which implements buffering.
+  * Data may optionally be pre-compressed and buffered separately using `CompressedData::new()` and `InsertFormatted::send_compressed()`.
+  * `BufInsertFormatted` also implements [`tokio::io::AsyncWrite`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncWrite.html) for composability.
+* Added `Client::set_option` to modify options through `&mut Client` ([#375])
+* Added `Client::get_option` to read previously set options ([#375])
+* Added support for binding byte-strings as server-side params ([#376])
+  * This means passing types to `Query::param` that call `Serializer::serialize_bytes()` are now supported.
+  * Note that `Vec<u8>` and `&[u8]` serialize as an array of integers. 
+    Use a specialized type, e.g. `bytes::Bytes` or `serde_bytes::Bytes` to bind a byte-string.
+* Implemented `Primitive` for `bytes::Bytes` and `bytes::BytesMut` ([#376])
+  * These can be used to fetch byte-strings as a scalar value, e.g. with `Query::fetch_one()`.
+
+### Fixed
+
+* Implemented parsing for the new exception tagging format in ClickHouse 25.11 ([#365])
+* Fixed a doc comment on `clickhouse::serde::chrono::date` ([#371])
+
+### Changed
+
+* (CI-only change) added scheduled runs against `clickhouse-server:head` tag, reworked secrets access ([#367])
+* `Query` no longer sets [the `readonly` option] by default. ([#377])
+  * This was previously added in [#342] to simulate the default read-only restriction
+    when issuing queries via `GET` requests, but had poor interaction with settings profiles that set `readonly="2"`.
+
+[#364]: https://github.com/ClickHouse/clickhouse-rs/pull/364
+[#365]: https://github.com/ClickHouse/clickhouse-rs/pull/365
+[#367]: https://github.com/ClickHouse/clickhouse-rs/pull/367
+[#371]: https://github.com/ClickHouse/clickhouse-rs/pull/371
+[#375]: https://github.com/ClickHouse/clickhouse-rs/pull/375
+[#376]: https://github.com/ClickHouse/clickhouse-rs/pull/376
+[#377]: https://github.com/ClickHouse/clickhouse-rs/pull/377
+
+[the `readonly` option]: https://clickhouse.com/docs/operations/settings/permissions-for-queries#readonly
+
 ## [0.14.1] - 2025-11-26
 
 ### Added
@@ -510,7 +549,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.2...HEAD
+[0.14.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.3...v0.14.0
 [0.13.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.2...v0.13.3
