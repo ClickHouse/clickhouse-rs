@@ -94,8 +94,8 @@ impl<T> Insert<T> {
 
     /// Configure the [roles] to use when executing `INSERT` statements.
     ///
-    /// Overrides any roles previously set by this method, [`Insert::with_option`],
-    /// [`Client::with_roles`] or [`Client::with_option`].
+    /// Overrides any roles previously set by this method, [`Insert::with_setting`],
+    /// [`Client::with_roles`] or [`Client::with_setting`].
     ///
     /// An empty iterator may be passed to clear the set roles.
     ///
@@ -110,8 +110,8 @@ impl<T> Insert<T> {
 
     /// Clear any explicit [roles] previously set on this `Insert` or inherited from [`Client`].
     ///
-    /// Overrides any roles previously set by [`Insert::with_roles`], [`Insert::with_option`],
-    /// [`Client::with_roles`] or [`Client::with_option`].
+    /// Overrides any roles previously set by [`Insert::with_roles`], [`Insert::with_setting`],
+    /// [`Client::with_roles`] or [`Client::with_setting`].
     ///
     /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
     ///
@@ -128,8 +128,20 @@ impl<T> Insert<T> {
     /// # Panics
     /// If called after the request is started, e.g., after [`Insert::write`].
     #[track_caller]
+    #[deprecated(since = "0.14.3", note = "please use `with_setting` instead")]
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.insert.expect_client_mut().set_option(name, value);
+        self.insert.expect_client_mut().set_setting(name, value);
+        self
+    }
+
+    /// Similar to [`Client::with_setting`], but for this particular INSERT
+    /// statement only.
+    ///
+    /// # Panics
+    /// If called after the request is started, e.g., after [`Insert::write`].
+    #[track_caller]
+    pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.insert.expect_client_mut().set_setting(name, value);
         self
     }
 

@@ -47,7 +47,7 @@ mod ticks;
 ///
 /// ### Cloning behavior
 /// Clones share the same HTTP transport but store their own configurations.
-/// Any `with_*` configuration method (e.g., [`Client::with_option`]) applies
+/// Any `with_*` configuration method (e.g., [`Client::with_setting`]) applies
 /// only to future clones, because [`Client::clone`] creates a deep copy
 /// of the [`Client`] configuration, except the transport.
 #[derive(Clone)]
@@ -59,7 +59,7 @@ pub struct Client {
     authentication: Authentication,
     compression: Compression,
     roles: HashSet<String>,
-    options: HashMap<String, String>,
+    settings: HashMap<String, String>,
     headers: HashMap<String, String>,
     products_info: Vec<ProductInfo>,
     validation: bool,
@@ -124,7 +124,7 @@ impl Client {
             authentication: Authentication::default(),
             compression: Compression::default(),
             roles: HashSet::new(),
-            options: HashMap::new(),
+            settings: HashMap::new(),
             headers: HashMap::new(),
             products_info: Vec::default(),
             validation: true,
@@ -232,7 +232,7 @@ impl Client {
 
     /// Configure the [roles] to use when executing statements with this `Client` instance.
     ///
-    /// Overrides any roles previously set by this method or [`Client::with_option`].
+    /// Overrides any roles previously set by this method or [`Client::with_setting`].
     ///
     /// Call [`Client::with_default_roles`] to clear any explicitly set roles.
     ///
@@ -258,7 +258,7 @@ impl Client {
 
     /// Clear any explicitly set [roles] from this `Client` instance.
     ///
-    /// Overrides any roles previously set by [`Client::with_roles`] or [`Client::with_option`].
+    /// Overrides any roles previously set by [`Client::with_roles`] or [`Client::with_setting`].
     ///
     /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
     pub fn with_default_roles(mut self) -> Self {
@@ -309,15 +309,28 @@ impl Client {
         self
     }
 
-    /// Used to specify options that will be passed to all queries.
+    /// Used to specify settings that will be passed to all queries.
     ///
     /// # Example
     /// ```
     /// # use clickhouse::Client;
     /// Client::default().with_option("allow_nondeterministic_mutations", "1");
     /// ```
+    #[deprecated(since = "0.14.3", note = "please use `with_setting` instead")]
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.options.insert(name.into(), value.into());
+        self.settings.insert(name.into(), value.into());
+        self
+    }
+
+    /// Used to specify settings that will be passed to all queries.
+    ///
+    /// # Example
+    /// ```
+    /// # use clickhouse::Client;
+    /// Client::default().with_setting("allow_nondeterministic_mutations", "1");
+    /// ```
+    pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.settings.insert(name.into(), value.into());
         self
     }
 
@@ -383,20 +396,38 @@ impl Client {
         self
     }
 
-    /// Set an option on this instance of [`Client`].
+    /// Set a setting on this instance of [`Client`].
     ///
-    /// Returns the previous value for the option, if one was set.
+    /// Returns the previous value for the setting, if one was set.
+    #[deprecated(since = "0.14.3", note = "please use `set_setting` instead")]
     pub fn set_option(
         &mut self,
         name: impl Into<String>,
         value: impl Into<String>,
     ) -> Option<String> {
-        self.options.insert(name.into(), value.into())
+        self.settings.insert(name.into(), value.into())
     }
 
-    /// Get an option that was previously set on this `Client`.
+    /// Set a setting on this instance of [`Client`].
+    ///
+    /// Returns the previous value for the setting, if one was set.
+    pub fn set_setting(
+        &mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Option<String> {
+        self.settings.insert(name.into(), value.into())
+    }
+
+    /// Get a setting that was previously set on this `Client`.
+    #[deprecated(since = "0.14.3", note = "please use `get_setting` instead")]
     pub fn get_option(&self, name: impl AsRef<str>) -> Option<&str> {
-        self.options.get(name.as_ref()).map(String::as_str)
+        self.settings.get(name.as_ref()).map(String::as_str)
+    }
+
+    /// Get a setting that was previously set on this `Client`.
+    pub fn get_setting(&self, name: impl AsRef<str>) -> Option<&str> {
+        self.settings.get(name.as_ref()).map(String::as_str)
     }
 
     /// Starts a new INSERT statement.
@@ -526,8 +557,8 @@ impl Client {
 
     #[inline]
     pub(crate) fn clear_roles(&mut self) {
-        // Make sure we overwrite any role manually set by the user via `with_option()`.
-        self.options.remove(settings::ROLE);
+        // Make sure we overwrite any role manually set by the user via `with_setting()`.
+        self.settings.remove(settings::ROLE);
         self.roles.clear();
     }
 
@@ -821,30 +852,30 @@ mod client_tests {
 
     #[test]
     fn it_does_follow_previous_configuration() {
-        let client = Client::default().with_option("async_insert", "1");
-        assert_eq!(client.options, client.clone().options,);
+        let client = Client::default().with_setting("async_insert", "1");
+        assert_eq!(client.settings, client.clone().settings,);
     }
 
     #[test]
     fn it_does_not_follow_future_configuration() {
         let client = Client::default();
         let client_clone = client.clone();
-        let client = client.with_option("async_insert", "1");
-        assert_ne!(client.options, client_clone.options,);
+        let client = client.with_setting("async_insert", "1");
+        assert_ne!(client.settings, client_clone.settings,);
     }
 
     #[test]
-    fn it_gets_and_sets_options() {
+    fn it_gets_and_sets_settings() {
         let mut client = Client::default();
 
-        assert_eq!(client.set_option("foo", "foo"), None);
-        assert_eq!(client.set_option("bar", "bar"), None);
+        assert_eq!(client.set_setting("foo", "foo"), None);
+        assert_eq!(client.set_setting("bar", "bar"), None);
 
-        assert_eq!(client.get_option("foo"), Some("foo"));
-        assert_eq!(client.get_option("bar"), Some("bar"));
-        assert_eq!(client.get_option("baz"), None);
+        assert_eq!(client.get_setting("foo"), Some("foo"));
+        assert_eq!(client.get_setting("bar"), Some("bar"));
+        assert_eq!(client.get_setting("baz"), None);
 
-        assert_eq!(client.set_option("foo", "foo_2"), Some("foo".to_string()));
-        assert_eq!(client.set_option("bar", "bar_2"), Some("bar".to_string()));
+        assert_eq!(client.set_setting("foo", "foo_2"), Some("foo".to_string()));
+        assert_eq!(client.set_setting("bar", "bar_2"), Some("bar".to_string()));
     }
 }

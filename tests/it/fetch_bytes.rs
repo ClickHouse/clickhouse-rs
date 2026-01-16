@@ -30,7 +30,7 @@ async fn multiple_chunks() {
     let mut cursor = client
         .query("SELECT number FROM system.numbers LIMIT 3")
         // each number will go into a separate chunk
-        .with_option("max_block_size", "1")
+        .with_setting("max_block_size", "1")
         .fetch_bytes("CSV")
         .unwrap();
 
@@ -52,8 +52,8 @@ async fn error() {
 
     let mut bytes_cursor = client
         .query("SELECT sleepEachRow(0.05) AS s FROM system.numbers LIMIT 30")
-        .with_option("max_block_size", "1")
-        .with_option("max_execution_time", "0.01")
+        .with_setting("max_block_size", "1")
+        .with_setting("max_execution_time", "0.01")
         .fetch_bytes("JSONEachRow")
         .unwrap();
 
@@ -72,7 +72,7 @@ async fn lines() {
             .query("SELECT number FROM system.numbers LIMIT {limit: Int32}")
             .param("limit", n)
             // each number will go into a separate chunk
-            .with_option("max_block_size", "1")
+            .with_setting("max_block_size", "1")
             .fetch_bytes("CSV")
             .unwrap()
             .lines();
@@ -96,7 +96,7 @@ async fn collect() {
             .query("SELECT number FROM system.numbers LIMIT {limit: Int32}")
             .param("limit", n)
             // each number will go into a separate chunk
-            .with_option("max_block_size", "1")
+            .with_setting("max_block_size", "1")
             .fetch_bytes("CSV")
             .unwrap();
 
@@ -116,7 +116,7 @@ async fn async_read() {
     let mut cursor = client
         .query("SELECT number, number FROM system.numbers LIMIT {limit: Int32}")
         .param("limit", limit)
-        .with_option("max_block_size", "3")
+        .with_setting("max_block_size", "3")
         .fetch_bytes("CSV")
         .unwrap();
 

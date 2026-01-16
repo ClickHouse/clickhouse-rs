@@ -598,7 +598,7 @@ async fn low_cardinality() {
             ORDER BY a
             ",
         )
-        .with_option("allow_suspicious_low_cardinality_types", "1")
+        .with_setting("allow_suspicious_low_cardinality_types", "1")
         .execute()
         .await
         .unwrap();
