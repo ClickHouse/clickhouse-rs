@@ -19,16 +19,16 @@ async fn wait_end_of_query() {
 
 async fn max_execution_time(mut client: Client, wait_end_of_query: bool) -> u8 {
     if wait_end_of_query {
-        client = client.with_option("wait_end_of_query", "1")
+        client = client.with_setting("wait_end_of_query", "1")
     }
 
     // TODO: check different `timeout_overflow_mode`
     let mut cursor = client
         .with_compression(Compression::None)
         // fails on the 4th row
-        .with_option("max_execution_time", "0.1")
+        .with_setting("max_execution_time", "0.1")
         // force streaming one row in a chunk
-        .with_option("max_block_size", "1")
+        .with_setting("max_block_size", "1")
         .query("SELECT sleepEachRow(0.03) AS s FROM system.numbers LIMIT 5")
         .fetch::<u8>()
         .unwrap();
@@ -86,7 +86,7 @@ async fn deferred_lz4() {
     }
 
     let mut cursor = client
-        .with_option("max_execution_time", "0.1")
+        .with_setting("max_execution_time", "0.1")
         .query("SELECT no FROM test")
         .fetch::<u32>()
         .unwrap();

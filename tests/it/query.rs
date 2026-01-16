@@ -228,40 +228,40 @@ async fn all_floats() {
 }
 
 #[tokio::test]
-async fn keeps_client_options() {
+async fn keeps_client_settings() {
     let (client_setting_name, client_setting_value) = ("max_block_size", "1000");
     let (query_setting_name, query_setting_value) = ("date_time_input_format", "basic");
 
-    let client = prepare_database!().with_option(client_setting_name, client_setting_value);
+    let client = prepare_database!().with_setting(client_setting_name, client_setting_value);
 
     let value = client
         .query("SELECT value FROM system.settings WHERE name = ? OR name = ? ORDER BY name")
         .bind(query_setting_name)
         .bind(client_setting_name)
-        .with_option(query_setting_name, query_setting_value)
+        .with_setting(query_setting_name, query_setting_value)
         .fetch_all::<String>()
         .await
         .unwrap();
 
-    // should keep the client options
+    // should keep the client settings
     assert_eq!(value, vec!(query_setting_value, client_setting_value));
 }
 
 #[tokio::test]
-async fn overrides_client_options() {
+async fn overrides_client_settings() {
     let (setting_name, setting_value, override_value) = ("max_block_size", "1000", "2000");
 
-    let client = prepare_database!().with_option(setting_name, setting_value);
+    let client = prepare_database!().with_setting(setting_name, setting_value);
 
     let value = client
         .query("SELECT value FROM system.settings WHERE name = ?")
         .bind(setting_name)
-        .with_option(setting_name, override_value)
+        .with_setting(setting_name, override_value)
         .fetch_one::<String>()
         .await
         .unwrap();
 
-    // should override the client options
+    // should override the client settings
     assert_eq!(value, override_value);
 }
 

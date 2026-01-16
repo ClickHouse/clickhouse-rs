@@ -33,11 +33,11 @@ async fn main() -> Result<()> {
             ORDER BY id",
         )
         .bind(Identifier(table_name))
-        .with_option("allow_experimental_variant_type", "1")
+        .with_setting("allow_experimental_variant_type", "1")
         // This is required only if we are mixing similar types in the Variant definition
         // In this case, this is various Int/UInt types, Float32/Float64, and String/FixedString
-        // Omit this option if there are no similar types in the definition
-        .with_option("allow_suspicious_variant_types", "1")
+        // Omit this setting if there are no similar types in the definition
+        .with_setting("allow_suspicious_variant_types", "1")
         .execute()
         .await?;
 

@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 use std::panic::AssertUnwindSafe;
 
 #[tokio::test]
-async fn keeps_client_options() {
-    let table_name = "insert_keeps_client_options";
+async fn keeps_client_settings() {
+    let table_name = "insert_keeps_client_settings";
     let query_id = uuid::Uuid::new_v4().to_string();
     let (client_setting_name, client_setting_value) = ("max_block_size", "1000");
     let (insert_setting_name, insert_setting_value) = ("async_insert", "1");
 
-    let client = prepare_database!().with_option(client_setting_name, client_setting_value);
+    let client = prepare_database!().with_setting(client_setting_name, client_setting_value);
     create_simple_table(&client, table_name).await;
 
     let row = SimpleRow::new(42, "foo");
@@ -20,8 +20,8 @@ async fn keeps_client_options() {
         .insert::<SimpleRow>(table_name)
         .await
         .unwrap()
-        .with_option(insert_setting_name, insert_setting_value)
-        .with_option("query_id", &query_id);
+        .with_setting(insert_setting_name, insert_setting_value)
+        .with_setting("query_id", &query_id);
 
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
@@ -49,14 +49,14 @@ async fn keeps_client_options() {
         has_insert_setting,
         "{}",
         format!(
-            "should contain {insert_setting_name} = {insert_setting_value} (from the insert options)"
+            "should contain {insert_setting_name} = {insert_setting_value} (from the insert settings)"
         )
     );
     assert!(
         has_client_setting,
         "{}",
         format!(
-            "should contain {client_setting_name} = {client_setting_value} (from the client options)"
+            "should contain {client_setting_name} = {client_setting_value} (from the client settings)"
         )
     );
 
@@ -65,12 +65,12 @@ async fn keeps_client_options() {
 }
 
 #[tokio::test]
-async fn overrides_client_options() {
-    let table_name = "insert_overrides_client_options";
+async fn overrides_client_settings() {
+    let table_name = "insert_overrides_client_settings";
     let query_id = uuid::Uuid::new_v4().to_string();
     let (setting_name, setting_value, override_value) = ("async_insert", "0", "1");
 
-    let client = prepare_database!().with_option(setting_name, setting_value);
+    let client = prepare_database!().with_setting(setting_name, setting_value);
     create_simple_table(&client, table_name).await;
 
     let row = SimpleRow::new(42, "foo");
@@ -79,8 +79,8 @@ async fn overrides_client_options() {
         .insert::<SimpleRow>(table_name)
         .await
         .unwrap()
-        .with_option(setting_name, override_value)
-        .with_option("query_id", &query_id);
+        .with_setting(setting_name, override_value)
+        .with_setting("query_id", &query_id);
 
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
@@ -105,7 +105,7 @@ async fn overrides_client_options() {
     assert!(
         has_setting_override,
         "{}",
-        format!("should contain {setting_name} = {override_value} (from the insert options)")
+        format!("should contain {setting_name} = {override_value} (from the insert settings)")
     );
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
@@ -126,7 +126,7 @@ async fn empty_insert() {
         .insert::<SimpleRow>(table_name)
         .await
         .unwrap()
-        .with_option("query_id", &query_id);
+        .with_setting("query_id", &query_id);
     insert.end().await.unwrap();
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
@@ -176,7 +176,7 @@ async fn rename_insert() {
         .insert::<RenameRow>(table_name)
         .await
         .unwrap()
-        .with_option("query_id", &query_id);
+        .with_setting("query_id", &query_id);
 
     insert.write(&row).await.unwrap();
     insert.end().await.unwrap();
