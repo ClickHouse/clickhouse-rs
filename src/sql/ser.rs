@@ -425,7 +425,7 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
 
     #[inline]
     fn serialize_none(self) -> std::result::Result<Self::Ok, Self::Error> {
-        self.writer.write_str("NULL")?;
+        self.writer.write_str("\n")?;
         Ok(())
     }
 
