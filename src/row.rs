@@ -194,6 +194,8 @@ impl<R> RowOwned for R where R: 'static + for<'a> Row<Value<'a> = R> {}
 #[doc(hidden)]
 pub trait Primitive {}
 
+impl<T: Primitive> Primitive for Option<T> {}
+
 macro_rules! impl_primitive_for {
     ($t:ty, $($other:tt)*) => {
         impl Primitive for $t {}

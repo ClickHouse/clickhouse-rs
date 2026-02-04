@@ -109,6 +109,14 @@ async fn server_side_param() {
     assert_eq!(result, "string");
 
     let result = client
+        .query("SELECT {val1: Nullable(String)} AS result")
+        .param("val1", Option::<String>::None)
+        .fetch_one::<Option<String>>()
+        .await
+        .expect("failed to fetch string");
+    assert_eq!(result, None);
+
+    let result = client
         .query("SELECT {val1: String} AS result")
         .param("val1", "\x01\x02\x03\\ \"\'")
         .fetch_one::<String>()
