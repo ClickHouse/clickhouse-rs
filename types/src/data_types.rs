@@ -1,6 +1,7 @@
 use crate::error::TypesError;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
 /// A definition of a column in the result set,
 /// taken out of the `RowBinaryWithNamesAndTypes` header.
@@ -95,6 +96,9 @@ pub enum DataTypeNode {
     Dynamic,
     JSON,
 
+    // TODO: Rename for better representation
+    JsonNew(Vec<(String, Box<DataTypeNode>)>),
+
     Point,
     Ring,
     LineString,
@@ -140,7 +144,7 @@ impl DataTypeNode {
             "Polygon" => Ok(Self::Polygon),
             "MultiPolygon" => Ok(Self::MultiPolygon),
 
-            str if str.starts_with("JSON") => Ok(Self::JSON),
+            str if str.starts_with("JSON(") => parse_json(str),
 
             str if str.starts_with("Decimal") => parse_decimal(str),
             str if str.starts_with("DateTime64") => parse_datetime64(str),
@@ -172,6 +176,14 @@ impl DataTypeNode {
             DataTypeNode::LowCardinality(inner) => inner,
             _ => self,
         }
+    }
+}
+
+impl FromStr for DataTypeNode {
+    type Err = TypesError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        DataTypeNode::new(s)
     }
 }
 
@@ -278,6 +290,9 @@ impl Display for DataTypeNode {
             MultiLineString => write!(f, "MultiLineString"),
             Polygon => write!(f, "Polygon"),
             MultiPolygon => write!(f, "MultiPolygon"),
+            JsonNew(json) => {
+                write!(f, "{:?}", json)
+            }
         }
     }
 }
@@ -630,6 +645,35 @@ fn parse_map(input: &str) -> Result<DataTypeNode, TypesError> {
     Err(TypesError::TypeParsingError(format!(
         "Invalid Map format, expected Map(KeyType, ValueType), got {input}"
     )))
+}
+
+fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
+    let columns = remove_json_header(input)?.split(',').collect::<Vec<_>>();
+
+    let inner_types = columns
+        .into_iter()
+        .map(|column| {
+            let map = column.trim().split(' ').collect::<Vec<_>>();
+            let key_type = map[0].to_string();
+            let value_type = map[1].parse::<DataTypeNode>()?;
+
+            Ok((key_type, Box::new(value_type)))
+        })
+        .collect::<Result<Vec<(String, Box<DataTypeNode>)>, TypesError>>()?;
+
+    Ok(DataTypeNode::JsonNew(inner_types))
+}
+
+fn remove_json_header(input: &str) -> Result<&str, TypesError> {
+    if input.starts_with("JSON") && input.ends_with(')') {
+        let new = input[5..].trim();
+
+        Ok(new.trim_end_matches(')'))
+    } else {
+        Err(TypesError::TypeParsingError(format!(
+            "Invalid JSON format, expected JSON(Type), got {input}"
+        )))
+    }
 }
 
 fn parse_tuple(input: &str) -> Result<DataTypeNode, TypesError> {
