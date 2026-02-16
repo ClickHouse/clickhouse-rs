@@ -229,10 +229,7 @@ pub(crate) enum InnerDataTypeValidatorKind<'caller> {
     Map(&'caller [Box<DataTypeNode>; 2], MapValidatorState),
     /// Allows supporting ClickHouse `Map<K, V>` defined as `Vec<(K, V)>` in Rust
     MapAsSequence(&'caller [Box<DataTypeNode>; 2], MapAsSequenceValidatorState),
-    MapWithHint(
-        &'caller Vec<(String, Box<DataTypeNode>)>,
-        MapAsSequenceValidatorState,
-    ),
+    JsonWithHint(&'caller Vec<(String, Box<DataTypeNode>)>),
     Tuple(&'caller [DataTypeNode]),
     /// This is a hack to support deserializing tuples/arrays (and not structs) from fetch calls
     RootTuple(&'caller [Column], usize),
@@ -294,9 +291,13 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                     }
                 }
             }
-            InnerDataTypeValidatorKind::MapWithHint(_kv, state) => match state {
-                _ => todo!(),
-            },
+            InnerDataTypeValidatorKind::JsonWithHint(kv) => {
+                kv.iter().try_for_each(|(_, value)| {
+                    validate_impl(inner.root, value, &serde_type, true).map(|_| ())
+                })?;
+
+                Ok(None)
+            }
             InnerDataTypeValidatorKind::Array(inner_type) => {
                 validate_impl(inner.root, inner_type, &serde_type, true)
             }
@@ -530,12 +531,9 @@ fn validate_impl<'serde, 'caller, R: Row>(
         SerdeType::F32 if data_type == &DataTypeNode::Float32 => Ok(None),
         SerdeType::F64 if data_type == &DataTypeNode::Float64 => Ok(None),
         SerdeType::Str | SerdeType::String => match data_type {
-            DataTypeNode::JsonNew(kv) => Ok(Some(InnerDataTypeValidator {
+            DataTypeNode::JsonWithHint(kv) => Ok(Some(InnerDataTypeValidator {
                 root,
-                kind: InnerDataTypeValidatorKind::MapWithHint(
-                    kv,
-                    MapAsSequenceValidatorState::Tuple,
-                ),
+                kind: InnerDataTypeValidatorKind::JsonWithHint(kv),
             })),
             DataTypeNode::String | DataTypeNode::JSON => Ok(None),
             _ => root.err_on_schema_mismatch(data_type, serde_type, is_inner),
