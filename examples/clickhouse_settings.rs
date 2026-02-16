@@ -1,4 +1,4 @@
-use clickhouse::{error::Result, Client};
+use clickhouse::{Client, error::Result};
 
 /// Besides [`Client::query`], it works similarly with [`Client::insert`] and [`Client::inserter`].
 #[tokio::main]

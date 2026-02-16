@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures_util::Stream;
 use std::{
     pin::pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 /// A cursor over raw bytes of a query response.

@@ -43,13 +43,13 @@ pub enum Error {
     TimedOut,
     #[error("error while parsing columns header from the response: {0}")]
     InvalidColumnsHeader(#[source] BoxedError),
+    #[error("schema mismatch: {0}")]
+    SchemaMismatch(String),
     #[error("unsupported: {0}")]
     Unsupported(String),
     #[error("{0}")]
     Other(BoxedError),
 }
-
-assert_impl_all!(Error: StdError, Send, Sync);
 
 impl From<clickhouse_types::error::TypesError> for Error {
     fn from(err: clickhouse_types::error::TypesError) -> Self {
@@ -112,17 +112,30 @@ impl From<io::Error> for Error {
     }
 }
 
-#[test]
-fn roundtrip_io_error() {
-    let orig = Error::NotEnoughData;
+#[cfg(tests)]
+mod tests {
+    use crate::error::Error;
+    use std::io;
 
-    // Error -> io::Error
-    let orig_str = orig.to_string();
-    let io = io::Error::from(orig);
-    assert_eq!(io.kind(), io::ErrorKind::Other);
-    assert_eq!(io.to_string(), orig_str);
+    #[test]
+    fn roundtrip_io_error() {
+        let orig = Error::NotEnoughData;
 
-    // io::Error -> Error
-    let orig = Error::from(io);
-    assert!(matches!(orig, Error::NotEnoughData));
+        // Error -> io::Error
+        let orig_str = orig.to_string();
+        let io = io::Error::from(orig);
+        assert_eq!(io.kind(), io::ErrorKind::Other);
+        assert_eq!(io.to_string(), orig_str);
+
+        // io::Error -> Error
+        let orig = Error::from(io);
+        assert!(matches!(orig, Error::NotEnoughData));
+    }
+
+    #[test]
+    fn error_traits() {
+        fn assert_traits<T: std::error::Error + Send + Sync>() {}
+
+        assert_traits::<Error>();
+    }
 }

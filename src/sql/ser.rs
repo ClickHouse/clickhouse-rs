@@ -1,12 +1,12 @@
 use std::fmt::{self, Write};
 
+use super::escape;
+use crate::types::{Int256, UInt256};
 use serde::{
-    ser::{self, SerializeSeq, SerializeTuple, Serializer},
     Serialize,
+    ser::{self, SerializeSeq, SerializeTuple, Serializer},
 };
 use thiserror::Error;
-
-use super::escape;
 
 // === SerializerError ===
 
@@ -37,6 +37,8 @@ type Impossible = ser::Impossible<(), SerializerError>;
 
 struct SqlSerializer<'a, W> {
     writer: &'a mut W,
+    in_param: bool,
+    skip_next_string_escape: bool,
 }
 
 macro_rules! unsupported {
@@ -117,19 +119,36 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     #[inline]
     fn serialize_i128(self, value: i128) -> Result {
-        write!(self.writer, "{value}::Int128")?;
+        if self.in_param {
+            // Casts aren't allowed in parameters, but the type is already fixed anyway.
+            write!(self.writer, "{value}")?;
+        } else {
+            write!(self.writer, "{value}::Int128")?;
+        }
+
         Ok(())
     }
 
     #[inline]
     fn serialize_u128(self, value: u128) -> Result {
-        write!(self.writer, "{value}::UInt128")?;
+        if self.in_param {
+            write!(self.writer, "{value}")?;
+        } else {
+            write!(self.writer, "{value}::UInt128")?;
+        }
+
         Ok(())
     }
 
     #[inline]
-    fn serialize_str(self, value: &str) -> Result {
-        escape::string(value, self.writer)?;
+    fn serialize_str(mut self, value: &str) -> Result {
+        if self.skip_next_string_escape {
+            self.skip_next_string_escape = false;
+            self.writer.write_str(value)?;
+        } else {
+            escape::string(value, self.writer)?;
+        }
+
         Ok(())
     }
 
@@ -138,6 +157,7 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
         self.writer.write_char('[')?;
         Ok(SqlListSerializer {
             writer: self.writer,
+            in_param: self.in_param,
             has_items: false,
             closing_char: ']',
         })
@@ -148,6 +168,7 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
         self.writer.write_char('(')?;
         Ok(SqlListSerializer {
             writer: self.writer,
+            in_param: self.in_param,
             has_items: false,
             closing_char: ')',
         })
@@ -177,11 +198,40 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
     #[inline]
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
-        self,
-        _name: &'static str,
+        mut self,
+        name: &'static str,
         value: &T,
     ) -> Result {
-        value.serialize(self)
+        match name {
+            UInt256::SERDE_NAME => {
+                value.serialize(SqlSerializer {
+                    writer: &mut self.writer,
+                    in_param: self.in_param,
+                    skip_next_string_escape: true,
+                })?;
+
+                if !self.in_param {
+                    write!(self.writer, "::UInt256")?;
+                }
+
+                Ok(())
+            }
+            Int256::SERDE_NAME => {
+                value.serialize(SqlSerializer {
+                    writer: &mut self.writer,
+                    in_param: self.in_param,
+                    skip_next_string_escape: true,
+                })?;
+
+                if !self.in_param {
+                    write!(self.writer, "::Int256")?;
+                }
+
+                Ok(())
+            }
+
+            _ => value.serialize(self),
+        }
     }
 
     #[inline]
@@ -237,6 +287,7 @@ impl<'a, W: Write> Serializer for SqlSerializer<'a, W> {
 
 struct SqlListSerializer<'a, W> {
     writer: &'a mut W,
+    in_param: bool,
     has_items: bool,
     closing_char: char,
 }
@@ -258,6 +309,8 @@ impl<W: Write> SerializeSeq for SqlListSerializer<'_, W> {
 
         value.serialize(SqlSerializer {
             writer: self.writer,
+            in_param: self.in_param,
+            skip_next_string_escape: false,
         })
     }
 
@@ -305,7 +358,6 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
 
     unsupported!(
         serialize_map(Option<usize>) -> Result<Impossible>,
-        serialize_bytes(&[u8]),
         serialize_unit,
         serialize_unit_struct(&'static str),
     );
@@ -327,6 +379,11 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
     );
 
     #[inline]
+    fn serialize_bytes(self, v: &[u8]) -> std::result::Result<Self::Ok, Self::Error> {
+        Ok(escape::escape_ascii(v, self.writer)?)
+    }
+
+    #[inline]
     fn serialize_char(self, value: char) -> Result {
         let mut tmp = [0u8; 4];
         self.serialize_str(value.encode_utf8(&mut tmp))
@@ -344,6 +401,7 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
         self.writer.write_char('[')?;
         Ok(SqlListSerializer {
             writer: self.writer,
+            in_param: true,
             has_items: false,
             closing_char: ']',
         })
@@ -354,6 +412,7 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
         self.writer.write_char('(')?;
         Ok(SqlListSerializer {
             writer: self.writer,
+            in_param: true,
             has_items: false,
             closing_char: ')',
         })
@@ -366,7 +425,7 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
 
     #[inline]
     fn serialize_none(self) -> std::result::Result<Self::Ok, Self::Error> {
-        self.writer.write_str("NULL")?;
+        self.writer.write_str(r"\N")?;
         Ok(())
     }
 
@@ -383,11 +442,19 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
 
     #[inline]
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
-        self,
-        _name: &'static str,
+        mut self,
+        name: &'static str,
         value: &T,
     ) -> Result {
-        value.serialize(self)
+        if matches!(name, UInt256::SERDE_NAME | Int256::SERDE_NAME) {
+            value.serialize(SqlSerializer {
+                writer: &mut self.writer,
+                in_param: true,
+                skip_next_string_escape: true,
+            })
+        } else {
+            value.serialize(self)
+        }
     }
 
     #[inline]
@@ -443,7 +510,11 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
 
 pub(crate) fn write_arg(writer: &mut impl Write, value: &impl Serialize) -> Result<(), String> {
     value
-        .serialize(SqlSerializer { writer })
+        .serialize(SqlSerializer {
+            writer,
+            in_param: false,
+            skip_next_string_escape: false,
+        })
         .map_err(|err| err.to_string())
 }
 
@@ -456,6 +527,19 @@ pub(crate) fn write_param(writer: &mut impl Write, value: &impl Serialize) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check_param(v: impl Serialize) -> String {
+        let mut out = String::new();
+        write_param(&mut out, &v).unwrap();
+        out
+    }
+
+    #[test]
+    fn it_writes_param_options() {
+        assert_eq!(check_param(None::<i32>), r"\N");
+        assert_eq!(check_param(Some(32)), "32");
+        assert_eq!(check_param(Some(vec![42, 43])), "[42,43]");
+    }
 
     fn check(v: impl Serialize) -> String {
         let mut out = String::new();

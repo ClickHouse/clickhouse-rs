@@ -115,7 +115,7 @@ pub trait Row {
 pub trait RowRead: for<'a> Row<Value<'a>: Deserialize<'a>> {}
 impl<R> RowRead for R where R: for<'a> Row<Value<'a>: Deserialize<'a>> {}
 
-/// Represents a row that can be writted into the database.
+/// Represents a row that can be written into the database.
 ///
 /// This trait is implemented automatically for all `Row + Serialize` types.
 ///
@@ -194,6 +194,8 @@ impl<R> RowOwned for R where R: 'static + for<'a> Row<Value<'a> = R> {}
 #[doc(hidden)]
 pub trait Primitive {}
 
+impl<T: Primitive> Primitive for Option<T> {}
+
 macro_rules! impl_primitive_for {
     ($t:ty, $($other:tt)*) => {
         impl Primitive for $t {}
@@ -204,7 +206,24 @@ macro_rules! impl_primitive_for {
 
 // TODO: char? &str? SocketAddr? Path? Duration? NonZero*?
 impl_primitive_for![
-    bool, String, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64,
+    bool,
+    String,
+    u8,
+    u16,
+    u32,
+    u64,
+    u128,
+    usize,
+    i8,
+    i16,
+    i32,
+    i64,
+    i128,
+    isize,
+    f32,
+    f64,
+    bytes::Bytes,
+    bytes::BytesMut,
 ];
 
 macro_rules! count_tokens {

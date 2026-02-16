@@ -1,4 +1,4 @@
-use clickhouse_types::{parse_rbwnat_columns_header, Column, DataTypeNode};
+use clickhouse_types::{Column, DataTypeNode, parse_rbwnat_columns_header};
 
 #[tokio::test]
 async fn header_parsing() {

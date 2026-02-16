@@ -1,8 +1,11 @@
-use crate::row::RowKind;
 use crate::Row;
+use crate::error::Error;
+use crate::error::Result;
+use crate::row::RowKind;
 use clickhouse_types::Column;
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum AccessType {
@@ -32,49 +35,64 @@ pub(crate) struct RowMetadata {
     pub(crate) access_type: AccessType,
 }
 
+pub(crate) struct InsertMetadata {
+    pub(crate) row_metadata: RowMetadata,
+    pub(crate) column_default_kinds: Vec<ColumnDefaultKind>,
+    pub(crate) column_lookup: HashMap<String, usize>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ColumnDefaultKind {
+    Unset,
+    Default,
+    Materialized,
+    Ephemeral,
+    Alias,
+}
+
 impl RowMetadata {
-    pub(crate) fn new_for_cursor<T: Row>(columns: Vec<Column>) -> Self {
+    pub(crate) fn new_for_cursor<T: Row>(columns: Vec<Column>) -> Result<Self> {
         let access_type = match T::KIND {
             RowKind::Primitive => {
                 if columns.len() != 1 {
-                    panic!(
+                    return Err(Error::SchemaMismatch(format!(
                         "While processing a primitive row: \
                         expected only 1 column in the database schema, \
                         but got {} instead.\n#### All schema columns:\n{}",
                         columns.len(),
                         join_panic_schema_hint(&columns),
-                    );
+                    )));
                 }
                 AccessType::WithSeqAccess // ignored
             }
             RowKind::Tuple => {
                 if T::COLUMN_COUNT != columns.len() {
-                    panic!(
+                    return Err(Error::SchemaMismatch(format!(
                         "While processing a tuple row: database schema has {} columns, \
                         but the tuple definition has {} fields in total.\
                         \n#### All schema columns:\n{}",
                         columns.len(),
                         T::COLUMN_COUNT,
                         join_panic_schema_hint(&columns),
-                    );
+                    )));
                 }
                 AccessType::WithSeqAccess // ignored
             }
             RowKind::Vec => {
                 if columns.len() != 1 {
-                    panic!(
+                    return Err(Error::SchemaMismatch(format!(
                         "While processing a row defined as a vector: \
                         expected only 1 column in the database schema, \
                         but got {} instead.\n#### All schema columns:\n{}",
                         columns.len(),
                         join_panic_schema_hint(&columns),
-                    );
+                    )));
                 }
                 AccessType::WithSeqAccess // ignored
             }
             RowKind::Struct => {
                 if columns.len() != T::COLUMN_NAMES.len() {
-                    panic!(
+                    return Err(Error::SchemaMismatch(format!(
                         "While processing struct {}: database schema has {} columns, \
                         but the struct definition has {} fields.\
                         \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
@@ -83,7 +101,7 @@ impl RowMetadata {
                         T::COLUMN_NAMES.len(),
                         join_panic_schema_hint(T::COLUMN_NAMES),
                         join_panic_schema_hint(&columns),
-                    );
+                    )));
                 }
                 let mut mapping = Vec::with_capacity(T::COLUMN_NAMES.len());
                 let mut expected_index = 0;
@@ -97,15 +115,14 @@ impl RowMetadata {
                         expected_index += 1;
                         mapping.push(index);
                     } else {
-                        panic!(
-                            "While processing struct {}: database schema has a column {} \
+                        return Err(Error::SchemaMismatch(format!(
+                            "While processing struct {}: database schema has a column {col} \
                             that was not found in the struct definition.\
                             \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
                             T::NAME,
-                            col,
                             join_panic_schema_hint(T::COLUMN_NAMES),
                             join_panic_schema_hint(&columns),
-                        );
+                        )));
                     }
                 }
                 if should_use_map {
@@ -115,58 +132,10 @@ impl RowMetadata {
                 }
             }
         };
-        Self {
+        Ok(Self {
             columns,
             access_type,
-        }
-    }
-
-    pub(crate) fn new_for_insert<T: Row>(columns: Vec<Column>) -> Self {
-        if T::KIND != RowKind::Struct {
-            panic!(
-                "SerializerRowMetadata can only be created for structs, \
-                but got {:?} instead.\n#### All schema columns:\n{}",
-                T::KIND,
-                join_panic_schema_hint(&columns),
-            );
-        }
-        if columns.len() != T::COLUMN_NAMES.len() {
-            panic!(
-                "While processing struct {}: database schema has {} columns, \
-                but the struct definition has {} fields.\
-                \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
-                T::NAME,
-                columns.len(),
-                T::COLUMN_NAMES.len(),
-                join_panic_schema_hint(T::COLUMN_NAMES),
-                join_panic_schema_hint(&columns),
-            );
-        }
-
-        let mut result_columns: Vec<Column> = Vec::with_capacity(columns.len());
-        let db_columns_lookup: HashMap<&str, &Column> =
-            columns.iter().map(|col| (col.name.as_str(), col)).collect();
-
-        for struct_column_name in T::COLUMN_NAMES {
-            match db_columns_lookup.get(*struct_column_name) {
-                Some(col) => result_columns.push((*col).clone()),
-                None => {
-                    panic!(
-                        "While processing struct {}: database schema has no column named {}.\
-                        \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
-                        T::NAME,
-                        struct_column_name,
-                        join_panic_schema_hint(T::COLUMN_NAMES),
-                        join_panic_schema_hint(&db_columns_lookup.values().collect::<Vec<_>>()),
-                    );
-                }
-            }
-        }
-
-        Self {
-            columns: result_columns,
-            access_type: AccessType::WithSeqAccess, // ignored
-        }
+        })
     }
 
     /// Returns the index of the column in the database schema
@@ -176,17 +145,19 @@ impl RowMetadata {
     /// since we write the header with the field order defined in the struct,
     /// and ClickHouse server figures out the rest on its own.
     #[inline]
-    pub(crate) fn get_schema_index(&self, struct_idx: usize) -> usize {
+    pub(crate) fn get_schema_index(&self, struct_idx: usize) -> Result<usize> {
         match &self.access_type {
             AccessType::WithMapAccess(mapping) => {
                 if struct_idx < mapping.len() {
-                    mapping[struct_idx]
+                    Ok(mapping[struct_idx])
                 } else {
                     // unreachable
-                    panic!("Struct has more fields than columns in the database schema")
+                    Err(Error::SchemaMismatch(
+                        "Struct has more fields than columns in the database schema".to_string(),
+                    ))
                 }
             }
-            AccessType::WithSeqAccess => struct_idx, // should be unreachable
+            AccessType::WithSeqAccess => Ok(struct_idx), // should be unreachable
         }
     }
 
@@ -199,11 +170,120 @@ impl RowMetadata {
     }
 }
 
-fn join_panic_schema_hint<T: Display>(col: &[T]) -> String {
-    if col.is_empty() {
-        return String::default();
+impl FromStr for ColumnDefaultKind {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "" => Ok(Self::Unset),
+            "DEFAULT" => Ok(Self::Default),
+            "MATERIALIZED" => Ok(Self::Materialized),
+            "EPHEMERAL" => Ok(Self::Ephemeral),
+            "ALIAS" => Ok(Self::Alias),
+            other => Err(Error::Other(
+                format!("unknown column default_kind {other}").into(),
+            )),
+        }
     }
-    col.iter()
+}
+
+impl ColumnDefaultKind {
+    pub(crate) fn is_immutable(self) -> bool {
+        matches!(self, Self::Materialized | Self::Alias)
+    }
+
+    pub(crate) fn has_default(self) -> bool {
+        matches!(self, Self::Default | Self::Materialized | Self::Alias)
+    }
+
+    pub(crate) fn to_str(self) -> &'static str {
+        match self {
+            ColumnDefaultKind::Unset => "",
+            ColumnDefaultKind::Default => "DEFAULT",
+            ColumnDefaultKind::Materialized => "MATERIALIZED",
+            ColumnDefaultKind::Ephemeral => "EPHEMERAL",
+            ColumnDefaultKind::Alias => "ALIAS",
+        }
+    }
+}
+
+impl Display for ColumnDefaultKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.to_str())
+    }
+}
+
+impl InsertMetadata {
+    pub(crate) fn to_row<T: Row>(&self) -> Result<RowMetadata> {
+        if T::KIND != RowKind::Struct {
+            return Err(Error::SchemaMismatch(format!(
+                "SerializerRowMetadata can only be created for structs, \
+                but got {:?} instead.\n#### All schema columns:\n{}",
+                T::KIND,
+                join_panic_schema_hint(&self.row_metadata.columns),
+            )));
+        }
+
+        let mut result_columns: Vec<Column> = Vec::with_capacity(T::COLUMN_COUNT);
+        let mut set_columns: Vec<bool> = vec![false; self.row_metadata.columns.len()];
+
+        for struct_column_name in T::COLUMN_NAMES {
+            match self.column_lookup.get(*struct_column_name) {
+                Some(&col) => {
+                    if self.column_default_kinds[col].is_immutable() {
+                        return Err(Error::SchemaMismatch(format!(
+                            "While processing struct {}: column {struct_column_name} is immutable (declared as `{}`)",
+                            T::NAME,
+                            self.column_default_kinds[col],
+                        )));
+                    }
+
+                    // TODO: what should happen if a column is mentioned multiple times?
+                    set_columns[col] = true;
+
+                    result_columns.push(self.row_metadata.columns[col].clone())
+                }
+                None => {
+                    return Err(Error::SchemaMismatch(format!(
+                        "While processing struct {}: database schema has no column named {struct_column_name}.\
+                        \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
+                        T::NAME,
+                        join_panic_schema_hint(T::COLUMN_NAMES),
+                        join_panic_schema_hint(&self.row_metadata.columns),
+                    )));
+                }
+            }
+        }
+
+        let missing_columns = set_columns.iter().enumerate().filter_map(|(col, &is_set)| {
+            if is_set || self.column_default_kinds[col].has_default() {
+                return None;
+            }
+
+            Some(&self.row_metadata.columns[col])
+        });
+
+        let missing_columns_hint = join_panic_schema_hint(missing_columns);
+
+        if !missing_columns_hint.is_empty() {
+            return Err(Error::SchemaMismatch(format!(
+                "While processing struct {}: the following non-default columns are missing:\n{missing_columns_hint}\
+                 \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
+                T::NAME,
+                join_panic_schema_hint(T::COLUMN_NAMES),
+                join_panic_schema_hint(&self.row_metadata.columns),
+            )));
+        }
+
+        Ok(RowMetadata {
+            columns: result_columns,
+            access_type: AccessType::WithSeqAccess, // ignored
+        })
+    }
+}
+
+fn join_panic_schema_hint<T: Display>(col: impl IntoIterator<Item = T>) -> String {
+    col.into_iter()
         .map(|c| format!("- {c}"))
         .collect::<Vec<String>>()
         .join("\n")

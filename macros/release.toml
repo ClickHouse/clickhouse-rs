@@ -1,0 +1,4 @@
+pre-release-commit-message = "chore: release clickhouse-macros {{version}}"
+# otherwise `cargo release` reads `../release.toml` and tries to process the replacement directives for this directory
+pre-release-replacements = []
+allow-branch = ["main"]

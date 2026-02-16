@@ -1,6 +1,6 @@
 use clickhouse::{Client, Compression};
 
-use crate::{create_simple_table, SimpleRow};
+use crate::{SimpleRow, create_simple_table};
 
 async fn check(client: Client) {
     create_simple_table(&client, "test").await;

@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use time::{macros::datetime, Date, OffsetDateTime};
+use time::{Date, OffsetDateTime, macros::datetime};
 
 use clickhouse::Row;
 

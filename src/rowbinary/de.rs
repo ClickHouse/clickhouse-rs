@@ -1,14 +1,16 @@
+use crate::Row;
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
-use crate::Row;
+use crate::types::int256;
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
+use serde::de::value::BytesDeserializer;
 use serde::{
-    de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
     Deserialize,
+    de::{DeserializeSeed, Deserializer, EnumAccess, SeqAccess, VariantAccess, Visitor},
 };
 use std::marker::PhantomData;
 use std::{convert::TryFrom, str};
@@ -79,12 +81,13 @@ where
     fn inner(
         &mut self,
         serde_type: SerdeType,
-    ) -> RowBinaryDeserializer<'_, 'data, R, V::Inner<'_>> {
-        RowBinaryDeserializer {
+    ) -> Result<RowBinaryDeserializer<'_, 'data, R, V::Inner<'_>>> {
+        let validator = self.validator.validate(serde_type)?;
+        Ok(RowBinaryDeserializer {
+            validator,
             input: self.input,
-            validator: self.validator.validate(serde_type),
             _marker: PhantomData,
-        }
+        })
     }
 
     fn read_vec(&mut self, size: usize) -> Result<Vec<u8>> {
@@ -109,7 +112,7 @@ macro_rules! impl_num {
     ($ty:ty, $deser_method:ident, $visitor_method:ident, $reader_method:ident, $serde_type:expr) => {
         #[inline(always)]
         fn $deser_method<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-            self.validator.validate($serde_type);
+            self.validator.validate($serde_type)?;
             ensure_size(&mut self.input, core::mem::size_of::<$ty>())?;
             let value = self.input.$reader_method();
             visitor.$visitor_method(value)
@@ -121,10 +124,10 @@ macro_rules! impl_num_or_enum {
     ($ty:ty, $deser_method:ident, $visitor_method:ident, $reader_method:ident, $serde_type:expr) => {
         #[inline(always)]
         fn $deser_method<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-            let mut maybe_enum_validator = self.validator.validate($serde_type);
+            let mut maybe_enum_validator = self.validator.validate($serde_type)?;
             ensure_size(&mut self.input, core::mem::size_of::<$ty>())?;
             let value = self.input.$reader_method();
-            maybe_enum_validator.validate_identifier::<$ty>(value);
+            maybe_enum_validator.validate_identifier::<$ty>(value)?;
             visitor.$visitor_method(value)
         }
     };
@@ -169,7 +172,7 @@ where
 
     #[inline(always)]
     fn deserialize_bool<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.validator.validate(SerdeType::Bool);
+        self.validator.validate(SerdeType::Bool)?;
         ensure_size(&mut self.input, 1)?;
         match self.input.get_u8() {
             0 => visitor.visit_bool(false),
@@ -180,7 +183,7 @@ where
 
     #[inline(always)]
     fn deserialize_str<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.validator.validate(SerdeType::Str);
+        self.validator.validate(SerdeType::Str)?;
         let size = self.read_size()?;
         let slice = self.read_slice(size)?;
         let str = str::from_utf8(slice).map_err(Error::from)?;
@@ -189,7 +192,7 @@ where
 
     #[inline(always)]
     fn deserialize_string<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
-        self.validator.validate(SerdeType::String);
+        self.validator.validate(SerdeType::String)?;
         let size = self.read_size()?;
         let vec = self.read_vec(size)?;
         let string = String::from_utf8(vec).map_err(|err| Error::from(err.utf8_error()))?;
@@ -199,7 +202,7 @@ where
     #[inline(always)]
     fn deserialize_bytes<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
-        self.validator.validate(SerdeType::Bytes(size));
+        self.validator.validate(SerdeType::Bytes(size))?;
         let slice = self.read_slice(size)?;
         visitor.visit_borrowed_bytes(slice)
     }
@@ -207,13 +210,13 @@ where
     #[inline(always)]
     fn deserialize_byte_buf<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let size = self.read_size()?;
-        self.validator.validate(SerdeType::ByteBuf(size));
+        self.validator.validate(SerdeType::ByteBuf(size))?;
         visitor.visit_byte_buf(self.read_vec(size)?)
     }
 
     /// This is used to deserialize identifiers for either:
     /// - `Variant` data type
-    /// - [`RowBinaryStructAsMapAccess`] field.
+    /// - out-of-order struct fields using [`MapAccess`].
     #[inline(always)]
     fn deserialize_identifier<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         ensure_size(&mut self.input, size_of::<u8>())?;
@@ -221,7 +224,7 @@ where
         // TODO: is there a better way to validate that the deserialized value matches the schema?
         // TODO: theoretically, we can track if we are currently processing a struct field id,
         //  and don't call the validator in that case, cause it will never be a `Variant`.
-        self.validator.validate_identifier::<u8>(value);
+        self.validator.validate_identifier::<u8>(value)?;
         visitor.visit_u8(value)
     }
 
@@ -232,21 +235,21 @@ where
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        let deserializer = &mut self.inner(SerdeType::Variant);
+        let deserializer = &mut self.inner(SerdeType::Variant)?;
         visitor.visit_enum(RowBinaryEnumAccess { deserializer })
     }
 
     #[inline(always)]
     fn deserialize_tuple<V: Visitor<'data>>(self, len: usize, visitor: V) -> Result<V::Value> {
-        let deserializer = &mut self.inner(SerdeType::Tuple(len));
-        visitor.visit_seq(RowBinarySeqAccess { deserializer, len })
+        let deserializer = &mut self.inner(SerdeType::Tuple(len))?;
+        visitor.visit_seq(RowBinaryTupleSeqAccess { deserializer, len })
     }
 
     #[inline(always)]
     fn deserialize_option<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         ensure_size(&mut self.input, 1)?;
         let is_null = self.input.get_u8();
-        let deserializer = &mut self.inner(SerdeType::Option);
+        let deserializer = &mut self.inner(SerdeType::Option)?;
         match is_null {
             0 => visitor.visit_some(deserializer),
             1 => visitor.visit_none(),
@@ -257,14 +260,14 @@ where
     #[inline(always)]
     fn deserialize_seq<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let len = self.read_size()?;
-        let deserializer = &mut self.inner(SerdeType::Seq(len));
+        let deserializer = &mut self.inner(SerdeType::Seq(len))?;
         visitor.visit_seq(RowBinarySeqAccess { deserializer, len })
     }
 
     #[inline(always)]
     fn deserialize_map<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         let len = self.read_size()?;
-        let deserializer = &mut self.inner(SerdeType::Map(len));
+        let deserializer = &mut self.inner(SerdeType::Map(len))?;
         visitor.visit_map(RowBinaryMapAccess {
             deserializer,
             remaining: len,
@@ -295,10 +298,18 @@ where
     #[inline(always)]
     fn deserialize_newtype_struct<V: Visitor<'data>>(
         self,
-        _name: &str,
+        name: &str,
         visitor: V,
     ) -> Result<V::Value> {
-        visitor.visit_newtype_struct(self)
+        if name.starts_with(int256::MODULE_PATH) {
+            self.validator
+                .validate(SerdeType::Bytes(int256::BYTE_LEN))?;
+
+            let slice = self.read_slice(int256::BYTE_LEN)?;
+            BytesDeserializer::new(slice).deserialize_bytes(visitor)
+        } else {
+            visitor.visit_newtype_struct(self)
+        }
     }
 
     #[inline(always)]
@@ -333,6 +344,44 @@ where
     #[inline(always)]
     fn is_human_readable(&self) -> bool {
         false
+    }
+}
+
+struct RowBinaryTupleSeqAccess<'de, 'cursor, 'data, R: Row, Validator>
+where
+    Validator: SchemaValidator<R>,
+{
+    deserializer: &'de mut RowBinaryDeserializer<'cursor, 'data, R, Validator>,
+    len: usize,
+}
+
+impl<'data, R: Row, Validator> SeqAccess<'data>
+    for RowBinaryTupleSeqAccess<'_, '_, 'data, R, Validator>
+where
+    Validator: SchemaValidator<R>,
+{
+    type Error = Error;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
+    where
+        T: DeserializeSeed<'data>,
+    {
+        if self.len > 0 {
+            self.len -= 1;
+            let value = DeserializeSeed::deserialize(seed, &mut *self.deserializer)?;
+
+            if self.len == 0 {
+                self.deserializer.validator.check_tuple_fully_validated()?;
+            }
+
+            Ok(Some(value))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.len)
     }
 }
 
@@ -481,7 +530,7 @@ where
         let schema_index = self
             .deserializer
             .validator
-            .get_schema_index(self.current_field_idx);
+            .get_schema_index(self.current_field_idx)?;
         let field_id = StructFieldIdentifier(self.fields[schema_index]);
         self.current_field_idx += 1;
         seed.deserialize(field_id).map(Some)

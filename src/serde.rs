@@ -646,7 +646,7 @@ pub mod jiff {
     /// Ser/de `jiff::civil::Date` to/from `Date`.
     pub mod date {
         use super::*;
-        use ::jiff::{civil::Date, SignedDuration};
+        use ::jiff::{SignedDuration, civil::Date};
 
         option!(Date, "Ser/de `Option<Date>` to/from `Nullable(Date)`.");
 
@@ -681,7 +681,7 @@ pub mod jiff {
     /// Ser/de `jiff::civil::Date` to/from `Date32`.
     pub mod date32 {
         use super::*;
-        use ::jiff::{civil::Date, SignedDuration};
+        use ::jiff::{SignedDuration, civil::Date};
 
         option!(Date, "Ser/de `Option<Date>` to/from `Nullable(Date32)`.");
 
@@ -881,7 +881,7 @@ pub mod jiff {
 pub mod time {
     use std::convert::TryFrom;
 
-    use ::time::{error::ComponentRange, Date, Duration, OffsetDateTime};
+    use ::time::{Date, Duration, OffsetDateTime, error::ComponentRange};
     use serde::{de::Error as _, ser::Error as _};
 
     use super::*;

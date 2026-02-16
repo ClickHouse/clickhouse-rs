@@ -1,4 +1,4 @@
-use clickhouse::{error::Result, Client};
+use clickhouse::{Client, error::Result};
 
 /// An example of using server-side query parameters.
 ///

@@ -2,10 +2,10 @@ use crate::attributes::Attributes;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use serde_derive_internals::{
-    attr::{Container, Default as SerdeDefault, Field},
     Ctxt,
+    attr::{Container, Default as SerdeDefault, Field},
 };
-use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Error, Fields, Lifetime, Result};
+use syn::{Data, DataStruct, DeriveInput, Error, Fields, Lifetime, Result, parse_macro_input};
 
 mod attributes;
 

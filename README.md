@@ -60,10 +60,10 @@ To use the crate, add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-clickhouse = "0.13.3"
+clickhouse = "0.14.2"
 
 [dev-dependencies]
-clickhouse = { version = "0.13.3", features = ["test-util"] }
+clickhouse = { version = "0.14.2", features = ["test-util"] }
 ```
 
 <details>
@@ -73,7 +73,7 @@ clickhouse = { version = "0.13.3", features = ["test-util"] }
 
 </summary>
 
-```rust,ignore
+```rust,no_run
 use clickhouse::Client;
 
 let client = Client::default()
@@ -93,7 +93,7 @@ let client = Client::default()
 
 </summary>
 
-```rust,ignore
+```rust,no_run
 use serde::Deserialize;
 use clickhouse::Row;
 
@@ -103,13 +103,19 @@ struct MyRow<'a> {
     name: &'a str,
 }
 
-let mut cursor = client
-    .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
-    .bind(500)
-    .bind(504)
-    .fetch::<MyRow<'_>>()?;
+async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
+    let mut cursor = client
+        .query("SELECT ?fields FROM some WHERE no BETWEEN ? AND ?")
+        .bind(500)
+        .bind(504)
+        .fetch::<MyRow<'_>>()?;
 
-while let Some(row) = cursor.next().await? { .. }
+    while let Some(row) = cursor.next().await? {
+        println!("no: {}, name: {}", row.no, row.name);
+    }
+    
+    Ok(())
+}
 ```
 
 * Placeholder `?fields` is replaced with `no, name` (fields of `Row`).
@@ -127,7 +133,7 @@ Note that cursors can return an error even after producing some rows. To avoid t
 
 </summary>
 
-```rust,ignore
+```rust,no_run
 use serde::Serialize;
 use clickhouse::Row;
 
@@ -137,10 +143,13 @@ struct MyRow {
     name: String,
 }
 
-let mut insert = client.insert::<MyRow>("some").await?;
-insert.write(&MyRow { no: 0, name: "foo".into() }).await?;
-insert.write(&MyRow { no: 1, name: "bar".into() }).await?;
-insert.end().await?;
+async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
+    let mut insert = client.insert::<MyRow>("some").await?;
+    insert.write(&MyRow { no: 0, name: "foo".into() }).await?;
+    insert.write(&MyRow { no: 1, name: "bar".into() }).await?;
+    insert.end().await?;
+    Ok(())
+}
 ```
 
 * If `end()` isn't called, the `INSERT` is aborted.
@@ -157,21 +166,35 @@ insert.end().await?;
 
 Requires the `inserter` feature.
 
-```rust,ignore
-let mut inserter = client.inserter::<MyRow>("some")?
-    .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
-    .with_max_bytes(50_000_000)
-    .with_max_rows(750_000)
-    .with_period(Some(Duration::from_secs(15)));
+```rust,no_run
+use serde::Serialize;
+use clickhouse::Row;
+use clickhouse::inserter::Inserter;
+use std::time::Duration;
 
-inserter.write(&MyRow { no: 0, name: "foo".into() }).await?;
-inserter.write(&MyRow { no: 1, name: "bar".into() }).await?;
-let stats = inserter.commit().await?;
-if stats.rows > 0 {
-    println!(
-        "{} bytes, {} rows, {} transactions have been inserted",
-        stats.bytes, stats.rows, stats.transactions,
-    );
+#[derive(Row, Serialize)]
+struct MyRow {
+    no: u32,
+    name: String,
+}
+
+async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
+    let mut inserter = client.inserter::<MyRow>("some")
+        .with_timeouts(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
+        .with_max_bytes(50_000_000)
+        .with_max_rows(750_000)
+        .with_period(Some(Duration::from_secs(15)));
+    
+    inserter.write(&MyRow { no: 0, name: "foo".into() }).await?;
+    inserter.write(&MyRow { no: 1, name: "bar".into() }).await?;
+    let stats = inserter.commit().await?;
+    if stats.rows > 0 {
+        println!(
+            "{} bytes, {} rows, {} transactions have been inserted",
+            stats.bytes, stats.rows, stats.transactions,
+        );
+    }
+    Ok(())
 }
 ```
 
@@ -195,8 +218,11 @@ inserter.end().await?;
 
 </summary>
 
-```rust,ignore
-client.query("DROP TABLE IF EXISTS some").execute().await?;
+```rust,no_run
+async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
+    client.query("DROP TABLE IF EXISTS some").execute().await?;
+    Ok(())
+}
 ```
 
 </details>
@@ -234,8 +260,18 @@ How to choose between all these features? Here are some considerations:
 [rustls-native-certs]: https://docs.rs/rustls-native-certs
 
 ## Data Types
+
+Usage of all mentioned data types are covered in the following examples:
+
+* [Simple ClickHouse data types](examples/data_types_derive_simple.rs)
+* [Container-like ClickHouse data types](examples/data_types_derive_containers.rs)
+* [Variant data type](examples/data_types_variant.rs)
+* [JSON data type](examples/data_types_new_json.rs)
+
+### Overview
+
 * `(U)Int(8|16|32|64|128)` maps to/from corresponding `(u|i)(8|16|32|64|128)` types or newtypes around them.
-* `(U)Int256` aren't supported directly, but there is [a workaround for it](https://github.com/ClickHouse/clickhouse-rs/issues/48).
+* `(U)Int256` are supported with convenience wrappers over `[u8; 32]`: `clickhouse::types::Int256` and `clickhouse::types::UInt256`. See the [derive example](./examples/data_types_derive_simple.rs).
 * `Float(32|64)` maps to/from corresponding `f(32|64)` or newtypes around them.
 * `Decimal(32|64|128)` maps to/from corresponding `i(32|64|128)` or newtypes around them. It's more convenient to use [fixnum](https://github.com/loyd/fixnum) or another implementation of signed fixed-point numbers.
 * `Boolean` maps to/from `bool` or newtypes around it.
@@ -243,7 +279,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+
     #[derive(Row, Debug, Serialize, Deserialize)]
     struct MyRow<'a> {
         str: &'a str,
@@ -259,7 +298,9 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
   
-    ```rust,ignore
+    ```rust,no_run
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
     #[derive(Row, Debug, Serialize, Deserialize)]
     struct MyRow {
         fixed_str: [u8; 16], // FixedString(16)
@@ -271,7 +312,9 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
     use serde_repr::{Deserialize_repr, Serialize_repr};
 
     #[derive(Row, Serialize, Deserialize)]
@@ -293,7 +336,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::uuid")]
@@ -306,7 +352,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::ipv4")]
@@ -321,7 +370,12 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+    use time::Date;
+    use chrono::NaiveDate;
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         days: u16,
@@ -344,7 +398,12 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+    use time::Date;
+    use chrono::NaiveDate;
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         days: i32,
@@ -367,7 +426,13 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+    use time::OffsetDateTime;
+    use chrono::{DateTime, Utc};
+    use jiff::Timestamp;
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         ts: u32,
@@ -389,7 +454,13 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+    use time::OffsetDateTime;
+    use chrono::{DateTime, Utc};
+    use jiff::Timestamp;
+
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         ts: i64, // elapsed s/us/ms/ns depending on `DateTime64(X)`
@@ -431,7 +502,9 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::time::time")]
@@ -453,7 +526,9 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::time::time64::secs")]
@@ -494,7 +569,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
+    use std::net::Ipv4Addr;
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(with = "clickhouse::serde::ipv4::option")]
@@ -506,8 +584,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
     // CREATE TABLE test(items Nested(name String, count UInt32))
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
     #[derive(Row, Serialize, Deserialize)]
     struct MyRow {
         #[serde(rename = "items.name")]
@@ -522,7 +602,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
 
-    ```rust,ignore
+    ```rust,no_run
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
+
     type Point = (f64, f64);
     type Ring = Vec<Point>;
     type Polygon = Vec<Ring>;
@@ -545,7 +628,10 @@ How to choose between all these features? Here are some considerations:
     <details>
     <summary>Example</summary>
     
-    ```rust,ignore
+    ```rust,no_run
+    use clickhouse::Row;
+    use serde::{Serialize, Deserialize};
+    use time::Date;
     #[derive(Serialize, Deserialize)]
     enum MyRowVariant {
         Array(Vec<i16>),
@@ -563,14 +649,8 @@ How to choose between all these features? Here are some considerations:
     }
     ```
     </details>
-* [New `JSON` data type](https://clickhouse.com/docs/en/sql-reference/data-types/newjson) is currently supported as a string when using ClickHouse 24.10+. See [this example](examples/data_types_new_json.rs) for more details.
+* [New `JSON` data type](https://clickhouse.com/docs/en/sql-reference/data-types/newjson) is currently supported as a string when using ClickHouse 24.10+. 
 * `Dynamic` data type is not supported for now.
-
-See also the additional examples:
-
-* [Simpler ClickHouse data types](examples/data_types_derive_simple.rs)
-* [Container-like ClickHouse data types](examples/data_types_derive_containers.rs)
-* [Variant data type](examples/data_types_variant.rs)
 
 ## Mocking
 The crate provides utils for mocking CH server and testing DDL, `SELECT` and `INSERT` queries.
@@ -578,3 +658,25 @@ The crate provides utils for mocking CH server and testing DDL, `SELECT` and `IN
 The functionality can be enabled with the `test-util` feature. Use it **only** in dev-dependencies.
 
 See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs).
+
+## Support Policies
+
+### Minimum Supported Rust Version (MSRV)
+
+This project's MSRV is the second-to-last stable release as of the beginning of the current release cycle (`0.x.0`),
+where it will remain until the beginning of the _next_ release cycle (`0.{x+1}.0`).
+
+The MSRV for the `0.14.x` release cycle is `1.89.0`.
+
+This guarantees that `clickhouse-rs` will compile with a Rust version that is at _least_ six weeks old, 
+which should be plenty of time for it to make it through any packaging system that is being actively kept up to date.
+
+Beware when installing Rust through operating system package managers, as it can often be a year or more
+out-of-date. For example, Debian Bookworm (released 10 June 2023) shipped with Rust 1.63.0 (released 11 August 2022).
+
+### ClickHouse Versions
+
+The supported versions of the ClickHouse database server coincide with the versions currently receiving security
+updates.
+
+For the list of currently supported versions, see <https://github.com/ClickHouse/ClickHouse/blob/master/SECURITY.md#security-change-log-and-support>.

@@ -1,5 +1,5 @@
-use crate::row::Primitive;
 use crate::Row;
+use crate::row::Primitive;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -11,12 +11,10 @@ struct Timestamp64(u64);
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Time32(i32);
 impl Primitive for Time32 {}
-impl Primitive for Option<Time32> {}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Time64(i64);
 impl Primitive for Time64 {}
-impl Primitive for Option<Time64> {}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct FixedPoint64(i64);
@@ -50,7 +48,7 @@ struct Sample<'a> {
     boolean: bool,
 }
 
-// clickhouse_derive is not working here
+// clickhouse_macros is not working here
 impl Row for Sample<'_> {
     const NAME: &'static str = "Sample";
     const COLUMN_NAMES: &'static [&'static str] = &[

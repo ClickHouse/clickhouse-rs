@@ -41,7 +41,13 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) -> u8 {
             Err(err) => break err,
         }
     };
-    assert!(err.to_string().contains("TIMEOUT_EXCEEDED"));
+
+    let err_s = err.to_string();
+    assert!(
+        err_s.contains("TIMEOUT_EXCEEDED"),
+        "expected TIMEOUT_EXCEEDED in error string, got {err_s:?}; original: {err:?}"
+    );
+
     i
 }
 
@@ -96,5 +102,10 @@ async fn deferred_lz4() {
     };
 
     assert_ne!(i, 0); // we're interested only in errors during processing
-    assert!(err.to_string().contains("TIMEOUT_EXCEEDED"));
+
+    let err_s = err.to_string();
+    assert!(
+        err_s.contains("TIMEOUT_EXCEEDED"),
+        "expected TIMEOUT_EXCEEDED in error string, got {err_s:?}; original: {err:?}"
+    );
 }

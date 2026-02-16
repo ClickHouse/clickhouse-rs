@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client as HyperClient;
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 
-use clickhouse::{error::Result, Client};
+use clickhouse::{Client, error::Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {

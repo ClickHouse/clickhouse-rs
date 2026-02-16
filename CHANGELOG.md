@@ -8,6 +8,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.14.2] - 2026-01-14
+
+### Added
+
+* Added `Client::insert_formatted_with()` and `InsertFormatted` for inserting data in a chosen format with a specified SQL query. ([#364])
+  * `InsertFormatted` does not buffer data by default, allowing precise control over when the data is sent. For best performance, ensure data is sent in larger chunks or use `.buffered()` to get `BufInsertFormatted` which implements buffering.
+  * Data may optionally be pre-compressed and buffered separately using `CompressedData::new()` and `InsertFormatted::send_compressed()`.
+  * `BufInsertFormatted` also implements [`tokio::io::AsyncWrite`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncWrite.html) for composability.
+* Added `Client::set_option` to modify options through `&mut Client` ([#375])
+* Added `Client::get_option` to read previously set options ([#375])
+* Added support for binding byte-strings as server-side params ([#376])
+  * This means passing types to `Query::param` that call `Serializer::serialize_bytes()` are now supported.
+  * Note that `Vec<u8>` and `&[u8]` serialize as an array of integers. 
+    Use a specialized type, e.g. `bytes::Bytes` or `serde_bytes::Bytes` to bind a byte-string.
+* Implemented `Primitive` for `bytes::Bytes` and `bytes::BytesMut` ([#376])
+  * These can be used to fetch byte-strings as a scalar value, e.g. with `Query::fetch_one()`.
+
+### Fixed
+
+* Implemented parsing for the new exception tagging format in ClickHouse 25.11 ([#365])
+* Fixed a doc comment on `clickhouse::serde::chrono::date` ([#371])
+
+### Changed
+
+* (CI-only change) added scheduled runs against `clickhouse-server:head` tag, reworked secrets access ([#367])
+* `Query` no longer sets [the `readonly` option] by default. ([#377])
+  * This was previously added in [#342] to simulate the default read-only restriction
+    when issuing queries via `GET` requests, but had poor interaction with settings profiles that set `readonly="2"`.
+
+[#364]: https://github.com/ClickHouse/clickhouse-rs/pull/364
+[#365]: https://github.com/ClickHouse/clickhouse-rs/pull/365
+[#367]: https://github.com/ClickHouse/clickhouse-rs/pull/367
+[#371]: https://github.com/ClickHouse/clickhouse-rs/pull/371
+[#375]: https://github.com/ClickHouse/clickhouse-rs/pull/375
+[#376]: https://github.com/ClickHouse/clickhouse-rs/pull/376
+[#377]: https://github.com/ClickHouse/clickhouse-rs/pull/377
+
+[the `readonly` option]: https://clickhouse.com/docs/operations/settings/permissions-for-queries#readonly
+
+## [0.14.1] - 2025-11-26
+
+### Added
+
+* Implement `Stream` for `RowCursor`. ([#283], [#340])
+* Added an optional `on_commit` callback to `Inserter`. ([#307])
+* Added `with_role` and `with_default_roles` methods to `Client`, `Query`, `Insert`, and `Inserter`, allowing to
+  explicitly set the [roles for executed queries]. ([#326])
+* Added `Int256` and `UInt256` ClickHouse types support. The client now provides two new convenience wrappers over 
+  `[u8; 32]`: `clickhouse::types::Int256` and `clickhouse::types::UInt256`. See the [updated derive example]. ([#352])
+
+### Fixed
+
+* When binding `u128`/`i128` values to SQL queries using server-side params, the client now correctly serializes them as
+  strings without adding an unnecessary cast. ([#322])
+* Fixed an issue where the schema validation could fail with custom `JSON` types such as 
+  `JSON(max_dynamic_paths=64, max_dynamic_types=8)`. ([#350], [Steffen911])
+
+### Changed
+
+* Optimize `RowCursor` by reusing buffer capacity where possible. ([#340])
+* All `Query::fetch*` methods will always use POST instead of GET. It is now allowed to change `readonly` value via
+  `Query::with_option`. ([#342])
+* In case of a schema mismatch, the client now emits `clickhouse::error::Error::SchemaMismatch` instead of panicking.
+  ([#346])
+* Removed [replace_with], [static_assertions], and [sealed] from the crate dependencies. ([#353])
+
+[#283]: https://github.com/ClickHouse/clickhouse-rs/pull/283
+[#307]: https://github.com/ClickHouse/clickhouse-rs/pull/307
+[#322]: https://github.com/ClickHouse/clickhouse-rs/pull/322
+[#326]: https://github.com/ClickHouse/clickhouse-rs/pull/326
+[#340]: https://github.com/ClickHouse/clickhouse-rs/pull/340
+[#342]: https://github.com/ClickHouse/clickhouse-rs/pull/342
+[#346]: https://github.com/ClickHouse/clickhouse-rs/pull/346
+[#350]: https://github.com/ClickHouse/clickhouse-rs/pull/350
+[#352]: https://github.com/ClickHouse/clickhouse-rs/pull/352
+[#353]: https://github.com/ClickHouse/clickhouse-rs/pull/353
+
+[Steffen911]: https://github.com/Steffen911
+
+[roles for executed queries]: https://clickhouse.com/docs/interfaces/http#setting-role-with-query-parameters
+[updated derive example]: examples/data_types_derive_simple.rs
+
+[replace_with]: https://crates.io/crates/replace_with
+[static_assertions]: https://crates.io/crates/static_assertions
+[sealed]: https://crates.io/crates/sealed
+
+## [0.14.0] - 2025-10-08
+
 ### Removed
 
 - **BREAKING** watch: `Client::watch()` API is removed ([#245]).
@@ -26,6 +114,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mock server, so it properly handles the response format and automatically disables parsing
   `RowBinaryWithNamesAndTypes` header parsing and validation. Additionally, it is not required to call `with_url`
   explicitly. See the [updated example](./examples/mock.rs).
+- **BREAKING** query: `Query::fetch_bytes()` now expects `impl AsRef<str>` for `format` instead of `Into<String>`. 
+  Most usages should not be affected, however, unless passing a custom type that implements the latter but not the former.
+  ([#311])
 - query: due to `RowBinaryWithNamesAndTypes` format usage, there might be an impact on fetch performance, which largely
   depends on how the dataset is defined. If you notice decreased performance, consider disabling validation by using
   `Client::with_validation(false)`.
@@ -34,6 +125,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tls: improved error messages in case of missing TLS features when using HTTPS ([#229]).
 - crate: MSRV is now 1.79 due to borrowed rows support redesign in [#247].
 - crate: bumped dependencies, see [#232], [#239] and [#280] for additional details.
+- crate: starting from 0.3.0, `clickhouse-derive` is now published as [`clickhouse-macros` on crates.io](https://crates.io/crates/clickhouse-macros/0.3.0). The former `clickhouse-derive` crate is discontinued. ([#318]).
 
 ### Added
 
@@ -51,6 +143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - client: extract the exception code from `X-ClickHouse-Exception-Code` in case of incorrect 200 OK response 
   that could occur with ClickHouse server up to versions 24.x ([#256]).
+- query: pass format as `?default_format` URL parameter instead of using `FORMAT` clause, allowing queries to have
+  trailing comments and/or semicolons ([#267], [#269], [#311]).
 
 [#189]: https://github.com/ClickHouse/clickhouse-rs/pull/189
 [#221]: https://github.com/ClickHouse/clickhouse-rs/pull/221
@@ -63,8 +157,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#250]: https://github.com/ClickHouse/clickhouse-rs/pull/250
 [#256]: https://github.com/ClickHouse/clickhouse-rs/pull/256
 [#258]: https://github.com/ClickHouse/clickhouse-rs/pull/258
+[#267]: https://github.com/ClickHouse/clickhouse-rs/pull/267
+[#269]: https://github.com/ClickHouse/clickhouse-rs/pull/269
 [#280]: https://github.com/ClickHouse/clickhouse-rs/pull/280
 [#292]: https://github.com/ClickHouse/clickhouse-rs/pull/292
+[#311]: https://github.com/ClickHouse/clickhouse-rs/pull/311
+[#318]: https://github.com/ClickHouse/clickhouse-rs/pull/318
 
 ## [0.13.3] - 2025-05-29
 ### Added
@@ -451,7 +549,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.3...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.2...HEAD
+[0.14.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.1...v0.14.2
+[0.14.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.0...v0.14.1
+[0.14.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.3...v0.14.0
 [0.13.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.0...v0.13.1

@@ -25,44 +25,59 @@
 //!   the "cloud" environment, it appends the current timestamp to allow
 //!   clean up outdated databases based on its creation time.
 
-use clickhouse::{sql::Identifier, Client, Row, RowOwned, RowRead, RowWrite};
+use clickhouse::{Client, Row, RowOwned, RowRead, RowWrite, sql::Identifier};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-macro_rules! assert_panic_on_fetch_with_client {
+macro_rules! assert_err_on_fetch_with_client {
     ($client:ident, $msg_parts:expr, $query:expr) => {
-        use futures_util::FutureExt;
-        let async_panic =
-            std::panic::AssertUnwindSafe(async { $client.query($query).fetch_all::<Data>().await });
-        let result = async_panic.catch_unwind().await;
-        assert!(result.is_err());
-        let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
+        let err = $client.query($query).fetch_all::<Data>().await;
+        assert!(
+            err.is_err(),
+            "expected an error, but got a result instead: {:?}",
+            err.unwrap()
+        );
+
+        let err = err.unwrap_err();
+        assert!(
+            matches!(err, clickhouse::error::Error::SchemaMismatch(_)),
+            "expected a SchemaMismatch error, but got: {:?}",
+            err,
+        );
+
+        let err_msg = err.to_string();
         for &msg in $msg_parts {
             assert!(
-                panic_msg.contains(msg),
-                "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
+                err_msg.contains(msg),
+                "error message:\n{err_msg}\ndid not contain the expected part:\n{msg}"
             );
         }
     };
 }
 
-macro_rules! assert_panic_on_fetch {
+macro_rules! assert_err_on_fetch {
     ($msg_parts:expr, $query:expr) => {
-        use futures_util::FutureExt;
         let client = get_client();
-        let async_panic =
-            std::panic::AssertUnwindSafe(async { client.query($query).fetch_all::<Data>().await });
-        let result = async_panic.catch_unwind().await;
+
+        let err = client.query($query).fetch_all::<Data>().await;
         assert!(
-            result.is_err(),
-            "expected a panic, but got a result instead: {:?}",
-            result.unwrap()
+            err.is_err(),
+            "expected an error, but got a result instead: {:?}",
+            err.unwrap()
         );
-        let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
+
+        let err = err.unwrap_err();
+        assert!(
+            matches!(err, clickhouse::error::Error::SchemaMismatch(_)),
+            "expected a SchemaMismatch error, but got: {:?}",
+            err,
+        );
+
+        let err_msg = err.to_string();
         for &msg in $msg_parts {
             assert!(
-                panic_msg.contains(msg),
-                "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
+                err_msg.contains(msg),
+                "error message:\n{err_msg}\ndid not contain the expected part:\n{msg}"
             );
         }
     };
@@ -78,7 +93,7 @@ macro_rules! assert_panic_msg {
             result.unwrap()
         );
         let panic_msg = *result.unwrap_err().downcast::<String>().unwrap();
-        for &msg in $msg_parts {
+        for msg in $msg_parts {
             assert!(
                 panic_msg.contains(msg),
                 "panic message:\n{panic_msg}\ndid not contain the expected part:\n{msg}"
@@ -89,14 +104,16 @@ macro_rules! assert_panic_msg {
 
 macro_rules! prepare_database {
     () => {
-        crate::_priv::prepare_database({
+        crate::_priv::prepare_database(&test_database_name!()).await
+    };
+}
+
+macro_rules! test_database_name {
+    () => {
+        crate::_priv::make_db_name({
             fn f() {}
-            fn type_name_of_val<T>(_: T) -> &'static str {
-                std::any::type_name::<T>()
-            }
-            type_name_of_val(f)
+            std::any::type_name_of_val(&f)
         })
-        .await
     };
 }
 
@@ -168,7 +185,12 @@ where
 }
 
 pub(crate) async fn flush_query_log(client: &Client) {
-    client.query("SYSTEM FLUSH LOGS").execute().await.unwrap();
+    client
+        .query("SYSTEM FLUSH LOGS")
+        .with_option("wait_end_of_query", "1")
+        .execute()
+        .await
+        .unwrap();
 }
 
 pub(crate) async fn execute_statements(client: &Client, statements: &[&str]) {
@@ -215,8 +237,8 @@ pub(crate) mod geo_types {
 }
 
 pub(crate) mod decimals {
-    use fixnum::typenum::{U12, U4, U8};
     use fixnum::FixedPoint;
+    use fixnum::typenum::{U4, U8, U12};
 
     // See ClickHouse decimal sizes: https://clickhouse.com/docs/en/sql-reference/data-types/decimal
     pub(crate) type Decimal32 = FixedPoint<i32, U4>; // Decimal(9, 4) = Decimal32(4)
@@ -232,13 +254,18 @@ mod cursor_stats;
 mod fetch_bytes;
 mod https_errors;
 mod insert;
+mod insert_formatted;
+#[cfg(feature = "inserter")]
 mod inserter;
 mod int128;
+mod int256;
 mod ip;
 mod jiff;
 mod mock;
 mod nested;
 mod query;
+mod query_readonly;
+mod query_syntax;
 mod rbwnat_header;
 mod rbwnat_smoke;
 mod rbwnat_validation;
@@ -255,7 +282,7 @@ enum TestEnv {
 
 #[allow(clippy::incompatible_msrv)]
 fn test_env() -> TestEnv {
-    use std::env::{var, VarError};
+    use std::env::{VarError, var};
 
     static TEST_ENV: LazyLock<TestEnv> =
         LazyLock::new(|| match var("CLICKHOUSE_TEST_ENVIRONMENT") {
@@ -271,18 +298,119 @@ fn test_env() -> TestEnv {
     *TEST_ENV
 }
 
+async fn create_readonly_user(client: &Client, database: &str) -> Client {
+    let username = format!("clickhouse-rs_readonly_user_{:X}", rand::random::<u64>());
+    let password = format!("CHRS_{:X}", rand::random::<u64>());
+
+    client
+        .query(
+            "CREATE USER ? IDENTIFIED WITH sha256_password BY ? \
+         DEFAULT DATABASE ? \
+         SETTINGS readonly = 1",
+        )
+        .bind(&username)
+        .bind(&password)
+        .bind(Identifier(database))
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query(
+            "GRANT SHOW TABLES, SELECT \
+         ON ?.* \
+         TO ?",
+        )
+        .bind(Identifier(database))
+        .bind(Identifier(&username))
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .clone()
+        .with_user(username)
+        .with_password(password)
+        .with_database(database)
+}
+
+/// Create a test user and role for `test_db_name` with no default grants.
+///
+/// Returns a `Client` with the user configured, and the role name.
+async fn create_user_and_role(client: &Client, test_db_name: &str) -> (Client, String) {
+    let username = format!("{test_db_name}__user");
+    let password = format!("CHRS_{:X}", rand::random::<u64>());
+
+    client
+        .query(
+            "CREATE USER OR REPLACE ? \
+         IDENTIFIED WITH sha256_password BY ? \
+         DEFAULT DATABASE ?",
+        )
+        .bind(&username)
+        .bind(&password)
+        .bind(Identifier(test_db_name))
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query("REVOKE ALL ON *.* FROM ?")
+        .bind(&username)
+        .execute()
+        .await
+        .unwrap();
+
+    // Needed for metadata queries
+    client
+        .query("GRANT SHOW ON ?.* TO ?")
+        .bind(Identifier(test_db_name))
+        .bind(&username)
+        .execute()
+        .await
+        .unwrap();
+
+    let role = format!("{test_db_name}__role");
+
+    client
+        .query("CREATE ROLE OR REPLACE ?")
+        .bind(Identifier(&role))
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query("GRANT ? TO ?")
+        .bind(Identifier(&role))
+        .bind(Identifier(&username))
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query("SET DEFAULT ROLE NONE TO ?")
+        .bind(Identifier(&username))
+        .execute()
+        .await
+        .unwrap();
+
+    (
+        client.clone().with_user(username).with_password(password),
+        role,
+    )
+}
+
 mod _priv {
     use super::*;
     use std::time::SystemTime;
 
-    pub(crate) async fn prepare_database(fn_path: &str) -> Client {
-        let db_name = make_db_name(fn_path);
+    pub(crate) async fn prepare_database(db_name: &str) -> Client {
         let client = get_client();
 
         client
             .query("DROP DATABASE IF EXISTS ?")
             .with_option("wait_end_of_query", "1")
-            .bind(Identifier(&db_name))
+            .bind(Identifier(db_name))
             .execute()
             .await
             .unwrap_or_else(|err| panic!("cannot drop db {db_name}, cause: {err}"));
@@ -290,7 +418,7 @@ mod _priv {
         client
             .query("CREATE DATABASE ?")
             .with_option("wait_end_of_query", "1")
-            .bind(Identifier(&db_name))
+            .bind(Identifier(db_name))
             .execute()
             .await
             .unwrap_or_else(|err| panic!("cannot create db {db_name}, cause: {err}"));
@@ -302,7 +430,7 @@ mod _priv {
     // `it::compression::lz4::{{closure}}::f` ->
     // - "local" env: `chrs__compression__lz4`
     // - "cloud" env: `chrs__compression__lz4__{unix_millis}`
-    fn make_db_name(fn_path: &str) -> String {
+    pub(crate) fn make_db_name(fn_path: &str) -> String {
         assert!(fn_path.starts_with("it::"));
         let mut iter = fn_path.split("::").skip(1);
         let module = iter.next().unwrap();

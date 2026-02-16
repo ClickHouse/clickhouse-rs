@@ -1,16 +1,16 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use fixnum::{
-    typenum::{U12, U4, U8},
     FixedPoint,
+    typenum::{U4, U8, U12},
 };
 use jiff::{civil::Date as JiffDate, Timestamp};
 use rand::prelude::IndexedRandom;
-use rand::{distr::Alphanumeric, Rng};
+use rand::{Rng, distr::Alphanumeric};
 use std::str::FromStr;
 use time::{Date, Month, OffsetDateTime, Time};
 
-use clickhouse::{error::Result, sql::Identifier, Client};
-
+use clickhouse::types::{Int256, UInt256};
+use clickhouse::{Client, error::Result, sql::Identifier};
 // This example covers derivation of _simpler_ ClickHouse data types.
 // See also: https://clickhouse.com/docs/en/sql-reference/data-types
 
@@ -29,13 +29,16 @@ async fn main() -> Result<()> {
                 int32                Int32,
                 int64                Int64,
                 int128               Int128,
-                -- int256               Int256,
+
                 uint8                UInt8,
                 uint16               UInt16,
                 uint32               UInt32,
                 uint64               UInt64,
                 uint128              UInt128,
-                -- uint256              UInt256,
+
+                int256               Int256,
+                uint256              UInt256,
+
                 float32              Float32,
                 float64              Float64,
                 boolean              Boolean,
@@ -91,14 +94,14 @@ async fn main() -> Result<()> {
         .execute()
         .await?;
 
-    let mut insert = client.insert::<Row>(table_name).await?;
-    insert.write(&Row::new()).await?;
+    let mut insert = client.insert::<MyRow>(table_name).await?;
+    insert.write(&MyRow::new()).await?;
     insert.end().await?;
 
     let rows = client
         .query("SELECT ?fields FROM ?")
         .bind(Identifier(table_name))
-        .fetch_all::<Row>()
+        .fetch_all::<MyRow>()
         .await?;
 
     println!("{rows:#?}");
@@ -107,20 +110,27 @@ async fn main() -> Result<()> {
 
 #[derive(Clone, Debug, PartialEq)]
 #[derive(clickhouse::Row, serde::Serialize, serde::Deserialize)]
-pub struct Row {
+pub struct MyRow {
     pub int8: i8,
     pub int16: i16,
     pub int32: i32,
     pub int64: i64,
     pub int128: i128,
+
     pub uint8: u8,
     pub uint16: u16,
     pub uint32: u32,
     pub uint64: u64,
     pub uint128: u128,
+
+    pub int256: Int256,
+    pub uint256: UInt256,
+
     pub float32: f32,
     pub float64: f64,
+
     pub boolean: bool,
+
     pub str: String,
     // Avoiding reading/writing strings as UTF-8 for blobs stored in a string column
     #[serde(with = "serde_bytes")]
@@ -142,6 +152,7 @@ pub struct Row {
     pub decimal32_9_4: Decimal32,
     pub decimal64_18_8: Decimal64,
     pub decimal128_38_12: Decimal128,
+
     #[serde(with = "clickhouse::serde::time::date")]
     pub time_date: Date,
     #[serde(with = "clickhouse::serde::time::date32")]
@@ -221,10 +232,10 @@ pub enum Enum16 {
     Qux = 255,
 }
 
-impl Row {
+impl MyRow {
     pub fn new() -> Self {
         let mut rng = rand::rng();
-        Row {
+        MyRow {
             int8: rng.random(),
             int16: rng.random(),
             int32: rng.random(),
@@ -260,6 +271,12 @@ impl Row {
             decimal64_18_8: Decimal64::from_str("9999999999.99999999").unwrap(),
             decimal128_38_12: Decimal128::from_str("99999999999999999999999999.999999999999")
                 .unwrap(),
+
+            // `Int256` and `UInt256` are intended for input and output only,
+            // so they don't support `rand` directly.
+            int256: rng.random::<i128>().into(),
+            uint256: rng.random::<u128>().into(),
+
             // Allowed values ranges:
             // - Date   = [1970-01-01, 2149-06-06]
             // - Date32 = [1900-01-01, 2299-12-31]
@@ -299,7 +316,7 @@ impl Row {
     }
 }
 
-impl Default for Row {
+impl Default for MyRow {
     fn default() -> Self {
         Self::new()
     }

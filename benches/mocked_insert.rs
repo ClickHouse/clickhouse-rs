@@ -1,11 +1,11 @@
 use bytes::Bytes;
-use clickhouse::{error::Result, Client, Compression, Row};
+use clickhouse::{Client, Compression, Row, error::Result};
 use clickhouse_types::{Column, DataTypeNode};
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures_util::stream;
 use http_body_util::StreamBody;
 use hyper::body::{Body, Frame};
-use hyper::{body::Incoming, Request, Response};
+use hyper::{Request, Response, body::Incoming};
 use serde::Serialize;
 use std::convert::Infallible;
 use std::hint::black_box;

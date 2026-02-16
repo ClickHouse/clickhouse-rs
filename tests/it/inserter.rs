@@ -1,12 +1,11 @@
-#![cfg(feature = "inserter")]
-
 use std::string::ToString;
 
 use serde::Serialize;
 
-use clickhouse::{inserter::Quantities, Client, Row};
-
-use crate::{create_simple_table, fetch_rows, flush_query_log, SimpleRow};
+use crate::{SimpleRow, create_simple_table, fetch_rows, flush_query_log};
+use clickhouse::inserter::Inserter;
+use clickhouse::sql::Identifier;
+use clickhouse::{Client, Row, inserter::Quantities};
 
 #[derive(Debug, Row, Serialize)]
 struct MyRow {
@@ -227,12 +226,18 @@ async fn keeps_client_options() {
         .unwrap();
 
     assert!(
-        has_insert_setting, "{}",
-        format!("should contain {insert_setting_name} = {insert_setting_value} (from the insert options)")
+        has_insert_setting,
+        "{}",
+        format!(
+            "should contain {insert_setting_name} = {insert_setting_value} (from the insert options)"
+        )
     );
     assert!(
-        has_client_setting, "{}",
-        format!("should contain {client_setting_name} = {client_setting_value} (from the client options)")
+        has_client_setting,
+        "{}",
+        format!(
+            "should contain {client_setting_name} = {client_setting_value} (from the client options)"
+        )
     );
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
@@ -284,4 +289,94 @@ async fn overrides_client_options() {
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
     assert_eq!(rows, vec!(row))
+}
+
+#[tokio::test]
+async fn inserter_with_role() {
+    #[derive(serde::Serialize, serde::Deserialize, clickhouse::Row)]
+    struct Foo {
+        bar: u64,
+        baz: String,
+    }
+
+    let db_name = test_database_name!();
+
+    let admin_client = crate::_priv::prepare_database(&db_name).await;
+
+    let (user_client, role) = crate::create_user_and_role(&admin_client, &db_name).await;
+
+    admin_client
+        .query(
+            "CREATE TABLE foo(\
+            bar UInt64, \
+            baz String\
+        ) \
+        ENGINE = MergeTree \
+        PRIMARY KEY(bar)",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let foos = [
+        "lorem ipsum",
+        "dolor sit amet",
+        "consectetur adipiscing elit",
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(bar, baz)| Foo {
+        bar: bar as u64,
+        baz: baz.to_string(),
+    })
+    .collect::<Vec<_>>();
+
+    let insert_foos = async |mut inserter: Inserter<Foo>| {
+        for foo in &foos {
+            inserter.write(foo).await?;
+        }
+
+        inserter.end().await
+    };
+
+    insert_foos(user_client.inserter("foo"))
+        .await
+        .expect_err("user should not be able to insert into `foo`");
+
+    admin_client
+        .query("GRANT INSERT ON ?.foo TO ?")
+        .bind(Identifier(&db_name))
+        .bind(Identifier(&role))
+        .execute()
+        .await
+        .unwrap();
+
+    // We haven't set the role yet
+    insert_foos(user_client.inserter("foo"))
+        .await
+        .expect_err("user should not be able to insert into `foo`");
+
+    insert_foos(user_client.clone().with_roles([&role]).inserter("foo"))
+        .await
+        .expect_err("user should be able to insert into `foo` now");
+
+    // Roles should not propagate back to the parent instance
+    insert_foos(user_client.inserter("foo"))
+        .await
+        .expect_err("user should not be able to insert into `foo`");
+
+    insert_foos(user_client.inserter("foo").with_roles([&role]))
+        .await
+        .expect_err("user should be able to insert into `foo` now");
+
+    // `with_default_roles` should clear the role
+    insert_foos(
+        user_client
+            .clone()
+            .with_roles([&role])
+            .inserter("foo")
+            .with_default_roles(),
+    )
+    .await
+    .expect_err("user should not be able to insert into `foo`");
 }
