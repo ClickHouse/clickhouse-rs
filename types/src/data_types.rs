@@ -97,8 +97,7 @@ pub enum DataTypeNode {
     JSON,
 
     // TODO: Rename for better representation
-    JsonNew(Vec<(String, Box<DataTypeNode>)>),
-
+    JsonWithHint(Vec<(String, Box<DataTypeNode>)>),
     Point,
     Ring,
     LineString,
@@ -290,11 +289,25 @@ impl Display for DataTypeNode {
             MultiLineString => write!(f, "MultiLineString"),
             Polygon => write!(f, "Polygon"),
             MultiPolygon => write!(f, "MultiPolygon"),
-            JsonNew(json) => {
-                write!(f, "{:?}", json)
-            }
+            JsonWithHint(json) => format_json_with_hint(json, f),
         }
     }
+}
+
+fn format_json_with_hint(
+    json: &[(String, Box<DataTypeNode>)],
+    f: &mut Formatter<'_>,
+) -> Result<(), std::fmt::Error> {
+    write!(f, "JSON(")?;
+
+    for (i, (name, ty)) in json.iter().enumerate() {
+        if i > 0 {
+            write!(f, ", ")?;
+        }
+        write!(f, "{} {}", name, ty)?;
+    }
+
+    write!(f, ")")
 }
 
 /// Represents the underlying integer size of an Enum type.
@@ -661,7 +674,7 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
         })
         .collect::<Result<Vec<(String, Box<DataTypeNode>)>, TypesError>>()?;
 
-    Ok(DataTypeNode::JsonNew(inner_types))
+    Ok(DataTypeNode::JsonWithHint(inner_types))
 }
 
 fn remove_json_header(input: &str) -> Result<&str, TypesError> {
@@ -905,6 +918,18 @@ mod tests {
         assert_eq!(
             multiple.to_string(),
             "Tuple(UInt64, String, DateTime, Array(Int32))"
+        );
+    }
+
+    #[test]
+    fn test_json_with_hint_display() {
+        let json_with_hint = DataTypeNode::JsonWithHint(vec![
+            ("foo".to_string(), Box::new(DataTypeNode::String)),
+            ("bar".to_string(), Box::new(DataTypeNode::Int32)),
+        ]);
+        assert_eq!(
+            json_with_hint.to_string(),
+            "JSON(foo String, bar Int32)".to_string()
         );
     }
 
