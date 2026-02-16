@@ -1,7 +1,6 @@
 use crate::error::TypesError;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::str::FromStr;
 
 /// A definition of a column in the result set,
 /// taken out of the `RowBinaryWithNamesAndTypes` header.
@@ -175,14 +174,6 @@ impl DataTypeNode {
             DataTypeNode::LowCardinality(inner) => inner,
             _ => self,
         }
-    }
-}
-
-impl FromStr for DataTypeNode {
-    type Err = TypesError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        DataTypeNode::new(s)
     }
 }
 
@@ -668,7 +659,7 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
         .map(|column| {
             let map = column.trim().split(' ').collect::<Vec<_>>();
             let key_type = map[0].to_string();
-            let value_type = map[1].parse::<DataTypeNode>()?;
+            let value_type = DataTypeNode::new(map[1])?;
 
             Ok((key_type, Box::new(value_type)))
         })
