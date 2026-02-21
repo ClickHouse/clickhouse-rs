@@ -656,6 +656,7 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
 
     let inner_types = columns
         .into_iter()
+        .filter(|column| !column.contains('=') || !column.starts_with("SKIP"))
         .map(|column| {
             let map = column.trim().split(' ').collect::<Vec<_>>();
             let key_type = map[0].to_string();
@@ -664,6 +665,10 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
             Ok((key_type, Box::new(value_type)))
         })
         .collect::<Result<Vec<(String, Box<DataTypeNode>)>, TypesError>>()?;
+
+    if inner_types.is_empty() {
+        return Ok(DataTypeNode::JSON);
+    }
 
     Ok(DataTypeNode::JsonWithHint(inner_types))
 }
@@ -1018,6 +1023,16 @@ mod tests {
         assert_eq!(
             DataTypeNode::new("JSON(max_dynamic_types=8, max_dynamic_paths=64)").unwrap(),
             DataTypeNode::JSON
+        );
+        assert_eq!(
+            DataTypeNode::new(
+                "JSON(max_dynamic_types=8, max_dynamic_paths=64, foo String, bar Int32)"
+            )
+            .unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                ("foo".to_string(), Box::new(DataTypeNode::String)),
+                ("bar".to_string(), Box::new(DataTypeNode::Int32))
+            ])
         );
         assert!(DataTypeNode::new("SomeUnknownType").is_err());
     }
