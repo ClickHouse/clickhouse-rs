@@ -164,7 +164,15 @@ impl Query {
             pairs.append_pair(settings::DATABASE, database);
         }
 
-        if self.client.compression.is_lz4() {
+        if self.client.compression.is_enabled() {
+            #[cfg(feature = "zstd")]
+            if matches!(self.client.compression, crate::Compression::Zstd(_)) {
+                pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
+            } else {
+                pairs.append_pair(settings::COMPRESS, "1");
+            }
+
+            #[cfg(not(feature = "zstd"))]
             pairs.append_pair(settings::COMPRESS, "1");
         }
 
@@ -179,6 +187,11 @@ impl Query {
         let mut builder = Request::builder().method(Method::POST).uri(url.as_str());
         builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
         builder = with_authentication(builder, &self.client.authentication);
+
+        #[cfg(feature = "zstd")]
+        if matches!(self.client.compression, crate::Compression::Zstd(_)) {
+            builder = builder.header("Accept-Encoding", "zstd");
+        }
 
         let content_length = query.len();
         builder = builder.header(CONTENT_LENGTH, content_length.to_string());

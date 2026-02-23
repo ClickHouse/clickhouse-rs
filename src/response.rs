@@ -15,6 +15,8 @@ use std::{
 
 #[cfg(feature = "lz4")]
 use crate::compression::lz4::Lz4Decoder;
+#[cfg(feature = "zstd")]
+use crate::compression::zstd::ZstdHttpDecoder;
 use crate::{
     compression::Compression,
     error::{Error, Result},
@@ -234,6 +236,8 @@ enum Decompress<S> {
     Plain(S),
     #[cfg(feature = "lz4")]
     Lz4(Lz4Decoder<S>),
+    #[cfg(feature = "zstd")]
+    Zstd(ZstdHttpDecoder<S>),
 }
 
 impl<S> Decompress<S> {
@@ -243,6 +247,8 @@ impl<S> Decompress<S> {
             #[cfg(feature = "lz4")]
             #[allow(deprecated)]
             Compression::Lz4 | Compression::Lz4Hc(_) => Self::Lz4(Lz4Decoder::new(stream)),
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(_) => Self::Zstd(ZstdHttpDecoder::new(stream)),
         }
     }
 }
@@ -264,6 +270,8 @@ where
                 .map_err(Into::into),
             #[cfg(feature = "lz4")]
             Self::Lz4(stream) => Pin::new(stream).poll_next(cx),
+            #[cfg(feature = "zstd")]
+            Self::Zstd(stream) => Pin::new(stream).poll_next(cx),
         }
     }
 }

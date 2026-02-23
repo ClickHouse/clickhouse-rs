@@ -296,13 +296,15 @@ impl Client {
     }
 
     /// Specifies a compression mode. See [`Compression`] for details.
-    /// By default, `Lz4` is used.
+    /// By default, `Lz4` is used if the `lz4` feature is enabled.
     ///
     /// # Examples
     /// ```
     /// # use clickhouse::{Client, Compression};
     /// # #[cfg(feature = "lz4")]
     /// let client = Client::default().with_compression(Compression::Lz4);
+    /// # #[cfg(feature = "zstd")]
+    /// let client = Client::default().with_compression(Compression::zstd());
     /// ```
     pub fn with_compression(mut self, compression: Compression) -> Self {
         self.compression = compression;
@@ -637,6 +639,8 @@ mod settings {
     pub(crate) const DEFAULT_FORMAT: &str = "default_format";
     pub(crate) const COMPRESS: &str = "compress";
     pub(crate) const DECOMPRESS: &str = "decompress";
+    #[cfg(feature = "zstd")]
+    pub(crate) const ENABLE_HTTP_COMPRESSION: &str = "enable_http_compression";
     pub(crate) const ROLE: &str = "role";
     pub(crate) const QUERY: &str = "query";
 }
@@ -650,6 +654,11 @@ pub mod _priv {
     #[cfg(feature = "lz4")]
     pub fn lz4_compress(uncompressed: &[u8]) -> super::Result<bytes::Bytes> {
         crate::compression::lz4::compress(uncompressed)
+    }
+
+    #[cfg(feature = "zstd")]
+    pub fn zstd_compress(uncompressed: &[u8]) -> super::Result<bytes::Bytes> {
+        crate::compression::zstd::compress(uncompressed, None)
     }
 
     // Also needed by `it::insert::cache_row_metadata()`

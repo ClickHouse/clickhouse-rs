@@ -64,9 +64,11 @@ pub(crate) fn print_results<T: WithAccessType>(
     } = stats;
     let validation_mode = if validation { "enabled" } else { "disabled" };
     let compression = match compression {
-        Compression::None => "none",
+        Compression::None => "none".to_string(),
         #[cfg(feature = "lz4")]
-        Compression::Lz4 => "lz4",
+        Compression::Lz4 => "lz4".to_string(),
+        #[cfg(feature = "zstd")]
+        Compression::Zstd(level) => format!("zstd({level})"),
         _ => panic!("Unexpected compression mode"),
     };
     let access = if T::ACCESS_TYPE.is_empty() {

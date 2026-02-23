@@ -76,7 +76,7 @@ async fn insert_small_chunks() {
 
 #[tokio::test]
 #[cfg(feature = "lz4")]
-async fn insert_compressed() {
+async fn insert_compressed_lz4() {
     use clickhouse::insert_formatted::CompressedData;
 
     let client = prepare_database!()
@@ -85,7 +85,30 @@ async fn insert_compressed() {
 
     create_table(&client).await;
 
-    let data = CompressedData::from_slice(TAXI_DATA_TSV);
+    let data = CompressedData::new(TAXI_DATA_TSV, Compression::Lz4).unwrap();
+
+    let mut insert =
+        client.insert_formatted_with("INSERT INTO nyc_taxi_trips_small FORMAT TabSeparated");
+
+    insert.send_compressed(data).await.unwrap();
+
+    insert.end().await.unwrap();
+
+    verify_insert(&client).await;
+}
+
+#[tokio::test]
+#[cfg(feature = "zstd")]
+async fn insert_compressed_zstd() {
+    use clickhouse::insert_formatted::CompressedData;
+
+    let client = prepare_database!()
+        // `test-util` turns compression off
+        .with_compression(Compression::zstd());
+
+    create_table(&client).await;
+
+    let data = CompressedData::new(TAXI_DATA_TSV, Compression::zstd()).unwrap();
 
     let mut insert =
         client.insert_formatted_with("INSERT INTO nyc_taxi_trips_small FORMAT TabSeparated");

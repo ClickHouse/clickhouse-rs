@@ -95,6 +95,7 @@ inserter = ["dep:quanta"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
 lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
+zstd = ["dep:zstd", "dep:cityhash-rs"]
 chrono = ["dep:chrono"]
 futures03 = []
 
@@ -146,6 +147,7 @@ lz4_flex = { version = "0.11.6", default-features = false, features = [
     "std",
 ], optional = true }
 cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety, this package has been stable for years
+zstd = { version = "0.13", default-features = false, optional = true }
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
 chrono = { version = "0.4", optional = true, features = ["serde"] }
