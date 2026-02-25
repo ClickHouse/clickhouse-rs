@@ -27,17 +27,19 @@ pub struct RowCursor<T> {
     /// [`None`] until the first call to [`RowCursor::next()`],
     /// as [`RowCursor::new`] is not `async`, so it loads lazily.
     row_metadata: Option<RowMetadata>,
+    span: tracing::Span,
     _marker: PhantomData<fn() -> T>,
 }
 
 impl<T> RowCursor<T> {
-    pub(crate) fn new(response: Response, validation: bool) -> Self {
+    pub(crate) fn new(response: Response, validation: bool, span: tracing::Span) -> Self {
         Self {
             _marker: PhantomData,
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
             row_metadata: None,
             validation,
+            span,
         }
     }
 
@@ -47,6 +49,8 @@ impl<T> RowCursor<T> {
     where
         T: RowRead,
     {
+        let _span = self.span.enter();
+
         loop {
             if self.bytes.remaining() > 0 {
                 let mut slice = self.bytes.slice();
@@ -110,6 +114,8 @@ impl<T> RowCursor<T> {
             ready!(self.poll_read_columns(cx))?;
             debug_assert!(self.row_metadata.is_some());
         }
+
+        let _span = self.span.enter();
 
         let mut bytes = &mut self.bytes;
 

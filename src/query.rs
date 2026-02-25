@@ -1,6 +1,7 @@
 use hyper::{Method, Request, header::CONTENT_LENGTH};
 use serde::Serialize;
 use std::fmt::Display;
+use tracing::Instrument;
 use url::Url;
 
 use crate::{
@@ -59,7 +60,13 @@ impl Query {
 
     /// Executes the query.
     pub async fn execute(self) -> Result<()> {
-        self.do_execute(None)?.finish().await
+        // Enter the span for the `self.do_execute()` call
+        let span = self.make_span(None).entered();
+
+        self.do_execute(None)?
+            .finish()
+            .instrument(span.exit())
+            .await
     }
 
     /// Executes the query, returning a [`RowCursor`] to obtain results.
@@ -84,8 +91,6 @@ impl Query {
     /// # Ok(()) }
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
-        self.sql.bind_fields::<T>();
-
         let validation = self.client.get_validation();
         let format = if validation {
             formats::ROW_BINARY_WITH_NAMES_AND_TYPES
@@ -93,8 +98,12 @@ impl Query {
             formats::ROW_BINARY
         };
 
+        let span = self.make_span(Some(format)).entered();
+
+        self.sql.bind_fields::<T>();
+
         let response = self.do_execute(Some(format))?;
-        Ok(RowCursor::new(response, validation))
+        Ok(RowCursor::new(response, validation, span.exit()))
     }
 
     /// Executes the query and returns just a single row.
@@ -144,8 +153,35 @@ impl Query {
     ///
     /// [provided format]: https://clickhouse.com/docs/en/interfaces/formats
     pub fn fetch_bytes(self, format: impl AsRef<str>) -> Result<BytesCursor> {
-        let response = self.do_execute(Some(format.as_ref()))?;
-        Ok(BytesCursor::new(response))
+        let format = format.as_ref();
+
+        let span = self.make_span(Some(format)).entered();
+
+        let response = self.do_execute(Some(format))?;
+        Ok(BytesCursor::new(response, span.exit()))
+    }
+
+    pub(crate) fn make_span(&self, response_format: Option<&str>) -> tracing::Span {
+        tracing::error_span!(
+            "clickhouse.query",
+            // OTel conventional fields
+            status = tracing::field::Empty,
+            otel.status_code = tracing::field::Empty,
+            otel.kind = "CLIENT",
+            db.system.name = "clickhouse",
+            // Only log full query text at TRACE level
+            // Important that this is taken before client-side parameters are populated
+            db.query.text = tracing::enabled!(tracing::Level::TRACE).then(|| self.sql.to_string()),
+            // TODO: generate summary
+            db.query.summary = tracing::field::Empty,
+            db.response.returned_rows = tracing::field::Empty,
+            // ClickHouse-specific extension fields
+            clickhouse.request.session_id = self.client.get_option(settings::SESSION_ID),
+            clickhouse.request.query_id = self.client.get_option(settings::QUERY_ID),
+            clickhouse.response.returned_bytes = tracing::field::Empty,
+            clickhouse.response.decompressed_bytes = tracing::field::Empty,
+            clickhouse.response.format = response_format,
+        )
     }
 
     pub(crate) fn do_execute(self, default_format: Option<&str>) -> Result<Response> {

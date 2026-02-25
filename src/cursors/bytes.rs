@@ -6,6 +6,7 @@ use std::{
     task::{Context, Poll, ready},
 };
 use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
+use tracing::Instrument;
 
 /// A cursor over raw bytes of the response returned by [`Query::fetch_bytes`].
 ///
@@ -35,15 +36,17 @@ use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 pub struct BytesCursor {
     raw: RawCursor,
     bytes: Bytes,
+    span: tracing::Span,
 }
 
 // TODO: what if any next/poll_* called AFTER error returned?
 
 impl BytesCursor {
-    pub(crate) fn new(response: Response) -> Self {
+    pub(crate) fn new(response: Response, span: tracing::Span) -> Self {
         Self {
             raw: RawCursor::new(response),
             bytes: Bytes::default(),
+            span,
         }
     }
 
@@ -58,7 +61,7 @@ impl BytesCursor {
             "mixing `BytesCursor::next()` and `AsyncRead` API methods is not allowed"
         );
 
-        self.raw.next().await
+        self.raw.next().instrument(self.span.clone()).await
     }
 
     /// Collects the whole response into a single [`Bytes`].
@@ -93,6 +96,8 @@ impl BytesCursor {
     #[cold]
     fn poll_refill(&mut self, cx: &mut Context<'_>) -> Poll<IoResult<bool>> {
         debug_assert_eq!(self.bytes.len(), 0);
+
+        let _guard = self.span.enter();
 
         // Theoretically, `self.raw.poll_next(cx)` can return empty chunks.
         // In this case, we should continue polling until we get a non-empty chunk or
@@ -215,7 +220,11 @@ impl futures_util::stream::Stream for BytesCursor {
             "mixing `Stream` and `AsyncRead` API methods is not allowed"
         );
 
-        self.raw.poll_next(cx).map(Result::transpose)
+        let this = &mut *self;
+
+        let _guard = this.span.enter();
+
+        this.raw.poll_next(cx).map(Result::transpose)
     }
 }
 

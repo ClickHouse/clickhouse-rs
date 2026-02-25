@@ -676,6 +676,8 @@ mod settings {
     pub(crate) const ENABLE_HTTP_COMPRESSION: &str = "enable_http_compression";
     pub(crate) const ROLE: &str = "role";
     pub(crate) const QUERY: &str = "query";
+    pub(crate) const QUERY_ID: &str = "query_id";
+    pub(crate) const SESSION_ID: &str = "session_id";
 }
 
 /// This is a private API exported only for internal purposes.
