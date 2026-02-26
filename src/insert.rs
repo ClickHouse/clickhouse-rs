@@ -230,12 +230,23 @@ impl<T> Insert<T> {
     ///
     /// NOTE: If it isn't called, the whole `INSERT` is aborted.
     pub async fn end(mut self) -> Result<()> {
-        self.insert.end().await?;
+        let res = self.insert.end().await;
 
-        tracing::record_all!(
-            self.insert.span(),
-            clickhouse.request.sent_rows = self.sent_rows.0,
-        );
+        let _span = self.insert.span().enter();
+
+        match res {
+            Ok(()) => {
+                tracing::record_all!(
+                    self.insert.span(),
+                    clickhouse.request.sent_rows = self.sent_rows.0,
+                );
+
+                tracing::debug!("finished insert");
+            }
+            Err(e) => {
+                tracing::warn!("error from insert: {e:?}");
+            }
+        }
 
         Ok(())
     }

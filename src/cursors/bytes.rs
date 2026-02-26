@@ -1,5 +1,6 @@
 use crate::{cursors::RawCursor, error::Result, query_summary::QuerySummary, response::Response};
 use bytes::{Buf, Bytes, BytesMut};
+use futures_util::TryFutureExt;
 use std::{
     io::Result as IoResult,
     pin::Pin,
@@ -61,7 +62,11 @@ impl BytesCursor {
             "mixing `BytesCursor::next()` and `AsyncRead` API methods is not allowed"
         );
 
-        self.raw.next().instrument(self.span.clone()).await
+        self.raw
+            .next()
+            .inspect_err(|e| tracing::warn!("error from BytesCursor::next(): {e:?}"))
+            .instrument(self.span.clone())
+            .await
     }
 
     /// Collects the whole response into a single [`Bytes`].
@@ -103,9 +108,13 @@ impl BytesCursor {
         // In this case, we should continue polling until we get a non-empty chunk or
         // end of stream in order to avoid false positive `Ok(0)` in I/O traits.
         while self.bytes.is_empty() {
-            match ready!(self.raw.poll_next(cx)?) {
-                Some(chunk) => self.bytes = chunk,
-                None => return Poll::Ready(Ok(false)),
+            match ready!(self.raw.poll_next(cx)) {
+                Ok(Some(chunk)) => self.bytes = chunk,
+                Ok(None) => return Poll::Ready(Ok(false)),
+                Err(e) => {
+                    tracing::warn!("error in BytesCursor::poll_refill(): {e:?}");
+                    return Poll::Ready(Err(e.into()));
+                }
             }
         }
 
@@ -184,11 +193,15 @@ impl AsyncBufRead for BytesCursor {
 
 impl Drop for BytesCursor {
     fn drop(&mut self) {
+        let _span = self.span.enter();
+
         tracing::record_all!(
             self.span,
             clickhouse.response.received_bytes = self.received_bytes(),
             clickhouse.response.decoded_bytes = self.decoded_bytes(),
         );
+
+        tracing::debug!("finished raw query");
     }
 }
 

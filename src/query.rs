@@ -102,7 +102,10 @@ impl Query {
 
         self.sql.bind_fields::<T>();
 
-        let response = self.do_execute(Some(format))?;
+        let response = self
+            .do_execute(Some(format))
+            .inspect_err(|e| tracing::warn!("query error: {e:?}"))?;
+
         Ok(RowCursor::new(response, validation, span.exit()))
     }
 

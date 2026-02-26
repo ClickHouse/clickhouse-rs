@@ -138,19 +138,33 @@ impl<T> RowCursor<T> {
                             polonius_return!(Poll::Ready(Ok(Some(value))))
                         }
                         Err(Error::NotEnoughData) => {}
-                        Err(err) => polonius_return!(Poll::Ready(Err(err))),
+                        Err(err) => {
+                            tracing::warn!("error deserializing row: {err:?}");
+                            polonius_return!(Poll::Ready(Err(err)))
+                        }
                     }
                 }
             });
 
-            match ready!(self.raw.poll_next(cx))? {
-                Some(chunk) => bytes.extend(chunk),
-                None if bytes.remaining() > 0 => {
-                    // If some data is left, we have an incomplete row in the buffer.
-                    // This is usually a schema mismatch on the client side.
-                    return Poll::Ready(Err(Error::NotEnoughData));
+            match ready!(self.raw.poll_next(cx)) {
+                Ok(Some(chunk)) => bytes.extend(chunk),
+                Ok(None) => {
+                    return if bytes.remaining() > 0 {
+                        // If some data is left, we have an incomplete row in the buffer.
+                        // This is usually a schema mismatch on the client side.
+                        tracing::error!(
+                            bytes_remaining = bytes.remaining(),
+                            "incomplete read from cursor"
+                        );
+                        Poll::Ready(Err(Error::NotEnoughData))
+                    } else {
+                        Poll::Ready(Ok(None))
+                    };
                 }
-                None => return Poll::Ready(Ok(None)),
+                Err(e) => {
+                    tracing::warn!("error in RowCursor::poll_next(): {e:?}");
+                    return Poll::Ready(Err(e));
+                }
             }
         }
     }
@@ -184,12 +198,16 @@ impl<T> RowCursor<T> {
 
 impl<T> Drop for RowCursor<T> {
     fn drop(&mut self) {
+        let _span = self.span.enter();
+
         tracing::record_all!(
             self.span,
             db.response.returned_rows = self.returned_rows.0,
             clickhouse.response.received_bytes = self.received_bytes(),
             clickhouse.response.decoded_bytes = self.decoded_bytes(),
         );
+
+        tracing::debug!("finished typed query");
     }
 }
 
