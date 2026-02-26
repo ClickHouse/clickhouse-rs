@@ -656,9 +656,10 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
 
     let inner_types = columns
         .into_iter()
-        .filter(|column| !column.contains('=') || !column.starts_with("SKIP"))
+        .map(|column| column.trim())
+        .filter(|column| !column.contains('=') && !column.starts_with("SKIP"))
         .map(|column| {
-            let map = column.trim().split(' ').collect::<Vec<_>>();
+            let map = column.split(' ').collect::<Vec<_>>();
             let key_type = map[0].to_string();
             let value_type = DataTypeNode::new(map[1])?;
 
@@ -1021,12 +1022,15 @@ mod tests {
         assert_eq!(DataTypeNode::new("Dynamic").unwrap(), DataTypeNode::Dynamic);
         assert_eq!(DataTypeNode::new("JSON").unwrap(), DataTypeNode::JSON);
         assert_eq!(
-            DataTypeNode::new("JSON(max_dynamic_types=8, max_dynamic_paths=64)").unwrap(),
+            DataTypeNode::new(
+                "JSON(max_dynamic_types=8, max_dynamic_paths=64, SKIP internal_metrics)"
+            )
+            .unwrap(),
             DataTypeNode::JSON
         );
         assert_eq!(
             DataTypeNode::new(
-                "JSON(max_dynamic_types=8, max_dynamic_paths=64, foo String, bar Int32)"
+                "JSON(max_dynamic_types=8, max_dynamic_paths=64, SKIP internal_metrics, foo String, bar Int32)"
             )
             .unwrap(),
             DataTypeNode::JsonWithHint(vec![
