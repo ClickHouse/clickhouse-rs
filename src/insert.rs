@@ -189,6 +189,9 @@ impl<T> Insert<T> {
             if self.insert.buf_len() >= MIN_CHUNK_SIZE {
                 self.insert.flush().await?;
             }
+
+            self.sent_rows += 1;
+
             Ok(())
         }
     }
@@ -227,7 +230,14 @@ impl<T> Insert<T> {
     ///
     /// NOTE: If it isn't called, the whole `INSERT` is aborted.
     pub async fn end(mut self) -> Result<()> {
-        self.insert.end().await
+        self.insert.end().await?;
+
+        tracing::record_all!(
+            self.insert.span(),
+            clickhouse.request.sent_rows = self.sent_rows.0,
+        );
+
+        Ok(())
     }
 
     fn init_request_if_required(&mut self) -> Result<()> {
