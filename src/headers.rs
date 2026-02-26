@@ -28,6 +28,20 @@ pub(crate) fn with_request_headers(
     headers: &HashMap<String, String>,
     products_info: &[ProductInfo],
 ) -> Builder {
+    // Inject the OpenTelemetry trace context if the feature is enabled
+    #[cfg(feature = "opentelemetry")]
+    opentelemetry::global::get_text_map_propagator(|propagator| {
+        use opentelemetry_http::HeaderInjector;
+
+        // The *official* example just uses `.unwrap()` here which is not great
+        // https://github.com/open-telemetry/opentelemetry-rust/blob/8ab834d60e780311e9261ddae4999989b76785d4/examples/tracing-http-propagator/src/client.rs#L59
+        let Some(headers) = builder.headers_mut() else {
+            return;
+        };
+
+        propagator.inject(&mut HeaderInjector(headers));
+    });
+
     for (name, value) in headers {
         builder = builder.header(name, value);
     }

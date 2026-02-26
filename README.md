@@ -235,6 +235,10 @@ async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
 * `chrono` — adds `serde::chrono` to work with [chrono](https://docs.rs/chrono) crate.
+* `opentelemetry` — [propagate OpenTelemetry context][otel-context] to [ClickHouse server][ch-otel].
+
+[otel-context]: https://opentelemetry.io/docs/concepts/context-propagation/
+[ch-otel]: https://clickhouse.com/docs/operations/opentelemetry
 
 ### TLS
 By default, TLS is disabled and one or more following features must be enabled to use HTTPS urls:
