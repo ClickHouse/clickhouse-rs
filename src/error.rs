@@ -112,6 +112,32 @@ impl From<io::Error> for Error {
     }
 }
 
+impl Error {
+    /// https://opentelemetry.io/docs/specs/semconv/registry/attributes/error/#error-type
+    pub(crate) fn error_type(&self) -> &str {
+        match self {
+            Error::InvalidParams(_) => "InvalidParams",
+            Error::Network(_) => "Network",
+            Error::Compression(_) => "Compression",
+            Error::Decompression(_) => "Decompression",
+            Error::RowNotFound => "RowNotFound",
+            Error::SequenceMustHaveLength => "SequenceMustHaveLength",
+            Error::DeserializeAnyNotSupported => "DeserializeAnyNotSupported",
+            Error::NotEnoughData => "NotEnoughData",
+            Error::InvalidUtf8Encoding(_) => "InvalidUtf8Encoding",
+            Error::InvalidTagEncoding(_) => "InvalidTagEncoding",
+            Error::VariantDiscriminatorIsOutOfBound(_) => "VariantDiscriminatorIsOutOfBound",
+            Error::Custom(_) => "Custom",
+            Error::BadResponse(_) => "BadResponse",
+            Error::TimedOut => "TimedOut",
+            Error::InvalidColumnsHeader(_) => "InvalidColumnsHeader",
+            Error::SchemaMismatch(_) => "SchemaMismatch",
+            Error::Unsupported(_) => "Unsupported",
+            Error::Other(_) => "Other",
+        }
+    }
+}
+
 #[cfg(tests)]
 mod tests {
     use crate::error::Error;

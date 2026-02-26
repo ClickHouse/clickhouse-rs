@@ -182,6 +182,16 @@ impl AsyncBufRead for BytesCursor {
     }
 }
 
+impl Drop for BytesCursor {
+    fn drop(&mut self) {
+        tracing::record_all!(
+            self.span,
+            clickhouse.response.received_bytes = self.received_bytes(),
+            clickhouse.response.decoded_bytes = self.decoded_bytes(),
+        );
+    }
+}
+
 #[cfg(feature = "futures03")]
 impl futures_util::AsyncRead for BytesCursor {
     #[inline]

@@ -174,12 +174,13 @@ impl Query {
             db.query.text = tracing::enabled!(tracing::Level::TRACE).then(|| self.sql.to_string()),
             // TODO: generate summary
             db.query.summary = tracing::field::Empty,
+            db.response.status_code = tracing::field::Empty,
             db.response.returned_rows = tracing::field::Empty,
             // ClickHouse-specific extension fields
             clickhouse.request.session_id = self.client.get_option(settings::SESSION_ID),
             clickhouse.request.query_id = self.client.get_option(settings::QUERY_ID),
-            clickhouse.response.returned_bytes = tracing::field::Empty,
-            clickhouse.response.decompressed_bytes = tracing::field::Empty,
+            clickhouse.response.received_bytes = tracing::field::Empty,
+            clickhouse.response.decoded_bytes = tracing::field::Empty,
             clickhouse.response.format = response_format,
         )
     }

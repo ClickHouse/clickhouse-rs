@@ -8,6 +8,7 @@ use crate::{
 };
 use bytes::{Bytes, BytesMut};
 use hyper::{self, Request};
+use std::num::Saturating;
 use std::ops::ControlFlow;
 use std::task::{Context, Poll, ready};
 use std::{cmp, future::Future, io, mem, panic, pin::Pin, time::Duration};
@@ -49,6 +50,7 @@ pub struct InsertFormatted {
     // Use boxed `Sleep` to reuse a timer entry, it improves performance.
     // Also, `tokio::time::timeout()` significantly increases a future's size.
     sleep: Pin<Box<Sleep>>,
+    span: tracing::Span,
 }
 
 struct Timeout {
@@ -64,6 +66,8 @@ enum InsertState {
     Active {
         sender: ChunkSender,
         handle: JoinHandle<Result<()>>,
+        sent_bytes: Saturating<u64>,
+        encoded_bytes: Saturating<u64>,
     },
     Terminated {
         handle: JoinHandle<Result<()>>,
@@ -123,6 +127,25 @@ impl InsertState {
 impl InsertFormatted {
     pub(crate) fn new(client: &Client, sql: String) -> Self {
         Self {
+            span: tracing::error_span!(
+                "clickhouse.insert",
+                // OTel conventional fields
+                status = tracing::field::Empty,
+                otel.status_code = tracing::field::Empty,
+                otel.kind = "CLIENT",
+                db.system.name = "clickhouse",
+                // Only log full query text at TRACE level
+                // Important that this is taken before client-side parameters are populated
+                db.query.text = tracing::enabled!(tracing::Level::TRACE).then_some(&sql),
+                // TODO: generate summary
+                db.query.summary = tracing::field::Empty,
+                // ClickHouse-specific extension fields
+                clickhouse.request.session_id = client.get_option(settings::SESSION_ID),
+                clickhouse.request.query_id = client.get_option(settings::QUERY_ID),
+                clickhouse.request.sent_rows = tracing::field::Empty,
+                clickhouse.request.sent_bytes = tracing::field::Empty,
+                clickhouse.request.encoded_bytes = tracing::field::Empty,
+            ),
             state: InsertState::NotStarted {
                 client: Box::new(client.clone()),
                 sql,
@@ -250,17 +273,20 @@ impl InsertFormatted {
     ///
     /// Use [`Self::buffered()`] for a buffered implementation which also implements [`AsyncWrite`].
     pub async fn send(&mut self, data: Bytes) -> Result<()> {
+        let original_size = to_u64_saturating(data.len());
+
         #[cfg(any(feature = "lz4", feature = "zstd"))]
         let data = if self.compression.is_enabled() {
-            CompressedData::new(&data, self.compression)?.0
+            CompressedData::from_slice(&data)
+                .compressed
         } else {
             data
         };
 
-        self.send_inner(data).await
+        self.send_inner(data, original_size).await
     }
 
-    async fn send_inner(&mut self, mut data: Bytes) -> Result<()> {
+    async fn send_inner(&mut self, mut data: Bytes, original_size: u64) -> Result<()> {
         if self.state.is_not_started() {
             self.init_request()?;
         }
@@ -268,7 +294,7 @@ impl InsertFormatted {
         std::future::poll_fn(move |cx| {
             loop {
                 // Potentially cheaper than cloning `data` which touches the refcount
-                match self.try_send(mem::take(&mut data)) {
+                match self.try_send(mem::take(&mut data), original_size) {
                     ControlFlow::Break(Ok(())) => return Poll::Ready(Ok(())),
                     ControlFlow::Break(Err(_)) => {
                         // If the channel is closed, we should return the actual error
@@ -314,14 +340,31 @@ impl InsertFormatted {
     }
 
     #[inline(always)]
-    pub(crate) fn try_send(&mut self, bytes: Bytes) -> ControlFlow<Result<()>, Bytes> {
-        let Some(sender) = self.state.sender() else {
+    pub(crate) fn try_send(
+        &mut self,
+        bytes: Bytes,
+        original_size: u64,
+    ) -> ControlFlow<Result<()>, Bytes> {
+        let InsertState::Active {
+            sender,
+            sent_bytes,
+            encoded_bytes,
+            ..
+        } = &mut self.state
+        else {
             return ControlFlow::Break(Err(Error::Network("channel closed".into())));
         };
 
-        sender
-            .try_send(bytes)
-            .map_break(|res| res.map_err(|e| Error::Network(e.into())))
+        let send_size = bytes.len();
+
+        sender.try_send(bytes).map_break(|res| match res {
+            Ok(()) => {
+                *sent_bytes += to_u64_saturating(send_size);
+                *encoded_bytes += original_size;
+                Ok(())
+            }
+            Err(e) => Err(Error::Network(e.into())),
+        })
     }
 
     /// Ends `INSERT`, the server starts processing the data.
@@ -374,6 +417,8 @@ impl InsertFormatted {
         debug_assert!(matches!(self.state, InsertState::NotStarted { .. }));
         let (client, sql) = self.state.client_with_sql().unwrap(); // checked above
 
+        let _span = self.span.enter();
+
         let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -409,14 +454,34 @@ impl InsertFormatted {
         let handle =
             tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
 
-        self.state = InsertState::Active { handle, sender };
+        self.state = InsertState::Active {
+            handle,
+            sender,
+            sent_bytes: Saturating(0),
+            encoded_bytes: Saturating(0),
+        };
         Ok(())
     }
 
     pub(crate) fn abort(&mut self) {
-        if let Some(sender) = self.state.sender() {
+        let _span = self.span.enter();
+
+        if let InsertState::Active {
+            sender,
+            sent_bytes,
+            encoded_bytes,
+            ..
+        } = &mut self.state
+        {
             sender.abort();
+            tracing::debug!(
+                clickhouse.request.sent_bytes = sent_bytes.0,
+                clickhouse.request.encoded_bytes = encoded_bytes.0,
+                "insert aborted",
+            );
         }
+
+        self.state.terminated();
     }
 }
 
@@ -549,14 +614,16 @@ impl BufInsertFormatted {
 
         let data = self.buffer.split().freeze();
 
+        let original_size: u64 = data.len().try_into().unwrap_or(u64::MAX);
+
         #[cfg(any(feature = "lz4", feature = "zstd"))]
         let data = if self.insert.compression.is_enabled() {
-            CompressedData::new(&data, self.insert.compression)?.0
+            CompressedData::new(&data, self.insert.compression)?.compressed
         } else {
             data
         };
 
-        let ControlFlow::Break(res) = self.insert.try_send(data) else {
+        let ControlFlow::Break(res) = self.insert.try_send(data, original_size) else {
             unreachable!("BUG: we just checked that `ChunkSender` was ready")
         };
 
@@ -665,17 +732,24 @@ impl Timeout {
     }
 }
 
+fn to_u64_saturating(n: usize) -> u64 {
+    n.try_into().unwrap_or(u64::MAX)
+}
+
 // Just so I don't have to repeat this feature flag a hundred times.
 #[cfg(any(feature = "lz4", feature = "zstd"))]
 mod compression {
     use crate::Compression;
     use crate::error::{Error, Result};
-    use crate::insert_formatted::InsertFormatted;
+    use crate::insert_formatted::{InsertFormatted, to_u64_saturating};
     use bytes::Bytes;
 
     /// A chunk of pre-compressed data.
     #[cfg_attr(docsrs, doc(cfg(any(feature = "lz4", feature = "zstd"))))]
-    pub struct CompressedData(pub(crate) Bytes);
+    pub struct CompressedData {
+        pub(crate) compressed: Bytes,
+        pub(crate) original_size: u64,
+    }
 
     impl CompressedData {
         /// Compress a slice of bytes using the specified compression method.
@@ -704,10 +778,11 @@ mod compression {
         #[deprecated(note = "use `CompressedData::new()` instead")]
         #[inline(always)]
         pub fn from_slice(slice: &[u8]) -> Self {
-            Self(
-                crate::compression::lz4::compress(slice)
+            Self {
+                original_size: to_u64_saturating(slice.len()),
+                compressed: crate::compression::lz4::compress(slice)
                     .expect("BUG: `lz4::compress()` should not error"),
-            )
+            }
         }
     }
 
@@ -736,7 +811,7 @@ mod compression {
                 ));
             }
 
-            self.send_inner(data.0).await
+            self.send_inner(data.compressed, data.original_size).await
         }
     }
 }

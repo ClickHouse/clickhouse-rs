@@ -8,6 +8,7 @@ use crate::{
     row::{self, Row},
 };
 use clickhouse_types::put_rbwnat_columns_header;
+use std::num::Saturating;
 use std::{future::Future, marker::PhantomData, time::Duration};
 
 // The desired max frame size.
@@ -40,6 +41,7 @@ const MIN_CHUNK_SIZE: usize = const {
 pub struct Insert<T> {
     insert: BufInsertFormatted,
     row_metadata: Option<RowMetadata>,
+    sent_rows: Saturating<u64>,
     _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
 }
 
@@ -65,6 +67,7 @@ impl<T> Insert<T> {
                 .insert_formatted_with(sql)
                 .buffered_with_capacity(BUFFER_SIZE),
             row_metadata,
+            sent_rows: Saturating(0),
             _marker: PhantomData,
         }
     }
