@@ -95,6 +95,8 @@ pub enum DataTypeNode {
     Dynamic,
     JSON,
 
+    // TODO: Rename for better representation
+    JsonWithHint(Vec<(String, Box<DataTypeNode>)>),
     Point,
     Ring,
     LineString,
@@ -140,7 +142,7 @@ impl DataTypeNode {
             "Polygon" => Ok(Self::Polygon),
             "MultiPolygon" => Ok(Self::MultiPolygon),
 
-            str if str.starts_with("JSON") => Ok(Self::JSON),
+            str if str.starts_with("JSON(") => parse_json(str),
 
             str if str.starts_with("Decimal") => parse_decimal(str),
             str if str.starts_with("DateTime64") => parse_datetime64(str),
@@ -278,8 +280,25 @@ impl Display for DataTypeNode {
             MultiLineString => write!(f, "MultiLineString"),
             Polygon => write!(f, "Polygon"),
             MultiPolygon => write!(f, "MultiPolygon"),
+            JsonWithHint(json) => format_json_with_hint(json, f),
         }
     }
+}
+
+fn format_json_with_hint(
+    json: &[(String, Box<DataTypeNode>)],
+    f: &mut Formatter<'_>,
+) -> Result<(), std::fmt::Error> {
+    write!(f, "JSON(")?;
+
+    for (i, (name, ty)) in json.iter().enumerate() {
+        if i > 0 {
+            write!(f, ", ")?;
+        }
+        write!(f, "{} {}", name, ty)?;
+    }
+
+    write!(f, ")")
 }
 
 /// Represents the underlying integer size of an Enum type.
@@ -632,6 +651,41 @@ fn parse_map(input: &str) -> Result<DataTypeNode, TypesError> {
     )))
 }
 
+fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
+    let columns = remove_json_header(input)?.split(',').collect::<Vec<_>>();
+
+    let inner_types = columns
+        .into_iter()
+        .map(|column| column.trim())
+        .filter(|column| !column.contains('=') && !column.starts_with("SKIP"))
+        .map(|column| {
+            let map = column.split(' ').collect::<Vec<_>>();
+            let key_type = map[0].to_string();
+            let value_type = DataTypeNode::new(map[1])?;
+
+            Ok((key_type, Box::new(value_type)))
+        })
+        .collect::<Result<Vec<(String, Box<DataTypeNode>)>, TypesError>>()?;
+
+    if inner_types.is_empty() {
+        return Ok(DataTypeNode::JSON);
+    }
+
+    Ok(DataTypeNode::JsonWithHint(inner_types))
+}
+
+fn remove_json_header(input: &str) -> Result<&str, TypesError> {
+    if input.starts_with("JSON") && input.ends_with(')') {
+        let new = input[5..].trim();
+
+        Ok(new.trim_end_matches(')'))
+    } else {
+        Err(TypesError::TypeParsingError(format!(
+            "Invalid JSON format, expected JSON(Type), got {input}"
+        )))
+    }
+}
+
 fn parse_tuple(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() > 7 {
         let inner_types_str = &input[6..input.len() - 1];
@@ -865,6 +919,18 @@ mod tests {
     }
 
     #[test]
+    fn test_json_with_hint_display() {
+        let json_with_hint = DataTypeNode::JsonWithHint(vec![
+            ("foo".to_string(), Box::new(DataTypeNode::String)),
+            ("bar".to_string(), Box::new(DataTypeNode::Int32)),
+        ]);
+        assert_eq!(
+            json_with_hint.to_string(),
+            "JSON(foo String, bar Int32)".to_string()
+        );
+    }
+
+    #[test]
     fn test_enum_display() {
         let mut values1 = HashMap::new();
         values1.insert(1, "one".to_string());
@@ -956,8 +1022,21 @@ mod tests {
         assert_eq!(DataTypeNode::new("Dynamic").unwrap(), DataTypeNode::Dynamic);
         assert_eq!(DataTypeNode::new("JSON").unwrap(), DataTypeNode::JSON);
         assert_eq!(
-            DataTypeNode::new("JSON(max_dynamic_types=8, max_dynamic_paths=64)").unwrap(),
+            DataTypeNode::new(
+                "JSON(max_dynamic_types=8, max_dynamic_paths=64, SKIP internal_metrics)"
+            )
+            .unwrap(),
             DataTypeNode::JSON
+        );
+        assert_eq!(
+            DataTypeNode::new(
+                "JSON(max_dynamic_types=8, max_dynamic_paths=64, SKIP internal_metrics, foo String, bar Int32)"
+            )
+            .unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                ("foo".to_string(), Box::new(DataTypeNode::String)),
+                ("bar".to_string(), Box::new(DataTypeNode::Int32))
+            ])
         );
         assert!(DataTypeNode::new("SomeUnknownType").is_err());
     }

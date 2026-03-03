@@ -2,6 +2,7 @@ use crate::{SimpleRow, create_simple_table, fetch_rows, flush_query_log};
 use clickhouse::insert::Insert;
 use clickhouse::{Row, sql::Identifier};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::panic::AssertUnwindSafe;
 
 #[tokio::test]
@@ -131,6 +132,66 @@ async fn empty_insert() {
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
     assert!(rows.is_empty())
+}
+
+#[tokio::test]
+async fn insert_with_json_hint() {
+    #[derive(Serialize, Deserialize, Row, PartialEq)]
+    struct JSONTestRow {
+        i: u8,
+        jv: String,
+    }
+
+    let table_name = "rust_json_test";
+
+    let client = prepare_database!()
+        .with_option("input_format_binary_read_json_as_string", "1")
+        .with_option("output_format_binary_write_json_as_string", "1");
+
+    client
+        .query(
+            r#"
+                CREATE TABLE ? (
+                    i UInt8,
+                    jv JSON(
+                        foo String,
+                        bar Int
+                    )
+                )
+                ENGINE = MergeTree
+                ORDER BY i
+            "#,
+        )
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+
+    let row = JSONTestRow {
+        i: 1,
+        jv: r#"{
+            "foo": "hello",
+            "bar": 123
+        }"#
+        .to_string(),
+    };
+
+    let mut insert = client.insert::<JSONTestRow>(table_name).await.unwrap();
+
+    insert.write(&row).await.unwrap();
+
+    insert.end().await.unwrap();
+
+    let rows = fetch_rows::<JSONTestRow>(&client, table_name).await;
+
+    assert!(rows.len() == 1);
+
+    assert_eq!(
+        serde_json::from_str::<Value>(&rows[0].jv).unwrap(),
+        serde_json::from_str::<Value>(&row.jv).unwrap()
+    );
+
+    assert_eq!(rows[0].i, row.i)
 }
 
 #[tokio::test]
