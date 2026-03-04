@@ -1,6 +1,7 @@
-use crate::{SimpleRow, create_simple_table, fetch_rows, flush_query_log};
+use crate::{SimpleRow, create_simple_table, fetch_rows, flush_query_log, get_client};
 use clickhouse::insert::Insert;
 use clickhouse::{Row, sql::Identifier};
+use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::panic::AssertUnwindSafe;
@@ -588,4 +589,54 @@ async fn insert_with_role() {
     )
     .await
     .expect_err("user should not be able to insert into `foo`");
+}
+
+#[tokio::test]
+async fn insert_into_temp_table() {
+    let client = get_client().with_option(
+        "session_id",
+        Alphanumeric.sample_string(&mut rand::rng(), 16),
+    );
+
+    client
+        .query("CREATE TEMPORARY TABLE foo(bar Int32, baz Nullable(String))")
+        .execute()
+        .await
+        .unwrap();
+
+    #[derive(
+        serde::Serialize,
+        serde::Deserialize,
+        clickhouse::Row,
+        Debug,
+        PartialEq,
+        Eq
+    )]
+    struct FooRow {
+        bar: i32,
+        baz: Option<String>,
+    }
+
+    let foos = (0..10)
+        .map(|bar| FooRow {
+            bar,
+            baz: (bar % 2 != 0).then(|| format!("baz_{bar}")),
+        })
+        .collect::<Vec<_>>();
+
+    let mut insert = client.insert::<FooRow>("foo").await.unwrap();
+
+    for foo in &foos {
+        insert.write(foo).await.unwrap();
+    }
+
+    insert.end().await.unwrap();
+
+    let foos_out = client
+        .query("SELECT * FROM foo ORDER BY bar")
+        .fetch_all::<FooRow>()
+        .await
+        .unwrap();
+
+    assert_eq!(foos, foos_out);
 }
