@@ -327,16 +327,18 @@ async fn cache_row_metadata() {
     // Ensure `system.query_log` is fully written
     flush_query_log(&client).await;
 
-    let count_query = "SELECT count() FROM system.query_log WHERE query LIKE ? || '%'";
+    let count_query = "SELECT count() FROM system.query_log \n\
+        WHERE query LIKE {query:String} || '%' \n\
+        AND current_database = {db:String}";
 
-    let row_insert_metadata_query =
-        clickhouse::_priv::row_insert_metadata_query(&db_name, table_name);
+    let row_insert_metadata_query = format!("DESCRIBE TABLE {table_name}");
 
     println!("row_insert_metadata_query: {row_insert_metadata_query:?}");
 
     let initial_count: u64 = client
         .query(count_query)
-        .bind(&row_insert_metadata_query)
+        .param("query", &row_insert_metadata_query)
+        .param("db", &db_name)
         .fetch_one()
         .await
         .unwrap();
@@ -358,7 +360,8 @@ async fn cache_row_metadata() {
 
     let after_insert: u64 = client
         .query(count_query)
-        .bind(&row_insert_metadata_query)
+        .param("query", &row_insert_metadata_query)
+        .param("db", &db_name)
         .fetch_one()
         .await
         .unwrap();
@@ -384,7 +387,8 @@ async fn cache_row_metadata() {
 
     let final_count: u64 = client
         .query(count_query)
-        .bind(&row_insert_metadata_query)
+        .param("query", &row_insert_metadata_query)
+        .param("db", &db_name)
         .fetch_one()
         .await
         .unwrap();

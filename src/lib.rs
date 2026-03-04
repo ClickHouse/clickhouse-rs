@@ -12,7 +12,6 @@ use crate::row_metadata::{AccessType, ColumnDefaultKind, InsertMetadata, RowMeta
 pub use clickhouse_macros::Row;
 use clickhouse_types::{Column, DataTypeNode};
 
-use crate::_priv::row_insert_metadata_query;
 use std::collections::HashSet;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
@@ -546,6 +545,20 @@ impl Client {
     }
 
     async fn get_insert_metadata(&self, table_name: &str) -> Result<Arc<InsertMetadata>> {
+        #[derive(::serde::Deserialize, clickhouse_macros::Row)]
+        #[clickhouse(crate = "self")]
+        // `Row` derive doesn't allow omitting columns
+        #[expect(dead_code)]
+        struct DescribeColumn {
+            name: String,
+            r#type: String,
+            default_type: String,
+            default_expression: String,
+            comment: String,
+            codec_expression: String,
+            ttl_expression: String,
+        }
+
         {
             let read_lock = self.insert_metadata_cache.0.read().await;
 
@@ -557,26 +570,27 @@ impl Client {
 
         // TODO: should it be moved to a cold function?
         let mut write_lock = self.insert_metadata_cache.0.write().await;
-        let db = match self.database {
-            Some(ref db) => db,
-            None => "default",
-        };
 
         let mut columns_cursor = self
-            .query(&row_insert_metadata_query(db, table_name))
-            .fetch::<(String, String, String)>()?;
+            .query("DESCRIBE TABLE {table:Identifier}")
+            .param("table", table_name)
+            .with_option("describe_include_subcolumns", "0")
+            .fetch::<DescribeColumn>()?;
 
         let mut columns = Vec::new();
         let mut column_default_kinds = Vec::new();
         let mut column_lookup = HashMap::new();
 
-        while let Some((name, type_, default_kind)) = columns_cursor.next().await? {
-            let data_type = DataTypeNode::new(&type_)?;
-            let default_kind = default_kind.parse::<ColumnDefaultKind>()?;
+        while let Some(column) = columns_cursor.next().await? {
+            let data_type = DataTypeNode::new(&column.r#type)?;
+            let default_kind = column.default_type.parse::<ColumnDefaultKind>()?;
 
-            column_lookup.insert(name.clone(), columns.len());
+            column_lookup.insert(column.name.clone(), columns.len());
 
-            columns.push(Column { name, data_type });
+            columns.push(Column {
+                name: column.name,
+                data_type,
+            });
 
             column_default_kinds.push(default_kind);
         }
@@ -618,25 +632,6 @@ pub mod _priv {
     #[cfg(feature = "lz4")]
     pub fn lz4_compress(uncompressed: &[u8]) -> super::Result<bytes::Bytes> {
         crate::compression::lz4::compress(uncompressed)
-    }
-
-    // Also needed by `it::insert::cache_row_metadata()`
-    pub fn row_insert_metadata_query(db: &str, table: &str) -> String {
-        let mut out = "SELECT \
-            name, \
-            type, \
-            default_kind \
-         FROM system.columns \
-         WHERE database = "
-            .to_string();
-
-        crate::sql::escape::string(db, &mut out).unwrap();
-
-        out.push_str(" AND table = ");
-
-        crate::sql::escape::string(table, &mut out).unwrap();
-
-        out
     }
 }
 
