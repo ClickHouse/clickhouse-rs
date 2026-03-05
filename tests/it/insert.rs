@@ -593,17 +593,6 @@ async fn insert_with_role() {
 
 #[tokio::test]
 async fn insert_into_temp_table() {
-    let client = get_client().with_option(
-        "session_id",
-        Alphanumeric.sample_string(&mut rand::rng(), 16),
-    );
-
-    client
-        .query("CREATE TEMPORARY TABLE foo(bar Int32, baz Nullable(String))")
-        .execute()
-        .await
-        .unwrap();
-
     #[derive(
         serde::Serialize,
         serde::Deserialize,
@@ -617,6 +606,17 @@ async fn insert_into_temp_table() {
         baz: Option<String>,
     }
 
+    let client = get_client().with_option(
+        "session_id",
+        Alphanumeric.sample_string(&mut rand::rng(), 16),
+    );
+
+    client
+        .query("CREATE TEMPORARY TABLE foo(bar Int32, baz Nullable(String))")
+        .execute()
+        .await
+        .unwrap();
+
     let foos = (0..10)
         .map(|bar| FooRow {
             bar,
@@ -625,6 +625,59 @@ async fn insert_into_temp_table() {
         .collect::<Vec<_>>();
 
     let mut insert = client.insert::<FooRow>("foo").await.unwrap();
+
+    for foo in &foos {
+        insert.write(foo).await.unwrap();
+    }
+
+    insert.end().await.unwrap();
+
+    let foos_out = client
+        .query("SELECT * FROM foo ORDER BY bar")
+        .fetch_all::<FooRow>()
+        .await
+        .unwrap();
+
+    assert_eq!(foos, foos_out);
+}
+
+#[tokio::test]
+async fn insert_fully_qualified() {
+    #[derive(
+        serde::Serialize,
+        serde::Deserialize,
+        clickhouse::Row,
+        Debug,
+        PartialEq,
+        Eq
+    )]
+    struct FooRow {
+        bar: i32,
+        baz: Option<String>,
+    }
+
+    let db_name = test_database_name!();
+
+    let default_client = get_client();
+    let client = crate::_priv::prepare_database(&db_name).await;
+
+    client
+        .query("CREATE TABLE foo(bar Int32, baz Nullable(String))")
+        .execute()
+        .await
+        .unwrap();
+
+    let foos = (0..10)
+        .map(|bar| FooRow {
+            bar,
+            baz: (bar % 2 != 0).then(|| format!("baz_{bar}")),
+        })
+        .collect::<Vec<_>>();
+
+    let mut insert = default_client
+        .insert::<FooRow>(&format!("{db_name}.foo"))
+        .await
+        .unwrap();
 
     for foo in &foos {
         insert.write(foo).await.unwrap();
