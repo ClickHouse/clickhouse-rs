@@ -591,7 +591,7 @@ impl Client {
         let mut write_lock = self.insert_metadata_cache.0.write().await;
 
         let mut columns_cursor = self
-            .query(&format!("DESCRIBE TABLE {raw_table_name}"))
+            .query(&_priv::row_insert_metadata_query(raw_table_name))
             .with_option("describe_include_subcolumns", "0")
             .fetch::<DescribeColumn>()?;
 
@@ -650,6 +650,11 @@ pub mod _priv {
     #[cfg(feature = "lz4")]
     pub fn lz4_compress(uncompressed: &[u8]) -> super::Result<bytes::Bytes> {
         crate::compression::lz4::compress(uncompressed)
+    }
+
+    // Also needed by `it::insert::cache_row_metadata()`
+    pub fn row_insert_metadata_query(raw_table: &str) -> String {
+        format!("DESCRIBE TABLE {raw_table}")
     }
 }
 

@@ -323,7 +323,7 @@ async fn cache_row_metadata() {
     }
 
     let db_name = test_database_name!();
-    let table_name = "foo";
+    let table_name = "`foo`";
 
     let client = crate::_priv::prepare_database(&db_name)
         .await
@@ -342,7 +342,7 @@ async fn cache_row_metadata() {
         WHERE query LIKE {query:String} || '%' \n\
         AND current_database = {db:String}";
 
-    let row_insert_metadata_query = format!("DESCRIBE TABLE `{table_name}`");
+    let row_insert_metadata_query = clickhouse::_priv::row_insert_metadata_query(table_name);
 
     println!("row_insert_metadata_query: {row_insert_metadata_query:?}");
 
@@ -354,7 +354,8 @@ async fn cache_row_metadata() {
         .await
         .unwrap();
 
-    let mut insert = client.insert::<Foo>(table_name).await.unwrap();
+    // Table name already manually escaped
+    let mut insert = client.insert_unescaped::<Foo>(table_name).await.unwrap();
 
     insert
         .write(&Foo {
@@ -382,7 +383,7 @@ async fn cache_row_metadata() {
     // Instead, of asserting a specific value, we assert that the count has changed.
     assert_ne!(after_insert, initial_count);
 
-    let mut insert = client.insert::<Foo>(table_name).await.unwrap();
+    let mut insert = client.insert_unescaped::<Foo>(table_name).await.unwrap();
 
     insert
         .write(&Foo {
