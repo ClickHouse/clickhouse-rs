@@ -642,7 +642,7 @@ async fn insert_into_temp_table() {
 }
 
 #[tokio::test]
-async fn insert_fully_qualified() {
+async fn insert_unescaped() {
     #[derive(
         serde::Serialize,
         serde::Deserialize,
@@ -675,7 +675,7 @@ async fn insert_fully_qualified() {
         .collect::<Vec<_>>();
 
     let mut insert = default_client
-        .insert::<FooRow>(&format!("{db_name}.foo"))
+        .insert_unescaped::<FooRow>(&format!("{db_name}.foo"))
         .await
         .unwrap();
 

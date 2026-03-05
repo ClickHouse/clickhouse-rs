@@ -12,6 +12,7 @@ use crate::row_metadata::{AccessType, ColumnDefaultKind, InsertMetadata, RowMeta
 pub use clickhouse_macros::Row;
 use clickhouse_types::{Column, DataTypeNode};
 
+use crate::error::Error;
 use std::collections::HashSet;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
@@ -400,6 +401,10 @@ impl Client {
 
     /// Starts a new INSERT statement.
     ///
+    /// The table name will be escaped as a single identifier. To pass a fully qualified name,
+    /// use [`Client::insert_unescaped()`] instead, or override the database name for this statement
+    /// using `client.clone().with_database("<db name>")`.
+    ///
     /// # Validation
     ///
     /// If validation is enabled (default), `RowBinaryWithNamesAndTypes` input format is used.
@@ -417,12 +422,27 @@ impl Client {
     ///
     /// If `T` has unnamed fields, e.g. tuples.
     pub async fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
+        let mut escaped_table_name = String::new();
+        sql::escape::identifier(table, &mut escaped_table_name)
+            // In practice this should not error, as writing to a `String` should be infallible.
+            .map_err(|e| Error::Other(format!("error escaping table name: {e:?}").into()))?;
+
+        self.insert_unescaped(&escaped_table_name).await
+    }
+
+    /// Start a new `INSERT` statement using an unescaped table name.
+    ///
+    /// See [`Client::insert()`] for details.
+    pub async fn insert_unescaped<T: Row>(
+        &self,
+        raw_table_name: &str,
+    ) -> Result<insert::Insert<T>> {
         if self.get_validation() {
-            let metadata = self.get_insert_metadata(table).await?;
+            let metadata = self.get_insert_metadata(raw_table_name).await?;
             let row = metadata.to_row::<T>()?;
-            return Ok(insert::Insert::new(self, table, Some(row)));
+            return Ok(insert::Insert::new(self, raw_table_name, Some(row)));
         }
-        Ok(insert::Insert::new(self, table, None))
+        Ok(insert::Insert::new(self, raw_table_name, None))
     }
 
     /// Creates an inserter to perform multiple INSERT statements.
@@ -544,7 +564,7 @@ impl Client {
         self
     }
 
-    async fn get_insert_metadata(&self, table_name: &str) -> Result<Arc<InsertMetadata>> {
+    async fn get_insert_metadata(&self, raw_table_name: &str) -> Result<Arc<InsertMetadata>> {
         #[derive(::serde::Deserialize, clickhouse_macros::Row)]
         #[clickhouse(crate = "self")]
         // `Row` derive doesn't allow omitting columns
@@ -562,8 +582,7 @@ impl Client {
         {
             let read_lock = self.insert_metadata_cache.0.read().await;
 
-            // FIXME: `table_name` is not necessarily fully qualified here
-            if let Some(metadata) = read_lock.get(table_name) {
+            if let Some(metadata) = read_lock.get(raw_table_name) {
                 return Ok(metadata.clone());
             }
         }
@@ -572,8 +591,7 @@ impl Client {
         let mut write_lock = self.insert_metadata_cache.0.write().await;
 
         let mut columns_cursor = self
-            .query("DESCRIBE TABLE {table:Identifier}")
-            .param("table", table_name)
+            .query(&format!("DESCRIBE TABLE {raw_table_name}"))
             .with_option("describe_include_subcolumns", "0")
             .fetch::<DescribeColumn>()?;
 
@@ -604,7 +622,7 @@ impl Client {
             column_lookup,
         });
 
-        write_lock.insert(table_name.to_string(), metadata.clone());
+        write_lock.insert(raw_table_name.to_string(), metadata.clone());
         Ok(metadata)
     }
 }
