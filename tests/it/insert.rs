@@ -332,7 +332,7 @@ async fn cache_row_metadata() {
         WHERE query LIKE {query:String} || '%' \n\
         AND current_database = {db:String}";
 
-    let row_insert_metadata_query = format!("DESCRIBE TABLE {table_name}");
+    let row_insert_metadata_query = format!("DESCRIBE TABLE `{table_name}`");
 
     println!("row_insert_metadata_query: {row_insert_metadata_query:?}");
 
