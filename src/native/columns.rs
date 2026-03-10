@@ -531,6 +531,15 @@ async fn read_low_cardinality_column<R: ClickHouseRead>(
     // Bit 9: HAS_ADDITIONAL_KEYS — server sends per-block additional keys
     let has_additional_keys = (state & 0x200) != 0;
 
+    // For LowCardinality(Nullable(T)), the dictionary on the wire is of type T
+    // (not Nullable(T)).  Index 0 is a special null-sentinel entry (the default
+    // T value, e.g. "" for String).  All other indices reference non-null T values.
+    let (dict_type, is_nullable_inner) = if let ColumnType::Nullable(t) = inner {
+        (t.as_ref(), true)
+    } else {
+        (inner, false)
+    };
+
     // Indices 0.. reference additional_keys first, then global_dict.
     // Build combined dict in that order.
     let mut additional: ColumnData = Vec::new();
@@ -538,12 +547,12 @@ async fn read_low_cardinality_column<R: ClickHouseRead>(
 
     if has_global_dict {
         let sz = reader.read_u64_le().await?;
-        global = read_column(reader, inner, sz).await?;
+        global = read_column(reader, dict_type, sz).await?;
     }
 
     if has_additional_keys {
         let sz = reader.read_u64_le().await?;
-        additional = read_column(reader, inner, sz).await?;
+        additional = read_column(reader, dict_type, sz).await?;
     }
 
     // Combined dict: additional_keys first (indices 0..additional.len()),
@@ -556,7 +565,7 @@ async fn read_low_cardinality_column<R: ClickHouseRead>(
     // (older / simpler LowCardinality without shared dictionaries).
     if !has_global_dict && !has_additional_keys {
         let sz = reader.read_u64_le().await?;
-        dict.extend(read_column(reader, inner, sz).await?);
+        dict.extend(read_column(reader, dict_type, sz).await?);
     }
 
     let num_indices = reader.read_u64_le().await?;
@@ -582,12 +591,28 @@ async fn read_low_cardinality_column<R: ClickHouseRead>(
     let mut result = Vec::with_capacity(n);
     for _ in 0..n {
         let idx = read_index(reader, index_bytes).await? as usize;
-        let value = dict.get(idx).ok_or_else(|| {
-            Error::BadResponse(format!(
-                "native protocol: LowCardinality index {idx} out of range (dict size {dict_size})"
-            ))
-        })?;
-        result.push(value.clone());
+        if is_nullable_inner {
+            // Index 0 = null sentinel → RowBinary null; other indices = Some(T).
+            if idx == 0 {
+                result.push(vec![0x01u8]); // RowBinary Nullable null flag
+            } else {
+                let value = dict.get(idx).ok_or_else(|| {
+                    Error::BadResponse(format!(
+                        "native protocol: LowCardinality index {idx} out of range (dict size {dict_size})"
+                    ))
+                })?;
+                let mut rb = vec![0x00u8]; // RowBinary not-null flag
+                rb.extend_from_slice(value);
+                result.push(rb);
+            }
+        } else {
+            let value = dict.get(idx).ok_or_else(|| {
+                Error::BadResponse(format!(
+                    "native protocol: LowCardinality index {idx} out of range (dict size {dict_size})"
+                ))
+            })?;
+            result.push(value.clone());
+        }
     }
     Ok(result)
 }

@@ -6,8 +6,8 @@
 //! # Supported types for INSERT
 //!
 //! All scalar fixed-size types, String, FixedString(N), Nullable(T),
-//! Array(T), Map(K, V), Tuple(T1..Tn), and nested combinations thereof.
-//! LowCardinality is stripped to its inner type (ClickHouse accepts plain values).
+//! LowCardinality(T), Array(T), Map(K, V), Tuple(T1..Tn), and nested combinations.
+//! LowCardinality is fully encoded with a per-block dictionary + indices.
 //! Variant, Dynamic, and JSON are not yet supported.
 
 use crate::error::{Error, Result};
@@ -28,9 +28,6 @@ pub(crate) struct ColumnSchema {
 
 impl ColumnSchema {
     /// Build a `ColumnSchema` list from server-provided `(name, type_name)` pairs.
-    ///
-    /// LowCardinality wrappers are stripped — the inner type is sent on wire,
-    /// which ClickHouse accepts transparently.
     pub(crate) fn from_headers(headers: &[(String, String)]) -> Result<Vec<Self>> {
         headers
             .iter()
@@ -42,38 +39,14 @@ impl ColumnSchema {
                              for column '{name}'"
                         ))
                     })?;
-                // Strip LowCardinality: send inner type bytes, CH handles encoding
-                let (effective_type, effective_name) =
-                    strip_low_cardinality(col_type, type_name);
                 Ok(ColumnSchema {
                     name: name.clone(),
-                    type_name: effective_name,
-                    col_type: effective_type,
+                    type_name: type_name.clone(),
+                    col_type,
                 })
             })
             .collect()
     }
-}
-
-/// Recursively strip `LowCardinality(...)` returning the inner `(ColumnType, type_name)`.
-fn strip_low_cardinality(col_type: ColumnType, type_name: &str) -> (ColumnType, String) {
-    match col_type {
-        ColumnType::LowCardinality(inner) => {
-            let inner_name = extract_inner(type_name, "LowCardinality");
-            strip_low_cardinality(*inner, inner_name)
-        }
-        other => (other, type_name.to_string()),
-    }
-}
-
-fn extract_inner<'a>(s: &'a str, wrapper: &str) -> &'a str {
-    let prefix = format!("{wrapper}(");
-    if let Some(rest) = s.strip_prefix(prefix.as_str()) {
-        if let Some(inner) = rest.strip_suffix(')') {
-            return inner;
-        }
-    }
-    s
 }
 
 /// Encode buffered RowBinary rows into native columnar block column bytes.
@@ -166,8 +139,92 @@ fn write_col_values(values: &[Vec<u8>], col_type: &ColumnType, out: &mut Vec<u8>
         }
 
         ColumnType::LowCardinality(inner) => {
-            // Stripped at schema level — just encode as inner type.
-            write_col_values(values, inner, out)?;
+            // LowCardinality wire format (ClickHouse native INSERT):
+            //   u64 version = 1
+            //   u64 flags = HAS_ADDITIONAL_KEYS (bit 9) | index_type (bits 0-1)
+            //   u64 dict_size + dict_size values (of dict_type)
+            //   u64 num_indices + indices (1/2/4/8 bytes each)
+            //
+            // For LowCardinality(Nullable(T)), the DICTIONARY type is T (not Nullable(T)).
+            // ClickHouse stores nullable LC as a T-typed dict with index 0 always
+            // pointing to the default T value (representing NULL).
+            //
+            // For LowCardinality(T) (non-nullable), dict type is T directly.
+
+            // Determine dict type and extract RowBinary key bytes from each value.
+            let (dict_type, is_nullable_inner) =
+                if let ColumnType::Nullable(t_inner) = inner.as_ref() {
+                    (t_inner.as_ref(), true)
+                } else {
+                    (inner.as_ref(), false)
+                };
+
+            let mut dict: Vec<Vec<u8>> = Vec::new();
+            let mut seen: std::collections::HashMap<Vec<u8>, u32> =
+                std::collections::HashMap::new();
+
+            if is_nullable_inner {
+                // Index 0 = default T value, represents NULL.
+                let mut default_val = Vec::new();
+                rb_write_default(&mut default_val, dict_type);
+                seen.insert(default_val.clone(), 0);
+                dict.push(default_val);
+            }
+
+            let mut indices: Vec<u32> = Vec::with_capacity(values.len());
+            for v in values {
+                // For Nullable inner: strip the Nullable RowBinary wrapper.
+                // [0x01] = NULL → index 0; [0x00, bytes...] = Some(v) → extract bytes.
+                let key: Option<Vec<u8>> = if is_nullable_inner {
+                    if v.is_empty() || v[0] == 0x01 {
+                        None // NULL
+                    } else {
+                        Some(v[1..].to_vec()) // extract T bytes
+                    }
+                } else {
+                    Some(v.clone())
+                };
+
+                let idx = match key {
+                    None => 0, // NULL → index 0
+                    Some(bytes) => {
+                        if let Some(&i) = seen.get(&bytes) {
+                            i
+                        } else {
+                            let i = dict.len() as u32;
+                            seen.insert(bytes.clone(), i);
+                            dict.push(bytes);
+                            i
+                        }
+                    }
+                };
+                indices.push(idx);
+            }
+
+            // Choose smallest index type that fits all dict indices.
+            let index_type: u64 = if dict.len() <= 0x100 {
+                0 // U8
+            } else if dict.len() <= 0x1_0000 {
+                1 // U16
+            } else if (dict.len() as u64) <= 0x1_0000_0000 {
+                2 // U32
+            } else {
+                3 // U64
+            };
+
+            // ClickHouse requires HAS_ADDITIONAL_KEYS (bit 9 = 0x200) for client INSERT blocks.
+            const HAS_ADDITIONAL_KEYS: u64 = 1 << 9;
+            let flags = HAS_ADDITIONAL_KEYS | index_type;
+
+            out.extend_from_slice(&1u64.to_le_bytes()); // version
+            out.extend_from_slice(&flags.to_le_bytes()); // flags
+            out.extend_from_slice(&(dict.len() as u64).to_le_bytes()); // dict_size
+            write_col_values(&dict, dict_type, out)?; // dict values (type = T, not Nullable(T))
+            out.extend_from_slice(&(indices.len() as u64).to_le_bytes()); // num_indices
+            let ibytes = [1usize, 2, 4, 8][index_type as usize];
+            for idx in &indices {
+                out.extend_from_slice(&idx.to_le_bytes()[..ibytes]);
+            }
         }
 
         ColumnType::Array(inner) => {

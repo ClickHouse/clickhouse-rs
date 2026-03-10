@@ -1196,6 +1196,87 @@ async fn native_insert_strings() {
     assert_eq!(rows[1], StringRow { id: 2, name: "Bob".into() });
 }
 
+/// INSERT into a table with a LowCardinality(String) column.
+///
+/// The encoder strips LowCardinality to its inner type and sends plain String
+/// bytes; ClickHouse accepts this via implicit type conversion.
+#[tokio::test]
+async fn native_insert_low_cardinality() {
+    let client = prepare_native_database("insert_lc").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, tag LowCardinality(String)) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Row {
+        id: u32,
+        tag: String,
+    }
+
+    let mut insert = client.insert::<Row>("t");
+    insert.write(&Row { id: 1, tag: "foo".into() }).await.expect("write 1 failed");
+    insert.write(&Row { id: 2, tag: "bar".into() }).await.expect("write 2 failed");
+    insert.write(&Row { id: 3, tag: "foo".into() }).await.expect("write 3 failed");
+    insert.end().await.expect("end failed");
+
+    let rows = client
+        .query("SELECT id, tag FROM t ORDER BY id ASC")
+        .fetch_all::<Row>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0], Row { id: 1, tag: "foo".into() });
+    assert_eq!(rows[1], Row { id: 2, tag: "bar".into() });
+    assert_eq!(rows[2], Row { id: 3, tag: "foo".into() });
+}
+
+/// INSERT into a table with LowCardinality(Nullable(String)).
+#[tokio::test]
+async fn native_insert_low_cardinality_nullable() {
+    let client = prepare_native_database("insert_lc_nullable").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, tag LowCardinality(Nullable(String))) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct Row {
+        id: u32,
+        tag: Option<String>,
+    }
+
+    let mut insert = client.insert::<Row>("t");
+    insert.write(&Row { id: 1, tag: Some("alpha".into()) }).await.expect("write 1");
+    insert.write(&Row { id: 2, tag: None }).await.expect("write 2");
+    insert.write(&Row { id: 3, tag: Some("beta".into()) }).await.expect("write 3");
+    insert.end().await.expect("end failed");
+
+    let rows = client
+        .query("SELECT id, tag FROM t ORDER BY id ASC")
+        .fetch_all::<Row>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0], Row { id: 1, tag: Some("alpha".into()) });
+    assert_eq!(rows[1], Row { id: 2, tag: None });
+    assert_eq!(rows[2], Row { id: 3, tag: Some("beta".into()) });
+}
+
 #[tokio::test]
 async fn native_insert_nullable() {
     let client = prepare_native_database("insert_nullable").await;
