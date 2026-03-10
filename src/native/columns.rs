@@ -269,8 +269,6 @@ impl ColumnType {
             | Self::Time64 => Some(8),
             Self::Int128 | Self::UInt128 | Self::Uuid | Self::IPv6 | Self::Decimal128 => Some(16),
             Self::Int256 | Self::UInt256 | Self::Decimal256 => Some(32),
-            // Point = 2 × Float64
-            Self::Point => Some(16),
             Self::FixedString(n) => Some(*n),
             Self::String
             | Self::Json
@@ -282,7 +280,9 @@ impl ColumnType {
             | Self::Map(_, _)
             | Self::Variant(_)
             | Self::NewJson
-            | Self::Dynamic => None,
+            | Self::Dynamic
+            // Point is Tuple(Float64, Float64) in columnar format — not a flat 16-byte blob.
+            | Self::Point => None,
         }
     }
 }
@@ -381,10 +381,22 @@ pub(crate) fn read_column<'a, R: ClickHouseRead + 'a>(
             | ColumnType::Decimal128
             | ColumnType::Int256
             | ColumnType::UInt256
-            | ColumnType::Decimal256
-            | ColumnType::Point => {
+            | ColumnType::Decimal256 => {
                 let size = col_type.fixed_size().expect("size is known for fixed type");
                 read_fixed_column(reader, n, size).await
+            }
+
+            // Point = Tuple(Float64, Float64) in the native columnar format:
+            // all N x-values come first, then all N y-values.
+            // Transpose here so each row becomes the 16 raw bytes [f64(x) || f64(y)].
+            ColumnType::Point => {
+                let x_col = read_fixed_column(reader, n, 8).await?;
+                let y_col = read_fixed_column(reader, n, 8).await?;
+                Ok(x_col
+                    .into_iter()
+                    .zip(y_col)
+                    .map(|(mut x, y)| { x.extend_from_slice(&y); x })
+                    .collect())
             }
 
             ColumnType::String | ColumnType::Json => read_string_column(reader, n).await,

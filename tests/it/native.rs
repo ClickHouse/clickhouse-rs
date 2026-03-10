@@ -701,6 +701,395 @@ async fn native_bool_type() {
     assert_eq!(rows[0], BoolRow { a: true, b: false });
 }
 
+// ---------------------------------------------------------------------------
+// Extended integer types: UInt128 / Int128 / UInt256 / Int256
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn native_extended_int_types() {
+    let client = prepare_native_database("ext_int").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (
+                u128 UInt128, i128 Int128,
+                u256 UInt256, i256 Int256
+            ) {}",
+            on_cluster(),
+            test_engine("tuple()")
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query("INSERT INTO t VALUES (42, -42, 42, -42)")
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    // 256-bit types have no native Rust equivalent — read as raw 32-byte LE arrays.
+    #[derive(Debug, Row, Deserialize)]
+    struct ExtIntRow {
+        u128: u128,
+        i128: i128,
+        u256: [u8; 32],
+        i256: [u8; 32],
+    }
+
+    let rows = client
+        .query("SELECT u128, i128, u256, i256 FROM t")
+        .fetch_all::<ExtIntRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].u128, 42u128);
+    assert_eq!(rows[0].i128, -42i128);
+    // UInt256(42): first byte = 42, rest zero (LE)
+    assert_eq!(rows[0].u256[0], 42);
+    assert!(rows[0].u256[1..].iter().all(|&b| b == 0));
+    // Int256(-42): two's complement 32-byte LE — last bytes all 0xFF
+    assert_eq!(rows[0].i256[31], 0xFF);
+}
+
+// ---------------------------------------------------------------------------
+// BFloat16 (brain float, 2-byte) and UUID
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn native_bfloat16_uuid() {
+    let client = prepare_native_database("bf16_uuid").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, bf BFloat16, uuid UUID) {}",
+            on_cluster(),
+            test_engine("tuple()")
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query(
+            "INSERT INTO t VALUES \
+             (1, 1.0, '00000000-0000-0000-0000-000000000001'), \
+             (2, 2.0, 'ffffffff-ffff-ffff-ffff-ffffffffffff')",
+        )
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    // BFloat16 = 2 raw bytes; read as u16 (raw bit pattern).
+    // UUID = 16 bytes.
+    #[derive(Debug, Row, Deserialize)]
+    struct Bf16UuidRow {
+        id: u32,
+        bf: u16,     // raw BFloat16 bits
+        uuid: [u8; 16],
+    }
+
+    let rows = client
+        .query("SELECT id, bf, uuid FROM t ORDER BY id ASC")
+        .fetch_all::<Bf16UuidRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 2);
+    // BFloat16(1.0) = 0x3F80 = 16256
+    assert_eq!(rows[0].bf, 0x3F80u16);
+    // BFloat16(2.0) = 0x4000 = 16384
+    assert_eq!(rows[1].bf, 0x4000u16);
+    // ClickHouse stores UUID as two LE uint64s: high 8 bytes then low 8 bytes.
+    // UUID 00000000-0000-0000-0000-000000000001:
+    //   high u64 = 0 → bytes [0..8] all zero
+    //   low  u64 = 1 → bytes [8..16] = [1, 0, 0, 0, 0, 0, 0, 0] (LE)
+    assert_eq!(rows[0].uuid[8], 1);
+    assert!(rows[0].uuid[..8].iter().all(|&b| b == 0));
+    assert!(rows[0].uuid[9..].iter().all(|&b| b == 0));
+    // UUID all-0xff
+    assert!(rows[1].uuid.iter().all(|&b| b == 0xFF));
+}
+
+// ---------------------------------------------------------------------------
+// Enum8 and Enum16
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn native_enum_types() {
+    let client = prepare_native_database("enums").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (
+                id  UInt32,
+                e8  Enum8('low' = 1, 'med' = 2, 'high' = 3),
+                e16 Enum16('pending' = 100, 'active' = 200, 'closed' = 300)
+            ) {}",
+            on_cluster(),
+            test_engine("tuple()")
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query(
+            "INSERT INTO t VALUES \
+             (1, 'low',  'pending'), \
+             (2, 'high', 'active'), \
+             (3, 'med',  'closed')",
+        )
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    // Enum8/16 are wire-compatible with Int8/Int16 — deserialize as raw integer discriminant.
+    #[derive(Debug, Row, Deserialize)]
+    struct EnumRow {
+        id: u32,
+        e8: i8,
+        e16: i16,
+    }
+
+    let rows = client
+        .query("SELECT id, e8, e16 FROM t ORDER BY id ASC")
+        .fetch_all::<EnumRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].e8, 1);   // 'low' = 1
+    assert_eq!(rows[0].e16, 100); // 'pending' = 100
+    assert_eq!(rows[1].e8, 3);   // 'high' = 3
+    assert_eq!(rows[1].e16, 200); // 'active' = 200
+    assert_eq!(rows[2].e8, 2);   // 'med' = 2
+    assert_eq!(rows[2].e16, 300); // 'closed' = 300
+}
+
+// ---------------------------------------------------------------------------
+// Date, Date32, DateTime, DateTime64 (multiple precisions)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn native_datetime_all() {
+    let client = prepare_native_database("datetimes").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (
+                id   UInt32,
+                d    Date,
+                d32  Date32,
+                dt   DateTime,
+                dt3  DateTime64(3),
+                dt6  DateTime64(6),
+                dt9  DateTime64(9)
+            ) {}",
+            on_cluster(),
+            test_engine("tuple()")
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query(
+            "INSERT INTO t VALUES \
+             (1, '1970-01-01', '1970-01-01', '1970-01-01 00:00:01', \
+              '1970-01-01 00:00:00.001', '1970-01-01 00:00:00.000001', \
+              '1970-01-01 00:00:00.000000001')",
+        )
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    // Date = u16 (days since 1970-01-01), DateTime = u32 (unix seconds),
+    // DateTime64(N) = i64 (scaled: ×10^N from epoch).
+    #[derive(Debug, Row, Deserialize)]
+    struct DtRow {
+        id: u32,
+        d: u16,
+        d32: i32,
+        dt: u32,
+        dt3: i64,
+        dt6: i64,
+        dt9: i64,
+    }
+
+    let rows = client
+        .query("SELECT id, d, d32, dt, dt3, dt6, dt9 FROM t ORDER BY id ASC")
+        .fetch_all::<DtRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].d, 0);    // 1970-01-01 = day 0
+    assert_eq!(rows[0].d32, 0);
+    assert_eq!(rows[0].dt, 1);   // 1 second past epoch
+    assert_eq!(rows[0].dt3, 1);  // 1 millisecond
+    assert_eq!(rows[0].dt6, 1);  // 1 microsecond
+    assert_eq!(rows[0].dt9, 1);  // 1 nanosecond
+}
+
+// ---------------------------------------------------------------------------
+// Decimal32 / Decimal128 / Decimal256  (Decimal64 already in native_decimal_type)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn native_decimal_all_sizes() {
+    let client = prepare_native_database("decimals").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (
+                id   UInt32,
+                d32  Decimal32(2),
+                d128 Decimal128(4),
+                d256 Decimal256(6)
+            ) {}",
+            on_cluster(),
+            test_engine("tuple()")
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query("INSERT INTO t VALUES (1, 12.34, 1234.5678, 123456.789012)")
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    #[derive(Debug, Row, Deserialize)]
+    struct DecRow {
+        id: u32,
+        d32: i32,
+        d128: i128,
+        d256: [u8; 32], // raw 32-byte LE
+    }
+
+    let rows = client
+        .query("SELECT id, d32, d128, d256 FROM t ORDER BY id ASC")
+        .fetch_all::<DecRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].d32, 1234);         // 12.34 × 100
+    assert_eq!(rows[0].d128, 12345678i128); // 1234.5678 × 10^4
+    // d256: 123456789012 (123456.789012 × 10^6) — check first bytes
+    let expected: i64 = 123_456_789_012;
+    let le_bytes = expected.to_le_bytes();
+    assert_eq!(&rows[0].d256[..8], &le_bytes);
+    assert!(rows[0].d256[8..].iter().all(|&b| b == 0));
+}
+
+// ---------------------------------------------------------------------------
+// Time and Time64
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn native_time_types() {
+    let client = prepare_native_database("times").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, t Time, t64 Time64(3)) {}",
+            on_cluster(),
+            test_engine("tuple()")
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query(
+            "INSERT INTO t VALUES \
+             (1, '01:02:03', '01:02:03.456'), \
+             (2, '00:00:00', '00:00:00.000')",
+        )
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    // Time = i32 (seconds since midnight), Time64(3) = i64 (milliseconds since midnight)
+    #[derive(Debug, Row, Deserialize)]
+    struct TimeRow {
+        id: u32,
+        t: i32,
+        t64: i64,
+    }
+
+    let rows = client
+        .query("SELECT id, t, t64 FROM t ORDER BY id ASC")
+        .fetch_all::<TimeRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 2);
+    // 01:02:03 = 1*3600 + 2*60 + 3 = 3723 seconds
+    assert_eq!(rows[0].t, 3723);
+    // 01:02:03.456 = 3723 * 1000 + 456 = 3723456 ms
+    assert_eq!(rows[0].t64, 3_723_456);
+    assert_eq!(rows[1].t, 0);
+    assert_eq!(rows[1].t64, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Geo types: Point
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn native_geo_types() {
+    let client = prepare_native_database("geo").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, pt Point) {}",
+            on_cluster(),
+            test_engine("tuple()")
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query(
+            "INSERT INTO t VALUES \
+             (1, (1.5, 2.5)), \
+             (2, (0.0, -90.0))",
+        )
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    // Point = 2 × Float64 LE (16 raw bytes).  Read as [u8; 16] to avoid
+    // relying on serde tuple deserialization, then decode f64 values manually.
+    #[derive(Debug, Row, Deserialize)]
+    struct GeoRow {
+        id: u32,
+        pt: [u8; 16],
+    }
+
+    let rows = client
+        .query("SELECT id, pt FROM t ORDER BY id ASC")
+        .fetch_all::<GeoRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 2);
+    let x0 = f64::from_le_bytes(rows[0].pt[..8].try_into().unwrap());
+    let y0 = f64::from_le_bytes(rows[0].pt[8..].try_into().unwrap());
+    assert!((x0 - 1.5).abs() < f64::EPSILON);
+    assert!((y0 - 2.5).abs() < f64::EPSILON);
+    let x1 = f64::from_le_bytes(rows[1].pt[..8].try_into().unwrap());
+    let y1 = f64::from_le_bytes(rows[1].pt[8..].try_into().unwrap());
+    assert!((x1 - 0.0).abs() < f64::EPSILON);
+    assert!((y1 - (-90.0)).abs() < f64::EPSILON);
+}
+
 #[tokio::test]
 async fn native_insert_scalars() {
     let client = prepare_native_database("insert_scalars").await;
