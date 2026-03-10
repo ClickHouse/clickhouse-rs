@@ -704,3 +704,42 @@ async fn insert_unescaped() {
 
     assert_eq!(foos, foos_out);
 }
+
+// This test is mostly to make CodeCov happy, but it's potentially useful to ensure that disabling
+// validation actually disables validation.
+#[tokio::test]
+async fn insert_unvalidated() {
+    #[derive(
+        serde::Serialize,
+        serde::Deserialize,
+        clickhouse::Row,
+        Debug,
+        PartialEq,
+        Eq
+    )]
+    struct InvalidRow {
+        foobar: u64,
+        bazquux: Option<bool>,
+    }
+
+    let client = prepare_database!().with_validation(false);
+
+    client
+        .query("CREATE TABLE foo(bar Int32, baz String)")
+        .execute()
+        .await
+        .unwrap();
+
+    let mut insert = client.insert::<InvalidRow>("foo").await.unwrap();
+
+    // An obviously invalid value
+    insert
+        .write(&InvalidRow {
+            foobar: u64::MAX,
+            bazquux: None,
+        })
+        .await
+        .unwrap();
+
+    insert.end().await.unwrap_err();
+}
