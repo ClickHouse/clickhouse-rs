@@ -249,6 +249,8 @@ pub(crate) mod decimals {
 mod chrono;
 mod cloud_jwt;
 mod compression;
+#[cfg(feature = "native-transport")]
+mod native;
 mod cursor_error;
 mod cursor_stats;
 mod fetch_bytes;
@@ -257,6 +259,8 @@ mod insert;
 mod insert_formatted;
 #[cfg(feature = "inserter")]
 mod inserter;
+#[cfg(feature = "batcher")]
+mod batcher;
 mod int128;
 mod int256;
 mod ip;
