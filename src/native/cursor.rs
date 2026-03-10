@@ -35,6 +35,23 @@ enum CursorState {
     Done,
 }
 
+impl<T: RowOwned + RowRead> Drop for NativeRowCursor<T> {
+    /// Discard the connection if the stream was never fully consumed.
+    ///
+    /// Dropping a cursor mid-stream (e.g. after `fetch_one`) without calling
+    /// `drain()` first would return a connection with unread bytes to the pool.
+    /// Marking it poisoned here ensures deadpool drops it instead of recycling.
+    fn drop(&mut self) {
+        if let CursorState::Reading(conn) =
+            std::mem::replace(&mut self.state, CursorState::Done)
+        {
+            // We can't async-drain here, so discard the connection.
+            let mut conn = conn;
+            conn.discard();
+        }
+    }
+}
+
 impl<T: RowOwned + RowRead> NativeRowCursor<T> {
     pub(crate) fn new(client: NativeClient, sql: String) -> Self {
         Self {
@@ -43,6 +60,43 @@ impl<T: RowOwned + RowRead> NativeRowCursor<T> {
             row_buf: VecDeque::new(),
             state: CursorState::NotStarted,
             _marker: PhantomData,
+        }
+    }
+
+    /// Consume all remaining packets until `EndOfStream`, allowing the
+    /// underlying connection to be returned to the pool in a clean state.
+    ///
+    /// Must be called after a partial read (e.g. after `fetch_one` got its row)
+    /// to prevent the half-read connection from being recycled with unread data.
+    pub(crate) async fn drain(&mut self) -> Result<()> {
+        loop {
+            match &self.state {
+                CursorState::Done | CursorState::NotStarted => return Ok(()),
+                CursorState::Reading(_) => {}
+            }
+            let CursorState::Reading(conn) = &mut self.state else {
+                unreachable!()
+            };
+            let revision = conn.server_revision();
+            let compression = conn.compression();
+            let packet =
+                crate::native::reader::read_packet(conn.reader_mut(), revision, compression)
+                    .await;
+            match packet {
+                Ok(ServerPacket::EndOfStream) => {
+                    self.state = CursorState::Done;
+                    return Ok(());
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    if let CursorState::Reading(mut conn) =
+                        std::mem::replace(&mut self.state, CursorState::Done)
+                    {
+                        conn.discard();
+                    }
+                    return Err(e);
+                }
+            }
         }
     }
 

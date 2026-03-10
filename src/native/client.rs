@@ -18,12 +18,12 @@
 //! [`with_pool_size`]: NativeClient::with_pool_size
 
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::native::insert::NativeInsert;
 use crate::native::inserter::NativeInserter;
-use crate::native::pool::{NativePool, PoolConfig, PooledConnection};
+use crate::native::pool::{NativePool, PoolConfig, PooledConnection, build_pool};
 use crate::native::protocol::NativeCompressionMethod;
 use crate::native::query::NativeQuery;
 use crate::native::schema::NativeSchemaCache;
@@ -62,30 +62,61 @@ pub struct NativeClient {
     settings: Arc<Vec<(String, String)>>,
     /// Maximum connections (idle + in-use) in the pool.
     pool_size: usize,
-    /// Lazily-initialised pool; reset whenever connection params change.
-    ///
-    /// Wrapped in `Arc` so `Clone` shares the same pool across copies of a
-    /// fully-configured client.
-    pool: Arc<OnceLock<Arc<NativePool>>>,
+    /// Deadpool-backed connection pool.  Already Arc-backed internally, so
+    /// cloning this client shares the same pool across all copies.
+    pool: NativePool,
 }
 
 impl Default for NativeClient {
     fn default() -> Self {
+        let addr: SocketAddr = "127.0.0.1:9000".parse().expect("valid default addr");
+        let database = "default".to_string();
+        let username = "default".to_string();
+        let password = String::new();
+        let compression = NativeCompressionMethod::None;
+        let settings: Vec<(String, String)> = Vec::new();
+        let pool = build_pool(
+            PoolConfig {
+                addr,
+                database: database.clone(),
+                username: username.clone(),
+                password: password.clone(),
+                compression,
+                settings: settings.clone(),
+            },
+            DEFAULT_POOL_SIZE,
+        );
         Self {
-            addr: "127.0.0.1:9000".parse().expect("valid default addr"),
-            database: "default".to_string(),
-            username: "default".to_string(),
-            password: String::new(),
-            compression: NativeCompressionMethod::None,
+            addr,
+            database,
+            username,
+            password,
+            compression,
             schema_cache: NativeSchemaCache::new(300),
-            settings: Arc::new(Vec::new()),
+            settings: Arc::new(settings),
             pool_size: DEFAULT_POOL_SIZE,
-            pool: Arc::new(OnceLock::new()),
+            pool,
         }
     }
 }
 
 impl NativeClient {
+    /// Rebuild the connection pool from the current client configuration.
+    /// Called internally whenever a connection parameter changes.
+    fn rebuild_pool(&mut self) {
+        self.pool = build_pool(
+            PoolConfig {
+                addr: self.addr,
+                database: self.database.clone(),
+                username: self.username.clone(),
+                password: self.password.clone(),
+                compression: self.compression,
+                settings: self.settings.as_ref().clone(),
+            },
+            self.pool_size,
+        );
+    }
+
     /// Set the server address (host:port).
     ///
     /// # Panics
@@ -98,7 +129,7 @@ impl NativeClient {
             .expect("invalid address")
             .next()
             .expect("no address resolved");
-        self.pool = Arc::new(OnceLock::new());
+        self.rebuild_pool();
         self
     }
 
@@ -106,7 +137,7 @@ impl NativeClient {
     #[must_use]
     pub fn with_database(mut self, database: impl Into<String>) -> Self {
         self.database = database.into();
-        self.pool = Arc::new(OnceLock::new());
+        self.rebuild_pool();
         self
     }
 
@@ -114,7 +145,7 @@ impl NativeClient {
     #[must_use]
     pub fn with_user(mut self, user: impl Into<String>) -> Self {
         self.username = user.into();
-        self.pool = Arc::new(OnceLock::new());
+        self.rebuild_pool();
         self
     }
 
@@ -122,7 +153,7 @@ impl NativeClient {
     #[must_use]
     pub fn with_password(mut self, password: impl Into<String>) -> Self {
         self.password = password.into();
-        self.pool = Arc::new(OnceLock::new());
+        self.rebuild_pool();
         self
     }
 
@@ -130,7 +161,7 @@ impl NativeClient {
     #[must_use]
     pub fn with_lz4(mut self) -> Self {
         self.compression = NativeCompressionMethod::Lz4;
-        self.pool = Arc::new(OnceLock::new());
+        self.rebuild_pool();
         self
     }
 
@@ -141,7 +172,7 @@ impl NativeClient {
     #[must_use]
     pub fn with_pool_size(mut self, size: usize) -> Self {
         self.pool_size = size;
-        self.pool = Arc::new(OnceLock::new());
+        self.rebuild_pool();
         self
     }
 
@@ -165,7 +196,7 @@ impl NativeClient {
         value: impl Into<String>,
     ) -> Self {
         Arc::make_mut(&mut self.settings).push((name.into(), value.into()));
-        self.pool = Arc::new(OnceLock::new());
+        self.rebuild_pool();
         self
     }
 
@@ -287,24 +318,16 @@ impl NativeClient {
     }
 
     /// Acquire a connection from the pool, opening a new one if needed.
-    ///
-    /// The pool is created lazily on first call with a snapshot of the
-    /// current connection parameters.
     pub(crate) async fn acquire(&self) -> Result<PooledConnection> {
-        let pool = self.pool.get_or_init(|| {
-            NativePool::new(
-                PoolConfig {
-                    addr: self.addr,
-                    database: self.database.clone(),
-                    username: self.username.clone(),
-                    password: self.password.clone(),
-                    compression: self.compression,
-                    settings: self.settings.as_ref().clone(),
-                },
-                self.pool_size,
-            )
-        });
-        pool.acquire().await
+        use deadpool::managed::PoolError;
+        self.pool
+            .get()
+            .await
+            .map(PooledConnection::new)
+            .map_err(|e| match e {
+                PoolError::Backend(e) => e,
+                e => Error::Custom(format!("pool: {e}")),
+            })
     }
 
     /// Ping the server.

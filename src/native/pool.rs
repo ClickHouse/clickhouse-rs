@@ -1,26 +1,22 @@
 //! Connection pool for the native TCP transport.
 //!
-//! Holds a bounded set of idle [`NativeConnection`]s so successive queries
-//! and inserts can reuse TCP connections instead of paying handshake overhead
-//! on every operation.
+//! Thin wrapper around [`deadpool::managed`].  A [`NativeConnectionManager`]
+//! teaches deadpool how to open and recycle [`NativeConnection`]s; all pool
+//! mechanics (semaphore, idle queue, timeouts, metrics) are handled by
+//! deadpool.
 //!
-//! # Model
+//! # Discard pattern
 //!
-//! - A [`Semaphore`] caps the total number of connections (idle + in-use) to
-//!   `max_size`.  Callers block on [`NativePool::acquire`] when the pool is
-//!   full until a permit becomes available.
-//! - Idle connections are stored in a `Mutex<VecDeque>` (FIFO, so recently
-//!   used connections are preferred).
-//! - On [`PooledConnection`] drop the connection is returned to the idle
-//!   queue unless [`PooledConnection::discard`] was called, in which case it
-//!   is closed and the semaphore slot is released.
+//! When an I/O error or incomplete protocol exchange leaves a connection in an
+//! unrecoverable state, call [`PooledConnection::discard`].  This sets the
+//! `poisoned` flag on the underlying [`NativeConnection`]; deadpool's
+//! `recycle()` hook sees the flag and drops the connection instead of
+//! returning it to the idle queue.
 
-use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex};
 
-use tokio::sync::Semaphore;
+use deadpool::managed::{self, RecycleError, RecycleResult};
 
 use crate::error::{Error, Result};
 use crate::native::connection::NativeConnection;
@@ -36,134 +32,84 @@ pub(crate) struct PoolConfig {
     pub(crate) settings: Vec<(String, String)>,
 }
 
-/// A bounded idle-connection pool.
-pub(crate) struct NativePool {
-    idle: Mutex<VecDeque<NativeConnection>>,
-    /// Total in-use + idle connections must not exceed `max_size`.
-    semaphore: Semaphore,
+/// deadpool [`Manager`](managed::Manager) for [`NativeConnection`].
+pub(crate) struct NativeConnectionManager {
     config: PoolConfig,
-    max_size: usize,
 }
 
-impl NativePool {
-    pub(crate) fn new(config: PoolConfig, max_size: usize) -> Arc<Self> {
-        Arc::new(Self {
-            idle: Mutex::new(VecDeque::new()),
-            semaphore: Semaphore::new(max_size),
-            config,
-            max_size,
-        })
+impl managed::Manager for NativeConnectionManager {
+    type Type = NativeConnection;
+    type Error = Error;
+
+    async fn create(&self) -> Result<NativeConnection> {
+        NativeConnection::open(
+            &self.config.addr,
+            &self.config.database,
+            &self.config.username,
+            &self.config.password,
+            self.config.compression,
+            self.config.settings.clone(),
+        )
+        .await
     }
 
-    /// Acquire a connection.  Waits if the pool is at capacity.
-    ///
-    /// Tries an idle connection first; opens a new one if none are available.
-    pub(crate) async fn acquire(self: &Arc<Self>) -> Result<PooledConnection> {
-        let permit = self
-            .semaphore
-            .acquire()
-            .await
-            .map_err(|_| Error::Custom("connection pool closed".into()))?;
-        // We manage permits manually — forget the RAII guard.
-        permit.forget();
-
-        let conn = {
-            let mut idle = self.idle.lock().expect("pool mutex");
-            idle.pop_front()
-        };
-
-        let conn = match conn {
-            Some(c) => c,
-            None => {
-                NativeConnection::open(
-                    &self.config.addr,
-                    &self.config.database,
-                    &self.config.username,
-                    &self.config.password,
-                    self.config.compression,
-                    self.config.settings.clone(),
-                )
-                .await
-                .inspect_err(|_| {
-                    // Opening failed — release the permit so the pool slot isn't lost.
-                    self.semaphore.add_permits(1);
-                })?
-            }
-        };
-
-        Ok(PooledConnection {
-            conn: Some(conn),
-            pool: Arc::clone(self),
-            return_to_pool: true,
-        })
-    }
-
-    /// Return a connection to the idle queue and release its semaphore slot.
-    fn return_conn(&self, conn: NativeConnection) {
-        {
-            let mut idle = self.idle.lock().expect("pool mutex");
-            // Guard against exceeding max_size in the idle queue.
-            if idle.len() < self.max_size {
-                idle.push_back(conn);
-            }
-            // If somehow over capacity, just drop the connection.
+    async fn recycle(
+        &self,
+        conn: &mut NativeConnection,
+        _: &managed::Metrics,
+    ) -> RecycleResult<Error> {
+        if !conn.check_alive() {
+            return Err(RecycleError::message("connection dead or dirty"));
         }
-        self.semaphore.add_permits(1);
-    }
-
-    /// Release a semaphore permit without returning the connection (broken path).
-    fn release_permit(&self) {
-        self.semaphore.add_permits(1);
+        Ok(())
     }
 }
 
-/// A connection borrowed from a [`NativePool`].
+/// A bounded connection pool backed by deadpool.
+pub(crate) type NativePool = managed::Pool<NativeConnectionManager>;
+
+/// Build a new pool with the given config and connection cap.
+pub(crate) fn build_pool(config: PoolConfig, max_size: usize) -> NativePool {
+    let mgr = NativeConnectionManager { config };
+    managed::Pool::builder(mgr)
+        .max_size(max_size)
+        .build()
+        .expect("pool config is always valid")
+}
+
+/// A connection borrowed from the pool.
 ///
-/// Dereferences to [`NativeConnection`] for transparent method calls.
-/// When dropped, the connection is returned to the pool — unless
-/// [`discard`](PooledConnection::discard) was called, in which case the
-/// connection is closed and the pool slot is freed.
+/// Dereferences to [`NativeConnection`] for transparent method access.
+/// Returns the connection to the idle queue on drop, unless
+/// [`discard`](PooledConnection::discard) was called first.
 pub(crate) struct PooledConnection {
-    conn: Option<NativeConnection>,
-    pool: Arc<NativePool>,
-    return_to_pool: bool,
+    inner: managed::Object<NativeConnectionManager>,
 }
 
 impl PooledConnection {
-    /// Mark this connection as broken — it will be closed on drop instead of
-    /// returned to the pool.  Call this when an I/O error or incomplete
-    /// protocol exchange leaves the connection in an unrecoverable state.
+    pub(crate) fn new(inner: managed::Object<NativeConnectionManager>) -> Self {
+        Self { inner }
+    }
+
+    /// Mark this connection as broken.
+    ///
+    /// The connection will be closed on drop rather than returned to the pool.
+    /// Call this after any I/O error or incomplete protocol exchange that
+    /// leaves the connection in an unrecoverable state.
     pub(crate) fn discard(&mut self) {
-        self.return_to_pool = false;
+        self.inner.poisoned = true;
     }
 }
 
 impl Deref for PooledConnection {
     type Target = NativeConnection;
     fn deref(&self) -> &NativeConnection {
-        self.conn
-            .as_ref()
-            .expect("PooledConnection invariant: conn is always Some while borrowed")
+        &self.inner
     }
 }
 
 impl DerefMut for PooledConnection {
     fn deref_mut(&mut self) -> &mut NativeConnection {
-        self.conn
-            .as_mut()
-            .expect("PooledConnection invariant: conn is always Some while borrowed")
-    }
-}
-
-impl Drop for PooledConnection {
-    fn drop(&mut self) {
-        if let Some(conn) = self.conn.take() {
-            if self.return_to_pool {
-                self.pool.return_conn(conn);
-            } else {
-                drop(conn);
-                self.pool.release_permit();
-            }
-        }
+        &mut self.inner
     }
 }

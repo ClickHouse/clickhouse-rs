@@ -130,11 +130,18 @@ impl<T: Row> NativeInsert<T> {
                 return Err(e);
             }
         }
-        self.conn
+        let result = self
+            .conn
             .as_mut()
             .expect("conn must be open")
             .finish_insert()
-            .await
+            .await;
+        if result.is_ok() {
+            // Take the connection out so our Drop impl does not discard it.
+            // Dropping the PooledConnection here returns it to the idle pool.
+            let _ = self.conn.take();
+        }
+        result
     }
 
     async fn ensure_connected(&mut self) -> Result<()> {
@@ -164,6 +171,9 @@ impl<T: Row> NativeInsert<T> {
         conn.send_insert_block(&column_bytes, self.columns.len(), n).await
     }
 
+}
+
+impl<T> NativeInsert<T> {
     /// Abort the INSERT: discard the connection and clear the buffer.
     ///
     /// The server-side INSERT is incomplete — we must not return this
@@ -175,5 +185,13 @@ impl<T: Row> NativeInsert<T> {
         }
         self.row_buf.clear();
         self.row_bytes = 0;
+    }
+}
+
+impl<T> Drop for NativeInsert<T> {
+    /// If [`end`](NativeInsert::end) was not called, discard the connection so
+    /// it is never returned to the pool mid-INSERT.
+    fn drop(&mut self) {
+        self.abort();
     }
 }

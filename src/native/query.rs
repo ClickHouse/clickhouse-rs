@@ -78,11 +78,16 @@ impl NativeQuery {
     where
         T: RowOwned + RowRead,
     {
-        match self.fetch::<T>()?.next().await {
-            Ok(Some(row)) => Ok(row),
-            Ok(None) => Err(Error::RowNotFound),
-            Err(err) => Err(err),
-        }
+        let mut cursor = self.fetch::<T>()?;
+        let row = match cursor.next().await {
+            Ok(Some(row)) => row,
+            Ok(None) => return Err(Error::RowNotFound),
+            Err(err) => return Err(err),
+        };
+        // Drain remaining packets so the connection is returned to the pool
+        // in a clean state rather than mid-stream.
+        cursor.drain().await?;
+        Ok(row)
     }
 
     /// Fetch all rows into a Vec.
@@ -103,6 +108,10 @@ impl NativeQuery {
     where
         T: RowOwned + RowRead,
     {
-        self.fetch::<T>()?.next().await
+        let mut cursor = self.fetch::<T>()?;
+        let row = cursor.next().await?;
+        // Drain if we got a row without reaching EndOfStream.
+        cursor.drain().await?;
+        Ok(row)
     }
 }

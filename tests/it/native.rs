@@ -1592,3 +1592,847 @@ async fn native_insert_lz4() {
     assert_eq!(rows[1].id, 2);
     assert_eq!(rows[1].name, "bob");
 }
+
+// ---------------------------------------------------------------------------
+// Pool edge cases
+// ---------------------------------------------------------------------------
+
+/// Pool size 2, 10 concurrent tasks — all must succeed.
+/// Verifies that tasks waiting for a connection are eventually served.
+#[tokio::test]
+async fn native_pool_concurrent() {
+    let client = get_native_client().with_pool_size(2);
+    let tasks: Vec<_> = (0..10u8)
+        .map(|i| {
+            let c = client.clone();
+            tokio::spawn(async move {
+                let n: u8 = c
+                    .query(&format!("SELECT {i}"))
+                    .fetch_one::<u8>()
+                    .await
+                    .expect("concurrent query failed");
+                assert_eq!(n, i);
+            })
+        })
+        .collect();
+    for task in tasks {
+        task.await.expect("task panicked");
+    }
+}
+
+/// A server exception must not permanently break the pool.
+/// The next query after an error must succeed on a fresh/recycled connection.
+#[tokio::test]
+async fn native_pool_error_recovery() {
+    let client = get_native_client();
+
+    // Trigger a server exception (table does not exist).
+    let result = client
+        .query("SELECT * FROM _this_table_does_not_exist_clickhouse_rs_test")
+        .fetch_all::<u8>()
+        .await;
+    assert!(result.is_err(), "expected error from bad query");
+
+    // Pool must still be usable after the error.
+    let n: u8 = client
+        .query("SELECT 99")
+        .fetch_one::<u8>()
+        .await
+        .expect("query after error must succeed");
+    assert_eq!(n, 99);
+}
+
+/// Pool size 1 + many concurrent inserts — verifies no deadlock when the
+/// INSERT holds the sole connection and another task waits for it.
+#[tokio::test]
+async fn native_pool_insert_wait() {
+    let client = prepare_native_database("pool_insert_wait").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    let small_client = client.clone().with_pool_size(1);
+
+    #[derive(Debug, Row, Serialize)]
+    struct R {
+        id: u32,
+    }
+
+    // Task A holds the connection in an INSERT.
+    // Task B tries to ping at the same time — it must wait, not deadlock.
+    let client_a = small_client.clone();
+    let client_b = small_client.clone();
+
+    let insert_task = tokio::spawn(async move {
+        let mut ins = client_a.insert::<R>("t");
+        for i in 0..100u32 {
+            ins.write(&R { id: i }).await.expect("write failed");
+        }
+        ins.end().await.expect("end failed");
+    });
+    let ping_task = tokio::spawn(async move {
+        client_b.ping().await.expect("ping failed while insert held connection");
+    });
+
+    insert_task.await.expect("insert task panicked");
+    ping_task.await.expect("ping task panicked");
+}
+
+// ---------------------------------------------------------------------------
+// Bool / sparse-serialization edge cases
+// ---------------------------------------------------------------------------
+
+/// All rows false — sparse format sends 0 non-default values.
+#[tokio::test]
+async fn native_bool_all_false() {
+    let client = prepare_native_database("bool_all_false").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, flag Bool) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    for i in 1..=8u32 {
+        client
+            .query(&format!("INSERT INTO t VALUES ({i}, false)"))
+            .execute()
+            .await
+            .expect("INSERT failed");
+    }
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct BoolRow {
+        id: u32,
+        flag: bool,
+    }
+
+    let rows = client
+        .query("SELECT id, flag FROM t ORDER BY id ASC")
+        .fetch_all::<BoolRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 8);
+    for row in &rows {
+        assert!(!row.flag, "expected false for id={}", row.id);
+    }
+}
+
+/// All rows true — sparse format stores every row as a non-default value.
+#[tokio::test]
+async fn native_bool_all_true() {
+    let client = prepare_native_database("bool_all_true").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, flag Bool) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    for i in 1..=8u32 {
+        client
+            .query(&format!("INSERT INTO t VALUES ({i}, true)"))
+            .execute()
+            .await
+            .expect("INSERT failed");
+    }
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct BoolRow {
+        id: u32,
+        flag: bool,
+    }
+
+    let rows = client
+        .query("SELECT id, flag FROM t ORDER BY id ASC")
+        .fetch_all::<BoolRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 8);
+    for row in &rows {
+        assert!(row.flag, "expected true for id={}", row.id);
+    }
+}
+
+/// Mixed true/false across many rows — exercises sparse offset groups.
+#[tokio::test]
+async fn native_bool_many_rows() {
+    let client = prepare_native_database("bool_many_rows").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, flag Bool) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    // Insert 200 rows in one batch: alternating true/false, then a run of
+    // 50 trues, then 50 falses — exercises multiple sparse offset groups.
+    let vals: String = (0..200u32)
+        .map(|i| {
+            let b = if i < 100 { i % 2 == 0 } else { i < 150 };
+            format!("({i}, {})", b)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    client
+        .query(&format!("INSERT INTO t VALUES {vals}"))
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    #[derive(Debug, Row, Deserialize)]
+    struct BoolRow {
+        id: u32,
+        flag: bool,
+    }
+
+    let rows = client
+        .query("SELECT id, flag FROM t ORDER BY id ASC")
+        .fetch_all::<BoolRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 200);
+    for row in &rows {
+        let expected = if row.id < 100 {
+            row.id % 2 == 0
+        } else {
+            row.id < 150
+        };
+        assert_eq!(row.flag, expected, "mismatch at id={}", row.id);
+    }
+}
+
+/// Nullable(Bool): Some(true), Some(false), NULL.
+#[tokio::test]
+async fn native_bool_nullable() {
+    let client = prepare_native_database("bool_nullable").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, flag Nullable(Bool)) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query("INSERT INTO t VALUES (1, true), (2, false), (3, NULL)")
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct BoolRow {
+        id: u32,
+        flag: Option<bool>,
+    }
+
+    let rows = client
+        .query("SELECT id, flag FROM t ORDER BY id ASC")
+        .fetch_all::<BoolRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0], BoolRow { id: 1, flag: Some(true) });
+    assert_eq!(rows[1], BoolRow { id: 2, flag: Some(false) });
+    assert_eq!(rows[2], BoolRow { id: 3, flag: None });
+}
+
+/// INSERT Bool via `NativeInsert<T>` (not SQL VALUES) — tests the encoder path.
+#[tokio::test]
+async fn native_insert_bool() {
+    let client = prepare_native_database("insert_bool").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, flag Bool) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    struct BoolRow {
+        id: u32,
+        flag: bool,
+    }
+
+    let mut insert = client.insert::<BoolRow>("t");
+    insert.write(&BoolRow { id: 1, flag: true }).await.expect("write 1 failed");
+    insert.write(&BoolRow { id: 2, flag: false }).await.expect("write 2 failed");
+    insert.write(&BoolRow { id: 3, flag: true }).await.expect("write 3 failed");
+    insert.end().await.expect("end failed");
+
+    let rows = client
+        .query("SELECT id, flag FROM t ORDER BY id ASC")
+        .fetch_all::<BoolRow>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0], BoolRow { id: 1, flag: true });
+    assert_eq!(rows[1], BoolRow { id: 2, flag: false });
+    assert_eq!(rows[2], BoolRow { id: 3, flag: true });
+}
+
+/// Bool column alongside non-sparse UInt32 and String columns.
+///
+/// Verifies that the sparse decoder does not misalign the stream — after reading
+/// the Bool column's sparse offsets + values, the reader must be positioned
+/// exactly at the next column's data.
+#[tokio::test]
+async fn native_bool_sparse_stream_alignment() {
+    let client = prepare_native_database("bool_sparse_align").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, flag Bool, name String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query("INSERT INTO t VALUES (1, true, 'alice'), (2, false, 'bob'), (3, true, 'carol'), (4, false, 'dave')")
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct R {
+        id: u32,
+        flag: bool,
+        name: String,
+    }
+
+    let rows = client
+        .query("SELECT id, flag, name FROM t ORDER BY id ASC")
+        .fetch_all::<R>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0], R { id: 1, flag: true,  name: "alice".into() });
+    assert_eq!(rows[1], R { id: 2, flag: false, name: "bob".into() });
+    assert_eq!(rows[2], R { id: 3, flag: true,  name: "carol".into() });
+    assert_eq!(rows[3], R { id: 4, flag: false, name: "dave".into() });
+}
+
+/// Two consecutive Bool columns — each must decode its own sparse stream
+/// independently without cross-contamination.
+#[tokio::test]
+async fn native_bool_multi_sparse_columns() {
+    let client = prepare_native_database("bool_multi_sparse").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (a Bool, b Bool) {}",
+            on_cluster(),
+            test_engine("a"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    // a: T F T F T, b: F F T T F → different sparse patterns.
+    client
+        .query("INSERT INTO t VALUES (true,false),(false,false),(true,true),(false,true),(true,false)")
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct R { a: bool, b: bool }
+
+    let rows = client
+        .query("SELECT a, b FROM t ORDER BY (a,b)")
+        .fetch_all::<R>()
+        .await
+        .expect("fetch failed");
+
+    // Sort-order independent check: collect (a,b) pairs.
+    let mut got: Vec<(bool, bool)> = rows.iter().map(|r| (r.a, r.b)).collect();
+    got.sort();
+    // (T,F),(F,F),(T,T),(F,T),(T,F) sorted: (F,F),(F,T),(T,F),(T,F),(T,T)
+    assert_eq!(
+        got,
+        vec![(false,false),(false,true),(true,false),(true,false),(true,true)]
+    );
+}
+
+/// 1 000 rows, only the last one is `true`.
+///
+/// Exercises large VarUInt offsets in the sparse stream (offset group = 999).
+#[tokio::test]
+async fn native_bool_sparse_large_gap() {
+    let client = prepare_native_database("bool_sparse_large_gap").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, flag Bool) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    #[derive(Debug, Row, Serialize)]
+    struct W { id: u32, flag: bool }
+    #[derive(Debug, Row, Deserialize)]
+    struct R { id: u32, flag: bool }
+
+    const N: u32 = 1000;
+    let mut insert = client.insert::<W>("t");
+    for i in 0..N {
+        insert.write(&W { id: i, flag: i == N - 1 }).await.expect("write failed");
+    }
+    insert.end().await.expect("end failed");
+
+    let rows = client
+        .query("SELECT id, flag FROM t ORDER BY id ASC")
+        .fetch_all::<R>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), N as usize);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(row.id, i as u32);
+        assert_eq!(row.flag, i == (N - 1) as usize,
+                   "row {i}: expected flag={}", i == (N - 1) as usize);
+    }
+}
+
+/// 1 000 rows, only position 0 is `true` — zero-offset sparse group.
+#[tokio::test]
+async fn native_bool_sparse_single_at_start() {
+    let client = prepare_native_database("bool_sparse_single_start").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, flag Bool) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    #[derive(Debug, Row, Serialize)]
+    struct W { id: u32, flag: bool }
+    #[derive(Debug, Row, Deserialize)]
+    struct R { id: u32, flag: bool }
+
+    const N: u32 = 1000;
+    let mut insert = client.insert::<W>("t");
+    for i in 0..N {
+        insert.write(&W { id: i, flag: i == 0 }).await.expect("write failed");
+    }
+    insert.end().await.expect("end failed");
+
+    let rows = client
+        .query("SELECT id, flag FROM t ORDER BY id ASC")
+        .fetch_all::<R>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), N as usize);
+    assert!(rows[0].flag, "row 0 should be true");
+    for row in &rows[1..] {
+        assert!(!row.flag, "row {} should be false", row.id);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// INSERT edge cases
+// ---------------------------------------------------------------------------
+
+/// Write 50 000 rows — enough to trigger multiple intermediate flushes at the
+/// 256 KiB threshold.  Verifies all rows arrive after end().
+#[tokio::test]
+async fn native_insert_large_batch() {
+    let client = prepare_native_database("insert_large_batch").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt64) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    #[derive(Debug, Row, Serialize)]
+    struct NumRow {
+        id: u64,
+    }
+
+    const N: u64 = 50_000;
+    let mut insert = client.insert::<NumRow>("t");
+    for i in 0..N {
+        insert.write(&NumRow { id: i }).await.expect("write failed");
+    }
+    insert.end().await.expect("end failed");
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one::<u64>()
+        .await
+        .expect("count failed");
+
+    assert_eq!(count, N, "row count mismatch after large batch");
+}
+
+/// Drop `NativeInsert` without calling `end()` — must not commit any data,
+/// and must not leave the pool connection in a broken state.
+#[tokio::test]
+async fn native_insert_abort() {
+    let client = prepare_native_database("insert_abort").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    #[derive(Debug, Row, Serialize)]
+    struct R {
+        id: u32,
+    }
+
+    // Write two rows then drop without end() — aborts the INSERT.
+    {
+        let mut insert = client.insert::<R>("t");
+        insert.write(&R { id: 1 }).await.expect("write 1 failed");
+        insert.write(&R { id: 2 }).await.expect("write 2 failed");
+        // dropped here — connection must be discarded, not returned to pool
+    }
+
+    // The pool must still work after the aborted insert.
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one::<u64>()
+        .await
+        .expect("count after abort failed");
+
+    assert_eq!(count, 0, "aborted insert must not commit data");
+}
+
+/// Two sequential inserts into the same table to verify pool reuse between
+/// INSERT operations does not misalign the protocol.
+#[tokio::test]
+async fn native_insert_sequential() {
+    let client = prepare_native_database("insert_sequential").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    #[derive(Debug, Row, Serialize)]
+    struct R {
+        id: u32,
+    }
+
+    // First INSERT
+    let mut ins = client.insert::<R>("t");
+    ins.write(&R { id: 1 }).await.expect("write 1a failed");
+    ins.write(&R { id: 2 }).await.expect("write 1b failed");
+    ins.end().await.expect("end 1 failed");
+
+    // Second INSERT reuses the same connection from the pool.
+    let mut ins2 = client.insert::<R>("t");
+    ins2.write(&R { id: 3 }).await.expect("write 2a failed");
+    ins2.end().await.expect("end 2 failed");
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one::<u64>()
+        .await
+        .expect("count failed");
+
+    assert_eq!(count, 3);
+}
+
+// ---------------------------------------------------------------------------
+// Query API edge cases
+// ---------------------------------------------------------------------------
+
+/// `fetch_one` on an empty result set must return `RowNotFound`.
+#[tokio::test]
+async fn native_query_fetch_one_empty() {
+    let client = prepare_native_database("fetch_one_empty").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    let result = client
+        .query("SELECT id FROM t")
+        .fetch_one::<u32>()
+        .await;
+
+    assert!(
+        matches!(result, Err(clickhouse::error::Error::RowNotFound)),
+        "expected RowNotFound, got {result:?}"
+    );
+}
+
+/// `fetch_optional` returns `None` when no rows match, `Some` when one does.
+#[tokio::test]
+async fn native_query_fetch_optional() {
+    let client = prepare_native_database("fetch_optional").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    // Empty table → None.
+    let none: Option<u32> = client
+        .query("SELECT id FROM t")
+        .fetch_optional::<u32>()
+        .await
+        .expect("fetch_optional failed");
+    assert!(none.is_none());
+
+    // Insert one row.
+    client
+        .query("INSERT INTO t VALUES (42)")
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    // One row → Some.
+    let some: Option<u32> = client
+        .query("SELECT id FROM t LIMIT 1")
+        .fetch_optional::<u32>()
+        .await
+        .expect("fetch_optional failed");
+    assert_eq!(some, Some(42u32));
+}
+
+/// `bind()` with multiple `?` placeholders — each replaces the next occurrence.
+#[tokio::test]
+async fn native_query_bind_multiple() {
+    let client = get_native_client();
+
+    // ClickHouse infers UInt8 for small literals; match the inferred type.
+    let result: u8 = client
+        .query("SELECT ? + ?")
+        .bind(10u8)
+        .bind(32u8)
+        .fetch_one::<u8>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(result, 42u8);
+}
+
+/// `bind()` when the SQL has no `?` — should be a no-op (query unchanged).
+#[tokio::test]
+async fn native_query_bind_no_placeholder() {
+    let client = get_native_client();
+
+    let result: u8 = client
+        .query("SELECT 1")
+        .bind(999u32)   // no placeholder — ignored
+        .fetch_one::<u8>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(result, 1u8);
+}
+
+// ---------------------------------------------------------------------------
+// Nullable edge cases
+// ---------------------------------------------------------------------------
+
+/// Column that is NULL for every row.
+#[tokio::test]
+async fn native_nullable_all_null() {
+    let client = prepare_native_database("nullable_all_null").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, val Nullable(Int64)) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query("INSERT INTO t VALUES (1, NULL), (2, NULL), (3, NULL)")
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    #[derive(Debug, Row, Deserialize, PartialEq)]
+    struct R {
+        id: u32,
+        val: Option<i64>,
+    }
+
+    let rows = client
+        .query("SELECT id, val FROM t ORDER BY id ASC")
+        .fetch_all::<R>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 3);
+    for row in &rows {
+        assert!(row.val.is_none(), "expected NULL for id={}", row.id);
+    }
+}
+
+/// Array(Nullable(String)) — nulls inside an array.
+#[tokio::test]
+async fn native_array_of_nullable() {
+    let client = prepare_native_database("array_nullable").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, tags Array(Nullable(String))) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    client
+        .query("INSERT INTO t VALUES (1, ['a', NULL, 'b']), (2, [])")
+        .execute()
+        .await
+        .expect("INSERT failed");
+
+    #[derive(Debug, Row, Deserialize)]
+    struct R {
+        id: u32,
+        tags: Vec<Option<String>>,
+    }
+
+    let rows = client
+        .query("SELECT id, tags FROM t ORDER BY id ASC")
+        .fetch_all::<R>()
+        .await
+        .expect("fetch failed");
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0].tags,
+        vec![Some("a".into()), None, Some("b".into())]
+    );
+    assert_eq!(rows[1].tags, Vec::<Option<String>>::new());
+}
+
+// ---------------------------------------------------------------------------
+// Schema cache edge cases
+// ---------------------------------------------------------------------------
+
+/// `fetch_schema` on a non-existent table must return an error (empty result).
+#[tokio::test]
+async fn native_schema_cache_miss() {
+    let client = get_native_client();
+
+    // Non-existent table returns empty schema (not an error from ClickHouse).
+    let schema = client
+        .fetch_schema("_this_table_does_not_exist_xyz_clickhouse_rs")
+        .await
+        .expect("fetch_schema should not error on missing table");
+
+    assert!(
+        schema.is_empty(),
+        "expected empty schema for non-existent table, got {schema:?}"
+    );
+}
+
+/// `clear_all_cached_schemas` removes all entries; subsequent access re-fetches.
+#[tokio::test]
+async fn native_schema_cache_clear_all() {
+    let client = prepare_native_database("schema_clear_all").await;
+
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, name String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .expect("CREATE failed");
+
+    #[derive(Debug, Row, Serialize)]
+    struct TestRow {
+        id: u32,
+        name: String,
+    }
+
+    // Populate the cache via an INSERT.
+    let mut ins = client.insert::<TestRow>("t");
+    ins.write(&TestRow { id: 1, name: "x".into() }).await.expect("write failed");
+    ins.end().await.expect("end failed");
+
+    assert!(client.cached_schema("t").is_some(), "cache should be populated after INSERT");
+
+    // Clear all — cache must be empty.
+    client.clear_all_cached_schemas();
+    assert!(client.cached_schema("t").is_none(), "cache should be empty after clear_all");
+
+    // fetch_schema re-populates.
+    let schema = client.fetch_schema("t").await.expect("fetch_schema failed");
+    assert!(!schema.is_empty());
+    assert!(client.cached_schema("t").is_some(), "cache should be re-populated after fetch_schema");
+}
