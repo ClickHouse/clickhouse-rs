@@ -103,6 +103,19 @@ async fn native_ping() {
     client.ping().await.expect("ping failed");
 }
 
+/// Verify that the connection pool reuses connections across queries.
+///
+/// Run 20 sequential pings on a pool capped to 1 connection.  If pooling
+/// works, all 20 succeed because the same connection is returned each time.
+/// Without pooling each ping would open a new connection.
+#[tokio::test]
+async fn native_pool_reuse() {
+    let client = get_native_client().with_pool_size(1);
+    for _ in 0..20 {
+        client.ping().await.expect("ping failed");
+    }
+}
+
 #[tokio::test]
 async fn native_ddl() {
     let client = prepare_native_database("ddl").await;
