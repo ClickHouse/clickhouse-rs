@@ -12,7 +12,7 @@ use crate::row_metadata::{AccessType, ColumnDefaultKind, InsertMetadata, RowMeta
 pub use clickhouse_macros::Row;
 use clickhouse_types::{Column, DataTypeNode};
 
-use crate::_priv::row_insert_metadata_query;
+use crate::error::Error;
 use std::collections::HashSet;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
@@ -401,6 +401,10 @@ impl Client {
 
     /// Starts a new INSERT statement.
     ///
+    /// The table name will be escaped as a single identifier. To pass a fully qualified name,
+    /// use [`Client::insert_unescaped()`] instead, or override the database name for this statement
+    /// using `client.clone().with_database("<db name>")`.
+    ///
     /// # Validation
     ///
     /// If validation is enabled (default), `RowBinaryWithNamesAndTypes` input format is used.
@@ -418,12 +422,27 @@ impl Client {
     ///
     /// If `T` has unnamed fields, e.g. tuples.
     pub async fn insert<T: Row>(&self, table: &str) -> Result<insert::Insert<T>> {
+        let mut escaped_table_name = String::new();
+        sql::escape::identifier(table, &mut escaped_table_name)
+            // In practice this should not error, as writing to a `String` should be infallible.
+            .map_err(|e| Error::Other(format!("error escaping table name: {e:?}").into()))?;
+
+        self.insert_unescaped(&escaped_table_name).await
+    }
+
+    /// Start a new `INSERT` statement using an unescaped table name.
+    ///
+    /// See [`Client::insert()`] for details.
+    pub async fn insert_unescaped<T: Row>(
+        &self,
+        raw_table_name: &str,
+    ) -> Result<insert::Insert<T>> {
         if self.get_validation() {
-            let metadata = self.get_insert_metadata(table).await?;
+            let metadata = self.get_insert_metadata(raw_table_name).await?;
             let row = metadata.to_row::<T>()?;
-            return Ok(insert::Insert::new(self, table, Some(row)));
+            return Ok(insert::Insert::new(self, raw_table_name, Some(row)));
         }
-        Ok(insert::Insert::new(self, table, None))
+        Ok(insert::Insert::new(self, raw_table_name, None))
     }
 
     /// Creates an inserter to perform multiple INSERT statements.
@@ -545,38 +564,51 @@ impl Client {
         self
     }
 
-    async fn get_insert_metadata(&self, table_name: &str) -> Result<Arc<InsertMetadata>> {
+    async fn get_insert_metadata(&self, raw_table_name: &str) -> Result<Arc<InsertMetadata>> {
+        #[derive(::serde::Deserialize, clickhouse_macros::Row)]
+        #[clickhouse(crate = "self")]
+        // `Row` derive doesn't allow omitting columns
+        #[expect(dead_code)]
+        struct DescribeColumn {
+            name: String,
+            r#type: String,
+            default_type: String,
+            default_expression: String,
+            comment: String,
+            codec_expression: String,
+            ttl_expression: String,
+        }
+
         {
             let read_lock = self.insert_metadata_cache.0.read().await;
 
-            // FIXME: `table_name` is not necessarily fully qualified here
-            if let Some(metadata) = read_lock.get(table_name) {
+            if let Some(metadata) = read_lock.get(raw_table_name) {
                 return Ok(metadata.clone());
             }
         }
 
         // TODO: should it be moved to a cold function?
         let mut write_lock = self.insert_metadata_cache.0.write().await;
-        let db = match self.database {
-            Some(ref db) => db,
-            None => "default",
-        };
 
         let mut columns_cursor = self
-            .query(&row_insert_metadata_query(db, table_name))
-            .fetch::<(String, String, String)>()?;
+            .query(&_priv::row_insert_metadata_query(raw_table_name))
+            .with_option("describe_include_subcolumns", "0")
+            .fetch::<DescribeColumn>()?;
 
         let mut columns = Vec::new();
         let mut column_default_kinds = Vec::new();
         let mut column_lookup = HashMap::new();
 
-        while let Some((name, type_, default_kind)) = columns_cursor.next().await? {
-            let data_type = DataTypeNode::new(&type_)?;
-            let default_kind = default_kind.parse::<ColumnDefaultKind>()?;
+        while let Some(column) = columns_cursor.next().await? {
+            let data_type = DataTypeNode::new(&column.r#type)?;
+            let default_kind = column.default_type.parse::<ColumnDefaultKind>()?;
 
-            column_lookup.insert(name.clone(), columns.len());
+            column_lookup.insert(column.name.clone(), columns.len());
 
-            columns.push(Column { name, data_type });
+            columns.push(Column {
+                name: column.name,
+                data_type,
+            });
 
             column_default_kinds.push(default_kind);
         }
@@ -590,7 +622,7 @@ impl Client {
             column_lookup,
         });
 
-        write_lock.insert(table_name.to_string(), metadata.clone());
+        write_lock.insert(raw_table_name.to_string(), metadata.clone());
         Ok(metadata)
     }
 }
@@ -621,22 +653,8 @@ pub mod _priv {
     }
 
     // Also needed by `it::insert::cache_row_metadata()`
-    pub fn row_insert_metadata_query(db: &str, table: &str) -> String {
-        let mut out = "SELECT \
-            name, \
-            type, \
-            default_kind \
-         FROM system.columns \
-         WHERE database = "
-            .to_string();
-
-        crate::sql::escape::string(db, &mut out).unwrap();
-
-        out.push_str(" AND table = ");
-
-        crate::sql::escape::string(table, &mut out).unwrap();
-
-        out
+    pub fn row_insert_metadata_query(raw_table: &str) -> String {
+        format!("DESCRIBE TABLE {raw_table}")
     }
 }
 

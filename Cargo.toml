@@ -125,8 +125,9 @@ rustls-tls-native-roots = [
 clickhouse-macros = { version = "0.3.0", path = "macros" }
 clickhouse-types = { version = "0.1.1", path = "types" }
 
+serde = { version = "1.0.106", features = ["derive"] }
+
 thiserror = "2.0"
-serde = "1.0.106"
 bytes = { version = "1.5.0", features = ["serde"] }
 tokio = { version = "1.0.1", features = ["rt", "macros"] }
 http-body-util = "0.1.2"
