@@ -2517,3 +2517,676 @@ async fn native_schema_cache_clear_all() {
     assert!(!schema.is_empty());
     assert!(client.cached_schema("t").is_some(), "cache should be re-populated after fetch_schema");
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AsyncNativeInserter tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn native_async_inserter_basic() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_basic").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    for i in 0..100u32 {
+        inserter
+            .write(R { id: i, data: i.to_string() })
+            .await
+            .unwrap();
+    }
+
+    inserter.end().await.unwrap();
+
+    let rows: Vec<R> = client
+        .query("SELECT id, data FROM t ORDER BY id")
+        .fetch_all()
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 100);
+    assert_eq!(rows[0].id, 0);
+    assert_eq!(rows[99].id, 99);
+}
+
+#[tokio::test]
+async fn native_async_inserter_flush() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_flush").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    for i in 0..50u32 {
+        inserter
+            .write(R { id: i, data: i.to_string() })
+            .await
+            .unwrap();
+    }
+
+    let q = inserter.flush().await.unwrap();
+    assert_eq!(q.rows, 50);
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 50);
+
+    for i in 50..100u32 {
+        inserter
+            .write(R { id: i, data: i.to_string() })
+            .await
+            .unwrap();
+    }
+
+    inserter.end().await.unwrap();
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 100);
+}
+
+#[tokio::test]
+async fn native_async_inserter_concurrent_handles() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_concurrent").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    let mut tasks = Vec::new();
+    for chunk_start in (0..100u32).step_by(10) {
+        let handle = inserter.handle();
+        tasks.push(tokio::spawn(async move {
+            for i in chunk_start..chunk_start + 10 {
+                handle
+                    .write(R { id: i, data: i.to_string() })
+                    .await
+                    .unwrap();
+            }
+        }));
+    }
+
+    for task in tasks {
+        task.await.unwrap();
+    }
+
+    inserter.end().await.unwrap();
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 100);
+}
+
+#[tokio::test]
+async fn native_async_inserter_empty_end() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_empty").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    inserter.end().await.unwrap();
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+// ── Edge cases ───────────────────────────────────────────────────────────
+
+/// Writing a single row should work.
+#[tokio::test]
+async fn native_async_inserter_single_row() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_single").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    inserter
+        .write(R {
+            id: 42,
+            data: "hello".into(),
+        })
+        .await
+        .unwrap();
+
+    inserter.end().await.unwrap();
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+/// Flush on empty buffer returns zero quantities (not an error).
+#[tokio::test]
+async fn native_async_inserter_flush_empty() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_flush_empty").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    let q = inserter.flush().await.unwrap();
+    assert_eq!(q.rows, 0);
+
+    inserter.end().await.unwrap();
+}
+
+/// Multiple flushes in a row without writes in between.
+#[tokio::test]
+async fn native_async_inserter_double_flush() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_double_flush").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    for i in 0..10u32 {
+        inserter
+            .write(R { id: i, data: i.to_string() })
+            .await
+            .unwrap();
+    }
+
+    let q1 = inserter.flush().await.unwrap();
+    assert_eq!(q1.rows, 10);
+
+    let q2 = inserter.flush().await.unwrap();
+    assert_eq!(q2.rows, 0);
+
+    inserter.end().await.unwrap();
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 10);
+}
+
+/// max_rows=1 should auto-flush after every single row.
+#[tokio::test]
+async fn native_async_inserter_max_rows_one() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_max1").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default()
+            .with_max_rows(1)
+            .without_period(),
+    );
+
+    for i in 0..5u32 {
+        inserter
+            .write(R { id: i, data: i.to_string() })
+            .await
+            .unwrap();
+    }
+
+    inserter.end().await.unwrap();
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 5);
+}
+
+/// Large string values round-trip correctly.
+#[tokio::test]
+async fn native_async_inserter_large_strings() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_large_str").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    let big = "x".repeat(100_000);
+    for i in 0..3u32 {
+        inserter
+            .write(R {
+                id: i,
+                data: big.clone(),
+            })
+            .await
+            .unwrap();
+    }
+
+    inserter.end().await.unwrap();
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 3);
+}
+
+/// Small channel capacity (1) forces extreme backpressure.
+#[tokio::test]
+async fn native_async_inserter_tiny_channel() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_tiny_ch").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default()
+            .with_channel_capacity(1)
+            .without_period(),
+    );
+
+    for i in 0..20u32 {
+        inserter
+            .write(R { id: i, data: i.to_string() })
+            .await
+            .unwrap();
+    }
+
+    inserter.end().await.unwrap();
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 20);
+}
+
+// ── Failure / error propagation ──────────────────────────────────────────
+
+/// Handle becomes inert after the inserter is ended — writes should fail.
+#[tokio::test]
+async fn native_async_inserter_handle_after_end() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_after_end").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    let handle = inserter.handle();
+
+    inserter.end().await.unwrap();
+
+    let result = handle
+        .write(R {
+            id: 1,
+            data: "late".into(),
+        })
+        .await;
+    assert!(result.is_err(), "write after end() should fail");
+}
+
+/// flush() via handle after inserter is ended should fail.
+#[tokio::test]
+async fn native_async_inserter_flush_after_end() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_flush_end").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    let handle = inserter.handle();
+
+    inserter.end().await.unwrap();
+
+    let result = handle.flush().await;
+    assert!(result.is_err(), "flush after end() should fail");
+}
+
+// ── Stress / concurrency ─────────────────────────────────────────────────
+
+/// Many concurrent writers with small max_rows to stress the flush path.
+#[tokio::test]
+async fn native_async_inserter_stress_concurrent() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_stress").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default()
+            .with_max_rows(7) // prime number for odd batch boundaries
+            .without_period(),
+    );
+
+    let mut tasks = Vec::new();
+    for task_id in 0..20u32 {
+        let handle = inserter.handle();
+        tasks.push(tokio::spawn(async move {
+            for j in 0..50u32 {
+                let id = task_id * 50 + j;
+                handle
+                    .write(R {
+                        id,
+                        data: format!("task{task_id}_row{j}"),
+                    })
+                    .await
+                    .unwrap();
+            }
+        }));
+    }
+
+    for task in tasks {
+        task.await.unwrap();
+    }
+
+    inserter.end().await.unwrap();
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 1000);
+}
+
+/// Interleaved writes and flushes from multiple handles.
+#[tokio::test]
+async fn native_async_inserter_interleaved_flush() {
+    use clickhouse::native::{AsyncNativeInserter, AsyncNativeInserterConfig};
+
+    #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
+    struct R {
+        id: u32,
+        data: String,
+    }
+
+    let client = prepare_native_database("async_inserter_interleave").await;
+    client
+        .query(&format!(
+            "CREATE TABLE t{} (id UInt32, data String) {}",
+            on_cluster(),
+            test_engine("id"),
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let inserter = AsyncNativeInserter::<R>::new(
+        &client,
+        "t",
+        AsyncNativeInserterConfig::default().without_period(),
+    );
+
+    let h1 = inserter.handle();
+    let h2 = inserter.handle();
+
+    for i in 0..10u32 {
+        h1.write(R { id: i, data: "a".into() }).await.unwrap();
+    }
+    h1.flush().await.unwrap();
+
+    for i in 10..20u32 {
+        h2.write(R { id: i, data: "b".into() }).await.unwrap();
+    }
+    h2.flush().await.unwrap();
+
+    let count: u64 = client
+        .query("SELECT count() FROM t")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(count, 20);
+
+    drop(h1);
+    drop(h2);
+    inserter.end().await.unwrap();
+}

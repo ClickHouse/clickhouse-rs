@@ -43,7 +43,7 @@ async fn batcher_basic() {
 
     for i in 0..100u32 {
         batcher
-            .append(&MyRow { id: i, data: i.to_string() })
+            .append(MyRow { id: i, data: i.to_string() })
             .await
             .unwrap();
     }
@@ -68,7 +68,7 @@ async fn batcher_explicit_flush() {
 
     for i in 0..50u32 {
         batcher
-            .append(&MyRow { id: i, data: i.to_string() })
+            .append(MyRow { id: i, data: i.to_string() })
             .await
             .unwrap();
     }
@@ -79,7 +79,7 @@ async fn batcher_explicit_flush() {
 
     for i in 50..100u32 {
         batcher
-            .append(&MyRow { id: i, data: i.to_string() })
+            .append(MyRow { id: i, data: i.to_string() })
             .await
             .unwrap();
     }
@@ -104,7 +104,7 @@ async fn batcher_max_rows_flush() {
 
     for i in 0..35u32 {
         batcher
-            .append(&MyRow { id: i, data: i.to_string() })
+            .append(MyRow { id: i, data: i.to_string() })
             .await
             .unwrap();
     }
@@ -134,7 +134,7 @@ async fn batcher_period_flush() {
 
     for i in 0..20u32 {
         batcher
-            .append(&MyRow { id: i, data: i.to_string() })
+            .append(MyRow { id: i, data: i.to_string() })
             .await
             .unwrap();
     }

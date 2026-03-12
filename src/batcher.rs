@@ -1,29 +1,45 @@
 //! Per-table batch inserter with automatic flushing.
 //!
-//! [`TableBatcher<T>`] wraps [`Inserter<T>`][crate::inserter::Inserter] with
-//! a shared buffer and a background task that handles period-based flushes,
-//! so callers don't need to poll `time_left()`.
+//! [`TableBatcher<T>`] is a thin convenience wrapper over
+//! [`AsyncInserter<T>`][crate::async_inserter::AsyncInserter] that provides
+//! ClickHouse Go client–style naming ([`append`][TableBatcher::append] /
+//! [`flush`][TableBatcher::flush] / [`send`][TableBatcher::send]) and
+//! sensible defaults.
 //!
-//! API names follow the ClickHouse Go client's
-//! [`Batch`](https://pkg.go.dev/github.com/ClickHouse/clickhouse-go/v2/lib/driver#Batch)
-//! interface: [`append`][TableBatcher::append] / [`flush`][TableBatcher::flush] /
-//! [`send`][TableBatcher::send].
+//! # Architecture
+//!
+//! ```text
+//!  TableBatcher (thin wrapper over AsyncInserter)
+//!  ┌───────────────────────────────────────────┐
+//!  │  append(row) ──→ AsyncInserter.write(row) │
+//!  │  flush()     ──→ AsyncInserter.flush()    │
+//!  │  send()      ──→ AsyncInserter.end()      │
+//!  └──────────────────────┬────────────────────┘
+//!                         │ mpsc channel
+//!                         ▼
+//!               Background Task (select!)
+//!                         │
+//!                    Inserter<T>
+//!                         │ HTTP
+//!                         ▼
+//!                 ClickHouse :8123
+//! ```
 //!
 //! A flush fires when **any** of these thresholds are crossed:
 //! - serialised bytes reach [`BatchConfig::max_bytes`]
 //! - row count reaches [`BatchConfig::max_rows`]
 //! - [`BatchConfig::max_period`] elapses (background task)
+//!
+//! Ported from the HyperI DFE Loader project (`dfe-loader/src/buffer/`).
 
-use std::sync::Arc;
-
-use tokio::sync::Mutex;
 use tokio::time::Duration;
 
 use crate::{
     Client,
+    async_inserter::{AsyncInserter, AsyncInserterConfig},
     error::Result,
-    inserter::{Inserter, Quantities},
-    row::{Row, RowWrite},
+    inserter::Quantities,
+    row::{RowOwned, RowWrite},
 };
 
 /// Flush thresholds for [`TableBatcher`].
@@ -81,107 +97,53 @@ impl BatchConfig {
 
 // HyperI CTO moonlighting — dfe-loader needed this and no one else was going to write it.
 
-struct BatcherInner<T> {
-    inserter: Inserter<T>,
-}
-
 /// Thread-safe, auto-flushing batch inserter for a single ClickHouse table.
 ///
-/// Wraps [`Inserter<T>`][crate::inserter::Inserter] behind an `Arc<Mutex>` for
-/// concurrent writes and spawns a background task to handle period-based flushes.
+/// Thin wrapper over [`AsyncInserter<T>`][crate::async_inserter::AsyncInserter]
+/// with Go client–style naming.
 ///
 /// Unlike `Inserter<T>`, this type accepts `&self` on [`append`][Self::append]
-/// and [`flush`][Self::flush], so it can be shared across tasks via [`Arc`].
+/// and [`flush`][Self::flush], so it can be shared across tasks via [`std::sync::Arc`].
 ///
-/// Concurrent appends are serialised through the internal mutex. On the hot path
-/// (limits not yet reached) the lock covers only RowBinary serialisation. A flush
-/// holds the lock across the network round-trip, but that happens at most once per batch.
-///
-/// For multi-table writes create one `TableBatcher` per table and share via `Arc`.
+/// For multi-table writes create one `TableBatcher` per table.
 pub struct TableBatcher<T> {
-    inner: Arc<Mutex<BatcherInner<T>>>,
-    flush_task: tokio::task::JoinHandle<()>,
+    inner: AsyncInserter<T>,
 }
 
 impl<T> TableBatcher<T>
 where
-    T: Row + RowWrite + Send + 'static,
-    for<'a> <T as Row>::Value<'a>: Send,
+    T: RowOwned + RowWrite + Send + Sync + 'static,
 {
     /// Create a new `TableBatcher` for `table` using `config` thresholds.
-    ///
-    /// If `config.max_period` is `Some`, a background tokio task is spawned
-    /// to handle periodic flushes.
     pub fn new(client: &Client, table: &str, config: BatchConfig) -> Self {
-        let inserter = client
-            .inserter::<T>(table)
-            .with_max_rows(config.max_rows)
-            .with_max_bytes(config.max_bytes)
-            .with_period(config.max_period);
+        let ai_config = AsyncInserterConfig {
+            max_rows: config.max_rows,
+            max_bytes: config.max_bytes,
+            max_period: config.max_period,
+            ..AsyncInserterConfig::default()
+        };
 
-        let inner = Arc::new(Mutex::new(BatcherInner { inserter }));
-        let inner_bg = Arc::clone(&inner);
-        let period = config.max_period;
-
-        let flush_task = tokio::spawn(async move {
-            let Some(p) = period else { return };
-
-            let mut interval = tokio::time::interval(p);
-            // Skip ticks that arrive while a flush is already in progress.
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            // First tick fires immediately at t=0; skip it to avoid flushing an empty buffer.
-            interval.tick().await;
-
-            loop {
-                interval.tick().await;
-                let mut guard = inner_bg.lock().await;
-                if let Err(_err) = guard.inserter.commit().await {
-                    // Errors surface on the next explicit append/flush/send call.
-                    // Background tasks can't propagate errors to callers.
-                }
-            }
-        });
-
-        Self { inner, flush_task }
+        Self {
+            inner: AsyncInserter::new(client, table, ai_config),
+        }
     }
 
     /// Add `row` to the buffer. Flushes automatically if a threshold is crossed.
-    pub async fn append(&self, row: &<T as Row>::Value<'_>) -> Result<()> {
-        let mut guard = self.inner.lock().await;
-        guard.inserter.write(row).await?;
-        guard.inserter.commit().await?;
-        Ok(())
+    pub async fn append(&self, row: T) -> Result<()> {
+        self.inner.write(row).await
     }
 
     /// Force-flush all pending rows to ClickHouse immediately.
     ///
-    /// Returns the [`Quantities`] sent. Useful when shutting down a subsystem
-    /// while other clones of this batcher are still alive.
+    /// Returns the [`Quantities`] sent.
     pub async fn flush(&self) -> Result<Quantities> {
-        let mut guard = self.inner.lock().await;
-        guard.inserter.force_commit().await
+        self.inner.flush().await
     }
 
     /// Flush remaining rows and shut down the batcher.
     ///
-    /// Aborts the background flush task, waits for it to exit (so its `Arc`
-    /// clone is dropped), then finalises the INSERT via
-    /// [`Inserter::end`][crate::inserter::Inserter::end].
-    ///
-    /// All other `Arc` holders over the same inner buffer must be dropped before
-    /// calling `send`. If any remain after the abort, a force-flush is done
-    /// instead of a clean `end`.
+    /// Consumes `self`.
     pub async fn send(self) -> Result<Quantities> {
-        self.flush_task.abort();
-        let _ = self.flush_task.await;
-
-        match Arc::try_unwrap(self.inner) {
-            Ok(mutex) => mutex.into_inner().inserter.end().await,
-            Err(arc) => {
-                // Another Arc clone still exists — force-commit what we can.
-                let mut guard = arc.lock().await;
-                guard.inserter.force_commit().await
-            }
-        }
+        self.inner.end().await
     }
 }

@@ -6,6 +6,7 @@
 
 // HyperI CTO moonlighting — ClickHouse Rust client needed love, so here we are.
 
+pub(crate) mod async_inserter;
 pub(crate) mod block_info;
 pub(crate) mod client_info;
 pub(crate) mod client;
@@ -27,6 +28,7 @@ pub(crate) mod sparse;
 pub(crate) mod tcp;
 pub(crate) mod writer;
 
+pub use self::async_inserter::{AsyncNativeInserter, AsyncNativeInserterConfig, AsyncNativeInserterHandle};
 pub use self::client::NativeClient;
 pub use self::cursor::NativeRowCursor;
 pub use self::insert::NativeInsert;

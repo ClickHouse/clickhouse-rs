@@ -22,6 +22,8 @@ pub mod insert;
 pub mod insert_formatted;
 #[cfg(feature = "inserter")]
 pub mod inserter;
+#[cfg(feature = "async-inserter")]
+pub mod async_inserter;
 #[cfg(feature = "batcher")]
 pub mod batcher;
 pub mod query;

@@ -261,6 +261,8 @@ mod insert_formatted;
 mod inserter;
 #[cfg(feature = "batcher")]
 mod batcher;
+#[cfg(feature = "async-inserter")]
+mod async_inserter;
 mod int128;
 mod int256;
 mod ip;
