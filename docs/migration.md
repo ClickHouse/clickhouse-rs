@@ -138,11 +138,11 @@ This fork (HyperI) adds the following on top of upstream v0.14.2:
 
 ```mermaid
 graph LR
-    M["main<br/>(upstream v0.14.2)"] --> NT["feature/native-transport<br/>native SELECT + INSERT"]
-    NT --> CP["feature/connection-pooling<br/>deadpool, cursor drain, health checks"]
-    CP --> LC["feature/lc-insert<br/>LowCardinality INSERT + LC(Nullable) fix"]
-    LC --> AI["feature/async-inserter<br/>AsyncInserter, TableBatcher"]
+    M["main<br/>(upstream v0.14.2)"] --> NT["hyperi/native-transport<br/>native SELECT + INSERT"]
+    NT --> CP["hyperi/connection-pooling<br/>deadpool, cursor drain, health checks"]
+    CP --> LC["hyperi/lc-insert<br/>LowCardinality INSERT + LC(Nullable) fix"]
+    LC --> AI["hyperi/async-inserter<br/>AsyncInserter, TableBatcher"]
 ```
 
-Branches are designed to be merged in order. `feature/native-transport` is the
+Branches are designed to be merged in order. `hyperi/native-transport` is the
 base PR; each subsequent branch stacks cleanly on top.
