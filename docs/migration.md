@@ -136,12 +136,12 @@ This fork (HyperI) adds the following on top of upstream v0.14.2:
 
 ### Branch structure
 
-```text
-main (upstream v0.14.2)
-  └── feature/native-transport    ← native SELECT + INSERT + infrastructure
-       └── feature/connection-pooling  ← deadpool pool, cursor drain, health checks
-            └── feature/lc-insert      ← LowCardinality INSERT + LC(Nullable) fix
-                 └── feature/async-inserter  ← AsyncInserter, TableBatcher
+```mermaid
+graph LR
+    M["main<br/>(upstream v0.14.2)"] --> NT["feature/native-transport<br/>native SELECT + INSERT"]
+    NT --> CP["feature/connection-pooling<br/>deadpool, cursor drain, health checks"]
+    CP --> LC["feature/lc-insert<br/>LowCardinality INSERT + LC(Nullable) fix"]
+    LC --> AI["feature/async-inserter<br/>AsyncInserter, TableBatcher"]
 ```
 
 Branches are designed to be merged in order. `feature/native-transport` is the

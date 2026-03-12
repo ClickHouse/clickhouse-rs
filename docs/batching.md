@@ -6,34 +6,21 @@ transport needs. All share the same three-threshold flush policy: **row count**,
 
 ## Inserter hierarchy
 
-```text
-                    ┌─────────────────────────┐
-                    │   TableBatcher<T>        │  Go-style append/flush/send
-                    │   (feature = "batcher")  │  wrapper
-                    └────────────┬────────────┘
-                                 │ delegates to
-                    ┌────────────▼────────────┐
-                    │   AsyncInserter<T>       │  MPSC channel + background task
-                    │   (feature =             │  concurrent &self writes
-                    │    "async-inserter")     │  HTTP transport
-                    └────────────┬────────────┘
-                                 │ wraps
-                    ┌────────────▼────────────┐
-                    │   Inserter<T>            │  Single-owner &mut self
-                    │   (feature = "inserter") │  multi-batch HTTP inserter
-                    └─────────────────────────┘
+```mermaid
+graph TD
+    subgraph HTTP Transport
+        TB["TableBatcher&lt;T&gt;<br/><i>feature = batcher</i><br/>Go-style append/flush/send"]
+        AI["AsyncInserter&lt;T&gt;<br/><i>feature = async-inserter</i><br/>MPSC channel + background task"]
+        I["Inserter&lt;T&gt;<br/><i>feature = inserter</i><br/>Single-owner &amp;mut self"]
+        TB -- delegates to --> AI
+        AI -- wraps --> I
+    end
 
-
-                    ┌─────────────────────────────┐
-                    │  AsyncNativeInserter<T>      │  MPSC channel + background task
-                    │  (feature =                  │  concurrent &self writes
-                    │   "native-transport")        │  Native TCP transport
-                    └────────────┬────────────────┘
-                                 │ wraps
-                    ┌────────────▼────────────────┐
-                    │  NativeInserter<T>            │  Single-owner &mut self
-                    │  (feature = "native-transport") │  multi-batch native inserter
-                    └──────────────────────────────┘
+    subgraph Native TCP Transport
+        ANI["AsyncNativeInserter&lt;T&gt;<br/><i>feature = native-transport</i><br/>MPSC channel + background task"]
+        NI["NativeInserter&lt;T&gt;<br/><i>feature = native-transport</i><br/>Single-owner &amp;mut self"]
+        ANI -- wraps --> NI
+    end
 ```
 
 ## Choosing an inserter
@@ -51,29 +38,13 @@ transport needs. All share the same three-threshold flush policy: **row count**,
 Both share identical architecture — an MPSC channel feeding a background tokio
 task that owns the underlying `Inserter` or `NativeInserter`:
 
-```text
-┌─ Task A ──┐  ┌─ Task B ──┐  ┌─ Task C ──┐
-│ tx.send() │  │ tx.send() │  │ tx.send() │
-└─────┬─────┘  └─────┬─────┘  └─────┬─────┘
-      └───────────────┴───────────────┘
-                      │
-               bounded mpsc channel
-              (default: 8192 slots)
-                      │
-          ┌───────────▼────────────┐
-          │   Background Task      │
-          │                        │
-          │  select! {             │
-          │    cmd = rx.recv()     │  ← biased toward commands
-          │    _ = interval.tick() │  ← period-based flush
-          │  }                     │
-          │                        │
-          │  serialize → buffer    │
-          │  check limits → flush  │
-          └──────────┬─────────────┘
-                     │
-                     ▼
-             ClickHouse server
+```mermaid
+graph TD
+    A["Task A<br/>tx.send()"] --> CH{{"bounded mpsc channel<br/>(default: 8192 slots)"}}
+    B["Task B<br/>tx.send()"] --> CH
+    C["Task C<br/>tx.send()"] --> CH
+    CH --> BG["Background Task<br/><br/>select! {<br/>&nbsp;&nbsp;cmd = rx.recv() &nbsp; ← biased<br/>&nbsp;&nbsp;_ = interval.tick() ← periodic flush<br/>}<br/><br/>serialize → buffer<br/>check limits → flush"]
+    BG --> CK[("ClickHouse server")]
 ```
 
 ### Key properties

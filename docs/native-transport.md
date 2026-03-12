@@ -192,26 +192,26 @@ client.clear_all_cached_schemas();
 
 ## Connection lifecycle
 
-```text
-NativeClient::default()
-    │
-    ▼
-  Pool (deadpool, max_size=10)
-    │
-    ├── acquire() ──→ create or reuse connection
-    │                   │
-    │                   ├── TCP connect
-    │                   ├── Hello handshake
-    │                   └── return PooledConnection
-    │
-    ├── recycle() ──→ check_alive()
-    │                   │
-    │                   ├── poisoned? → drop
-    │                   ├── buffered data? → drop
-    │                   ├── EOF? → drop
-    │                   └── ok → return to idle queue
-    │
-    └── discard() ──→ sets poisoned flag → recycle drops it
+```mermaid
+graph TD
+    NC["NativeClient::default()"] --> Pool["Pool<br/>(deadpool, max_size=10)"]
+
+    Pool --> ACQ["acquire()"]
+    ACQ --> CREATE["Create or reuse connection"]
+    CREATE --> TCP["TCP connect"]
+    TCP --> HELLO["Hello handshake"]
+    HELLO --> PC["Return PooledConnection"]
+
+    Pool --> REC["recycle()"]
+    REC --> CA["check_alive()"]
+    CA -->|poisoned?| DROP1["Drop connection"]
+    CA -->|buffered data?| DROP2["Drop connection"]
+    CA -->|EOF?| DROP3["Drop connection"]
+    CA -->|ok| IDLE["Return to idle queue"]
+
+    Pool --> DISC["discard()"]
+    DISC --> POISON["Set poisoned flag"]
+    POISON -.-> DROP1
 ```
 
 See [Connection Pooling](connection-pooling.md) for details.

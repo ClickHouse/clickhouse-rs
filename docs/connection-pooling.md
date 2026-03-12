@@ -51,11 +51,11 @@ remaining server packets until `EndOfStream`. This is called automatically by
 `fetch_one` and `fetch_optional` to clean up the connection before returning it
 to the pool:
 
-```text
-fetch_one()
-  ├── next().await?   → get first row
-  ├── drain().await?  → consume remaining packets
-  └── return row      → connection returned to pool cleanly
+```mermaid
+graph LR
+    F["fetch_one()"] --> N["next().await?<br/>get first row"]
+    N --> D["drain().await?<br/>consume remaining packets"]
+    D --> R["return row<br/>connection returned to pool"]
 ```
 
 If `drain()` is not called (e.g. cursor dropped early), the `Drop` impl
@@ -78,22 +78,18 @@ Affected methods:
 
 ## Architecture
 
-```text
-NativeClient
-  │
-  ├── pool: NativePool (deadpool::managed::Pool)
-  │     │
-  │     ├── NativeConnectionManager
-  │     │     ├── create() → NativeConnection::open()
-  │     │     └── recycle() → check_alive()
-  │     │
-  │     └── idle queue (bounded semaphore)
-  │           ├── conn 1 (idle)
-  │           ├── conn 2 (idle)
-  │           └── ...
-  │
-  ├── schema_cache: Arc<NativeSchemaCache>
-  │     └── HashMap<table, (columns, expires_at)>
-  │
-  └── settings: Arc<Vec<(key, value)>>
+```mermaid
+graph TD
+    NC["NativeClient"] --> POOL["pool: NativePool<br/>(deadpool::managed::Pool)"]
+    NC --> SC["schema_cache: Arc&lt;NativeSchemaCache&gt;<br/>HashMap&lt;table, (columns, expires_at)&gt;"]
+    NC --> SET["settings: Arc&lt;Vec&lt;(key, value)&gt;&gt;"]
+
+    POOL --> MGR["NativeConnectionManager"]
+    MGR -->|"create()"| OPEN["NativeConnection::open()"]
+    MGR -->|"recycle()"| CHECK["check_alive()"]
+
+    POOL --> IDLE["Idle queue<br/>(bounded semaphore)"]
+    IDLE --> C1["conn 1"]
+    IDLE --> C2["conn 2"]
+    IDLE --> C3["..."]
 ```
