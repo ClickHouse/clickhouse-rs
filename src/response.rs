@@ -43,54 +43,78 @@ impl Response {
         let instrument_span = span.clone();
 
         Self::Waiting(Box::pin(
-            async move {
-                let response = response.await?;
+            collect_response(response, compression, span).instrument(instrument_span),
+        ))
+    }
 
-                let status = response.status();
-                let exception_code = response.headers().get("X-ClickHouse-Exception-Code");
+    pub(crate) fn into_future(self) -> ResponseFuture {
+        match self {
+            Self::Waiting(future) => future,
+            Self::Loading(_) => panic!("response is already streaming"),
+        }
+    }
 
-                tracing::record_all!(
-                    span,
-                    // Note: not supposed to set `otel.status_code` until the entire request is successful
-                    db.response.status_code = status.as_u16(),
-                );
+    pub(crate) async fn finish(&mut self) -> Result<()> {
+        let chunks = loop {
+            match self {
+                Self::Waiting(future) => *self = Self::Loading(future.await?),
+                Self::Loading(chunks) => break chunks,
+            }
+        };
 
-                if status == StatusCode::OK && exception_code.is_none() {
-                    let tag = response
-                        .headers()
-                        .get("X-ClickHouse-Exception-Tag")
-                        .map(|value| value.as_bytes().into());
+        while chunks.try_next().await?.is_some() {}
+        Ok(())
+    }
+}
 
-                    let summary = response
+async fn collect_response(
+    response: HyperResponseFuture,
+    compression: Compression,
+    span: tracing::Span,
+) -> Result<Chunks> {
+    let response = response.await?;
+
+    let status = response.status();
+    let exception_code = response.headers().get("X-ClickHouse-Exception-Code");
+
+    tracing::record_all!(
+        span,
+        // Note: not supposed to set `otel.status_code` until the entire request is successful
+        db.response.status_code = status.as_u16(),
+    );
+
+    if status == StatusCode::OK && exception_code.is_none() {
+        let tag = response
+            .headers()
+            .get("X-ClickHouse-Exception-Tag")
+            .map(|value| value.as_bytes().into());
+
+        let summary = response
                     .headers()
                     .get("X-ClickHouse-Summary")
                     .and_then(|v| v.to_str().ok())
                     .and_then(QuerySummary::from_header)
                     .map(Box::new);// More likely to be successful, start streaming.
-                    // It still can fail, but we'll handle it in `DetectDbException`.
-                    Ok((Chunks::new(response.into_body(), compression, tag), summary))
-                } else {
-                    // An instantly failed request.
-                    let error = collect_bad_response(
-                        status,
-                        exception_code
-                            .and_then(|value| value.to_str().ok())
-                            .map(|code| format!("Code: {code}")),
-                        response.into_body(),
-                        compression,
-                    )
-                    .await;
+        // It still can fail, but we'll handle it in `DetectDbException`.
+        Ok((Chunks::new(response.into_body(), compression, tag), summary))
+    } else {
+        // An instantly failed request.
+        let error = collect_bad_response(
+            status,
+            exception_code
+                .and_then(|value| value.to_str().ok())
+                .map(|code| format!("Code: {code}")),
+            response.into_body(),
+            compression,
+        )
+        .await;
 
-                    tracing::record_all!(
-                        span,
-                        error.type = error.error_type(),
-                    );
+        tracing::record_all!(
+            span,
+            error.type = error.error_type(),
+        );
 
-                    Err(error)
-                }
-            }
-            .instrument(instrument_span),
-        ))
+        Err(error)
     }
 
     pub(crate) fn into_future(self) -> ResponseFuture {
