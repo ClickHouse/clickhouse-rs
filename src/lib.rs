@@ -506,7 +506,8 @@ impl Client {
         &self,
         sql: impl Into<String>,
     ) -> insert_formatted::InsertFormatted {
-        insert_formatted::InsertFormatted::new(self, sql.into())
+        // TODO: extract collection name from query
+        insert_formatted::InsertFormatted::new(self, sql.into(), None)
     }
 
     /// Starts a new SELECT/DDL query.

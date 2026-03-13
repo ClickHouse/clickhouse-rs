@@ -33,12 +33,13 @@ pub(crate) fn with_request_headers(
     opentelemetry::global::get_text_map_propagator(|propagator| {
         use opentelemetry_http::HeaderInjector;
 
-        // The *official* example just uses `.unwrap()` here which is not great
-        // https://github.com/open-telemetry/opentelemetry-rust/blob/8ab834d60e780311e9261ddae4999989b76785d4/examples/tracing-http-propagator/src/client.rs#L59
+        // Will only be `None` if there's already an error in building the request,
+        // in which case injecting the headers would be redundant anyway.
         let Some(headers) = builder.headers_mut() else {
             return;
         };
 
+        // Note that `HeaderInjector` skips headers with invalid names, as of writing.
         propagator.inject(&mut HeaderInjector(headers));
     });
 

@@ -8,7 +8,6 @@ use crate::{
 };
 use bytes::{Bytes, BytesMut};
 use hyper::{self, Request};
-use std::num::Saturating;
 use std::ops::ControlFlow;
 use std::task::{Context, Poll, ready};
 use std::{cmp, future::Future, io, mem, panic, pin::Pin, time::Duration};
@@ -66,8 +65,8 @@ enum InsertState {
     Active {
         sender: ChunkSender,
         handle: JoinHandle<Result<()>>,
-        sent_bytes: Saturating<u64>,
-        encoded_bytes: Saturating<u64>,
+        sent_bytes: u64,
+        encoded_bytes: u64,
     },
     Terminated {
         handle: JoinHandle<Result<()>>,
@@ -111,11 +110,22 @@ impl InsertState {
         client
     }
 
-    fn terminated(&mut self) {
+    fn terminated(&mut self, span: &tracing::Span) {
         match mem::replace(self, InsertState::Completed) {
             InsertState::NotStarted { .. } | InsertState::Completed => (),
-            InsertState::Active { handle, .. } => {
+            InsertState::Active {
+                handle,
+                sent_bytes,
+                encoded_bytes,
+                ..
+            } => {
                 *self = InsertState::Terminated { handle };
+
+                tracing::record_all!(
+                    span,
+                    clickhouse.request.sent_bytes = sent_bytes,
+                    clickhouse.request.encoded_bytes = encoded_bytes,
+                );
             }
             InsertState::Terminated { handle } => {
                 *self = InsertState::Terminated { handle };
@@ -125,7 +135,7 @@ impl InsertState {
 }
 
 impl InsertFormatted {
-    pub(crate) fn new(client: &Client, sql: String) -> Self {
+    pub(crate) fn new(client: &Client, sql: String, collection_name: Option<&str>) -> Self {
         Self {
             span: tracing::error_span!(
                 "clickhouse.insert",
@@ -139,6 +149,7 @@ impl InsertFormatted {
                 db.query.text = tracing::enabled!(tracing::Level::TRACE).then_some(&sql),
                 // TODO: generate summary
                 db.query.summary = tracing::field::Empty,
+                db.collection.name = collection_name,
                 // ClickHouse-specific extension fields
                 clickhouse.request.session_id = client.get_option(settings::SESSION_ID),
                 clickhouse.request.query_id = client.get_option(settings::QUERY_ID),
@@ -385,7 +396,7 @@ impl InsertFormatted {
     }
 
     pub(crate) fn poll_end(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
-        self.state.terminated();
+        self.state.terminated(&self.span);
         self.poll_wait_handle(cx)
     }
 
@@ -403,6 +414,7 @@ impl InsertFormatted {
 
             // We can do nothing useful here, so just shut down the background task.
             handle.abort();
+            tracing::debug!("insert timed out");
             return Poll::Ready(Err(Error::TimedOut));
         };
 
@@ -413,6 +425,8 @@ impl InsertFormatted {
         };
 
         self.state = InsertState::Completed;
+
+        tracing::trace!("finished insert");
 
         Poll::Ready(res)
     }
@@ -425,6 +439,8 @@ impl InsertFormatted {
         let (client, sql) = self.state.client_with_sql().unwrap(); // checked above
 
         let _span = self.span.enter();
+
+        tracing::trace!("beginning insert");
 
         let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
         let mut pairs = url.query_pairs_mut();
@@ -464,8 +480,8 @@ impl InsertFormatted {
         self.state = InsertState::Active {
             handle,
             sender,
-            sent_bytes: Saturating(0),
-            encoded_bytes: Saturating(0),
+            sent_bytes: 0,
+            encoded_bytes: 0,
         };
         Ok(())
     }
@@ -473,22 +489,11 @@ impl InsertFormatted {
     pub(crate) fn abort(&mut self) {
         let _span = self.span.enter();
 
-        if let InsertState::Active {
-            sender,
-            sent_bytes,
-            encoded_bytes,
-            ..
-        } = &mut self.state
-        {
+        if let InsertState::Active { sender, .. } = &mut self.state {
             sender.abort();
-            tracing::debug!(
-                clickhouse.request.sent_bytes = sent_bytes.0,
-                clickhouse.request.encoded_bytes = encoded_bytes.0,
-                "insert aborted",
-            );
         }
 
-        self.state.terminated();
+        self.state.terminated(&self.span);
     }
 }
 

@@ -165,10 +165,9 @@ impl Query {
     }
 
     pub(crate) fn make_span(&self, response_format: Option<&str>) -> tracing::Span {
-        tracing::error_span!(
+        tracing::info_span!(
             "clickhouse.query",
             // OTel conventional fields
-            status = tracing::field::Empty,
             otel.status_code = tracing::field::Empty,
             otel.kind = "CLIENT",
             db.system.name = "clickhouse",

@@ -64,7 +64,7 @@ impl BytesCursor {
 
         self.raw
             .next()
-            .inspect_err(|e| tracing::warn!("error from BytesCursor::next(): {e:?}"))
+            .inspect_err(|e| tracing::debug!(error=?e, "error from BytesCursor::next()"))
             .instrument(self.span.clone())
             .await
     }
@@ -112,7 +112,7 @@ impl BytesCursor {
                 Ok(Some(chunk)) => self.bytes = chunk,
                 Ok(None) => return Poll::Ready(Ok(false)),
                 Err(e) => {
-                    tracing::warn!("error in BytesCursor::poll_refill(): {e:?}");
+                    tracing::debug!(error=?e, "error reading from cursor");
                     return Poll::Ready(Err(e.into()));
                 }
             }

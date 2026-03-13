@@ -1,4 +1,4 @@
-use crate::insert_formatted::BufInsertFormatted;
+use crate::insert_formatted::{BufInsertFormatted, InsertFormatted};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::{serialize_row_binary, serialize_with_validation};
 use crate::{
@@ -53,8 +53,6 @@ impl<T> Insert<T> {
         let fields = row::join_column_names::<T>()
             .expect("the row type must be a struct or a wrapper around it");
 
-        // TODO: what about escaping a table name?
-        // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
         let format = if row_metadata.is_some() {
             formats::ROW_BINARY_WITH_NAMES_AND_TYPES
         } else {
@@ -63,8 +61,7 @@ impl<T> Insert<T> {
         let sql = format!("INSERT INTO {table}({fields}) FORMAT {format}");
 
         Self {
-            insert: client
-                .insert_formatted_with(sql)
+            insert: InsertFormatted::new(client, sql, Some(table))
                 .buffered_with_capacity(BUFFER_SIZE),
             row_metadata,
             sent_rows: Saturating(0),
@@ -234,21 +231,13 @@ impl<T> Insert<T> {
 
         let _span = self.insert.span().enter();
 
-        match res {
-            Ok(()) => {
-                tracing::record_all!(
-                    self.insert.span(),
-                    clickhouse.request.sent_rows = self.sent_rows.0,
-                );
+        // `InsertFormatted::end()` will have added `sent_bytes` and `encoded_bytes` to the span.
+        tracing::record_all!(
+            self.insert.span(),
+            clickhouse.request.sent_rows = self.sent_rows.0,
+        );
 
-                tracing::debug!("finished insert");
-            }
-            Err(e) => {
-                tracing::warn!("error from insert: {e:?}");
-            }
-        }
-
-        Ok(())
+        res.inspect_err(|e| tracing::debug!("error from insert: {e:?}"))
     }
 
     fn init_request_if_required(&mut self) -> Result<()> {

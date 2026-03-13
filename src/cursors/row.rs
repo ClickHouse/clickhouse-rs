@@ -15,7 +15,6 @@ use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
 use polonius_the_crab::prelude::*;
 use std::marker::PhantomData;
-use std::num::Saturating;
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
@@ -29,7 +28,7 @@ pub struct RowCursor<T> {
     /// as [`RowCursor::new`] is not `async`, so it loads lazily.
     row_metadata: Option<RowMetadata>,
     span: tracing::Span,
-    returned_rows: Saturating<u64>,
+    returned_rows: u64,
     _marker: PhantomData<fn() -> T>,
 }
 
@@ -42,7 +41,7 @@ impl<T> RowCursor<T> {
             row_metadata: None,
             validation,
             span,
-            returned_rows: Saturating(0),
+            returned_rows: 0,
         }
     }
 
@@ -139,7 +138,7 @@ impl<T> RowCursor<T> {
                         }
                         Err(Error::NotEnoughData) => {}
                         Err(err) => {
-                            tracing::warn!("error deserializing row: {err:?}");
+                            tracing::debug!(error=?err, "error deserializing row");
                             polonius_return!(Poll::Ready(Err(err)))
                         }
                     }
@@ -152,7 +151,7 @@ impl<T> RowCursor<T> {
                     return if bytes.remaining() > 0 {
                         // If some data is left, we have an incomplete row in the buffer.
                         // This is usually a schema mismatch on the client side.
-                        tracing::error!(
+                        tracing::warn!(
                             bytes_remaining = bytes.remaining(),
                             "incomplete read from cursor"
                         );
@@ -162,7 +161,7 @@ impl<T> RowCursor<T> {
                     };
                 }
                 Err(e) => {
-                    tracing::warn!("error in RowCursor::poll_next(): {e:?}");
+                    tracing::debug!(error=?e, "error from raw cursor");
                     return Poll::Ready(Err(e));
                 }
             }
@@ -185,6 +184,12 @@ impl<T> RowCursor<T> {
         self.raw.decoded_bytes()
     }
 
+    /// Returns the total number of rows that have been decoded so far.
+    #[inline]
+    pub fn returned_rows(&self) -> u64 {
+        self.returned_rows
+    }
+
     /// Returns the parsed `X-ClickHouse-Summary` response header, if
     /// present. Available once the response headers have been received.
     ///
@@ -202,7 +207,7 @@ impl<T> Drop for RowCursor<T> {
 
         tracing::record_all!(
             self.span,
-            db.response.returned_rows = self.returned_rows.0,
+            db.response.returned_rows = self.returned_rows,
             clickhouse.response.received_bytes = self.received_bytes(),
             clickhouse.response.decoded_bytes = self.decoded_bytes(),
         );
