@@ -51,6 +51,80 @@ async fn query_with_opentelemetry() {
     assert_eq!(query_id, span_query_id);
 }
 
+#[tokio::test]
+async fn insert_with_opentelemetry() {
+    #[derive(serde::Serialize, clickhouse::Row, Debug)]
+    struct FooRow {
+        bar: i32,
+        baz: String,
+    }
+
+    let tracer = get_tracer();
+
+    let _guard = tracing::subscriber::set_default(
+        tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer)),
+    );
+
+    let client = prepare_database!();
+
+    client
+        .query("CREATE TABLE foo(bar Int32, baz String)")
+        .execute()
+        .await
+        .unwrap();
+
+    let span = tracing::info_span!("insert_with_opentelemetry", "foo=bar");
+
+    let context = span.context();
+
+    let query_id = format!("clickhouse_test_{}", rand::random::<u64>());
+
+    // Ensure this entire request chain is instrumented
+    async {
+        let mut insert = client
+            .insert::<FooRow>("foo")
+            .await
+            .unwrap()
+            .with_option("query_id", &query_id);
+
+        for i in 0..10 {
+            insert
+                .write(&FooRow {
+                    bar: i,
+                    baz: format!("baz_{i}"),
+                })
+                .await
+                .unwrap();
+        }
+
+        insert.end().await.unwrap();
+    }
+    .instrument(span)
+    .await;
+
+    let trace_id = context.span().span_context().trace_id();
+
+    crate::flush_query_log(&client).await;
+
+    // The metadata query by `Insert` will appear under the same trace ID,
+    // so we sort by event time to ensure we're looking at the last span emitted,
+    // which should be the insert itself.
+    let span_query_id = client
+        .query(
+            "SELECT attribute['clickhouse.query_id'] AS query_id \
+         FROM system.opentelemetry_span_log \
+         WHERE trace_id = {trace_id:String} AND query_id != ''\
+         ORDER BY finish_time_us DESC",
+        )
+        .param("trace_id", trace_id.to_string())
+        // ClickHouse parses and stores the hex span ID as an integer
+        .fetch_one::<String>()
+        .await
+        .unwrap();
+
+    assert_eq!(query_id, span_query_id);
+}
+
 fn get_tracer() -> BoxedTracer {
     static ONCE: Once = Once::new();
 
