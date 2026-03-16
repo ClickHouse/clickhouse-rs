@@ -28,6 +28,11 @@ pub enum Compression {
     /// Used by default if the `zstd` feature is enabled and `lz4` is not.
     /// The `i32` parameter specifies the compression level.
     /// Use [`Compression::zstd()`] for the default level.
+    ///
+    /// **Note:** Extremely high compression levels (e.g. above 19) are very
+    /// CPU-intensive and likely unsuitable for real-time networked
+    /// applications. They can also block the async executor for a
+    /// significant amount of time. Prefer moderate levels for online usage.
     #[cfg(feature = "zstd")]
     Zstd(i32),
 }
