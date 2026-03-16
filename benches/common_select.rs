@@ -3,6 +3,7 @@
 use clickhouse::query::RowCursor;
 use clickhouse::{Client, Compression, Row, RowRead};
 use std::time::{Duration, Instant};
+use tracing_subscriber::util::SubscriberInitExt;
 
 pub(crate) trait WithId {
     fn id(&self) -> u64;
@@ -48,22 +49,24 @@ macro_rules! impl_benchmark_row_no_access_type {
 
 pub(crate) fn print_header(add: Option<&str>) {
     let add = add.unwrap_or("");
-    println!("compress  validation    elapsed  throughput  received{add}");
+    println!("compress  validation  opentelemetry    elapsed  throughput  received{add}");
 }
 
-pub(crate) fn print_results<T: WithAccessType>(
-    stats: &BenchmarkStats<u64>,
-    compression: Compression,
-    validation: bool,
-) {
+pub(crate) fn print_results<T: WithAccessType>(stats: &BenchmarkStats<u64>, opts: BenchmarkOpts) {
+    fn flag_as_str(flag: bool) -> &'static str {
+        if flag { "enabled" } else { "disabled" }
+    }
+
     let BenchmarkStats {
         throughput_mbytes_sec,
         received_mbytes,
         elapsed,
         ..
     } = stats;
-    let validation_mode = if validation { "enabled" } else { "disabled" };
-    let compression = match compression {
+    let validation_mode = flag_as_str(opts.validation);
+    let otel_mode = flag_as_str(opts.otel);
+
+    let compression = match opts.compression {
         Compression::None => "none".to_string(),
         #[cfg(feature = "lz4")]
         Compression::Lz4 => "lz4".to_string(),
@@ -78,7 +81,7 @@ pub(crate) fn print_results<T: WithAccessType>(
         &format!("  {access_type:>6}")
     };
     println!(
-        "{compression:>8}  {validation_mode:>10}  {elapsed:>9.3?}  {throughput_mbytes_sec:>4.0} MiB/s  {received_mbytes:>4.0} MiB{access}"
+        "{compression:>8}  {validation_mode:>10} {otel_mode:>14}  {elapsed:>9.3?}  {throughput_mbytes_sec:>4.0} MiB/s  {received_mbytes:>4.0} MiB{access}"
     );
 }
 
@@ -98,11 +101,23 @@ pub(crate) async fn fetch_cursor<T: Row>(
 
 pub(crate) async fn do_select_bench<T: BenchmarkRow>(
     query: &str,
-    compression: Compression,
-    validation: bool,
+    opts: BenchmarkOpts,
 ) -> BenchmarkStats<u64> {
+    let _guard = match opts.otel {
+        #[cfg(feature = "opentelemetry")]
+        true => {
+            use tracing_subscriber::layer::SubscriberExt;
+
+            tracing_subscriber::registry()
+                .with(tracing_opentelemetry::layer().with_tracer(get_tracer()))
+                .set_default()
+        }
+        // Use a subscriber that does non-trivial work in order to test the overhead of `tracing`
+        _ => tracing_subscriber::fmt().with_test_writer().set_default(),
+    };
+
     let start = Instant::now();
-    let mut cursor = fetch_cursor::<T>(compression, validation, query).await;
+    let mut cursor = fetch_cursor::<T>(opts.compression, opts.validation, query).await;
 
     let mut sum = 0;
     while let Some(row) = cursor.next().await.unwrap() {
@@ -138,4 +153,62 @@ impl<R> BenchmarkStats<R> {
             result,
         }
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct BenchmarkOpts {
+    pub compression: Compression,
+    pub validation: bool,
+    pub otel: bool,
+}
+
+impl BenchmarkOpts {
+    pub(crate) fn permutations() -> impl Iterator<Item = Self> + 'static {
+        let compression_modes = [
+            Compression::None,
+            #[cfg(feature = "lz4")]
+            Compression::Lz4,
+        ];
+
+        let validation_modes = [false, true];
+        let otel_modes = [
+            false,
+            #[cfg(feature = "opentelemetry")]
+            true,
+        ];
+
+        compression_modes.into_iter().flat_map(move |compression| {
+            validation_modes.into_iter().flat_map(move |validation| {
+                otel_modes.into_iter().map(move |otel| BenchmarkOpts {
+                    compression,
+                    validation,
+                    otel,
+                })
+            })
+        })
+    }
+}
+
+#[cfg(feature = "opentelemetry")]
+fn get_tracer() -> opentelemetry::global::BoxedTracer {
+    use opentelemetry_sdk::propagation::TraceContextPropagator;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
+
+    use std::sync::Once;
+
+    static ONCE: Once = Once::new();
+
+    ONCE.call_once(|| {
+        // These set global statics so we want to ensure this is done,
+        // but it only needs to be done once.
+        opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
+
+        let provider = SdkTracerProvider::builder()
+            // .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
+            .build();
+
+        opentelemetry::global::set_tracer_provider(provider);
+    });
+
+    opentelemetry::global::tracer("clickhouse_test_opentelemetry")
 }

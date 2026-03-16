@@ -1,9 +1,10 @@
 #![cfg(feature = "time")]
 
 use crate::common_select::{
-    BenchmarkRow, WithAccessType, WithId, do_select_bench, print_header, print_results,
+    BenchmarkOpts, BenchmarkRow, WithAccessType, WithId, do_select_bench, print_header,
+    print_results,
 };
-use clickhouse::{Client, Compression, Row};
+use clickhouse::{Client, Row};
 use serde::Deserialize;
 use serde_repr::Deserialize_repr;
 use time::OffsetDateTime;
@@ -154,28 +155,27 @@ async fn prepare_data() {
     }
 }
 
-async fn bench<T: BenchmarkRow>(compression: Compression, validation: bool) {
+async fn bench<T: BenchmarkRow>(opts: BenchmarkOpts) {
     let stats = do_select_bench::<T>(
         "SELECT * FROM nyc_taxi.trips_small ORDER BY trip_id DESC",
-        compression,
-        validation,
+        opts,
     )
     .await;
     assert_eq!(stats.result, 3630387815532582);
-    print_results::<T>(&stats, compression, validation);
+    print_results::<T>(&stats, opts);
 }
 
 #[tokio::main]
 async fn main() {
     prepare_data().await;
     print_header(Some("  access"));
-    bench::<TripSmallSeqAccess>(Compression::None, false).await;
-    bench::<TripSmallSeqAccess>(Compression::None, true).await;
-    bench::<TripSmallMapAccess>(Compression::None, true).await;
-    #[cfg(feature = "lz4")]
-    {
-        bench::<TripSmallSeqAccess>(Compression::Lz4, false).await;
-        bench::<TripSmallSeqAccess>(Compression::Lz4, true).await;
-        bench::<TripSmallMapAccess>(Compression::Lz4, true).await;
+
+    for opts in BenchmarkOpts::permutations() {
+        bench::<TripSmallSeqAccess>(opts).await;
+
+        if opts.validation {
+            // Map access benchmark requires validation
+            bench::<TripSmallMapAccess>(opts).await;
+        }
     }
 }

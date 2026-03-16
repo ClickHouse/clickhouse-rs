@@ -7,14 +7,15 @@ use std::sync::Once;
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::test]
 async fn query_with_opentelemetry() {
     let tracer = get_tracer();
 
-    let _guard = tracing::subscriber::set_default(
-        tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer)),
-    );
+    let _guard = tracing_subscriber::registry()
+        .with(tracing_opentelemetry::layer().with_tracer(tracer))
+        .set_default();
 
     let span = tracing::info_span!("query_with_opentelemetry", "foo=bar");
 
@@ -61,9 +62,9 @@ async fn insert_with_opentelemetry() {
 
     let tracer = get_tracer();
 
-    let _guard = tracing::subscriber::set_default(
-        tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer)),
-    );
+    let _guard = tracing_subscriber::registry()
+        .with(tracing_opentelemetry::layer().with_tracer(tracer))
+        .set_default();
 
     let client = prepare_database!();
 
