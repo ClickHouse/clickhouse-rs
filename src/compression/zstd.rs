@@ -139,13 +139,13 @@ async fn it_decompresses_http_zstd() {
     use futures_util::stream::{self, TryStreamExt};
 
     let original = vec![
-        1u8, 0, 2, 255, 255, 255, 255, 0, 1, 1, 1, 115, 6, 83, 116, 114, 105, 110, 103, 3, 97,
-        98, 99,
+        1u8, 0, 2, 255, 255, 255, 255, 0, 1, 1, 1, 115, 6, 83, 116, 114, 105, 110, 103, 3, 97, 98,
+        99,
     ];
 
     // Compress with raw ZSTD (no ClickHouse framing).
-    let compressed =
-        zstd::bulk::compress(&original, zstd::DEFAULT_COMPRESSION_LEVEL).expect("failed to compress");
+    let compressed = zstd::bulk::compress(&original, zstd::DEFAULT_COMPRESSION_LEVEL)
+        .expect("failed to compress");
 
     async fn test(chunks: &[&[u8]], expected: &[u8]) {
         let stream = stream::iter(
@@ -176,8 +176,8 @@ async fn it_decompresses_http_zstd() {
 #[test]
 fn it_compresses_and_decompresses() {
     let source = vec![
-        1u8, 0, 2, 255, 255, 255, 255, 0, 1, 1, 1, 115, 6, 83, 116, 114, 105, 110, 103, 3, 97,
-        98, 99,
+        1u8, 0, 2, 255, 255, 255, 255, 0, 1, 1, 1, 115, 6, 83, 116, 114, 105, 110, 103, 3, 97, 98,
+        99,
     ];
 
     let compressed = compress(&source, None).unwrap();
@@ -186,7 +186,6 @@ fn it_compresses_and_decompresses() {
     assert_eq!(compressed[CHECKSUM_SIZE], ZSTD_MAGIC);
 
     // Verify decompression of the payload.
-    let decompressed =
-        zstd::bulk::decompress(&compressed[META_SIZE..], source.len()).unwrap();
+    let decompressed = zstd::bulk::decompress(&compressed[META_SIZE..], source.len()).unwrap();
     assert_eq!(decompressed, source);
 }
