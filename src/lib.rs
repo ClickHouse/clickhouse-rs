@@ -73,6 +73,7 @@ pub struct Client {
     products_info: Vec<ProductInfo>,
     validation: bool,
     insert_metadata_cache: Arc<InsertMetadataCache>,
+    dynamic_schema_cache: Arc<dynamic::DynamicSchemaCache>,
 
     #[cfg(feature = "test-util")]
     mocked: bool,
@@ -138,6 +139,9 @@ impl Client {
             products_info: Vec::default(),
             validation: true,
             insert_metadata_cache: Arc::new(InsertMetadataCache::default()),
+            dynamic_schema_cache: dynamic::DynamicSchemaCache::new(
+                std::time::Duration::from_secs(300),
+            ),
             #[cfg(feature = "test-util")]
             mocked: false,
         }
@@ -462,6 +466,34 @@ impl Client {
         sql: impl Into<String>,
     ) -> insert_formatted::InsertFormatted {
         insert_formatted::InsertFormatted::new(self, sql.into())
+    }
+
+    /// Start a dynamic INSERT for a table with runtime schema.
+    ///
+    /// Fetches the schema from `system.columns` (cached with TTL) and encodes
+    /// `Map<String, Value>` to RowBinary. As simple as JSONEachRow to use, but
+    /// ClickHouse skips JSON parsing entirely — significant CPU savings on the
+    /// cluster at scale.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut insert = client.dynamic_insert("mydb", "mytable");
+    /// insert.write_map(&row).await?;
+    /// insert.write_map(&row2).await?;
+    /// let rows_written = insert.end().await?;
+    /// ```
+    pub fn dynamic_insert(
+        &self,
+        database: &str,
+        table: &str,
+    ) -> dynamic::insert::DynamicInsert {
+        dynamic::insert::DynamicInsert::new(
+            self.clone(),
+            database.to_string(),
+            table.to_string(),
+            self.dynamic_schema_cache.clone(),
+        )
     }
 
     /// Starts a new SELECT/DDL query.

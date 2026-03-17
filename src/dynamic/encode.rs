@@ -29,7 +29,7 @@ use super::schema::{ColumnDef, DynamicSchema};
 /// columns WITHOUT defaults get a type-appropriate zero value.
 pub fn encode_dynamic_row(
     row: &Map<String, Value>,
-    schema: &DynamicSchema,
+    _schema: &DynamicSchema,
     columns_to_send: &[&ColumnDef],
 ) -> Result<Vec<u8>, DynamicError> {
     let mut buf = Vec::with_capacity(256);
