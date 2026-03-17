@@ -142,7 +142,7 @@ hyper-rustls = { version = "0.27.3", default-features = false, features = [
 url = "2.1.1"
 futures-util = { version = "0.3.5", default-features = false, features = ["sink", "io"] }
 futures-channel = { version = "0.3.30", features = ["sink"] }
-lz4_flex = { version = "0.11.3", default-features = false, features = [
+lz4_flex = { version = "0.11.6", default-features = false, features = [
     "std",
 ], optional = true }
 cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety, this package has been stable for years
