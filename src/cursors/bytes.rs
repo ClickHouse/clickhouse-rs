@@ -123,6 +123,13 @@ impl BytesCursor {
     pub fn decoded_bytes(&self) -> u64 {
         self.raw.decoded_bytes()
     }
+
+    /// Returns the raw `X-ClickHouse-Summary` response header value, if
+    /// present. Available after the first chunk has been received.
+    #[inline]
+    pub fn summary(&self) -> Option<&str> {
+        self.raw.summary()
+    }
 }
 
 impl AsyncRead for BytesCursor {

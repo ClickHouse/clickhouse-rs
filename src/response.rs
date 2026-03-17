@@ -46,9 +46,15 @@ impl Response {
                     .get("X-ClickHouse-Exception-Tag")
                     .map(|value| value.as_bytes().into());
 
+                let summary = response
+                    .headers()
+                    .get("X-ClickHouse-Summary")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
                 // More likely to be successful, start streaming.
                 // It still can fail, but we'll handle it in `DetectDbException`.
-                Ok(Chunks::new(response.into_body(), compression, tag))
+                Ok(Chunks::new(response.into_body(), compression, tag, summary))
             } else {
                 // An instantly failed request.
                 Err(collect_bad_response(
@@ -157,26 +163,44 @@ pub(crate) struct Chunk {
 
 // * Uses `Option<_>` to make this stream fused.
 // * Uses `Box<_>` in order to reduce the size of cursors.
-pub(crate) struct Chunks(Option<Box<DetectDbException<Decompress<IncomingStream>>>>);
+pub(crate) struct Chunks {
+    inner: Option<Box<DetectDbException<Decompress<IncomingStream>>>>,
+    summary: Option<String>,
+}
 
 impl Chunks {
-    fn new(stream: Incoming, compression: Compression, exception_tag: Option<Box<[u8]>>) -> Self {
+    fn new(
+        stream: Incoming,
+        compression: Compression,
+        exception_tag: Option<Box<[u8]>>,
+        summary: Option<String>,
+    ) -> Self {
         let stream = IncomingStream(stream);
         let stream = Decompress::new(stream, compression);
         let stream = DetectDbException {
             stream,
             exception_tag,
         };
-        Self(Some(Box::new(stream)))
+        Self {
+            inner: Some(Box::new(stream)),
+            summary,
+        }
     }
 
     pub(crate) fn empty() -> Self {
-        Self(None)
+        Self {
+            inner: None,
+            summary: None,
+        }
+    }
+
+    pub(crate) fn summary(&self) -> Option<&str> {
+        self.summary.as_deref()
     }
 
     #[cfg(feature = "futures03")]
     pub(crate) fn is_terminated(&self) -> bool {
-        self.0.is_none()
+        self.inner.is_none()
     }
 }
 
@@ -185,11 +209,11 @@ impl Stream for Chunks {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // We use `take()` to make the stream fused, including the case of panics.
-        if let Some(mut stream) = self.0.take() {
+        if let Some(mut stream) = self.inner.take() {
             let res = Pin::new(&mut stream).poll_next(cx);
 
             if matches!(res, Poll::Pending | Poll::Ready(Some(Ok(_)))) {
-                self.0 = Some(stream);
+                self.inner = Some(stream);
             }
 
             res

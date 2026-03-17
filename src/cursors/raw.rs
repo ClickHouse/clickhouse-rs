@@ -88,6 +88,13 @@ impl RawCursor {
         }
     }
 
+    pub(crate) fn summary(&self) -> Option<&str> {
+        match &self.0 {
+            RawCursorState::Loading(state) => state.chunks.summary(),
+            RawCursorState::Waiting(_) => None,
+        }
+    }
+
     #[cfg(feature = "futures03")]
     pub(crate) fn is_terminated(&self) -> bool {
         match &self.0 {
