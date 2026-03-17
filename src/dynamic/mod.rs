@@ -18,6 +18,8 @@
 
 pub mod error;
 pub mod parsed_type;
+pub mod schema;
 
 pub use error::DynamicError;
 pub use parsed_type::ParsedType;
+pub use schema::{ColumnDef, DynamicSchema, DynamicSchemaCache, fetch_dynamic_schema};
