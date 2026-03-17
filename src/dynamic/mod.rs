@@ -33,12 +33,14 @@
 //! Tier 2 gives you the ergonomics of Tier 3 (push any JSON map) with the
 //! performance profile of Tier 1 (ClickHouse skips JSON parsing entirely).
 
+pub mod batcher;
 pub mod encode;
 pub mod error;
 pub mod insert;
 pub mod parsed_type;
 pub mod schema;
 
+pub use batcher::{DynamicBatchConfig, DynamicBatcher, DynamicBatcherHandle};
 pub use error::DynamicError;
 pub use insert::DynamicInsert;
 pub use parsed_type::ParsedType;

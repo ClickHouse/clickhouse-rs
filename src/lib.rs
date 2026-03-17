@@ -73,7 +73,7 @@ pub struct Client {
     products_info: Vec<ProductInfo>,
     validation: bool,
     insert_metadata_cache: Arc<InsertMetadataCache>,
-    dynamic_schema_cache: Arc<dynamic::DynamicSchemaCache>,
+    pub(crate) dynamic_schema_cache: Arc<dynamic::DynamicSchemaCache>,
 
     #[cfg(feature = "test-util")]
     mocked: bool,
@@ -494,6 +494,29 @@ impl Client {
             table.to_string(),
             self.dynamic_schema_cache.clone(),
         )
+    }
+
+    /// Start an async auto-flushing dynamic batcher for a table.
+    ///
+    /// Same as [`dynamic_insert`][Self::dynamic_insert] but with a background
+    /// task that auto-flushes on row count and time thresholds. Multiple tasks
+    /// can write concurrently via [`DynamicBatcherHandle`][dynamic::DynamicBatcherHandle].
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let batcher = client.dynamic_batcher("mydb", "mytable", Default::default());
+    /// let handle = batcher.handle();
+    /// handle.write_map(row).await?;
+    /// batcher.end().await?;
+    /// ```
+    pub fn dynamic_batcher(
+        &self,
+        database: &str,
+        table: &str,
+        config: dynamic::DynamicBatchConfig,
+    ) -> dynamic::DynamicBatcher {
+        dynamic::DynamicBatcher::new(self, database, table, config)
     }
 
     /// Starts a new SELECT/DDL query.
