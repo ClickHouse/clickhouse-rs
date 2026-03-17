@@ -50,6 +50,8 @@ mod ticks;
 #[cfg(feature = "native-transport")]
 pub mod native;
 
+pub mod dynamic;
+
 /// A client containing HTTP pool.
 ///
 /// ### Cloning behavior
