@@ -85,7 +85,9 @@ name = "time_types_example"
 required-features = ["time", "chrono"]
 
 [[example]]
-name = "opentelemetry"
+# The crate name needs to be distinct from `opentelemetry` for the `RUST_LOG` filtering to work correctly.
+name = "opentelemetry_example"
+path = "examples/opentelemetry.rs"
 required-features = ["opentelemetry"]
 
 [profile.release]
@@ -187,8 +189,10 @@ trybuild = "1.0"
 
 # Only used in testing and examples if the `opentelemetry` feature is enabled,
 # but dev-dependencies cannot be optional.
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 tracing-opentelemetry = "0.32.1"
+# Version constrained by primary dependency
+tracing = { version = "0.1", features = ["attributes"] }
 opentelemetry_sdk = "0.31.0"
 opentelemetry-stdout = "0.31.0"
 opentelemetry-otlp = "0.31.0"
