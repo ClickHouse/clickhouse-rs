@@ -16,6 +16,7 @@ use tokio::{
     task::JoinHandle,
     time::{Instant, Sleep},
 };
+use tracing::Instrument;
 use url::Url;
 
 #[cfg(any(feature = "lz4", feature = "zstd"))]
@@ -312,8 +313,6 @@ impl InsertFormatted {
         }
 
         std::future::poll_fn(move |cx| {
-            let _span = self.span.enter();
-
             loop {
                 // Potentially cheaper than cloning `data` which touches the refcount
                 match self.try_send(mem::take(&mut data), original_size) {
