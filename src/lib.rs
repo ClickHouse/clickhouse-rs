@@ -3,6 +3,7 @@
 
 pub use self::{
     compression::Compression,
+    query_summary::QuerySummary,
     row::{Row, RowOwned, RowRead, RowWrite},
 };
 use self::{error::Result, http_client::HttpClient};
@@ -35,6 +36,7 @@ mod compression;
 mod cursors;
 mod headers;
 mod http_client;
+mod query_summary;
 mod request_body;
 mod response;
 mod row;

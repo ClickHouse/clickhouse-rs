@@ -18,6 +18,7 @@ use crate::compression::lz4::Lz4Decoder;
 use crate::{
     compression::Compression,
     error::{Error, Result},
+    query_summary::QuerySummary,
 };
 
 // === Response ===
@@ -50,7 +51,8 @@ impl Response {
                     .headers()
                     .get("X-ClickHouse-Summary")
                     .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string());
+                    .and_then(|s| serde_json::from_str::<QuerySummary>(s).ok())
+                    .map(Box::new);
 
                 // More likely to be successful, start streaming.
                 // It still can fail, but we'll handle it in `DetectDbException`.
@@ -165,7 +167,7 @@ pub(crate) struct Chunk {
 // * Uses `Box<_>` in order to reduce the size of cursors.
 pub(crate) struct Chunks {
     inner: Option<Box<DetectDbException<Decompress<IncomingStream>>>>,
-    summary: Option<String>,
+    summary: Option<Box<QuerySummary>>,
 }
 
 impl Chunks {
@@ -173,7 +175,7 @@ impl Chunks {
         stream: Incoming,
         compression: Compression,
         exception_tag: Option<Box<[u8]>>,
-        summary: Option<String>,
+        summary: Option<Box<QuerySummary>>,
     ) -> Self {
         let stream = IncomingStream(stream);
         let stream = Decompress::new(stream, compression);
@@ -194,7 +196,7 @@ impl Chunks {
         }
     }
 
-    pub(crate) fn summary(&self) -> Option<&str> {
+    pub(crate) fn summary(&self) -> Option<&QuerySummary> {
         self.summary.as_deref()
     }
 

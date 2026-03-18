@@ -1,5 +1,6 @@
 use crate::{
     error::Result,
+    query_summary::QuerySummary,
     response::{Chunks, Response, ResponseFuture},
 };
 use bytes::Bytes;
@@ -88,7 +89,7 @@ impl RawCursor {
         }
     }
 
-    pub(crate) fn summary(&self) -> Option<&str> {
+    pub(crate) fn summary(&self) -> Option<&QuerySummary> {
         match &self.0 {
             RawCursorState::Loading(state) => state.chunks.summary(),
             RawCursorState::Waiting(_) => None,

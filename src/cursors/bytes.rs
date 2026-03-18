@@ -1,4 +1,4 @@
-use crate::{cursors::RawCursor, error::Result, response::Response};
+use crate::{cursors::RawCursor, error::Result, query_summary::QuerySummary, response::Response};
 use bytes::{Buf, Bytes, BytesMut};
 use std::{
     io::Result as IoResult,
@@ -124,10 +124,10 @@ impl BytesCursor {
         self.raw.decoded_bytes()
     }
 
-    /// Returns the raw `X-ClickHouse-Summary` response header value, if
+    /// Returns the parsed `X-ClickHouse-Summary` response header, if
     /// present. Available after the first chunk has been received.
     #[inline]
-    pub fn summary(&self) -> Option<&str> {
+    pub fn summary(&self) -> Option<&QuerySummary> {
         self.raw.summary()
     }
 }

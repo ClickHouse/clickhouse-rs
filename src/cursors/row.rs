@@ -6,6 +6,7 @@ use crate::{
     bytes_ext::BytesExt,
     cursors::RawCursor,
     error::{Error, Result},
+    query_summary::QuerySummary,
     response::Response,
     rowbinary,
 };
@@ -160,10 +161,10 @@ impl<T> RowCursor<T> {
         self.raw.decoded_bytes()
     }
 
-    /// Returns the raw `X-ClickHouse-Summary` response header value, if
+    /// Returns the parsed `X-ClickHouse-Summary` response header, if
     /// present. Available after the first row has been received.
     #[inline]
-    pub fn summary(&self) -> Option<&str> {
+    pub fn summary(&self) -> Option<&QuerySummary> {
         self.raw.summary()
     }
 }
