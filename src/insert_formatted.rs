@@ -16,7 +16,6 @@ use tokio::{
     task::JoinHandle,
     time::{Instant, Sleep},
 };
-use tracing::Instrument;
 use url::Url;
 
 #[cfg(any(feature = "lz4", feature = "zstd"))]
