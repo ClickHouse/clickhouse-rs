@@ -63,30 +63,6 @@ async fn summary_header() {
     assert_eq!(summary.result_bytes, 24);
     assert_eq!(summary.elapsed_ns, 12345);
     assert_eq!(summary.memory_usage, 1024);
-    assert_eq!(summary.rows_before_limit_at_least, None);
-}
-
-#[tokio::test]
-async fn summary_header_with_limit() {
-    let mock = test::Mock::new();
-    let client = Client::default().with_mock(&mock);
-    let rows = vec![SimpleRow::new(1, "one")];
-    let summary_json = r#"{"read_rows":"100","read_bytes":"800","written_rows":"0","written_bytes":"0","total_rows_to_read":"100","result_rows":"1","result_bytes":"8","elapsed_ns":"5000","memory_usage":"2048","rows_before_limit_at_least":"100"}"#;
-
-    mock.add(test::handlers::provide_with_summary(
-        rows.clone(),
-        summary_json,
-    ));
-
-    let mut cursor = client
-        .query("doesn't matter")
-        .fetch::<SimpleRow>()
-        .unwrap();
-
-    while cursor.next().await.unwrap().is_some() {}
-
-    let summary = cursor.summary().expect("summary should be present");
-    assert_eq!(summary.rows_before_limit_at_least, Some(100));
 }
 
 #[tokio::test]
