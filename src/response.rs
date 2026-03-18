@@ -79,7 +79,7 @@ async fn collect_response(
 
     tracing::record_all!(
         span,
-        // Note: not supposed to set `otel.status_code` until the entire request is successful
+        // Note: not supposed to set `otel.status_code` unless an error occurs
         db.response.status_code = status.as_u16(),
     );
 
@@ -112,6 +112,13 @@ async fn collect_response(
         tracing::record_all!(
             span,
             error.type = error.error_type(),
+        );
+
+        #[cfg(feature = "opentelemetry")]
+        tracing::record_all!(
+            span,
+            otel.status = "Error",
+            otel.status_description = %error,
         );
 
         Err(error)
@@ -353,6 +360,7 @@ where
         if let Poll::Ready(Some(Ok(chunk))) = &res
             && let Some(err) = extract_exception(&chunk.data, self.exception_tag.as_deref())
         {
+            err.record_in_current_span("response error");
             return Poll::Ready(Some(Err(err)));
         }
 

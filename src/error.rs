@@ -136,6 +136,22 @@ impl Error {
             Error::Other(_) => "Other",
         }
     }
+
+    /// Record this `Error` in the context of the current `tracing::Span`,
+    /// setting the OpenTelemetry conventional fields if the `opentelemetry` feature is enabled.
+    pub(crate) fn record_in_current_span(&self, msg: &str) {
+        // Span fields that remain unpopulated are not reported,
+        // so we can avoid adding noise to logs if the user isn't utilizing this feature.
+        #[cfg(feature = "opentelemetry")]
+        tracing::record_all!(
+            tracing::Span::current(),
+            otel.status = "Error",
+            otel.status_description = format!("{msg}: {self}"),
+            error.type = self.error_type(),
+        );
+
+        tracing::debug!(error=%self, "{msg}");
+    }
 }
 
 #[cfg(tests)]

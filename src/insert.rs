@@ -213,7 +213,8 @@ impl<T> Insert<T> {
         };
         let written = buffer.len() - old_buf_size;
 
-        if result.is_err() {
+        if let Err(e) = &result {
+            e.record_in_current_span("error serializing row");
             self.abort();
         }
 
@@ -227,17 +228,13 @@ impl<T> Insert<T> {
     ///
     /// NOTE: If it isn't called, the whole `INSERT` is aborted.
     pub async fn end(mut self) -> Result<()> {
-        let res = self.insert.end().await;
-
-        let _span = self.insert.span().enter();
-
-        // `InsertFormatted::end()` will have added `sent_bytes` and `encoded_bytes` to the span.
+        // `InsertFormatted::end()` will add `sent_bytes` and `encoded_bytes` to the span.
         tracing::record_all!(
             self.insert.span(),
             clickhouse.request.sent_rows = self.sent_rows.0,
         );
 
-        res.inspect_err(|e| tracing::debug!("error from insert: {e:?}"))
+        self.insert.end().await
     }
 
     fn init_request_if_required(&mut self) -> Result<()> {

@@ -137,13 +137,15 @@ impl InsertState {
 impl InsertFormatted {
     pub(crate) fn new(client: &Client, sql: String, collection_name: Option<&str>) -> Self {
         Self {
-            span: tracing::error_span!(
+            span: tracing::info_span!(
                 "clickhouse.insert",
                 // OTel conventional fields
-                status = tracing::field::Empty,
+                // Note that `Empty` or `Option::None` fields are not reported,
+                // so we can avoid adding noise to logs when the `opentelemetry` feature is disabled.
                 otel.status_code = tracing::field::Empty,
-                otel.kind = "CLIENT",
-                db.system.name = "clickhouse",
+                otel.kind = cfg!(feature = "opentelemetry").then_some("client"),
+                error.type = tracing::field::Empty,
+                db.system.name = cfg!(feature = "opentelemetry").then_some("clickhouse"),
                 // Only log full query text at TRACE level
                 // Important that this is taken before client-side parameters are populated
                 db.query.text = tracing::enabled!(tracing::Level::TRACE).then_some(&sql),
@@ -310,6 +312,8 @@ impl InsertFormatted {
         }
 
         std::future::poll_fn(move |cx| {
+            let _span = self.span.enter();
+
             loop {
                 // Potentially cheaper than cloning `data` which touches the refcount
                 match self.try_send(mem::take(&mut data), original_size) {
@@ -428,7 +432,7 @@ impl InsertFormatted {
 
         tracing::trace!("finished insert");
 
-        Poll::Ready(res)
+        Poll::Ready(res.inspect_err(|e| e.record_in_current_span("error from insert query")))
     }
 
     #[cold]
@@ -468,9 +472,11 @@ impl InsertFormatted {
 
         let (sender, body) = RequestBody::chunked();
 
-        let request = builder
-            .body(body)
-            .map_err(|err| Error::InvalidParams(Box::new(err)))?;
+        let request = builder.body(body).map_err(|err| {
+            let err = Error::InvalidParams(Box::new(err));
+            err.record_in_current_span("invalid params in insert request");
+            err
+        })?;
 
         let future = client.http.request(request);
         // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.

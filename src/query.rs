@@ -104,7 +104,7 @@ impl Query {
 
         let response = self
             .do_execute(Some(format))
-            .inspect_err(|e| tracing::warn!("query error: {e:?}"))?;
+            .inspect_err(|e| e.record_in_current_span("error response from query"))?;
 
         Ok(RowCursor::new(response, validation, span.exit()))
     }
@@ -168,9 +168,12 @@ impl Query {
         tracing::info_span!(
             "clickhouse.query",
             // OTel conventional fields
+            // Note that `Empty` or `Option::None` fields are not reported,
+            // so we can avoid adding noise to logs when the `opentelemetry` feature is disabled.
             otel.status_code = tracing::field::Empty,
-            otel.kind = "CLIENT",
-            db.system.name = "clickhouse",
+            otel.kind = cfg!(feature = "opentelemetry").then_some("client"),
+            error.type = tracing::field::Empty,
+            db.system.name = cfg!(feature = "opentelemetry").then_some("clickhouse"),
             // Only log full query text at TRACE level
             // Important that this is taken before client-side parameters are populated
             db.query.text = tracing::enabled!(tracing::Level::TRACE).then(|| self.sql.to_string()),
@@ -235,9 +238,11 @@ impl Query {
         let content_length = query.len();
         builder = builder.header(CONTENT_LENGTH, content_length.to_string());
 
-        let request = builder
-            .body(RequestBody::full(query))
-            .map_err(|err| Error::InvalidParams(Box::new(err)))?;
+        let request = builder.body(RequestBody::full(query)).map_err(|err| {
+            let err = Error::InvalidParams(Box::new(err));
+            err.record_in_current_span("invalid params in query");
+            err
+        })?;
 
         let future = self.client.http.request(request);
         Ok(Response::new(future, self.client.compression))

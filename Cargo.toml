@@ -104,7 +104,7 @@ lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
 zstd = ["dep:zstd", "dep:cityhash-rs"]
 chrono = ["dep:chrono"]
 futures03 = []
-opentelemetry = ["dep:opentelemetry", "dep:opentelemetry-http"]
+opentelemetry = ["dep:opentelemetry", "dep:opentelemetry-http", "tracing-opentelemetry"]
 
 ##  TLS
 native-tls = ["dep:hyper-tls"]
