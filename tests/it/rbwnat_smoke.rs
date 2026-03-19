@@ -3,9 +3,8 @@ use crate::geo_types::{LineString, MultiLineString, MultiPolygon, Point, Polygon
 use crate::{SimpleRow, create_simple_table, execute_statements, get_client, insert_and_select};
 use clickhouse::Row;
 use clickhouse::sql::Identifier;
-use fxhash::FxHashMap;
 use indexmap::IndexMap;
-use linked_hash_map::LinkedHashMap;
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
@@ -392,9 +391,9 @@ async fn maps_third_party() {
     #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
     struct Data {
         im: IndexMap<u16, String>,
-        lhm: LinkedHashMap<u32, String>,
+        lhm: IndexMap<u32, String>,
         fx: FxHashMap<u64, String>,
-        weird_but_ok: LinkedHashMap<u128, IndexMap<i8, FxHashMap<i16, Vec<bool>>>>,
+        weird_but_ok: IndexMap<u128, IndexMap<i8, FxHashMap<i16, Vec<bool>>>>,
     }
 
     let client = prepare_database!();
@@ -417,9 +416,9 @@ async fn maps_third_party() {
 
     let rows = vec![Data {
         im: IndexMap::from_iter(vec![(1, "one".to_string()), (2, "two".to_string())]),
-        lhm: LinkedHashMap::from_iter(vec![(3, "three".to_string()), (4, "four".to_string())]),
+        lhm: IndexMap::from_iter(vec![(3, "three".to_string()), (4, "four".to_string())]),
         fx: FxHashMap::from_iter(vec![(5, "five".to_string()), (6, "six".to_string())]),
-        weird_but_ok: LinkedHashMap::from_iter(vec![(
+        weird_but_ok: IndexMap::from_iter(vec![(
             7u128,
             IndexMap::from_iter(vec![(
                 -8i8,
