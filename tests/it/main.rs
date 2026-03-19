@@ -252,6 +252,7 @@ mod compression;
 #[cfg(feature = "native-transport")]
 mod native;
 mod cursor_error;
+mod cursor_reborrow;
 mod cursor_stats;
 mod fetch_bytes;
 mod https_errors;

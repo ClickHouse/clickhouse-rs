@@ -157,8 +157,6 @@ time = { version = "0.3", optional = true }
 chrono = { version = "0.4", optional = true, features = ["serde"] }
 bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
-polonius-the-crab = "0.5.0"
-
 bnum = "0.13.0"
 deadpool = { version = "0.12", features = ["managed", "rt_tokio_1"], optional = true }
 serde_json = "1"
@@ -170,8 +168,7 @@ serde = { version = "1.0.106", features = ["derive"] }
 tokio = { version = "1.0.1", features = ["full", "test-util", "io-util"] }
 hyper = { version = "1.1", features = ["server"] }
 indexmap = { version = "2.10.0", features = ["serde"] }
-linked-hash-map = { version = "0.5.6", features = ["serde_impl"] }
-fxhash = { version = "0.2.1" }
+rustc-hash = "2"
 serde_bytes = "0.11.4"
 serde_json = "1"
 serde_repr = "0.1.7"
