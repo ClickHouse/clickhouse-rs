@@ -114,6 +114,7 @@ impl From<io::Error> for Error {
 
 impl Error {
     /// https://opentelemetry.io/docs/specs/semconv/registry/attributes/error/#error-type
+    #[cfg(feature = "opentelemetry")]
     pub(crate) fn error_type(&self) -> &str {
         match self {
             Error::InvalidParams(_) => "InvalidParams",
