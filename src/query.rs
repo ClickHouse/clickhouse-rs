@@ -61,12 +61,20 @@ impl Query {
     /// Executes the query.
     pub async fn execute(self) -> Result<()> {
         // Enter the span for the `self.do_execute()` call
-        let span = self.make_span(None).entered();
+        let span = self.make_span(None);
 
-        self.do_execute(None)?
-            .finish()
-            .instrument(span.exit())
-            .await
+        async {
+            let mut response = self
+                .do_execute(None)
+                .inspect_err(|e| e.record_in_current_span("error executing query"))?;
+
+            response
+                .finish()
+                .await
+                .inspect_err(|e| e.record_in_current_span("response error"))
+        }
+        .instrument(span)
+        .await
     }
 
     /// Executes the query, returning a [`RowCursor`] to obtain results.
@@ -104,7 +112,7 @@ impl Query {
 
         let response = self
             .do_execute(Some(format))
-            .inspect_err(|e| e.record_in_current_span("error response from query"))?;
+            .inspect_err(|e| e.record_in_current_span("error executing fetch"))?;
 
         Ok(RowCursor::new(response, validation, span.exit()))
     }

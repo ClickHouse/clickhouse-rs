@@ -1,9 +1,13 @@
 use crate::get_client;
+use opentelemetry::Context;
 use opentelemetry::global::BoxedTracer;
-use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::{Status, TraceContextExt};
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::{SdkTracerProvider, Span, SpanData, SpanProcessor};
+use std::cell::Cell;
 use std::sync::Once;
+use std::time::Duration;
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::layer::SubscriberExt;
@@ -126,8 +130,59 @@ async fn insert_with_opentelemetry() {
     assert_eq!(query_id, span_query_id);
 }
 
+#[tokio::test]
+async fn error_sets_span_status() {
+    let tracer = get_tracer();
+
+    let _guard = tracing_subscriber::registry()
+        .with(tracing_opentelemetry::layer().with_tracer(tracer))
+        .set_default();
+
+    let res = get_client()
+        .query("SELECT throwif(true, 'test error'")
+        .execute()
+        .await;
+
+    let _err = res.unwrap_err();
+
+    // `opentelemetry` doesn't give us any way to look up the status of a live span,
+    // so we instead install a middleware that stores its data in a thread-local.
+    let span_data = LAST_SPAN_DATA.take().expect("expected last span data");
+
+    assert!(
+        matches!(span_data.status, Status::Error { .. }),
+        "expected error status, got {:?}",
+        span_data.status
+    );
+}
+
+thread_local! {
+    /// The data for the last span ended on the current thread.
+    static LAST_SPAN_DATA: Cell<Option<SpanData>> = const {  Cell::new(None) };
+}
+
 fn get_tracer() -> BoxedTracer {
     static ONCE: Once = Once::new();
+
+    #[derive(Debug)]
+    struct LastSpanProcessor;
+
+    impl SpanProcessor for LastSpanProcessor {
+        fn on_start(&self, _span: &mut Span, _cx: &Context) {}
+
+        fn on_end(&self, span: SpanData) {
+            eprintln!("last span data: {span:?}");
+            LAST_SPAN_DATA.set(Some(span));
+        }
+
+        fn force_flush(&self) -> OTelSdkResult {
+            Ok(())
+        }
+
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+            Ok(())
+        }
+    }
 
     ONCE.call_once(|| {
         // These set global statics so we want to ensure this is done,
@@ -136,6 +191,7 @@ fn get_tracer() -> BoxedTracer {
 
         let provider = SdkTracerProvider::builder()
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
+            .with_span_processor(LastSpanProcessor)
             .build();
 
         opentelemetry::global::set_tracer_provider(provider);

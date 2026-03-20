@@ -145,7 +145,7 @@ impl Error {
         #[cfg(feature = "opentelemetry")]
         tracing::record_all!(
             tracing::Span::current(),
-            otel.status = "Error",
+            otel.status_code = "Error",
             otel.status_description = format!("{msg}: {self}"),
             error.type = self.error_type(),
         );

@@ -39,11 +39,16 @@ pub(crate) type ResponseFuture =
 
 impl Response {
     pub(crate) fn new(response: HyperResponseFuture, compression: Compression) -> Self {
-        let span = tracing::error_span!("response");
-        let instrument_span = span.clone();
+        let span = tracing::info_span!(
+            "response",
+            otel.status_code = tracing::field::Empty,
+            otel.status_description = tracing::field::Empty,
+            error.type = tracing::field::Empty,
+            db.response_code = tracing::field::Empty,
+        );
 
         Self::Waiting(Box::pin(
-            collect_response(response, compression, span).instrument(instrument_span),
+            collect_response(response, compression).instrument(span),
         ))
     }
 
@@ -70,7 +75,6 @@ impl Response {
 async fn collect_response(
     response: HyperResponseFuture,
     compression: Compression,
-    span: tracing::Span,
 ) -> Result<Chunks> {
     let response = response.await?;
 
@@ -78,7 +82,7 @@ async fn collect_response(
     let exception_code = response.headers().get("X-ClickHouse-Exception-Code");
 
     tracing::record_all!(
-        span,
+        tracing::Span::current(),
         // Note: not supposed to set `otel.status_code` unless an error occurs
         db.response.status_code = status.as_u16(),
     );
@@ -109,17 +113,7 @@ async fn collect_response(
         )
         .await;
 
-        tracing::record_all!(
-            span,
-            error.type = error.error_type(),
-        );
-
-        #[cfg(feature = "opentelemetry")]
-        tracing::record_all!(
-            span,
-            otel.status = "Error",
-            otel.status_description = %error,
-        );
+        error.record_in_current_span("response error");
 
         Err(error)
     }
