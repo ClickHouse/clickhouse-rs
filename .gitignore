@@ -1,7 +1,3 @@
 .idea
 target
 Cargo.lock
-
-# HyperI-local: private session files not for public commits
-CLAUDE.md
-STATE.md
