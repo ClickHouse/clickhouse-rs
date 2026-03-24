@@ -193,6 +193,7 @@ impl UnifiedQuery {
     // -----------------------------------------------------------------------
 
     /// Return a static label for the active transport, used in tracing spans.
+    #[cfg(feature = "tracing")]
     fn transport_name(&self) -> &'static str {
         match &self.inner {
             QueryInner::Http(_) => "http",
