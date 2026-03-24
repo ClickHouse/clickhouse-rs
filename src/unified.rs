@@ -23,6 +23,7 @@
 //!    optionally, an `as_grpc() -> Option<&GrpcClient>` accessor.
 
 use crate::Client;
+use crate::unified_query::UnifiedQuery;
 
 #[cfg(feature = "native-transport")]
 use crate::native::NativeClient;
@@ -126,6 +127,36 @@ impl UnifiedClient {
         match &self.transport {
             Transport::Native(c) => Some(c),
             Transport::Http(_) => None,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Query
+    // -----------------------------------------------------------------------
+
+    /// Start building a SELECT or DDL query.
+    ///
+    /// Returns a [`UnifiedQuery`] that dispatches to whichever transport is
+    /// active.  Use [`UnifiedQuery::bind`] to fill `?` placeholders, then
+    /// call one of the terminal methods (`execute`, `fetch_all`, `fetch_one`,
+    /// `fetch_optional`).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use clickhouse::unified::UnifiedClient;
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// let client = UnifiedClient::http().with_url("http://localhost:8123").build();
+    /// client.query("CREATE TABLE IF NOT EXISTS t (x UInt32) ENGINE=Memory")
+    ///     .execute()
+    ///     .await?;
+    /// # Ok(()) }
+    /// ```
+    pub fn query(&self, sql: &str) -> UnifiedQuery {
+        match &self.transport {
+            Transport::Http(c) => UnifiedQuery::from_http(c.query(sql)),
+            #[cfg(feature = "native-transport")]
+            Transport::Native(c) => UnifiedQuery::from_native(c.query(sql)),
         }
     }
 }
