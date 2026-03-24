@@ -66,3 +66,29 @@ async fn variant_null_values() {
         ]
     );
 }
+
+// exact reproduction from the issue: single query, no table needed
+#[tokio::test]
+async fn variant_null_cast() {
+    let client = prepare_database!();
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    enum SimpleVariant {
+        String(String),
+        UInt64(u64),
+    }
+
+    #[derive(Debug, PartialEq, Row, Deserialize)]
+    struct Wrapper {
+        #[serde(rename = "v")]
+        v: Option<SimpleVariant>,
+    }
+
+    let result = client
+        .query("SELECT NULL::Variant(String, UInt64) AS v")
+        .fetch_one::<Wrapper>()
+        .await
+        .unwrap();
+
+    assert_eq!(result.v, None);
+}
