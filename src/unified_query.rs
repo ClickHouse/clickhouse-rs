@@ -189,6 +189,19 @@ impl UnifiedQuery {
     }
 
     // -----------------------------------------------------------------------
+    // Private helpers
+    // -----------------------------------------------------------------------
+
+    /// Return a static label for the active transport, used in tracing spans.
+    fn transport_name(&self) -> &'static str {
+        match &self.inner {
+            QueryInner::Http(_) => "http",
+            #[cfg(feature = "native-transport")]
+            QueryInner::Native(_) => "native",
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Terminal methods
     // -----------------------------------------------------------------------
 
@@ -228,6 +241,9 @@ impl UnifiedQuery {
 
     /// Execute a DDL or non-SELECT statement and discard any results.
     pub async fn execute(self) -> Result<()> {
+        #[cfg(feature = "tracing")]
+        tracing::debug!(transport = self.transport_name(), "executing query");
+
         match self.inner {
             QueryInner::Http(q) => q.execute().await,
             #[cfg(feature = "native-transport")]
@@ -240,6 +256,9 @@ impl UnifiedQuery {
     where
         T: RowOwned + RowRead,
     {
+        #[cfg(feature = "tracing")]
+        tracing::debug!(transport = self.transport_name(), "fetching all rows");
+
         match self.inner {
             QueryInner::Http(q) => q.fetch_all::<T>().await,
             #[cfg(feature = "native-transport")]
