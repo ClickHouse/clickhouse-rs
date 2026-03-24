@@ -57,18 +57,12 @@ async fn variant_null_values() {
                 id: 1,
                 var: Some(SimpleVariant::String("hello".to_string())),
             },
-            MyRow {
-                id: 2,
-                var: None,
-            },
+            MyRow { id: 2, var: None },
             MyRow {
                 id: 3,
                 var: Some(SimpleVariant::UInt64(42)),
             },
-            MyRow {
-                id: 4,
-                var: None,
-            },
+            MyRow { id: 4, var: None },
         ]
     );
 }
