@@ -48,15 +48,17 @@ async fn main() {
     //
     // To send logs to OpenTelemetry as well, set up `opentelemetry-appender-tracing` as shown here:
     // https://github.com/open-telemetry/opentelemetry-rust/blob/main/examples/logs-basic/src/main.rs
+    // Permalink to the current version as of writing:
+    // https://github.com/open-telemetry/opentelemetry-rust/blob/965078315b58ae14725721735f1c8e2bc2d3b445/examples/logs-basic/src/main.rs
     //
-    // Notice how it has to add filters for crates that it calls internally to avoid generating logs
-    // in a loop. Since the `clickhouse` crate also uses some of these dependencies (namely `hyper`),
-    // which might be useful have in logs, it didn't make sense to include this in the example
-    // until this limitation was addressed.
+    // Notice how (as of writing) it has to add filters for crates that it calls internally to avoid
+    // generating logs in a loop. Since the `clickhouse` crate also uses some of these dependencies
+    // (namely `hyper`), which might be useful have in logs, it didn't make sense to include this in
+    // the example until this limitation was addressed.
     //
     // Writing logs via `tracing-subscriber` directly avoids this issue.
     //
-    // `tracing-opentelemetry` also already converts `tracing` events as OTel "span events"
+    // `tracing-opentelemetry` also already exports `tracing` events as OTel "span events"
     // which are recorded in the context of their parent span, which is arguably more useful
     // than exporting events as logs anyway, which does not include trace metadata.
     // In this light, it would seem that exporting logs separately to OTel is simply redundant.
@@ -140,9 +142,11 @@ async fn main() {
         .await
         .unwrap();
 
+    // This call is self-instrumenting thanks to the `#[instrument]` attribute (see below).
     insert_query(&client, 16).await;
 
-    // An inline `async {}` block can be used to instrument just one bit of code:
+    // An inline `async {}` block can be used to instrument just one bit of code,
+    // albeit at a small cost to code readability:
     async {
         let foos = client
             .query("SELECT bar, baz FROM clickhouse_rs_example_opentelemetry ORDER BY bar")
