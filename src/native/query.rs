@@ -12,6 +12,12 @@ use crate::row::{RowOwned, RowRead};
 pub struct NativeQuery {
     client: NativeClient,
     sql: String,
+    /// Optional query ID sent in the query packet header.
+    ///
+    /// If `None`, an empty string is sent and the server generates its own ID.
+    query_id: Option<String>,
+    /// Per-query settings that override (or extend) the client-level settings.
+    settings: Vec<(String, String)>,
 }
 
 impl NativeQuery {
@@ -19,7 +25,48 @@ impl NativeQuery {
         Self {
             client,
             sql: sql.to_string(),
+            query_id: None,
+            settings: Vec::new(),
         }
+    }
+
+    /// Set the query ID sent to the server in the query packet header.
+    ///
+    /// ClickHouse records this ID in `system.query_log` and returns it in
+    /// progress/profile packets.  If not set, an empty string is sent and the
+    /// server generates its own UUID.
+    pub fn with_query_id(mut self, id: impl Into<String>) -> Self {
+        self.query_id = Some(id.into());
+        self
+    }
+
+    /// Add per-query settings that override client-level settings for this
+    /// query only.
+    ///
+    /// Settings are sent in the query packet and apply only to this query.
+    /// They are merged with (and take precedence over) any settings configured
+    /// on the [`NativeClient`] via [`NativeClient::with_setting`].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use clickhouse::native::NativeClient;
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// let client = NativeClient::default();
+    /// let rows = client
+    ///     .query("SELECT * FROM large_table")
+    ///     .with_settings([("max_rows_to_read", "1000000")])
+    ///     .fetch_all::<(u64,)>()
+    ///     .await?;
+    /// # Ok(()) }
+    /// ```
+    pub fn with_settings(
+        mut self,
+        settings: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Self {
+        self.settings
+            .extend(settings.into_iter().map(|(k, v)| (k.into(), v.into())));
+        self
     }
 
     /// Bind a parameter using simple string substitution.
@@ -40,10 +87,32 @@ impl NativeQuery {
         self
     }
 
+    /// Merge client-level settings with per-query settings.
+    ///
+    /// Per-query settings take precedence: if the same key appears in both,
+    /// the per-query value wins.
+    fn merged_settings(&self) -> Vec<(String, String)> {
+        if self.settings.is_empty() {
+            return self.client.settings().to_vec();
+        }
+        // Start with client-level settings, then override with per-query ones.
+        let mut merged: Vec<(String, String)> = self.client.settings().to_vec();
+        for (k, v) in &self.settings {
+            if let Some(existing) = merged.iter_mut().find(|(ek, _)| ek == k) {
+                existing.1 = v.clone();
+            } else {
+                merged.push((k.clone(), v.clone()));
+            }
+        }
+        merged
+    }
+
     /// Execute a DDL or non-SELECT query (CREATE, DROP, INSERT, etc.).
     pub async fn execute(self) -> Result<()> {
+        let query_id = self.query_id.as_deref().unwrap_or("");
+        let settings = self.merged_settings();
         let mut conn = self.client.acquire().await?;
-        conn.execute_query(&self.sql).await
+        conn.execute_query_with(query_id, &self.sql, &settings).await
     }
 
     /// Execute a SELECT query, returning a cursor over deserialized rows.
@@ -70,7 +139,9 @@ impl NativeQuery {
     where
         T: RowOwned + RowRead,
     {
-        Ok(NativeRowCursor::new(self.client, self.sql))
+        let query_id = self.query_id.clone().unwrap_or_default();
+        let settings = self.merged_settings();
+        Ok(NativeRowCursor::new(self.client, self.sql, query_id, settings))
     }
 
     /// Fetch a single row.

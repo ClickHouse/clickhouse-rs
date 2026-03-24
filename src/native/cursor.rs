@@ -20,6 +20,10 @@ use crate::rowbinary;
 pub struct NativeRowCursor<T: RowOwned + RowRead> {
     client: NativeClient,
     sql: String,
+    /// Query ID to send in the query packet (`""` → server generates one).
+    query_id: String,
+    /// Merged settings (client-level + per-query overrides) for this cursor.
+    settings: Vec<(String, String)>,
     /// Buffered row bytes from already-received blocks.
     row_buf: VecDeque<Vec<u8>>,
     state: CursorState,
@@ -53,10 +57,17 @@ impl<T: RowOwned + RowRead> Drop for NativeRowCursor<T> {
 }
 
 impl<T: RowOwned + RowRead> NativeRowCursor<T> {
-    pub(crate) fn new(client: NativeClient, sql: String) -> Self {
+    pub(crate) fn new(
+        client: NativeClient,
+        sql: String,
+        query_id: String,
+        settings: Vec<(String, String)>,
+    ) -> Self {
         Self {
             client,
             sql,
+            query_id,
+            settings,
             row_buf: VecDeque::new(),
             state: CursorState::NotStarted,
             _marker: PhantomData,
@@ -122,9 +133,9 @@ impl<T: RowOwned + RowRead> NativeRowCursor<T> {
                     let compression = conn.compression();
                     crate::native::writer::send_query(
                         conn.writer_mut(),
-                        "",
+                        &self.query_id,
                         &self.sql,
-                        self.client.settings(),
+                        &self.settings,
                         revision,
                         compression,
                     )

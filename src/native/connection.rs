@@ -133,10 +133,30 @@ impl NativeConnection {
 
     /// Execute a query and read all response packets until EndOfStream.
     pub(crate) async fn execute_query(&mut self, query: &str) -> Result<()> {
+        self.execute_query_with("", query, &[]).await
+    }
+
+    /// Execute a query with an explicit query ID and per-query settings.
+    ///
+    /// `query_id` is sent verbatim in the query packet header; pass `""` to
+    /// let the server generate its own ID.
+    ///
+    /// `extra_settings` are appended after the connection-level settings.
+    /// Callers that want per-query settings to *override* client settings
+    /// should perform the merge themselves before calling this method.
+    pub(crate) async fn execute_query_with(
+        &mut self,
+        query_id: &str,
+        query: &str,
+        extra_settings: &[(String, String)],
+    ) -> Result<()> {
         let revision = self.server_hello.revision_version;
         let compression = self.compression;
 
-        writer::send_query(&mut self.writer, "", query, &self.settings, revision, compression).await?;
+        // Merge connection-level settings with per-query overrides.
+        let settings = merge_settings(&self.settings, extra_settings);
+
+        writer::send_query(&mut self.writer, query_id, query, &settings, revision, compression).await?;
         writer::send_empty_block(&mut self.writer, compression).await?;
 
         loop {
@@ -246,6 +266,29 @@ impl NativeConnection {
             }
         }
     }
+}
+
+/// Merge `base` settings with `extra`, where `extra` overrides duplicates.
+///
+/// Returns a `Vec` containing all entries from `base` (with any keys that also
+/// appear in `extra` replaced by the `extra` value), followed by any `extra`
+/// keys that were not present in `base`.
+fn merge_settings(
+    base: &[(String, String)],
+    extra: &[(String, String)],
+) -> Vec<(String, String)> {
+    if extra.is_empty() {
+        return base.to_vec();
+    }
+    let mut merged = base.to_vec();
+    for (k, v) in extra {
+        if let Some(slot) = merged.iter_mut().find(|(ek, _)| ek == k) {
+            slot.1 = v.clone();
+        } else {
+            merged.push((k.clone(), v.clone()));
+        }
+    }
+    merged
 }
 
 /// A no-op [`Waker`] used for non-blocking `poll_read` calls in `check_alive`.
