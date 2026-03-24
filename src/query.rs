@@ -173,6 +173,8 @@ impl Query {
     }
 
     pub(crate) fn make_span(&self, response_format: Option<&str>) -> tracing::Span {
+        // https://opentelemetry.io/docs/specs/semconv/db/sql/
+        // TODO: write our own Semantic Conventions for ClickHouse
         tracing::info_span!(
             "clickhouse.query",
             // OTel conventional fields

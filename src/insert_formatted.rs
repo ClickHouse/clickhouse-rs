@@ -136,6 +136,8 @@ impl InsertState {
 
 impl InsertFormatted {
     pub(crate) fn new(client: &Client, sql: String, collection_name: Option<&str>) -> Self {
+        // https://opentelemetry.io/docs/specs/semconv/db/sql/
+        // TODO: write our own Semantic Conventions for ClickHouse
         Self {
             span: tracing::info_span!(
                 "clickhouse.insert",
@@ -151,6 +153,7 @@ impl InsertFormatted {
                 db.query.text = tracing::enabled!(tracing::Level::TRACE).then_some(&sql),
                 // TODO: generate summary
                 db.query.summary = tracing::field::Empty,
+                db.operation.name = "INSERT",
                 db.collection.name = collection_name,
                 // ClickHouse-specific extension fields
                 clickhouse.request.session_id = client.get_option(settings::SESSION_ID),
