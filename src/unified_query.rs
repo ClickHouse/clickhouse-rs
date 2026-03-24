@@ -90,6 +90,46 @@ impl UnifiedQuery {
         }
     }
 
+    /// Register a callback invoked for each [`Progress`] packet received from the server.
+    ///
+    /// Only available when the `native-transport` feature is enabled. For the
+    /// HTTP transport this method is a no-op — HTTP responses do not carry
+    /// inline Progress packets.
+    #[cfg(feature = "native-transport")]
+    pub fn with_progress(
+        self,
+        f: impl Fn(&crate::native::protocol::Progress) + Send + Sync + 'static,
+    ) -> Self {
+        match self.inner {
+            QueryInner::Http(q) => Self {
+                inner: QueryInner::Http(q),
+            },
+            QueryInner::Native(q) => Self {
+                inner: QueryInner::Native(q.with_progress(f)),
+            },
+        }
+    }
+
+    /// Register a callback invoked when the server sends a [`ProfileInfo`] packet.
+    ///
+    /// Only available when the `native-transport` feature is enabled. For the
+    /// HTTP transport this method is a no-op — HTTP responses do not carry
+    /// inline ProfileInfo packets.
+    #[cfg(feature = "native-transport")]
+    pub fn with_profile_info(
+        self,
+        f: impl Fn(&crate::native::protocol::ProfileInfo) + Send + Sync + 'static,
+    ) -> Self {
+        match self.inner {
+            QueryInner::Http(q) => Self {
+                inner: QueryInner::Http(q),
+            },
+            QueryInner::Native(q) => Self {
+                inner: QueryInner::Native(q.with_profile_info(f)),
+            },
+        }
+    }
+
     /// Add per-query settings that override any client-level settings for this
     /// query only.
     ///
