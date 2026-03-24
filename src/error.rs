@@ -47,6 +47,8 @@ pub enum Error {
     SchemaMismatch(String),
     #[error("unsupported: {0}")]
     Unsupported(String),
+    #[error("unsupported transport: {0}")]
+    UnsupportedTransport(String),
     #[error("{0}")]
     Other(BoxedError),
 }
