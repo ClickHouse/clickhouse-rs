@@ -485,6 +485,19 @@ impl UnifiedNativeBuilder {
         self
     }
 
+    /// Set multiple server addresses for round-robin failover.
+    ///
+    /// Delegates to [`NativeClient::with_addrs`].
+    ///
+    /// # Panics
+    ///
+    /// If `addrs` is empty.
+    #[must_use]
+    pub fn with_addrs(mut self, addrs: Vec<std::net::SocketAddr>) -> Self {
+        self.inner = self.inner.with_addrs(addrs);
+        self
+    }
+
     /// Consume the builder and return a [`UnifiedClient`].
     pub fn build(self) -> UnifiedClient {
         UnifiedClient::new(Transport::Native(self.inner))

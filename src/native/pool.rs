@@ -15,6 +15,7 @@
 
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use deadpool::managed::{self, RecycleError, RecycleResult};
 
@@ -24,7 +25,12 @@ use crate::native::protocol::NativeCompressionMethod;
 
 /// Parameters needed to open a new connection.
 pub(crate) struct PoolConfig {
-    pub(crate) addr: SocketAddr,
+    /// One or more server addresses for round-robin failover.
+    ///
+    /// The pool cycles through addresses in order, so connections are
+    /// spread across all listed hosts.  A single-element vec is the
+    /// common case and behaves identically to the original single-addr design.
+    pub(crate) addrs: Vec<SocketAddr>,
     pub(crate) database: String,
     pub(crate) username: String,
     pub(crate) password: String,
@@ -35,6 +41,8 @@ pub(crate) struct PoolConfig {
 /// deadpool [`Manager`](managed::Manager) for [`NativeConnection`].
 pub(crate) struct NativeConnectionManager {
     config: PoolConfig,
+    /// Monotonically increasing counter used for round-robin address selection.
+    next_addr: AtomicUsize,
 }
 
 impl managed::Manager for NativeConnectionManager {
@@ -42,8 +50,11 @@ impl managed::Manager for NativeConnectionManager {
     type Error = Error;
 
     async fn create(&self) -> Result<NativeConnection> {
+        let addrs = &self.config.addrs;
+        let idx = self.next_addr.fetch_add(1, Ordering::Relaxed) % addrs.len();
+        let addr = &addrs[idx];
         NativeConnection::open(
-            &self.config.addr,
+            addr,
             &self.config.database,
             &self.config.username,
             &self.config.password,
@@ -70,7 +81,10 @@ pub(crate) type NativePool = managed::Pool<NativeConnectionManager>;
 
 /// Build a new pool with the given config and connection cap.
 pub(crate) fn build_pool(config: PoolConfig, max_size: usize) -> NativePool {
-    let mgr = NativeConnectionManager { config };
+    let mgr = NativeConnectionManager {
+        config,
+        next_addr: AtomicUsize::new(0),
+    };
     managed::Pool::builder(mgr)
         .max_size(max_size)
         .build()

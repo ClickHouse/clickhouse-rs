@@ -53,7 +53,13 @@ const DEFAULT_POOL_SIZE: usize = 10;
 
 #[derive(Clone)]
 pub struct NativeClient {
-    addr: SocketAddr,
+    /// One or more server addresses for round-robin failover.
+    ///
+    /// Set via [`with_addr`] (single) or [`with_addrs`] (multiple).
+    ///
+    /// [`with_addr`]: NativeClient::with_addr
+    /// [`with_addrs`]: NativeClient::with_addrs
+    addrs: Vec<SocketAddr>,
     database: String,
     username: String,
     password: String,
@@ -71,7 +77,8 @@ pub struct NativeClient {
 
 impl Default for NativeClient {
     fn default() -> Self {
-        let addr: SocketAddr = "127.0.0.1:9000".parse().expect("valid default addr");
+        let default_addr: SocketAddr = "127.0.0.1:9000".parse().expect("valid default addr");
+        let addrs = vec![default_addr];
         let database = "default".to_string();
         let username = "default".to_string();
         let password = String::new();
@@ -79,7 +86,7 @@ impl Default for NativeClient {
         let settings: Vec<(String, String)> = Vec::new();
         let pool = build_pool(
             PoolConfig {
-                addr,
+                addrs: addrs.clone(),
                 database: database.clone(),
                 username: username.clone(),
                 password: password.clone(),
@@ -89,7 +96,7 @@ impl Default for NativeClient {
             DEFAULT_POOL_SIZE,
         );
         Self {
-            addr,
+            addrs,
             database,
             username,
             password,
@@ -108,7 +115,7 @@ impl NativeClient {
     fn rebuild_pool(&mut self) {
         self.pool = build_pool(
             PoolConfig {
-                addr: self.addr,
+                addrs: self.addrs.clone(),
                 database: self.database.clone(),
                 username: self.username.clone(),
                 password: self.password.clone(),
@@ -121,16 +128,51 @@ impl NativeClient {
 
     /// Set the server address (host:port).
     ///
+    /// Replaces any previously configured addresses with a single address.
+    /// To configure multiple addresses for round-robin failover, use
+    /// [`with_addrs`](NativeClient::with_addrs).
+    ///
     /// # Panics
     ///
     /// If `addr` cannot be resolved to a socket address.
     #[must_use]
     pub fn with_addr(mut self, addr: impl ToSocketAddrs) -> Self {
-        self.addr = addr
+        let resolved = addr
             .to_socket_addrs()
             .expect("invalid address")
             .next()
             .expect("no address resolved");
+        self.addrs = vec![resolved];
+        self.rebuild_pool();
+        self
+    }
+
+    /// Set multiple server addresses for round-robin failover.
+    ///
+    /// The pool cycles through the provided addresses in order, distributing
+    /// new connections across all listed hosts.  When a connection to one host
+    /// fails, the next `acquire` will try the following address in the list.
+    ///
+    /// Replaces any previously configured addresses.
+    ///
+    /// # Panics
+    ///
+    /// If `addrs` is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use clickhouse::native::NativeClient;
+    /// let client = NativeClient::default()
+    ///     .with_addrs(vec![
+    ///         "10.0.0.1:9000".parse().unwrap(),
+    ///         "10.0.0.2:9000".parse().unwrap(),
+    ///     ]);
+    /// ```
+    #[must_use]
+    pub fn with_addrs(mut self, addrs: Vec<std::net::SocketAddr>) -> Self {
+        assert!(!addrs.is_empty(), "with_addrs: address list must not be empty");
+        self.addrs = addrs;
         self.rebuild_pool();
         self
     }
