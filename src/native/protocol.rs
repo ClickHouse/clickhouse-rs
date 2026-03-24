@@ -189,15 +189,15 @@ pub(crate) struct ServerException {
 
 #[allow(unused)]
 #[derive(Debug, Clone)]
-pub(crate) struct ProfileInfo {
-    pub(crate) rows: u64,
-    pub(crate) blocks: u64,
-    pub(crate) bytes: u64,
-    pub(crate) applied_limit: bool,
-    pub(crate) rows_before_limit: u64,
-    pub(crate) calculated_rows_before_limit: bool,
-    pub(crate) applied_aggregation: bool,
-    pub(crate) rows_before_aggregation: u64,
+pub struct ProfileInfo {
+    pub rows: u64,
+    pub blocks: u64,
+    pub bytes: u64,
+    pub applied_limit: bool,
+    pub rows_before_limit: u64,
+    pub calculated_rows_before_limit: bool,
+    pub applied_aggregation: bool,
+    pub rows_before_aggregation: u64,
 }
 
 #[allow(unused)]
@@ -210,14 +210,14 @@ pub(crate) struct TableColumns {
 // === Progress ===
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Progress {
-    pub(crate) read_rows: u64,
-    pub(crate) read_bytes: u64,
-    pub(crate) total_rows_to_read: u64,
-    pub(crate) total_bytes_to_read: Option<u64>,
-    pub(crate) written_rows: Option<u64>,
-    pub(crate) written_bytes: Option<u64>,
-    pub(crate) elapsed_ns: Option<u64>,
+pub struct Progress {
+    pub read_rows: u64,
+    pub read_bytes: u64,
+    pub total_rows_to_read: u64,
+    pub total_bytes_to_read: Option<u64>,
+    pub written_rows: Option<u64>,
+    pub written_bytes: Option<u64>,
+    pub elapsed_ns: Option<u64>,
 }
 
 impl std::ops::Add for Progress {
