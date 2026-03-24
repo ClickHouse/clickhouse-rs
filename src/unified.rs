@@ -293,6 +293,42 @@ impl UnifiedClient {
     }
 
     // -----------------------------------------------------------------------
+    // Query cancellation
+    // -----------------------------------------------------------------------
+
+    /// Cancel a running query by its ID.
+    ///
+    /// Sends `KILL QUERY WHERE query_id = '{id}'` on a fresh connection so
+    /// the in-flight query is not interrupted mid-stream.  ClickHouse will
+    /// attempt to cancel the query asynchronously — cancellation is
+    /// best-effort and not guaranteed to be immediate.
+    ///
+    /// The `query_id` should be the same value passed to
+    /// [`UnifiedQuery::with_query_id`] when the query was started.  Because
+    /// `query_id` is caller-supplied (not end-user input), a plain format
+    /// string is used rather than a parameterized query.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use clickhouse::unified::UnifiedClient;
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// let client = UnifiedClient::http().with_url("http://localhost:8123").build();
+    /// client
+    ///     .query("SELECT sleep(30)")
+    ///     .with_query_id("my-long-query")
+    ///     .execute();  // fire-and-forget in a separate task
+    ///
+    /// // ... later, from another task:
+    /// client.cancel_query("my-long-query").await?;
+    /// # Ok(()) }
+    /// ```
+    pub async fn cancel_query(&self, query_id: &str) -> Result<()> {
+        let sql = format!("KILL QUERY WHERE query_id = '{query_id}'");
+        self.query(&sql).execute().await
+    }
+
+    // -----------------------------------------------------------------------
     // Ping
     // -----------------------------------------------------------------------
 
