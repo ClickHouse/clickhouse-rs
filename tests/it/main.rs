@@ -130,10 +130,25 @@ pub(crate) fn get_client() -> Client {
     let client = Client::default();
 
     match test_env() {
-        TestEnv::Local => client.with_url("http://localhost:8123"),
+        TestEnv::Local => {
+            let url = std::env::var("CLICKHOUSE_URL")
+                .unwrap_or_else(|_| "http://localhost:8123".to_string());
+            let client = client.with_url(url);
+            // Optional auth for local deployments that require it
+            let client = match std::env::var("CLICKHOUSE_USER") {
+                Ok(user) => client.with_user(user),
+                Err(_) => client,
+            };
+            match std::env::var("CLICKHOUSE_PASSWORD") {
+                Ok(pw) => client.with_password(pw),
+                Err(_) => client,
+            }
+        }
         TestEnv::Cloud => client
             .with_url(get_cloud_url())
-            .with_user("default")
+            .with_user(
+                std::env::var("CLICKHOUSE_CLOUD_USER").unwrap_or_else(|_| "default".to_string()),
+            )
             .with_password(require_env_var("CLICKHOUSE_CLOUD_PASSWORD")),
     }
 }
@@ -144,7 +159,8 @@ pub(crate) fn require_env_var(name: &str) -> String {
 
 pub(crate) fn get_cloud_url() -> String {
     let hostname = require_env_var("CLICKHOUSE_CLOUD_HOST");
-    format!("https://{hostname}:8443")
+    let port = std::env::var("CLICKHOUSE_CLOUD_PORT").unwrap_or_else(|_| "8443".to_string());
+    format!("https://{hostname}:{port}")
 }
 
 #[derive(Clone, Debug, Row, Serialize, Deserialize, PartialEq)]
