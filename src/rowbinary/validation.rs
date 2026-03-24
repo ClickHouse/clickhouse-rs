@@ -6,6 +6,18 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::marker::PhantomData;
 
+/// How a ClickHouse column encodes NULL on the wire.
+/// Different column types use different encodings; the deserializer
+/// needs to know which strategy to use when reading `Option<T>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NullEncoding {
+    /// `Nullable(T)`: a leading byte where 0 = not null, 1 = null.
+    Nullable,
+    /// `Variant(T1, T2, ...)`: NULL is encoded as discriminator 0xFF,
+    /// with no separate null byte and no value bytes following.
+    Discriminator,
+}
+
 /// This trait is used to validate the schema of a [`crate::Row`] against the parsed RBWNAT schema.
 /// Note that [`SchemaValidator`] is also implemented for `()`,
 /// which is used to skip validation if the user disabled it.
@@ -33,6 +45,12 @@ pub(crate) trait SchemaValidator<R: Row>: Sized {
     // If the database schema contains a tuple with more elements than it is defined in the struct,
     // this method will emit an error indicating that the struct definition is incomplete.
     fn check_tuple_fully_validated(&self) -> Result<()>;
+    /// Returns the null encoding of the current column, if known.
+    /// Called by the deserializer before reading any bytes in `deserialize_option`
+    /// to determine which null-reading strategy to use.
+    fn null_encoding(&self) -> Option<NullEncoding> {
+        None
+    }
 }
 
 pub(crate) struct DataTypeValidator<'caller, R: Row> {
