@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use crate::error::{Error, Result};
+use crate::native::callbacks::QueryCallbacks;
 use crate::native::client::NativeClient;
 use crate::native::pool::PooledConnection;
 use crate::native::reader::ServerPacket;
@@ -24,6 +25,8 @@ pub struct NativeRowCursor<T: RowOwned + RowRead> {
     query_id: String,
     /// Merged settings (client-level + per-query overrides) for this cursor.
     settings: Vec<(String, String)>,
+    /// Observability callbacks invoked as packets arrive from the server.
+    callbacks: QueryCallbacks,
     /// Buffered row bytes from already-received blocks.
     row_buf: VecDeque<Vec<u8>>,
     state: CursorState,
@@ -62,12 +65,14 @@ impl<T: RowOwned + RowRead> NativeRowCursor<T> {
         sql: String,
         query_id: String,
         settings: Vec<(String, String)>,
+        callbacks: QueryCallbacks,
     ) -> Self {
         Self {
             client,
             sql,
             query_id,
             settings,
+            callbacks,
             row_buf: VecDeque::new(),
             state: CursorState::NotStarted,
             _marker: PhantomData,
@@ -174,6 +179,16 @@ impl<T: RowOwned + RowRead> NativeRowCursor<T> {
                                 conn.discard();
                             }
                             return Err(Error::BadResponse(err.to_string()));
+                        }
+                        ServerPacket::Progress(p) => {
+                            if let Some(cb) = &self.callbacks.on_progress {
+                                cb(&p);
+                            }
+                        }
+                        ServerPacket::ProfileInfo(pi) => {
+                            if let Some(cb) = &self.callbacks.on_profile_info {
+                                cb(&pi);
+                            }
                         }
                         _ => {}
                     }

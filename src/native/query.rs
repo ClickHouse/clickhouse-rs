@@ -1,8 +1,10 @@
 //! Native query builder — mirrors `crate::query::Query` for the native transport.
 
 use crate::error::{Error, Result};
+use crate::native::callbacks::QueryCallbacks;
 use crate::native::client::NativeClient;
 use crate::native::cursor::NativeRowCursor;
+use crate::native::protocol::{ProfileInfo, Progress};
 use crate::row::{RowOwned, RowRead};
 
 /// A query being built for native transport execution.
@@ -18,6 +20,8 @@ pub struct NativeQuery {
     query_id: Option<String>,
     /// Per-query settings that override (or extend) the client-level settings.
     settings: Vec<(String, String)>,
+    /// Observability callbacks invoked as packets arrive from the server.
+    callbacks: QueryCallbacks,
 }
 
 impl NativeQuery {
@@ -27,6 +31,7 @@ impl NativeQuery {
             sql: sql.to_string(),
             query_id: None,
             settings: Vec::new(),
+            callbacks: QueryCallbacks::default(),
         }
     }
 
@@ -66,6 +71,27 @@ impl NativeQuery {
     ) -> Self {
         self.settings
             .extend(settings.into_iter().map(|(k, v)| (k.into(), v.into())));
+        self
+    }
+
+    /// Register a callback invoked for each [`Progress`] packet received.
+    ///
+    /// Progress packets are sent periodically by ClickHouse during query
+    /// execution and report rows/bytes read so far.  The callback is called
+    /// synchronously in the cursor's read loop; it must not block.
+    pub fn with_progress(mut self, f: impl Fn(&Progress) + Send + Sync + 'static) -> Self {
+        self.callbacks.on_progress = Some(Box::new(f));
+        self
+    }
+
+    /// Register a callback invoked when the server sends a [`ProfileInfo`] packet.
+    ///
+    /// ProfileInfo arrives once at the end of a SELECT result set and reports
+    /// final statistics (total rows, bytes, applied limits, etc.).  The
+    /// callback is called synchronously in the cursor's read loop; it must not
+    /// block.
+    pub fn with_profile_info(mut self, f: impl Fn(&ProfileInfo) + Send + Sync + 'static) -> Self {
+        self.callbacks.on_profile_info = Some(Box::new(f));
         self
     }
 
@@ -141,7 +167,13 @@ impl NativeQuery {
     {
         let query_id = self.query_id.clone().unwrap_or_default();
         let settings = self.merged_settings();
-        Ok(NativeRowCursor::new(self.client, self.sql, query_id, settings))
+        Ok(NativeRowCursor::new(
+            self.client,
+            self.sql,
+            query_id,
+            settings,
+            self.callbacks,
+        ))
     }
 
     /// Fetch a single row.
