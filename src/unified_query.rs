@@ -53,6 +53,37 @@ impl UnifiedQuery {
     // Builder methods
     // -----------------------------------------------------------------------
 
+    /// Bind a ClickHouse named parameter using the `{name:Type}` placeholder syntax.
+    ///
+    /// For the HTTP transport, delegates to [`crate::query::Query::param`].
+    /// For the native transport, sends the parameter as a `param_<name>`
+    /// query setting (the same mechanism used by the Go client).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use clickhouse::unified::UnifiedClient;
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// let client = UnifiedClient::http().with_url("http://localhost:8123").build();
+    /// let rows = client
+    ///     .query("SELECT * FROM t WHERE id = {id:UInt32}")
+    ///     .param("id", 42u32)
+    ///     .fetch_all::<(u32,)>()
+    ///     .await?;
+    /// # Ok(()) }
+    /// ```
+    pub fn param(self, name: &str, value: impl std::fmt::Display) -> Self {
+        match self.inner {
+            QueryInner::Http(q) => Self {
+                inner: QueryInner::Http(q.param(name, value.to_string())),
+            },
+            #[cfg(feature = "native-transport")]
+            QueryInner::Native(q) => Self {
+                inner: QueryInner::Native(q.param(name, value)),
+            },
+        }
+    }
+
     /// Bind the next `?` placeholder in the query to `value`.
     ///
     /// Uses [`std::fmt::Display`] as the common interface across both

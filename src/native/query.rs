@@ -95,6 +95,34 @@ impl NativeQuery {
         self
     }
 
+    /// Bind a ClickHouse named parameter using the `{name:Type}` placeholder syntax.
+    ///
+    /// ClickHouse server-side named parameters use the syntax `{name:Type}` in
+    /// SQL.  The Go client — and this method — sends these as query settings
+    /// with the prefix `param_`.  For example, calling
+    /// `.param("id", 42u32)` adds the setting `param_id = "42"`, which
+    /// ClickHouse substitutes before executing the query.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use clickhouse::native::NativeClient;
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// let client = NativeClient::default();
+    /// let rows = client
+    ///     .query("SELECT * FROM t WHERE id = {id:UInt32}")
+    ///     .param("id", 42u32)
+    ///     .fetch_all::<(u32,)>()
+    ///     .await?;
+    /// # Ok(()) }
+    /// ```
+    pub fn param(mut self, name: &str, value: impl std::fmt::Display) -> Self {
+        let key = format!("param_{name}");
+        let val = value.to_string();
+        self.settings.push((key, val));
+        self
+    }
+
     /// Bind a parameter using simple string substitution.
     ///
     /// Replaces the next `?` placeholder in the SQL string.
