@@ -4,6 +4,7 @@
 
 use crate::error::Result;
 use crate::row::{RowOwned, RowRead};
+use crate::unified_cursor::UnifiedCursor;
 
 // ---------------------------------------------------------------------------
 // Inner enum
@@ -73,6 +74,40 @@ impl UnifiedQuery {
     // -----------------------------------------------------------------------
     // Terminal methods
     // -----------------------------------------------------------------------
+
+    /// Execute a SELECT query and return a streaming [`UnifiedCursor`].
+    ///
+    /// The cursor yields one owned row at a time via [`UnifiedCursor::next`].
+    /// Use this when the result set may be large and you want to process rows
+    /// without buffering them all in memory.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use clickhouse::unified::UnifiedClient;
+    /// # use clickhouse::{Row, RowOwned, RowRead};
+    /// # use serde::Deserialize;
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// #[derive(Row, Deserialize)]
+    /// struct MyRow { id: u64 }
+    ///
+    /// let client = UnifiedClient::http().with_url("http://localhost:8123").build();
+    /// let mut cursor = client.query("SELECT id FROM t").fetch::<MyRow>()?;
+    /// while let Some(row) = cursor.next().await? {
+    ///     println!("{}", row.id);
+    /// }
+    /// # Ok(()) }
+    /// ```
+    pub fn fetch<T>(self) -> Result<UnifiedCursor<T>>
+    where
+        T: RowOwned + RowRead,
+    {
+        match self.inner {
+            QueryInner::Http(q) => Ok(UnifiedCursor::from_http(q.fetch::<T>()?)),
+            #[cfg(feature = "native-transport")]
+            QueryInner::Native(q) => Ok(UnifiedCursor::from_native(q.fetch::<T>()?)),
+        }
+    }
 
     /// Execute a DDL or non-SELECT statement and discard any results.
     pub async fn execute(self) -> Result<()> {

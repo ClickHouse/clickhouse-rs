@@ -53,6 +53,8 @@ pub mod native;
 pub mod dynamic;
 
 pub mod unified;
+pub mod unified_cursor;
+pub mod unified_insert;
 pub mod unified_query;
 pub use unified::{Transport, UnifiedClient};
 
