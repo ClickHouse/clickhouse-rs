@@ -211,6 +211,20 @@ impl<'caller, R: Row> SchemaValidator<R> for DataTypeValidator<'caller, R> {
     fn check_tuple_fully_validated(&self) -> Result<()> {
         unreachable!()
     }
+
+    fn null_encoding(&self) -> Option<NullEncoding> {
+        if self.current_column_idx >= self.metadata.columns.len() {
+            return None;
+        }
+        let data_type = self.metadata.columns[self.current_column_idx]
+            .data_type
+            .remove_low_cardinality();
+        match data_type {
+            DataTypeNode::Nullable(_) => Some(NullEncoding::Nullable),
+            DataTypeNode::Variant(_) => Some(NullEncoding::Discriminator),
+            _ => None,
+        }
+    }
 }
 
 /// Having a ClickHouse `Map<K, V>` defined as a `HashMap<K, V>` in Rust, Serde will call:
@@ -408,17 +422,31 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                 }
                 IdentifierType::Variant => {
                     if let Variant(possible_types, state) = &mut inner.kind {
-                        // ClickHouse guarantees max 255 variants, i.e. the same max value as u8
-                        if value.into_u8() < (possible_types.len() as u8) {
-                            *state = VariantValidationState::Identifier(value.into_u8());
+                        let id = value.into_u8();
+                        if id < (possible_types.len() as u8) {
+                            *state = VariantValidationState::Identifier(id);
                         } else {
                             let (full_name, full_data_type) =
                                 inner.root.get_current_column_name_and_type()?;
 
+                            // 0xFF is the NULL discriminator for Variant columns.
+                            // reaching here means the Rust field is not Option<T>,
+                            // so it cannot represent NULL.
+                            let detail = if id == 0xFF {
+                                "received NULL (0xFF discriminator), \
+                                 but the field is not Option<T>"
+                                    .to_string()
+                            } else {
+                                format!(
+                                    "Variant identifier {id} is out of bounds, \
+                                     max allowed index is {}",
+                                    possible_types.len() - 1
+                                )
+                            };
+
                             return Err(Error::SchemaMismatch(format!(
-                                "While processing column {full_name} defined as {full_data_type}: \
-                                 Variant identifier {value} is out of bounds, max allowed index is {}",
-                                possible_types.len() - 1
+                                "While processing column {full_name} \
+                                 defined as {full_data_type}: {detail}"
                             )));
                         }
                     }
@@ -568,16 +596,20 @@ fn validate_impl<'serde, 'caller, R: Row>(
         {
             Ok(None)
         }
-        SerdeType::Option => {
-            if let DataTypeNode::Nullable(inner_type) = data_type {
-                Ok(Some(InnerDataTypeValidator {
-                    root,
-                    kind: InnerDataTypeValidatorKind::Nullable(inner_type),
-                }))
-            } else {
-                root.err_on_schema_mismatch(data_type, serde_type, is_inner)
-            }
-        }
+        SerdeType::Option => match data_type {
+            DataTypeNode::Nullable(inner_type) => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Nullable(inner_type),
+            })),
+            // variant is implicitly nullable; 0xFF discriminator = NULL.
+            // reuse Nullable inner kind as a passthrough so the subsequent
+            // SerdeType::Variant call resolves against the Variant data type.
+            DataTypeNode::Variant(_) => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Nullable(data_type),
+            })),
+            _ => root.err_on_schema_mismatch(data_type, serde_type, is_inner),
+        },
         SerdeType::Seq(_) => match data_type {
             DataTypeNode::Array(inner_type) => Ok(Some(InnerDataTypeValidator {
                 root,
