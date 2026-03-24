@@ -496,12 +496,9 @@ impl Client {
         database: &str,
         table: &str,
     ) -> dynamic::insert::DynamicInsert {
-        dynamic::insert::DynamicInsert::new(
-            self.clone(),
-            database.to_string(),
-            table.to_string(),
-            self.dynamic_schema_cache.clone(),
-        )
+        let unified =
+            crate::unified::UnifiedClient::new(crate::unified::Transport::Http(self.clone()));
+        unified.dynamic_insert(database, table)
     }
 
     /// Start an async auto-flushing dynamic batcher for a table.
@@ -524,7 +521,9 @@ impl Client {
         table: &str,
         config: dynamic::DynamicBatchConfig,
     ) -> dynamic::DynamicBatcher {
-        dynamic::DynamicBatcher::new(self, database, table, config)
+        let unified =
+            crate::unified::UnifiedClient::new(crate::unified::Transport::Http(self.clone()));
+        unified.dynamic_batcher(database, table, config)
     }
 
     /// Starts a new SELECT/DDL query.

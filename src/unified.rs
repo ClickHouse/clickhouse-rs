@@ -22,7 +22,11 @@
 //! 3. Add an `UnifiedClient::grpc() -> UnifiedGrpcBuilder` constructor and,
 //!    optionally, an `as_grpc() -> Option<&GrpcClient>` accessor.
 
+use std::sync::Arc;
+
 use crate::Client;
+use crate::dynamic::{DynamicBatchConfig, DynamicBatcher, DynamicSchemaCache};
+use crate::dynamic::insert::DynamicInsert;
 use crate::error::Result;
 use crate::pool_stats::PoolStats;
 use crate::row::Row;
@@ -42,6 +46,7 @@ use crate::native::NativeClient;
 /// Variants are additive — new transports can be introduced without breaking
 /// existing code that already pattern-matches on this enum (add `#[non_exhaustive]`
 /// if upstream opts in to that stability guarantee).
+#[derive(Clone)]
 pub enum Transport {
     /// HTTP interface (default ClickHouse port 8123).
     Http(Client),
@@ -87,14 +92,28 @@ pub enum Transport {
 /// let http = Client::default().with_url("http://localhost:8123");
 /// let client = UnifiedClient::new(Transport::Http(http));
 /// ```
+#[derive(Clone)]
 pub struct UnifiedClient {
     transport: Transport,
+    pub(crate) dynamic_schema_cache: Arc<DynamicSchemaCache>,
 }
 
 impl UnifiedClient {
     /// Wrap an existing [`Transport`] value.
+    ///
+    /// For the HTTP transport, the dynamic schema cache is shared with the
+    /// underlying [`Client`].  For the native transport, a new independent
+    /// cache is created (5 min TTL, same default as HTTP).
     pub fn new(transport: Transport) -> Self {
-        Self { transport }
+        let dynamic_schema_cache = match &transport {
+            Transport::Http(c) => c.dynamic_schema_cache.clone(),
+            #[cfg(feature = "native-transport")]
+            Transport::Native(_) => DynamicSchemaCache::new(std::time::Duration::from_secs(300)),
+        };
+        Self {
+            transport,
+            dynamic_schema_cache,
+        }
     }
 
     /// Start building an HTTP-transport client.
@@ -220,6 +239,57 @@ impl UnifiedClient {
                 "InsertFormatted requires HTTP transport".into(),
             )),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Dynamic INSERT
+    // -----------------------------------------------------------------------
+
+    /// Start a schema-driven dynamic insert for a table.
+    ///
+    /// Fetches the schema from `system.columns` (cached with TTL) and encodes
+    /// `Map<String, Value>` to RowBinary.  The query path works on both HTTP
+    /// and native transports, but the actual insert data path currently requires
+    /// the HTTP transport (native returns an error at write time).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut insert = client.dynamic_insert("mydb", "mytable");
+    /// insert.write_map(&row).await?;
+    /// insert.write_map(&row2).await?;
+    /// let rows_written = insert.end().await?;
+    /// ```
+    pub fn dynamic_insert(&self, database: &str, table: &str) -> DynamicInsert {
+        DynamicInsert::new(
+            self.clone(),
+            database.to_string(),
+            table.to_string(),
+            self.dynamic_schema_cache.clone(),
+        )
+    }
+
+    /// Start an async auto-flushing dynamic batcher for a table.
+    ///
+    /// Same as [`dynamic_insert`][Self::dynamic_insert] but with a background
+    /// task that auto-flushes on row count and time thresholds.  Multiple tasks
+    /// can write concurrently via [`DynamicBatcherHandle`][crate::dynamic::DynamicBatcherHandle].
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let batcher = client.dynamic_batcher("mydb", "mytable", Default::default());
+    /// let handle = batcher.handle();
+    /// handle.write_map(row).await?;
+    /// batcher.end().await?;
+    /// ```
+    pub fn dynamic_batcher(
+        &self,
+        database: &str,
+        table: &str,
+        config: DynamicBatchConfig,
+    ) -> DynamicBatcher {
+        DynamicBatcher::new(self, database, table, config)
     }
 
     // -----------------------------------------------------------------------

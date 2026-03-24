@@ -169,11 +169,12 @@ impl std::fmt::Debug for DynamicSchemaCache {
 // Schema fetch
 // ---------------------------------------------------------------------------
 
-/// Fetch table schema from `system.columns` via the HTTP client.
+/// Fetch table schema from `system.columns` via the unified client.
 ///
+/// Works over both HTTP and native TCP transports.
 /// Parses each column's type string into a full [`ParsedType`].
 pub async fn fetch_dynamic_schema(
-    client: &crate::Client,
+    client: &crate::unified::UnifiedClient,
     database: &str,
     table: &str,
 ) -> Result<DynamicSchema, DynamicError> {

@@ -47,7 +47,7 @@ use serde_json::{Map, Value};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Duration;
 
-use crate::Client;
+use crate::unified::UnifiedClient;
 
 use super::error::DynamicError;
 use super::schema::DynamicSchemaCache;
@@ -117,7 +117,7 @@ fn channel_closed() -> DynamicError {
 impl DynamicBatcher {
     /// Create a new `DynamicBatcher`. Spawns a background tokio task immediately.
     pub fn new(
-        client: &Client,
+        client: &UnifiedClient,
         database: &str,
         table: &str,
         config: DynamicBatchConfig,
@@ -207,7 +207,7 @@ impl DynamicBatcherHandle {
 // ---------------------------------------------------------------------------
 
 async fn background_task(
-    client: Client,
+    client: UnifiedClient,
     database: String,
     table: String,
     schema_cache: Arc<DynamicSchemaCache>,
@@ -312,7 +312,7 @@ async fn background_task(
 ///
 /// On schema mismatch, invalidates cache and retries once with fresh schema.
 async fn flush_buffer(
-    client: &Client,
+    client: &UnifiedClient,
     database: &str,
     table: &str,
     schema_cache: &Arc<DynamicSchemaCache>,
@@ -343,7 +343,7 @@ async fn flush_buffer(
 
 /// Attempt to insert rows via DynamicInsert.
 async fn try_insert(
-    client: &Client,
+    client: &UnifiedClient,
     database: &str,
     table: &str,
     rows: &[Map<String, Value>],

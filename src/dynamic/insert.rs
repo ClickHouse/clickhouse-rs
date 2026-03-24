@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
-use crate::Client;
+use crate::unified::UnifiedClient;
 
 use super::encode::{columns_to_send, encode_dynamic_row};
 use super::error::DynamicError;
@@ -38,7 +38,7 @@ use super::schema::{fetch_dynamic_schema, ColumnDef, DynamicSchema, DynamicSchem
 /// For automatic recovery in a pipeline context, use `DynamicBatcher` which
 /// handles this transparently.
 pub struct DynamicInsert {
-    client: Client,
+    client: UnifiedClient,
     database: String,
     table: String,
     schema_cache: Arc<DynamicSchemaCache>,
@@ -53,7 +53,7 @@ pub struct DynamicInsert {
 impl DynamicInsert {
     /// Create a new `DynamicInsert`. Schema is fetched lazily on first `write_map()`.
     pub(crate) fn new(
-        client: Client,
+        client: UnifiedClient,
         database: String,
         table: String,
         schema_cache: Arc<DynamicSchemaCache>,
@@ -98,7 +98,9 @@ impl DynamicInsert {
         }
         let schema = self.schema.as_ref().unwrap();
 
-        // On first row, determine the column list and create the INSERT
+        // On first row, determine the column list and create the INSERT.
+        // The insert data path requires HTTP transport — for native, the
+        // RowBinary-to-columnar conversion is not yet wired up.
         if self.insert.is_none() {
             let cols = columns_to_send(row, schema);
             let col_names: Vec<String> = cols.iter().map(|c| c.name.clone()).collect();
@@ -107,7 +109,14 @@ impl DynamicInsert {
                 "INSERT INTO {}.{} ({col_list}) FORMAT RowBinary",
                 self.database, self.table
             );
-            self.insert = Some(self.client.insert_formatted_with(sql).buffered());
+            let formatted = self
+                .client
+                .insert_formatted_with(sql)
+                .map_err(|e| DynamicError::EncodingError {
+                    column: String::new(),
+                    message: e.to_string(),
+                })?;
+            self.insert = Some(formatted.buffered());
             self.insert_columns = Some(col_names);
         }
 
