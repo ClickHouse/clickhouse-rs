@@ -1,0 +1,278 @@
+//! Unified client wrapper that dispatches to either the HTTP or native TCP transport.
+//!
+//! # Design — Approach C (additive wrapper, both backends untouched)
+//!
+//! [`UnifiedClient`] holds a [`Transport`] enum and delegates every operation
+//! to whichever variant is active.  Neither [`crate::Client`] nor
+//! [`crate::native::NativeClient`] is modified; they remain fully independent
+//! and can still be used directly.
+//!
+//! ## Extension point
+//!
+//! `Transport` is the single extension point for future transports.  To add
+//! a new transport (e.g. gRPC):
+//!
+//! 1. Add a variant to `Transport` (feature-gate it if appropriate):
+//!    ```ignore
+//!    #[cfg(feature = "grpc-transport")]
+//!    Grpc(GrpcClient),
+//!    ```
+//! 2. Add a builder struct (`UnifiedGrpcBuilder`) that wraps `GrpcClient`'s
+//!    builder pattern and terminates in `.build() -> UnifiedClient`.
+//! 3. Add an `UnifiedClient::grpc() -> UnifiedGrpcBuilder` constructor and,
+//!    optionally, an `as_grpc() -> Option<&GrpcClient>` accessor.
+
+use crate::Client;
+
+#[cfg(feature = "native-transport")]
+use crate::native::NativeClient;
+
+// ---------------------------------------------------------------------------
+// Transport enum
+// ---------------------------------------------------------------------------
+
+/// Selects the wire protocol used by a [`UnifiedClient`].
+///
+/// Variants are additive — new transports can be introduced without breaking
+/// existing code that already pattern-matches on this enum (add `#[non_exhaustive]`
+/// if upstream opts in to that stability guarantee).
+pub enum Transport {
+    /// HTTP interface (default ClickHouse port 8123).
+    Http(Client),
+
+    /// Native binary TCP protocol (default ClickHouse port 9000).
+    #[cfg(feature = "native-transport")]
+    Native(NativeClient),
+}
+
+// ---------------------------------------------------------------------------
+// UnifiedClient
+// ---------------------------------------------------------------------------
+
+/// A ClickHouse client that can use either the HTTP or native TCP transport,
+/// selected at runtime via the [`Transport`] enum.
+///
+/// # Construction
+///
+/// Use the transport-specific constructors for a fluent builder experience:
+///
+/// ```no_run
+/// use clickhouse::unified::UnifiedClient;
+///
+/// // HTTP transport
+/// let client = UnifiedClient::http()
+///     .with_url("http://localhost:8123")
+///     .with_database("default")
+///     .build();
+///
+/// // Native TCP transport (requires feature = "native-transport")
+/// # #[cfg(feature = "native-transport")]
+/// let client = UnifiedClient::native()
+///     .with_addr("localhost:9000")
+///     .with_database("default")
+///     .build();
+/// ```
+///
+/// Or wrap an already-configured client directly:
+///
+/// ```no_run
+/// use clickhouse::{Client, unified::{Transport, UnifiedClient}};
+///
+/// let http = Client::default().with_url("http://localhost:8123");
+/// let client = UnifiedClient::new(Transport::Http(http));
+/// ```
+pub struct UnifiedClient {
+    transport: Transport,
+}
+
+impl UnifiedClient {
+    /// Wrap an existing [`Transport`] value.
+    pub fn new(transport: Transport) -> Self {
+        Self { transport }
+    }
+
+    /// Start building an HTTP-transport client.
+    pub fn http() -> UnifiedHttpBuilder {
+        UnifiedHttpBuilder::default()
+    }
+
+    /// Start building a native-TCP-transport client.
+    #[cfg(feature = "native-transport")]
+    pub fn native() -> UnifiedNativeBuilder {
+        UnifiedNativeBuilder::default()
+    }
+
+    // -----------------------------------------------------------------------
+    // Accessors
+    // -----------------------------------------------------------------------
+
+    /// Return a reference to the underlying [`Transport`].
+    pub fn transport(&self) -> &Transport {
+        &self.transport
+    }
+
+    /// Return the inner [`Client`] if this is an HTTP transport, otherwise `None`.
+    pub fn as_http(&self) -> Option<&Client> {
+        match &self.transport {
+            Transport::Http(c) => Some(c),
+            #[cfg(feature = "native-transport")]
+            Transport::Native(_) => None,
+        }
+    }
+
+    /// Return the inner [`NativeClient`] if this is a native transport, otherwise `None`.
+    #[cfg(feature = "native-transport")]
+    pub fn as_native(&self) -> Option<&NativeClient> {
+        match &self.transport {
+            Transport::Native(c) => Some(c),
+            Transport::Http(_) => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HTTP builder
+// ---------------------------------------------------------------------------
+
+/// Fluent builder for an HTTP-backed [`UnifiedClient`].
+///
+/// Delegates to [`Client`]'s builder methods.  Call `.build()` to finish.
+pub struct UnifiedHttpBuilder {
+    inner: Client,
+}
+
+impl Default for UnifiedHttpBuilder {
+    fn default() -> Self {
+        Self {
+            inner: Client::default(),
+        }
+    }
+}
+
+impl UnifiedHttpBuilder {
+    /// Set the ClickHouse HTTP endpoint URL.
+    ///
+    /// # Examples
+    /// ```
+    /// use clickhouse::unified::UnifiedClient;
+    /// let client = UnifiedClient::http().with_url("http://localhost:8123").build();
+    /// ```
+    #[must_use]
+    pub fn with_url(mut self, url: impl Into<String>) -> Self {
+        self.inner = self.inner.with_url(url);
+        self
+    }
+
+    /// Set the database name.
+    #[must_use]
+    pub fn with_database(mut self, database: impl Into<String>) -> Self {
+        self.inner = self.inner.with_database(database);
+        self
+    }
+
+    /// Set the username.
+    #[must_use]
+    pub fn with_user(mut self, user: impl Into<String>) -> Self {
+        self.inner = self.inner.with_user(user);
+        self
+    }
+
+    /// Set the password.
+    #[must_use]
+    pub fn with_password(mut self, password: impl Into<String>) -> Self {
+        self.inner = self.inner.with_password(password);
+        self
+    }
+
+    /// Consume the builder and return a [`UnifiedClient`].
+    pub fn build(self) -> UnifiedClient {
+        UnifiedClient::new(Transport::Http(self.inner))
+    }
+}
+
+impl From<UnifiedHttpBuilder> for UnifiedClient {
+    fn from(b: UnifiedHttpBuilder) -> Self {
+        b.build()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Native builder
+// ---------------------------------------------------------------------------
+
+/// Fluent builder for a native-TCP-backed [`UnifiedClient`].
+///
+/// Delegates to [`NativeClient`]'s builder methods.  Call `.build()` to finish.
+#[cfg(feature = "native-transport")]
+pub struct UnifiedNativeBuilder {
+    inner: NativeClient,
+}
+
+#[cfg(feature = "native-transport")]
+impl Default for UnifiedNativeBuilder {
+    fn default() -> Self {
+        Self {
+            inner: NativeClient::default(),
+        }
+    }
+}
+
+#[cfg(feature = "native-transport")]
+impl UnifiedNativeBuilder {
+    /// Set the server address (`host:port`).
+    ///
+    /// # Panics
+    ///
+    /// If `addr` cannot be resolved to a socket address.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use clickhouse::unified::UnifiedClient;
+    /// let client = UnifiedClient::native().with_addr("localhost:9000").build();
+    /// ```
+    #[must_use]
+    pub fn with_addr(mut self, addr: impl std::net::ToSocketAddrs) -> Self {
+        self.inner = self.inner.with_addr(addr);
+        self
+    }
+
+    /// Set the database name.
+    #[must_use]
+    pub fn with_database(mut self, database: impl Into<String>) -> Self {
+        self.inner = self.inner.with_database(database);
+        self
+    }
+
+    /// Set the username.
+    #[must_use]
+    pub fn with_user(mut self, user: impl Into<String>) -> Self {
+        self.inner = self.inner.with_user(user);
+        self
+    }
+
+    /// Set the password.
+    #[must_use]
+    pub fn with_password(mut self, password: impl Into<String>) -> Self {
+        self.inner = self.inner.with_password(password);
+        self
+    }
+
+    /// Enable LZ4 compression for query data.
+    #[must_use]
+    pub fn with_lz4(mut self) -> Self {
+        self.inner = self.inner.with_lz4();
+        self
+    }
+
+    /// Consume the builder and return a [`UnifiedClient`].
+    pub fn build(self) -> UnifiedClient {
+        UnifiedClient::new(Transport::Native(self.inner))
+    }
+}
+
+#[cfg(feature = "native-transport")]
+impl From<UnifiedNativeBuilder> for UnifiedClient {
+    fn from(b: UnifiedNativeBuilder) -> Self {
+        b.build()
+    }
+}

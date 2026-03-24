@@ -52,6 +52,9 @@ pub mod native;
 
 pub mod dynamic;
 
+pub mod unified;
+pub use unified::{Transport, UnifiedClient};
+
 /// A client containing HTTP pool.
 ///
 /// ### Cloning behavior
