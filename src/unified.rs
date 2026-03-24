@@ -25,6 +25,7 @@
 use crate::Client;
 use crate::error::Result;
 use crate::row::Row;
+use crate::server_info::ServerVersion;
 use crate::unified_insert::UnifiedInsert;
 use crate::unified_query::UnifiedQuery;
 
@@ -245,6 +246,24 @@ impl UnifiedClient {
             Transport::Native(c) => c.ping().await,
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Server metadata
+    // -----------------------------------------------------------------------
+
+    /// Return server version information from the native TCP handshake.
+    ///
+    /// Returns `None` for the HTTP transport (no handshake with version info).
+    /// For the native transport this acquires a pooled connection, reads the
+    /// cached [`ServerVersion`], and immediately returns the connection.
+    pub async fn server_version(&self) -> Option<ServerVersion> {
+        match &self.transport {
+            Transport::Http(_) => None,
+            #[cfg(feature = "native-transport")]
+            Transport::Native(c) => c.server_version().await.ok(),
+        }
+    }
+
 }
 
 // ---------------------------------------------------------------------------

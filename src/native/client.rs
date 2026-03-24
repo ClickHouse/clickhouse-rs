@@ -28,6 +28,7 @@ use crate::native::protocol::NativeCompressionMethod;
 use crate::native::query::NativeQuery;
 use crate::native::schema::NativeSchemaCache;
 use crate::row::Row;
+use crate::server_info::ServerVersion;
 
 /// A ClickHouse client using the native binary TCP protocol (port 9000).
 ///
@@ -335,6 +336,26 @@ impl NativeClient {
         let mut conn = self.acquire().await?;
         conn.ping().await
     }
+
+    /// Return server version information from the native protocol handshake.
+    ///
+    /// Acquires a pooled connection (opening one if the pool is empty), reads
+    /// the cached [`ServerHello`](crate::native::protocol::ServerHello), and
+    /// immediately returns the connection to the pool.
+    pub async fn server_version(&self) -> Result<ServerVersion> {
+        let conn = self.acquire().await?;
+        let hello = conn.server_hello();
+        Ok(ServerVersion {
+            name: hello.server_name.clone(),
+            major: hello.version.0,
+            minor: hello.version.1,
+            patch: hello.version.2,
+            revision: hello.revision_version,
+            timezone: hello.timezone.clone(),
+            display_name: hello.display_name.clone(),
+        })
+    }
+
 }
 
 /// Execute a query expected to return two `String` columns and collect all rows

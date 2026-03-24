@@ -151,11 +151,11 @@ impl ServerPacketId {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ServerHello {
-    pub(crate) server_name: String,
-    pub(crate) version: (u64, u64, u64),
-    pub(crate) revision_version: u64,
-    pub(crate) timezone: Option<String>,
-    pub(crate) display_name: Option<String>,
+    pub server_name: String,
+    pub version: (u64, u64, u64),
+    pub revision_version: u64,
+    pub timezone: Option<String>,
+    pub display_name: Option<String>,
     pub(crate) chunked_send: ChunkedProtocolMode,
     pub(crate) chunked_recv: ChunkedProtocolMode,
 }
