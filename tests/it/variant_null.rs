@@ -67,7 +67,8 @@ async fn variant_null_values() {
     );
 }
 
-// exact reproduction from the issue: single query, no table needed
+// verifies that a NULL Variant value can be read without a table,
+// using an inline cast expression (e.g. `NULL::Variant(String, UInt64)`).
 #[tokio::test]
 async fn variant_null_cast() {
     let client = prepare_database!();
