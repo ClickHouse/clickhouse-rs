@@ -220,6 +220,31 @@ impl UnifiedClient {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Ping
+    // -----------------------------------------------------------------------
+
+    /// Ping the server to verify connectivity.
+    ///
+    /// For the HTTP transport this issues `SELECT 1`.  For the native transport
+    /// it sends the native ping packet.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use clickhouse::unified::UnifiedClient;
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// let client = UnifiedClient::http().with_url("http://localhost:8123").build();
+    /// client.ping().await?;
+    /// # Ok(()) }
+    /// ```
+    pub async fn ping(&self) -> Result<()> {
+        match &self.transport {
+            Transport::Http(c) => c.query("SELECT 1").execute().await,
+            #[cfg(feature = "native-transport")]
+            Transport::Native(c) => c.ping().await,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
