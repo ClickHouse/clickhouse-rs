@@ -23,6 +23,9 @@
 //!    optionally, an `as_grpc() -> Option<&GrpcClient>` accessor.
 
 use crate::Client;
+use crate::error::Result;
+use crate::row::Row;
+use crate::unified_insert::UnifiedInsert;
 use crate::unified_query::UnifiedQuery;
 
 #[cfg(feature = "native-transport")]
@@ -159,6 +162,64 @@ impl UnifiedClient {
             Transport::Native(c) => UnifiedQuery::from_native(c.query(sql)),
         }
     }
+
+    // -----------------------------------------------------------------------
+    // INSERT
+    // -----------------------------------------------------------------------
+
+    /// Start an INSERT for rows of type `T`.
+    ///
+    /// Returns a [`UnifiedInsert`] that dispatches to whichever transport is
+    /// active.  Call [`UnifiedInsert::write`] for each row, then
+    /// [`UnifiedInsert::end`] to commit.
+    ///
+    /// This method is `async` because the HTTP transport opens the request at
+    /// this point; the native transport defers the connection until the first
+    /// [`write`](UnifiedInsert::write) call.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use clickhouse::unified::UnifiedClient;
+    /// # use clickhouse::{Row, RowOwned, RowWrite};
+    /// # use serde::Serialize;
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// #[derive(Row, Serialize)]
+    /// struct Event { id: u64, name: String }
+    ///
+    /// let client = UnifiedClient::http().with_url("http://localhost:8123").build();
+    /// let mut insert = client.insert::<Event>("events").await?;
+    /// insert.write(&Event { id: 1, name: "foo".into() }).await?;
+    /// insert.end().await?;
+    /// # Ok(()) }
+    /// ```
+    pub async fn insert<T: Row>(&self, table: &str) -> Result<UnifiedInsert<T>> {
+        match &self.transport {
+            Transport::Http(c) => Ok(UnifiedInsert::from_http(c.insert::<T>(table).await?)),
+            #[cfg(feature = "native-transport")]
+            Transport::Native(c) => Ok(UnifiedInsert::from_native(c.insert::<T>(table))),
+        }
+    }
+
+    /// Start an INSERT sending pre-formatted data (HTTP transport only).
+    ///
+    /// `sql` should be an `INSERT INTO ... FORMAT <format name>` statement.
+    ///
+    /// Returns [`crate::error::Error::UnsupportedTransport`] if the active
+    /// transport is not HTTP.
+    pub fn insert_formatted_with(
+        &self,
+        sql: impl Into<String>,
+    ) -> Result<crate::insert_formatted::InsertFormatted> {
+        match &self.transport {
+            Transport::Http(c) => Ok(c.insert_formatted_with(sql)),
+            #[cfg(feature = "native-transport")]
+            Transport::Native(_) => Err(crate::error::Error::UnsupportedTransport(
+                "InsertFormatted requires HTTP transport".into(),
+            )),
+        }
+    }
+
 }
 
 // ---------------------------------------------------------------------------
