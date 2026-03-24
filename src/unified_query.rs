@@ -71,6 +71,52 @@ impl UnifiedQuery {
         }
     }
 
+    /// Set a query ID that ClickHouse will associate with this query.
+    ///
+    /// For the HTTP transport, this sets the `query_id` URL parameter.
+    /// For the native transport, the ID is sent in the query packet header.
+    ///
+    /// If not set, the server generates its own query ID.
+    pub fn with_query_id(self, id: impl Into<String>) -> Self {
+        let id = id.into();
+        match self.inner {
+            QueryInner::Http(q) => Self {
+                inner: QueryInner::Http(q.with_option("query_id", &id)),
+            },
+            #[cfg(feature = "native-transport")]
+            QueryInner::Native(q) => Self {
+                inner: QueryInner::Native(q.with_query_id(id)),
+            },
+        }
+    }
+
+    /// Add per-query settings that override any client-level settings for this
+    /// query only.
+    ///
+    /// For the HTTP transport, each setting is forwarded as a URL parameter
+    /// (ClickHouse accepts settings as query parameters on the HTTP interface).
+    /// For the native transport, settings are sent in the query packet.
+    pub fn with_settings(
+        self,
+        settings: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Self {
+        match self.inner {
+            QueryInner::Http(q) => {
+                let mut q = q;
+                for (k, v) in settings {
+                    q = q.with_option(k.into(), v.into());
+                }
+                Self {
+                    inner: QueryInner::Http(q),
+                }
+            }
+            #[cfg(feature = "native-transport")]
+            QueryInner::Native(q) => Self {
+                inner: QueryInner::Native(q.with_settings(settings)),
+            },
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Terminal methods
     // -----------------------------------------------------------------------
