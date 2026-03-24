@@ -27,6 +27,7 @@ use crate::native::pool::{NativePool, PoolConfig, PooledConnection, build_pool};
 use crate::native::protocol::NativeCompressionMethod;
 use crate::native::query::NativeQuery;
 use crate::native::schema::NativeSchemaCache;
+use crate::pool_stats::PoolStats;
 use crate::row::Row;
 use crate::server_info::ServerVersion;
 
@@ -356,6 +357,19 @@ impl NativeClient {
         })
     }
 
+    /// Return a snapshot of connection pool statistics.
+    ///
+    /// Values are eventually-consistent — they reflect the pool state at the
+    /// moment of the call.
+    pub fn pool_stats(&self) -> PoolStats {
+        let status = self.pool.status();
+        PoolStats {
+            max_size: status.max_size,
+            size: status.size,
+            available: status.available,
+            waiting: status.waiting,
+        }
+    }
 }
 
 /// Execute a query expected to return two `String` columns and collect all rows

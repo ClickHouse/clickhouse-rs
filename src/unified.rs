@@ -24,6 +24,7 @@
 
 use crate::Client;
 use crate::error::Result;
+use crate::pool_stats::PoolStats;
 use crate::row::Row;
 use crate::server_info::ServerVersion;
 use crate::unified_insert::UnifiedInsert;
@@ -264,6 +265,20 @@ impl UnifiedClient {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Pool statistics
+    // -----------------------------------------------------------------------
+
+    /// Return a snapshot of connection pool statistics.
+    ///
+    /// Returns `None` for the HTTP transport (no managed connection pool).
+    pub fn pool_stats(&self) -> Option<PoolStats> {
+        match &self.transport {
+            Transport::Http(_) => None,
+            #[cfg(feature = "native-transport")]
+            Transport::Native(c) => Some(c.pool_stats()),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

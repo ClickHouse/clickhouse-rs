@@ -52,6 +52,7 @@ pub mod native;
 
 pub mod dynamic;
 
+pub mod pool_stats;
 pub mod server_info;
 pub mod unified;
 pub mod unified_cursor;
