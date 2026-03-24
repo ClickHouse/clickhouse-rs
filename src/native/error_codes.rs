@@ -55,6 +55,7 @@ pub(crate) struct ServerError {
 }
 
 impl ServerError {
+    #[allow(dead_code)] // Future error classification — used when pool recycler inspects exception severity
     pub(crate) fn is_fatal(&self) -> bool {
         matches!(self.severity, Severity::Server(_))
     }

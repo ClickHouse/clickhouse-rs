@@ -125,10 +125,14 @@ pub(crate) async fn decompress_data<R: ClickHouseRead>(
     }
 }
 
+// ZSTD streaming decompression infrastructure — used when ZSTD block-at-a-time
+// reading is wired up (currently LZ4 only; ZSTD uses decompress_data directly).
+#[allow(dead_code)]
 type BlockReadingFuture<'a, R> =
     Pin<Box<dyn Future<Output = Result<(Vec<u8>, &'a mut R)>> + Send + Sync + 'a>>;
 
 /// Async reader that decompresses ClickHouse native protocol blocks on-the-fly.
+#[allow(dead_code)]
 pub(crate) struct DecompressionReader<'a, R: ClickHouseRead + 'static> {
     mode: NativeCompressionMethod,
     inner: Option<&'a mut R>,
@@ -139,6 +143,7 @@ pub(crate) struct DecompressionReader<'a, R: ClickHouseRead + 'static> {
 
 impl<'a, R: ClickHouseRead> DecompressionReader<'a, R> {
     /// Create decompressor. Reads first chunk immediately.
+    #[allow(dead_code)] // ZSTD streaming path — wired when block-at-a-time ZSTD is enabled
     pub(crate) async fn new(mode: NativeCompressionMethod, inner: &'a mut R) -> Result<Self> {
         let decompressed = decompress_data(inner, mode).await?;
         Ok(Self {

@@ -71,6 +71,7 @@ impl NativeConnection {
 
     /// Returns `true` if this connection has been marked as broken and should
     /// not be returned to the idle pool.
+    #[allow(dead_code)] // Pool recycler accesses `conn.poisoned` directly; method kept for external callers
     pub(crate) fn is_poisoned(&self) -> bool {
         self.poisoned
     }
@@ -132,6 +133,7 @@ impl NativeConnection {
     }
 
     /// Execute a query and read all response packets until EndOfStream.
+    #[allow(dead_code)] // Convenience wrapper over execute_query_with; kept for callers that don't need query_id/settings
     pub(crate) async fn execute_query(&mut self, query: &str) -> Result<()> {
         self.execute_query_with("", query, &[]).await
     }

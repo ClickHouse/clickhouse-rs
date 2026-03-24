@@ -77,6 +77,7 @@ pub(crate) async fn read_sparse_offsets<R: ClickHouseRead>(
 }
 
 /// Sync version of `read_sparse_offsets` for `bytes::Buf` readers.
+#[allow(dead_code)] // Only called from tests; kept as a sync alternative for future non-async read paths
 #[allow(clippy::cast_possible_truncation)]
 pub(crate) fn read_sparse_offsets_sync<R: ClickHouseBytesRead>(
     reader: &mut R,

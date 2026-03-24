@@ -48,8 +48,8 @@ pub(crate) enum ServerPacket {
 /// A fully-read data block from the server.
 #[derive(Debug)]
 pub(crate) struct DataBlock {
-    pub(crate) info: BlockInfo,
-    pub(crate) num_columns: u64,
+    pub(crate) _info: BlockInfo,       // read from wire; not yet exposed to callers
+    pub(crate) _num_columns: u64,      // derived from column_headers.len(); wire value kept for parity
     pub(crate) num_rows: u64,
     /// Column name + type.
     pub(crate) column_headers: Vec<ColumnHeader>,
@@ -206,14 +206,14 @@ pub(crate) async fn read_exception<R: ClickHouseRead>(
     let message =
         String::from_utf8_lossy(&reader.read_string().await?).to_string();
     let stack_trace = reader.read_utf8_string().await?;
-    let has_nested = reader.read_u8().await? != 0;
+    let _has_nested = reader.read_u8().await? != 0;
 
     Ok(ServerException {
         code,
         name,
         message,
         stack_trace,
-        has_nested,
+        _has_nested,
     })
 }
 
@@ -428,8 +428,8 @@ async fn read_data_block<R: ClickHouseRead>(reader: &mut R, revision: u64) -> Re
     };
 
     Ok(ServerPacket::Data(DataBlock {
-        info,
-        num_columns,
+        _info: info,
+        _num_columns: num_columns,
         num_rows,
         column_headers,
         row_data,

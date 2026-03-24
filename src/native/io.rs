@@ -2,8 +2,6 @@
 //!
 //! Provides VarUInt and length-prefixed string encoding used by the native TCP protocol.
 
-use std::io::IoSlice;
-
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::error::{Error, Result};
@@ -63,12 +61,6 @@ pub(crate) trait ClickHouseWrite: AsyncWrite + Unpin + Send + Sync {
         &mut self,
         value: V,
     ) -> impl Future<Output = Result<()>> + Send + use<'_, Self, V>;
-
-    /// Write multiple buffers in one syscall (vectored I/O).
-    fn write_vectored_all<'a>(
-        &'a mut self,
-        bufs: &'a mut [IoSlice<'a>],
-    ) -> impl Future<Output = Result<()>> + Send + 'a;
 }
 
 impl<T: AsyncWrite + Unpin + Send + Sync> ClickHouseWrite for T {
@@ -99,61 +91,10 @@ impl<T: AsyncWrite + Unpin + Send + Sync> ClickHouseWrite for T {
         self.write_all(value).await?;
         Ok(())
     }
-
-    async fn write_vectored_all<'a>(&'a mut self, bufs: &'a mut [IoSlice<'a>]) -> Result<()> {
-        let total: usize = bufs.iter().map(|b| b.len()).sum();
-        if total == 0 {
-            return Ok(());
-        }
-
-        let mut written = 0usize;
-        while written < total {
-            let mut remaining_bufs: Vec<IoSlice<'_>> =
-                bufs.iter().skip_while(|b| b.is_empty()).map(|b| IoSlice::new(b)).collect();
-
-            if remaining_bufs.is_empty() {
-                break;
-            }
-
-            let mut to_skip = written;
-            for buf in &mut remaining_bufs {
-                if to_skip == 0 {
-                    break;
-                }
-                let buf_len = buf.len();
-                if to_skip >= buf_len {
-                    to_skip -= buf_len;
-                    *buf = IoSlice::new(&[]);
-                } else {
-                    break;
-                }
-            }
-
-            let active_bufs: Vec<IoSlice<'_>> =
-                remaining_bufs.into_iter().filter(|b| !b.is_empty()).collect();
-
-            if active_bufs.is_empty() {
-                break;
-            }
-
-            match self.write_vectored(&active_bufs).await {
-                Ok(0) => {
-                    return Err(Error::Network(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::WriteZero,
-                        "write_vectored returned 0",
-                    ))));
-                }
-                Ok(n) => written += n,
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(e.into()),
-            }
-        }
-
-        Ok(())
-    }
 }
 
 /// Sync extension trait on `bytes::Buf` for ClickHouse wire protocol.
+#[allow(dead_code)] // Used as bound in read_sparse_offsets_sync (test-only path); kept for future sync readers
 pub(crate) trait ClickHouseBytesRead: bytes::Buf {
     fn try_get_var_uint(&mut self) -> Result<u64>;
     fn try_get_string(&mut self) -> Result<bytes::Bytes>;
