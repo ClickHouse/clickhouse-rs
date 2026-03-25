@@ -7,6 +7,7 @@ pub use self::{
 };
 use self::{error::Result, http_client::HttpClient};
 use crate::row_metadata::{AccessType, ColumnDefaultKind, InsertMetadata, RowMetadata};
+use crate::server_info::ServerVersion;
 
 #[doc = include_str!("row_derive.md")]
 pub use clickhouse_macros::Row;
@@ -562,6 +563,57 @@ impl Client {
     pub fn with_validation(mut self, enabled: bool) -> Self {
         self.validation = enabled;
         self
+    }
+
+    /// Checks connectivity to the ClickHouse server.
+    ///
+    /// Executes `SELECT 1` and discards the result. Returns `Ok(())` if the
+    /// server responds successfully, or an error if the connection fails or the
+    /// server returns an exception.
+    ///
+    /// Works with all ClickHouse deployments including those behind HTTP proxies
+    /// that may not forward the `/ping` endpoint.
+    pub async fn ping(&self) -> Result<()> {
+        self.query("SELECT 1").execute().await
+    }
+
+    /// Returns version information for the connected ClickHouse server.
+    ///
+    /// Executes `SELECT version(), timezone()` and parses the result into a
+    /// [`ServerVersion`]. The version string is expected in the format returned
+    /// by ClickHouse: `"major.minor.patch.revision"` (e.g. `"24.3.1.123"`).
+    ///
+    /// `display_name` is always `None` for the HTTP transport — the server
+    /// display name is only available via the native TCP handshake.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server is unreachable, the query fails, or the
+    /// version string cannot be parsed.
+    pub async fn server_version(&self) -> Result<ServerVersion> {
+        let (version_str, timezone): (String, String) = self
+            .query("SELECT version(), timezone()")
+            .fetch_one()
+            .await?;
+
+        // Parse "major.minor.patch.revision" — ClickHouse always emits all
+        // four components. Any missing component defaults to 0 so that future
+        // format changes degrade gracefully rather than returning an error.
+        let mut parts = version_str.splitn(4, '.');
+        let major = parts.next().unwrap_or("0").parse::<u64>().unwrap_or(0);
+        let minor = parts.next().unwrap_or("0").parse::<u64>().unwrap_or(0);
+        let patch = parts.next().unwrap_or("0").parse::<u64>().unwrap_or(0);
+        let revision = parts.next().unwrap_or("0").parse::<u64>().unwrap_or(0);
+
+        Ok(ServerVersion {
+            name: "ClickHouse".to_string(),
+            major,
+            minor,
+            patch,
+            revision,
+            timezone: Some(timezone),
+            display_name: None,
+        })
     }
 
     /// Clear table metadata that was previously received and cached.
