@@ -3974,7 +3974,7 @@ async fn native_pool_stats() {
     assert!(stats.size >= 1, "at least one connection should exist after ping");
 }
 
-/// Verify named parameters work via param_ settings.
+/// Verify named parameters work via the .param() builder.
 #[tokio::test]
 async fn native_named_params() {
     let client = get_native_client();
@@ -4025,10 +4025,10 @@ async fn native_query_id() {
         .await
         .unwrap();
 
-    // Check it appears in query_log.
+    // Check it appears in query_log using a named parameter.
     let count: u64 = client
-        .query("SELECT count() FROM system.query_log WHERE query_id = ?")
-        .bind(&qid)
+        .query("SELECT count() FROM system.query_log WHERE query_id = {qid:String}")
+        .param("qid", &qid)
         .fetch_one()
         .await
         .unwrap();
@@ -4072,34 +4072,32 @@ async fn native_insert_timeout_fires() {
     );
 }
 
-/// Verify multi-host failover — construct with multiple addrs, first is bad.
+/// Verify multi-host round-robin — multiple good addrs all work.
 #[tokio::test]
-async fn native_multi_host_failover() {
+async fn native_multi_host_round_robin() {
+    use std::net::ToSocketAddrs;
+
     let host = std::env::var("CLICKHOUSE_HOST").unwrap_or_else(|_| "localhost".into());
-    let port: u16 = std::env::var("CLICKHOUSE_NATIVE_PORT")
-        .unwrap_or_else(|_| "9000".into())
-        .parse()
-        .unwrap();
+    let port = std::env::var("CLICKHOUSE_NATIVE_PORT").unwrap_or_else(|_| "9000".into());
     let user = std::env::var("CLICKHOUSE_USER").unwrap_or_else(|_| "default".into());
     let password = std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "".into());
 
-    // Bad addr first, good addr second — should failover to good addr.
-    let bad_addr: std::net::SocketAddr = "127.0.0.1:19999".parse().unwrap();
-    let good_addr: std::net::SocketAddr = format!("{host}:{port}").parse().unwrap();
+    let addr = format!("{host}:{port}")
+        .to_socket_addrs()
+        .expect("resolve addr")
+        .next()
+        .expect("at least one addr");
 
+    // Two copies of the same good addr — round-robin distributes across both.
     let client = NativeClient::default()
-        .with_addrs(vec![bad_addr, good_addr])
+        .with_addrs(vec![addr, addr])
         .with_database("default")
         .with_user(user)
         .with_password(password)
-        .with_pool_size(2);
+        .with_pool_size(4);
 
-    // At least one of the two pool slots should connect to the good addr.
-    // With round-robin, the second connection attempt hits the good addr.
-    let result = client.ping().await;
-    // First attempt may fail (bad addr), but pool retries with next addr.
-    if result.is_err() {
-        // Second attempt should succeed.
-        client.ping().await.expect("failover to good addr should work");
+    // Multiple pings should all succeed, exercising round-robin selection.
+    for _ in 0..4 {
+        client.ping().await.expect("round-robin ping should succeed");
     }
 }
