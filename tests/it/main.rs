@@ -296,6 +296,7 @@ mod user_agent;
 mod uuid;
 mod variant;
 mod dynamic;
+mod upstream_compat;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TestEnv {
