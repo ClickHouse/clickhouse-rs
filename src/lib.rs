@@ -19,15 +19,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
+#[cfg(feature = "async-inserter")]
+pub mod async_inserter;
+#[cfg(feature = "batcher")]
+pub mod batcher;
 pub mod error;
 pub mod insert;
 pub mod insert_formatted;
 #[cfg(feature = "inserter")]
 pub mod inserter;
-#[cfg(feature = "async-inserter")]
-pub mod async_inserter;
-#[cfg(feature = "batcher")]
-pub mod batcher;
 pub mod query;
 pub mod serde;
 pub mod sql;
@@ -41,12 +41,12 @@ mod compression;
 mod cursors;
 mod headers;
 mod http_client;
+pub mod quantities;
 mod request_body;
 mod response;
 mod row;
 mod row_metadata;
 mod rowbinary;
-pub mod quantities;
 #[cfg(any(feature = "inserter", feature = "native-transport"))]
 pub(crate) mod ticks;
 
@@ -61,6 +61,7 @@ pub mod unified;
 pub mod unified_cursor;
 pub mod unified_insert;
 pub mod unified_query;
+pub use pool_stats::PoolStats;
 pub use unified::{Transport, UnifiedClient};
 
 /// A client containing HTTP pool.
@@ -166,9 +167,9 @@ impl Client {
             products_info: Vec::default(),
             validation: true,
             insert_metadata_cache: Arc::new(InsertMetadataCache::default()),
-            dynamic_schema_cache: dynamic::DynamicSchemaCache::new(
-                std::time::Duration::from_secs(300),
-            ),
+            dynamic_schema_cache: dynamic::DynamicSchemaCache::new(std::time::Duration::from_secs(
+                300,
+            )),
             #[cfg(feature = "test-util")]
             mocked: false,
         }
@@ -547,11 +548,7 @@ impl Client {
     /// insert.write_map(&row2).await?;
     /// let rows_written = insert.end().await?;
     /// ```
-    pub fn dynamic_insert(
-        &self,
-        database: &str,
-        table: &str,
-    ) -> dynamic::insert::DynamicInsert {
+    pub fn dynamic_insert(&self, database: &str, table: &str) -> dynamic::insert::DynamicInsert {
         let unified =
             crate::unified::UnifiedClient::new(crate::unified::Transport::Http(self.clone()));
         unified.dynamic_insert(database, table)
