@@ -458,7 +458,9 @@ fn validate_impl<'serde, 'caller, R: Row>(
     serde_type: &SerdeType,
     is_inner: bool,
 ) -> Result<Option<InnerDataTypeValidator<'serde, 'caller, R>>> {
-    let data_type = column_data_type.remove_low_cardinality();
+    let data_type = column_data_type
+        .remove_low_cardinality()
+        .remove_simple_aggregate_function();
     match serde_type {
         SerdeType::Bool
             if data_type == &DataTypeNode::Bool || data_type == &DataTypeNode::UInt8 =>
@@ -661,7 +663,12 @@ fn validate_impl<'serde, 'caller, R: Row>(
         _ => root.err_on_schema_mismatch(
             data_type,
             serde_type,
-            is_inner || matches!(column_data_type, DataTypeNode::LowCardinality { .. }),
+            is_inner
+                || matches!(column_data_type, DataTypeNode::LowCardinality { .. })
+                || matches!(
+                    column_data_type,
+                    DataTypeNode::SimpleAggregateFunction { .. }
+                ),
         ),
     }
 }
