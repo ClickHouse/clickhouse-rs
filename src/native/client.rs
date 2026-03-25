@@ -175,12 +175,12 @@ impl NativeClient {
                 if let Some(resolved) = addrs.next() {
                     self.addrs = vec![resolved];
                     self.rebuild_pool();
-                } else {
-                    tracing::warn!("no address resolved — will fail at connect time");
                 }
+                // No address resolved — will fail at connect time with a proper error
             }
-            Err(e) => {
-                tracing::warn!("address resolution failed: {e} — will fail at connect time");
+            Err(_) => {
+                // DNS resolution failed — will fail at connect time with a proper error.
+                // Don't panic: callers may be validating configs or testing error paths.
             }
         }
         self
