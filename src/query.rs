@@ -225,6 +225,41 @@ impl Query {
         self
     }
 
+    /// Set the server-side query ID for this query.
+    ///
+    /// Useful for tracing queries in system.query_log and for cancellation
+    /// via `KILL QUERY WHERE query_id = '...'`.
+    ///
+    /// ClickHouse accepts `query_id` as a URL parameter in the HTTP interface.
+    pub fn with_query_id(self, query_id: impl Into<String>) -> Self {
+        self.with_option("query_id", query_id)
+    }
+
+    /// Set per-query ClickHouse settings.
+    ///
+    /// Overrides client-level settings for this query only.  Each setting is
+    /// passed as a URL parameter in the HTTP interface.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn example() {
+    /// # let client = clickhouse::Client::default();
+    /// client.query("SELECT ...")
+    ///     .with_settings([("max_threads", "4"), ("max_memory_usage", "1000000000")])
+    ///     .execute();
+    /// # }
+    /// ```
+    pub fn with_settings<'a>(
+        mut self,
+        settings: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Self {
+        for (k, v) in settings {
+            self.client.set_option(k.to_owned(), v.to_owned());
+        }
+        self
+    }
+
     /// Specify server side parameter for query.
     ///
     /// In queries, you can reference params as {name: type} e.g. {val: Int32}.
