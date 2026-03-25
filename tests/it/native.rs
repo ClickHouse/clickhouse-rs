@@ -3947,3 +3947,159 @@ async fn native_async_inserter_mixed_beats_concurrent() {
         .unwrap();
     assert_eq!(security_count, 20);
 }
+
+// ---------------------------------------------------------------------------
+// New feature tests — native parity, observability, unified client
+// ---------------------------------------------------------------------------
+
+/// Verify server_version() returns sensible data.
+#[tokio::test]
+async fn native_server_version() {
+    let client = get_native_client();
+    let ver = client.server_version().await.unwrap();
+    assert!(!ver.name.is_empty(), "server name must not be empty");
+    assert!(ver.major > 0, "major version must be > 0, got {}", ver.major);
+    assert!(ver.revision > 0, "revision must be > 0");
+}
+
+/// Verify pool_stats() returns metrics consistent with pool_size.
+#[tokio::test]
+async fn native_pool_stats() {
+    let client = get_native_client().with_pool_size(3);
+    // Warm up one connection.
+    client.ping().await.unwrap();
+
+    let stats = client.pool_stats();
+    assert_eq!(stats.max_size, 3);
+    assert!(stats.size >= 1, "at least one connection should exist after ping");
+}
+
+/// Verify named parameters work via param_ settings.
+#[tokio::test]
+async fn native_named_params() {
+    let client = get_native_client();
+    let result: u64 = client
+        .query("SELECT {val:UInt64}")
+        .param("val", 42u64)
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(result, 42);
+}
+
+/// Verify per-query settings override client settings.
+#[tokio::test]
+async fn native_per_query_settings() {
+    let client = get_native_client();
+    // max_result_rows=1 should cause an error when we try to fetch 2 rows
+    // (with result_overflow_mode=throw).
+    let result = client
+        .query("SELECT number FROM system.numbers LIMIT 2")
+        .with_settings([
+            ("max_result_rows".to_string(), "1".to_string()),
+            ("result_overflow_mode".to_string(), "throw".to_string()),
+        ])
+        .fetch_all::<u64>()
+        .await;
+    assert!(result.is_err(), "should fail with max_result_rows=1");
+}
+
+/// Verify query_id is respected — appears in system.query_log.
+#[tokio::test]
+async fn native_query_id() {
+    let client = get_native_client();
+    let qid = format!("chrs_test_{:x}", rand::random::<u64>());
+
+    // Execute a query with a specific ID.
+    client
+        .query("SELECT 1")
+        .with_query_id(&qid)
+        .execute()
+        .await
+        .unwrap();
+
+    // Flush the query log.
+    client
+        .query("SYSTEM FLUSH LOGS")
+        .execute()
+        .await
+        .unwrap();
+
+    // Check it appears in query_log.
+    let count: u64 = client
+        .query("SELECT count() FROM system.query_log WHERE query_id = ?")
+        .bind(&qid)
+        .fetch_one()
+        .await
+        .unwrap();
+    assert!(count > 0, "query_id {qid} not found in system.query_log");
+}
+
+/// Verify insert timeouts — a very short timeout should fail.
+#[tokio::test]
+async fn native_insert_timeout_fires() {
+    use std::time::Duration;
+
+    #[derive(Row, Serialize)]
+    struct TimeoutRow {
+        x: u64,
+    }
+
+    let client = get_native_client();
+    client
+        .query("CREATE TABLE IF NOT EXISTS default.chrs_timeout_test (x UInt64) ENGINE = Memory")
+        .execute()
+        .await
+        .unwrap();
+
+    // end_timeout of 1ns is effectively instant — should time out.
+    let mut insert = client
+        .insert::<TimeoutRow>("default.chrs_timeout_test")
+        .with_timeouts(None, Some(Duration::from_nanos(1)));
+
+    insert.write(&TimeoutRow { x: 1 }).await.unwrap();
+    let result = insert.end().await;
+
+    // Clean up regardless of result.
+    let _ = client
+        .query("DROP TABLE IF EXISTS default.chrs_timeout_test")
+        .execute()
+        .await;
+
+    assert!(
+        result.is_err(),
+        "insert with 1ns end_timeout should fail"
+    );
+}
+
+/// Verify multi-host failover — construct with multiple addrs, first is bad.
+#[tokio::test]
+async fn native_multi_host_failover() {
+    let host = std::env::var("CLICKHOUSE_HOST").unwrap_or_else(|_| "localhost".into());
+    let port: u16 = std::env::var("CLICKHOUSE_NATIVE_PORT")
+        .unwrap_or_else(|_| "9000".into())
+        .parse()
+        .unwrap();
+    let user = std::env::var("CLICKHOUSE_USER").unwrap_or_else(|_| "default".into());
+    let password = std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "".into());
+
+    // Bad addr first, good addr second — should failover to good addr.
+    let bad_addr: std::net::SocketAddr = "127.0.0.1:19999".parse().unwrap();
+    let good_addr: std::net::SocketAddr = format!("{host}:{port}").parse().unwrap();
+
+    let client = NativeClient::default()
+        .with_addrs(vec![bad_addr, good_addr])
+        .with_database("default")
+        .with_user(user)
+        .with_password(password)
+        .with_pool_size(2);
+
+    // At least one of the two pool slots should connect to the good addr.
+    // With round-robin, the second connection attempt hits the good addr.
+    let result = client.ping().await;
+    // First attempt may fail (bad addr), but pool retries with next addr.
+    if result.is_err() {
+        // Second attempt should succeed.
+        client.ping().await.expect("failover to good addr should work");
+    }
+}
