@@ -30,6 +30,7 @@
 //!   without calling `end` silently aborts (connection dropped).
 
 use std::marker::PhantomData;
+use std::time::Duration;
 
 use bytes::BytesMut;
 
@@ -64,6 +65,13 @@ pub struct NativeInsert<T> {
     row_buf: Vec<Vec<u8>>,
     /// Total bytes across all buffered rows (used for flush threshold).
     row_bytes: usize,
+    /// If set, each `send_insert_block` call is bounded by this duration.
+    /// On expiry the connection is poisoned and `Error::TimedOut` is returned.
+    send_timeout: Option<Duration>,
+    /// If set, the final `finish_insert` call (including server-side processing)
+    /// is bounded by this duration.  On expiry the connection is poisoned and
+    /// `Error::TimedOut` is returned.
+    end_timeout: Option<Duration>,
     _marker: PhantomData<fn() -> T>,
 }
 
@@ -81,6 +89,8 @@ impl<T: Row> NativeInsert<T> {
             columns: Vec::new(),
             row_buf: Vec::new(),
             row_bytes: 0,
+            send_timeout: None,
+            end_timeout: None,
             _marker: PhantomData,
         }
     }
@@ -130,12 +140,23 @@ impl<T: Row> NativeInsert<T> {
                 return Err(e);
             }
         }
-        let result = self
+        let finish = self
             .conn
             .as_mut()
             .expect("conn must be open")
-            .finish_insert()
-            .await;
+            .finish_insert();
+        let result = if let Some(timeout) = self.end_timeout {
+            match tokio::time::timeout(timeout, finish).await {
+                Ok(r) => r,
+                Err(_elapsed) => {
+                    // Poison the connection — the protocol exchange is incomplete.
+                    self.conn.as_mut().expect("conn must be open").discard();
+                    Err(Error::TimedOut)
+                }
+            }
+        } else {
+            finish.await
+        };
         if result.is_ok() {
             // Take the connection out so our Drop impl does not discard it.
             // Dropping the PooledConnection here returns it to the idle pool.
@@ -168,12 +189,49 @@ impl<T: Row> NativeInsert<T> {
         let conn = self.conn.as_mut().expect("conn must be open during flush");
         let revision = conn.server_revision();
         let column_bytes = encode_columns(&rows, &self.columns, revision)?;
-        conn.send_insert_block(&column_bytes, self.columns.len(), n).await
+        // Drive the send future, applying send_timeout if configured.
+        // `conn` (a reborrow of `self.conn`) is consumed by `send`; once
+        // `send` is consumed by `timeout`/`await` the reborrow is released,
+        // allowing the subsequent `self.conn` borrow for poisoning.
+        let send = conn.send_insert_block(&column_bytes, self.columns.len(), n);
+        let result: Result<()> = if let Some(timeout) = self.send_timeout {
+            match tokio::time::timeout(timeout, send).await {
+                Ok(r) => r,
+                Err(_elapsed) => Err(Error::TimedOut),
+            }
+        } else {
+            send.await
+        };
+        if result.is_err() {
+            // Poison the connection on any error (including timeout) so it is
+            // never returned to the pool mid-INSERT.
+            self.conn.as_mut().expect("conn must be open during flush").discard();
+        }
+        result
     }
 
 }
 
 impl<T> NativeInsert<T> {
+    /// Set per-operation timeouts for this INSERT.
+    ///
+    /// `send_timeout` bounds each individual block send (`write` flush).
+    /// `end_timeout` bounds the final `end()` call, which includes waiting for
+    /// the server to acknowledge the INSERT (materialized views, quorum, etc.).
+    ///
+    /// `None` disables the corresponding timeout (the default).
+    ///
+    /// On timeout the connection is poisoned and [`Error::TimedOut`] is returned.
+    pub fn with_timeouts(
+        mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) -> Self {
+        self.send_timeout = send_timeout;
+        self.end_timeout = end_timeout;
+        self
+    }
+
     /// Abort the INSERT: discard the connection and clear the buffer.
     ///
     /// The server-side INSERT is incomplete — we must not return this

@@ -3,6 +3,8 @@
 //!
 //! Returned by [`crate::unified::UnifiedClient::insert`].
 
+use std::time::Duration;
+
 use crate::error::Result;
 use crate::row::{Row, RowWrite};
 
@@ -62,6 +64,32 @@ impl<T> UnifiedInsert<T> {
         Self {
             inner: InsertInner::Native(insert),
         }
+    }
+
+    /// Set per-operation timeouts for this INSERT.
+    ///
+    /// Delegates to the underlying transport:
+    /// - HTTP: [`crate::insert::Insert::with_timeouts`]
+    /// - Native: [`crate::native::NativeInsert::with_timeouts`]
+    ///
+    /// `send_timeout` bounds each block send; `end_timeout` bounds the final
+    /// server acknowledgement.  `None` disables the corresponding timeout.
+    pub fn with_timeouts(
+        self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) -> Self {
+        let inner = match self.inner {
+            InsertInner::Http(mut i) => {
+                i.set_timeouts(send_timeout, end_timeout);
+                InsertInner::Http(i)
+            }
+            #[cfg(feature = "native-transport")]
+            InsertInner::Native(i) => {
+                InsertInner::Native(i.with_timeouts(send_timeout, end_timeout))
+            }
+        };
+        Self { inner }
     }
 
     /// Serialise `row` into the internal buffer and flush if above threshold.
