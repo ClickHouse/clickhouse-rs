@@ -44,8 +44,9 @@ mod response;
 mod row;
 mod row_metadata;
 mod rowbinary;
-#[cfg(feature = "inserter")]
-mod ticks;
+pub mod quantities;
+#[cfg(any(feature = "inserter", feature = "native-transport"))]
+pub(crate) mod ticks;
 
 #[cfg(feature = "native-transport")]
 pub mod native;

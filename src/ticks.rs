@@ -4,12 +4,18 @@ const PERIOD_THRESHOLD: Duration = Duration::from_secs(365 * 24 * 3600);
 
 // === Instant ===
 
-// More efficient `Instant` based on TSC.
-#[cfg(not(feature = "test-util"))]
-type Instant = quanta::Instant;
-
+// quanta::Instant is a more efficient Instant based on TSC, used when the
+// `inserter` feature is enabled (which pulls in the `quanta` crate).
+// Without quanta (e.g. native transport without `inserter`), we fall back
+// to std::time::Instant.  test-util always uses tokio's controllable Instant.
 #[cfg(feature = "test-util")]
 type Instant = tokio::time::Instant;
+
+#[cfg(all(not(feature = "test-util"), feature = "inserter"))]
+type Instant = quanta::Instant;
+
+#[cfg(all(not(feature = "test-util"), not(feature = "inserter")))]
+type Instant = std::time::Instant;
 
 // === Ticks ===
 

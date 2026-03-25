@@ -4,75 +4,16 @@
 //! without requiring the `inserter` crate feature.
 
 use std::mem;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::error::Result;
 use crate::native::client::NativeClient;
 use crate::native::insert::NativeInsert;
 use crate::row::{Row, RowWrite};
+use crate::ticks::Ticks;
 
-/// Statistics about pending or inserted data.
-///
-/// Mirrors [`crate::inserter::Quantities`] for the native transport.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Quantities {
-    /// Approximate number of uncompressed bytes (RowBinary representation).
-    pub bytes: u64,
-    /// Number of rows written since the last commit.
-    pub rows: u64,
-    /// Number of non-empty transactions (INSERT statements) committed.
-    pub transactions: u64,
-}
-
-impl Quantities {
-    /// All-zero quantities.
-    pub const ZERO: Quantities = Quantities {
-        bytes: 0,
-        rows: 0,
-        transactions: 0,
-    };
-}
-
-/// Simple wall-clock period tracker used by [`NativeInserter`].
-struct NativeTicks {
-    period: Option<Duration>,
-    next_at: Option<Instant>,
-}
-
-impl Default for NativeTicks {
-    fn default() -> Self {
-        Self {
-            period: None,
-            next_at: None,
-        }
-    }
-}
-
-impl NativeTicks {
-    fn set_period(&mut self, period: Option<Duration>) {
-        self.period = period;
-    }
-
-    fn set_period_bias(&mut self, _bias: f64) {
-        // Bias (jitter) is accepted for API compatibility; not applied in native MVP.
-    }
-
-    fn reschedule(&mut self) {
-        self.next_at = self.period.map(|p| Instant::now() + p);
-    }
-
-    fn time_left(&mut self) -> Option<Duration> {
-        let next = self.next_at?;
-        let now = Instant::now();
-        Some(if next > now { next - now } else { Duration::ZERO })
-    }
-
-    fn reached(&self) -> bool {
-        self.next_at
-            .map(|next| Instant::now() >= next)
-            .unwrap_or(false)
-    }
-}
+// Re-export from shared module for backwards compatibility.
+pub use crate::quantities::Quantities;
 
 /// Multi-batch native INSERT manager.
 ///
@@ -86,7 +27,7 @@ pub struct NativeInserter<T> {
     max_bytes: u64,
     max_rows: u64,
     insert: Option<NativeInsert<T>>,
-    ticks: NativeTicks,
+    ticks: Ticks,
     pending: Quantities,
     in_transaction: bool,
     #[allow(clippy::type_complexity)]
@@ -101,7 +42,7 @@ impl<T: Row> NativeInserter<T> {
             max_bytes: u64::MAX,
             max_rows: u64::MAX,
             insert: None,
-            ticks: NativeTicks::default(),
+            ticks: Ticks::default(),
             pending: Quantities::ZERO,
             in_transaction: false,
             on_commit: None,

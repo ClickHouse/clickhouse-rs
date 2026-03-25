@@ -37,25 +37,8 @@ pub struct Inserter<T> {
     on_commit: Option<Box<dyn FnMut(&Quantities) + Send + 'static>>,
 }
 
-/// Statistics about pending or inserted data.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Quantities {
-    /// The number of uncompressed bytes.
-    pub bytes: u64,
-    /// The number for rows (calls of [`Inserter::write`]).
-    pub rows: u64,
-    /// The number of nonempty transactions (calls of [`Inserter::commit`]).
-    pub transactions: u64,
-}
-
-impl Quantities {
-    /// Just zero quantities, nothing special.
-    pub const ZERO: Quantities = Quantities {
-        bytes: 0,
-        rows: 0,
-        transactions: 0,
-    };
-}
+// Re-export from shared module for backwards compatibility.
+pub use crate::quantities::Quantities;
 
 impl<T> Inserter<T>
 where
