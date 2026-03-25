@@ -78,7 +78,7 @@ pub struct NativeClient {
     /// connection, immediately after the handshake.  The pool manager sends
     /// `SET ROLE role1, role2, ...` before returning a new connection.
     ///
-    /// An empty vec means "use the server default roles for this user"  -- 
+    /// An empty vec means "use the server default roles for this user"  --
     /// equivalent to `SET ROLE DEFAULT`.
     roles: Vec<String>,
     /// Maximum connections (idle + in-use) in the pool.
@@ -91,9 +91,13 @@ pub struct NativeClient {
 /// Default TLS config: no TLS.
 fn default_tls_config() -> TlsConfig {
     #[cfg(feature = "native-tls-rustls")]
-    { None }
+    {
+        None
+    }
     #[cfg(not(feature = "native-tls-rustls"))]
-    { () }
+    {
+        ()
+    }
 }
 
 impl Default for NativeClient {
@@ -166,13 +170,19 @@ impl NativeClient {
     /// If `addr` cannot be resolved to a socket address.
     #[must_use]
     pub fn with_addr(mut self, addr: impl ToSocketAddrs) -> Self {
-        let resolved = addr
-            .to_socket_addrs()
-            .expect("invalid address")
-            .next()
-            .expect("no address resolved");
-        self.addrs = vec![resolved];
-        self.rebuild_pool();
+        match addr.to_socket_addrs() {
+            Ok(mut addrs) => {
+                if let Some(resolved) = addrs.next() {
+                    self.addrs = vec![resolved];
+                    self.rebuild_pool();
+                } else {
+                    tracing::warn!("no address resolved — will fail at connect time");
+                }
+            }
+            Err(e) => {
+                tracing::warn!("address resolution failed: {e} — will fail at connect time");
+            }
+        }
         self
     }
 
@@ -200,7 +210,10 @@ impl NativeClient {
     /// ```
     #[must_use]
     pub fn with_addrs(mut self, addrs: Vec<std::net::SocketAddr>) -> Self {
-        assert!(!addrs.is_empty(), "with_addrs: address list must not be empty");
+        assert!(
+            !addrs.is_empty(),
+            "with_addrs: address list must not be empty"
+        );
         self.addrs = addrs;
         self.rebuild_pool();
         self
@@ -244,7 +257,7 @@ impl NativeClient {
     /// so connections work against both public ClickHouse Cloud and
     /// internal deployments with private CAs.
     ///
-    /// The `server_name` is used for SNI and certificate verification  -- 
+    /// The `server_name` is used for SNI and certificate verification  --
     /// typically the hostname of the ClickHouse server.
     /// Connect to ClickHouse's native TLS port (9440 by default).
     ///
@@ -279,7 +292,7 @@ impl NativeClient {
 
     /// Set the maximum number of connections (idle + in-use) in the pool.
     ///
-    /// Defaults to 10.  Must be called before the first query/insert  -- 
+    /// Defaults to 10.  Must be called before the first query/insert  --
     /// changing it after the pool has been initialised has no effect.
     #[must_use]
     pub fn with_pool_size(mut self, size: usize) -> Self {
@@ -302,11 +315,7 @@ impl NativeClient {
     ///     .with_setting("insert_quorum", "2");
     /// ```
     #[must_use]
-    pub fn with_setting(
-        mut self,
-        name: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Self {
+    pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         Arc::make_mut(&mut self.settings).push((name.into(), value.into()));
         self.rebuild_pool();
         self
@@ -430,10 +439,7 @@ impl NativeClient {
     /// The result is stored in the TTL cache for future calls to [`cached_schema`].
     ///
     /// [`cached_schema`]: NativeClient::cached_schema
-    pub async fn fetch_schema(
-        &self,
-        table: &str,
-    ) -> Result<Vec<(String, String)>> {
+    pub async fn fetch_schema(&self, table: &str) -> Result<Vec<(String, String)>> {
         if let Some(cached) = self.schema_cache.get(table) {
             return Ok(cached);
         }
@@ -463,11 +469,7 @@ impl NativeClient {
     ///
     /// Called internally after a successful `begin_insert` to cache the schema
     /// the server reported.
-    pub(crate) fn cache_schema(
-        &self,
-        table: &str,
-        columns: &[(String, String)],
-    ) {
+    pub(crate) fn cache_schema(&self, table: &str, columns: &[(String, String)]) {
         self.schema_cache
             .insert(table.to_string(), columns.to_vec());
     }
@@ -527,10 +529,7 @@ impl NativeClient {
 
 /// Execute a query expected to return two `String` columns and collect all rows
 /// as `Vec<(String, String)>`, parsing RowBinary directly without serde.
-async fn fetch_string_pairs(
-    client: &NativeClient,
-    sql: &str,
-) -> Result<Vec<(String, String)>> {
+async fn fetch_string_pairs(client: &NativeClient, sql: &str) -> Result<Vec<(String, String)>> {
     use crate::native::reader::ServerPacket;
 
     let mut conn = client.acquire().await?;
@@ -551,12 +550,8 @@ async fn fetch_string_pairs(
     let mut result = Vec::new();
 
     loop {
-        let packet = crate::native::reader::read_packet(
-            conn.reader_mut(),
-            revision,
-            compression,
-        )
-        .await?;
+        let packet =
+            crate::native::reader::read_packet(conn.reader_mut(), revision, compression).await?;
         match packet {
             ServerPacket::Data(block) if block.num_rows > 0 => {
                 // Each element in row_data is one complete RowBinary row.
