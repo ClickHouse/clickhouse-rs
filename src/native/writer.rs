@@ -101,16 +101,20 @@ pub(crate) async fn send_query<W: ClickHouseWrite>(
     writer.write_string(query).await?;
 
     // Parameters (revision >= 54459): sent AFTER the query body as a separate
-    // block. Each parameter is (key, FLAG_CUSTOM, field_dump_value). The key
-    // includes the "param_" prefix. Field dump wraps string values in single
-    // quotes with escaping.
+    // block. Each parameter is (bare_name, FLAG_CUSTOM, field_dump_value).
+    //
+    // On the native wire, parameter keys use the BARE name ("val"), not the
+    // prefixed form ("param_val"). The "param_" prefix is HTTP-only (URL params).
+    // We store them with the prefix internally (same as .param() builder), so
+    // strip it here before sending.
     if revision >= DBMS_MIN_PROTOCOL_VERSION_WITH_PARAMETERS {
         const FLAG_CUSTOM: u8 = 0x02;
         for (name, value) in settings {
             if !name.starts_with("param_") {
                 continue; // already sent as settings above
             }
-            writer.write_string(name).await?;
+            let bare_name = &name["param_".len()..];
+            writer.write_string(bare_name).await?;
             writer.write_u8(FLAG_CUSTOM).await?;
             let escaped = value.replace('\'', "\\'");
             writer.write_string(&format!("'{escaped}'")).await?;
