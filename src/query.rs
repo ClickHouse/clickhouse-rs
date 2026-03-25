@@ -186,7 +186,9 @@ impl Query {
             db.system.name = cfg!(feature = "opentelemetry").then_some("clickhouse"),
             // Only log full query text at TRACE level
             // Important that this is taken before client-side parameters are populated
-            db.query.text = tracing::enabled!(tracing::Level::TRACE).then(|| self.sql.to_string()),
+            // FIXME: we can't use `enabled!` due to https://github.com/tokio-rs/tracing/issues/2448
+            // but we don't want to log the full query at all verbosity levels.
+            // db.query.text = tracing::enabled!(tracing::Level::TRACE).then(|| self.sql.to_string()),
             // TODO: generate summary
             db.query.summary = tracing::field::Empty,
             db.response.status_code = tracing::field::Empty,
