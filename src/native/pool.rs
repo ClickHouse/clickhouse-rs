@@ -36,6 +36,12 @@ pub(crate) struct PoolConfig {
     pub(crate) password: String,
     pub(crate) compression: NativeCompressionMethod,
     pub(crate) settings: Vec<(String, String)>,
+    /// Roles to activate on each new connection via `SET ROLE`.
+    ///
+    /// When non-empty, the manager sends `SET ROLE role1, role2, …` once
+    /// after the handshake completes, before returning the connection to the
+    /// pool.  An empty vec skips `SET ROLE` entirely (server defaults apply).
+    pub(crate) roles: Vec<String>,
     pub(crate) tls: TlsConfig,
 }
 
@@ -54,7 +60,7 @@ impl managed::Manager for NativeConnectionManager {
         let addrs = &self.config.addrs;
         let idx = self.next_addr.fetch_add(1, Ordering::Relaxed) % addrs.len();
         let addr = &addrs[idx];
-        NativeConnection::open(
+        let mut conn = NativeConnection::open(
             addr,
             &self.config.database,
             &self.config.username,
@@ -63,7 +69,13 @@ impl managed::Manager for NativeConnectionManager {
             self.config.settings.clone(),
             &self.config.tls,
         )
-        .await
+        .await?;
+        // Activate roles for this session before the connection enters the pool.
+        // SET ROLE must be issued once per connection, right after the handshake.
+        if !self.config.roles.is_empty() {
+            conn.set_roles(&self.config.roles).await?;
+        }
+        Ok(conn)
     }
 
     async fn recycle(

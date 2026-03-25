@@ -152,7 +152,7 @@ impl Query {
         let query = self.sql.finish()?;
 
         let mut url =
-            Url::parse(&self.client.url).map_err(|err| Error::InvalidParams(Box::new(err)))?;
+            Url::parse(self.client.pick_url()).map_err(|err| Error::InvalidParams(Box::new(err)))?;
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
 

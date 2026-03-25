@@ -164,6 +164,24 @@ impl NativeConnection {
         &mut self.reader
     }
 
+    /// Activate ClickHouse roles for this session.
+    ///
+    /// Sends `SET ROLE role1, role2, …` as a plain query and waits for
+    /// `EndOfStream`.  Called once per new connection by the pool manager,
+    /// immediately after the handshake, before the connection is handed to
+    /// any query or insert.
+    ///
+    /// Role names are joined with `, ` and embedded directly in the SQL
+    /// string.  This is safe because role names are controlled by the
+    /// application (set via [`NativeClient::with_roles`]) and are not
+    /// end-user input.
+    pub(crate) async fn set_roles(&mut self, roles: &[String]) -> Result<()> {
+        debug_assert!(!roles.is_empty(), "set_roles called with empty slice");
+        let role_list = roles.join(", ");
+        let sql = format!("SET ROLE {role_list}");
+        self.execute_query(&sql).await
+    }
+
     /// Execute a query and read all response packets until EndOfStream.
     #[allow(dead_code)] // Convenience wrapper over execute_query_with; kept for callers that don't need query_id/settings
     pub(crate) async fn execute_query(&mut self, query: &str) -> Result<()> {

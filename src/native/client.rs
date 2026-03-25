@@ -11,9 +11,9 @@
 //! cap.  The pool is per-client-instance; clones share the same pool.
 //!
 //! Builder methods that affect connection parameters (`with_addr`,
-//! `with_database`, `with_user`, `with_password`, `with_setting`, `with_lz4`)
-//! reset the pool so the next `acquire` opens fresh connections with the
-//! updated config.
+//! `with_database`, `with_user`, `with_password`, `with_setting`, `with_lz4`,
+//! `with_roles`) reset the pool so the next `acquire` opens fresh connections
+//! with the updated config.
 //!
 //! [`with_pool_size`]: NativeClient::with_pool_size
 
@@ -72,6 +72,15 @@ pub struct NativeClient {
     schema_cache: Arc<NativeSchemaCache>,
     /// Per-query settings sent with every query on this client.
     settings: Arc<Vec<(String, String)>>,
+    /// Roles to activate on each new connection via `SET ROLE`.
+    ///
+    /// ClickHouse roles are session-scoped: `SET ROLE` must be issued once per
+    /// connection, immediately after the handshake.  The pool manager sends
+    /// `SET ROLE role1, role2, …` before returning a new connection.
+    ///
+    /// An empty vec means "use the server default roles for this user" —
+    /// equivalent to `SET ROLE DEFAULT`.
+    roles: Vec<String>,
     /// Maximum connections (idle + in-use) in the pool.
     pool_size: usize,
     /// Deadpool-backed connection pool.  Already Arc-backed internally, so
@@ -96,6 +105,7 @@ impl Default for NativeClient {
         let password = String::new();
         let compression = NativeCompressionMethod::None;
         let settings: Vec<(String, String)> = Vec::new();
+        let roles: Vec<String> = Vec::new();
         let tls = default_tls_config();
         let pool = build_pool(
             PoolConfig {
@@ -105,6 +115,7 @@ impl Default for NativeClient {
                 password: password.clone(),
                 compression,
                 settings: settings.clone(),
+                roles: roles.clone(),
                 tls: tls.clone(),
             },
             DEFAULT_POOL_SIZE,
@@ -118,6 +129,7 @@ impl Default for NativeClient {
             tls,
             schema_cache: NativeSchemaCache::new(300),
             settings: Arc::new(settings),
+            roles,
             pool_size: DEFAULT_POOL_SIZE,
             pool,
         }
@@ -136,6 +148,7 @@ impl NativeClient {
                 password: self.password.clone(),
                 compression: self.compression,
                 settings: self.settings.as_ref().clone(),
+                roles: self.roles.clone(),
                 tls: self.tls.clone(),
             },
             self.pool_size,
@@ -295,6 +308,49 @@ impl NativeClient {
         value: impl Into<String>,
     ) -> Self {
         Arc::make_mut(&mut self.settings).push((name.into(), value.into()));
+        self.rebuild_pool();
+        self
+    }
+
+    /// Activate one or more ClickHouse roles for all connections on this client.
+    ///
+    /// Roles are session-scoped in ClickHouse: each new connection opened by
+    /// the pool will execute `SET ROLE role1, role2, …` immediately after the
+    /// handshake, before the connection is handed to any query or insert.
+    ///
+    /// Replaces any roles previously set by this method.  Call
+    /// [`with_default_roles`] to revert to the user's default role set.
+    ///
+    /// [`with_default_roles`]: NativeClient::with_default_roles
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use clickhouse::native::NativeClient;
+    /// // Single role
+    /// let client = NativeClient::default().with_roles(["readonly"]);
+    ///
+    /// // Multiple roles
+    /// let client = NativeClient::default().with_roles(["analyst", "reporting"]);
+    /// ```
+    #[must_use]
+    pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.roles = roles.into_iter().map(Into::into).collect();
+        self.rebuild_pool();
+        self
+    }
+
+    /// Clear any explicitly set roles, reverting to the user's default role set.
+    ///
+    /// New connections will not send `SET ROLE`, so ClickHouse uses whatever
+    /// roles are configured as defaults for the authenticated user.
+    ///
+    /// Overrides any roles previously set by [`with_roles`].
+    ///
+    /// [`with_roles`]: NativeClient::with_roles
+    #[must_use]
+    pub fn with_default_roles(mut self) -> Self {
+        self.roles.clear();
         self.rebuild_pool();
         self
     }

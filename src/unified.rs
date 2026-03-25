@@ -555,6 +555,36 @@ impl UnifiedNativeBuilder {
         self
     }
 
+    /// Activate one or more ClickHouse roles for all connections.
+    ///
+    /// Delegates to [`NativeClient::with_roles`].  Each new connection opened
+    /// by the pool will execute `SET ROLE role1, role2, …` immediately after
+    /// the handshake.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use clickhouse::unified::UnifiedClient;
+    /// let client = UnifiedClient::native()
+    ///     .with_addr("localhost:9000")
+    ///     .with_roles(["analyst", "reporting"])
+    ///     .build();
+    /// ```
+    #[must_use]
+    pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.inner = self.inner.with_roles(roles);
+        self
+    }
+
+    /// Clear any explicitly set roles, reverting to the user's default role set.
+    ///
+    /// Delegates to [`NativeClient::with_default_roles`].
+    #[must_use]
+    pub fn with_default_roles(mut self) -> Self {
+        self.inner = self.inner.with_default_roles();
+        self
+    }
+
     /// Consume the builder and return a [`UnifiedClient`].
     pub fn build(self) -> UnifiedClient {
         UnifiedClient::new(Transport::Native(self.inner))

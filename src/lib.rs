@@ -15,6 +15,7 @@ use clickhouse_types::{Column, DataTypeNode};
 
 use crate::_priv::row_insert_metadata_query;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -69,11 +70,26 @@ pub use unified::{Transport, UnifiedClient};
 /// Any `with_*` configuration method (e.g., [`Client::with_option`]) applies
 /// only to future clones, because [`Client::clone`] creates a deep copy
 /// of the [`Client`] configuration, except the transport.
+///
+/// The round-robin URL counter (`next_url_index`) is shared across clones so
+/// that all copies of a client advance through the same host rotation.
 #[derive(Clone)]
 pub struct Client {
     http: Arc<dyn HttpClient>,
 
-    url: String,
+    /// The ordered list of ClickHouse HTTP endpoints.
+    ///
+    /// Always contains at least one entry after [`Client::with_url`] or
+    /// [`Client::with_urls`] is called. May be empty for a default-constructed
+    /// client that has not yet had a URL set (preserving backwards compat).
+    urls: Vec<String>,
+
+    /// Shared counter for round-robin URL selection across all clones.
+    ///
+    /// `Arc` so that all clones advance the same counter; `AtomicUsize` so
+    /// that there is no lock contention on the hot path.
+    next_url_index: Arc<AtomicUsize>,
+
     database: Option<String>,
     authentication: Authentication,
     compression: Compression,
@@ -139,7 +155,8 @@ impl Client {
     pub fn with_http_client(client: impl HttpClient) -> Self {
         Self {
             http: Arc::new(client),
-            url: String::new(),
+            urls: Vec::new(),
+            next_url_index: Arc::new(AtomicUsize::new(0)),
             database: None,
             authentication: Authentication::default(),
             compression: Compression::default(),
@@ -168,15 +185,52 @@ impl Client {
     /// let client = Client::default().with_url("http://localhost:8123");
     /// ```
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
-        self.url = url.into();
+        let mut url = url.into();
 
         // `with_mock()` didn't exist previously, so to not break existing usages,
         // we need to be able to detect a mocked server using nothing but the URL.
         #[cfg(feature = "test-util")]
-        if let Some(url) = test::Mock::mocked_url_to_real(&self.url) {
-            self.url = url;
+        if let Some(real_url) = test::Mock::mocked_url_to_real(&url) {
+            url = real_url;
             self.mocked = true;
         }
+
+        self.urls = vec![url];
+
+        // Assume our cached metadata is invalid.
+        self.insert_metadata_cache = Default::default();
+
+        self
+    }
+
+    /// Specifies multiple ClickHouse HTTP endpoints for round-robin failover.
+    ///
+    /// On each request the client picks the next URL from the list using a
+    /// shared atomic counter, cycling through the hosts in order. This provides
+    /// simple load distribution across a set of ClickHouse nodes.
+    ///
+    /// All clones of the client share the same counter so the rotation is
+    /// co-ordinated across copies.
+    ///
+    /// Automatically [clears the metadata cache][Self::clear_cached_metadata]
+    /// for this instance only.
+    ///
+    /// # Panics
+    ///
+    /// If `urls` is empty.
+    ///
+    /// # Examples
+    /// ```
+    /// # use clickhouse::Client;
+    /// let client = Client::default().with_urls(vec![
+    ///     "http://ch-1:8123".to_string(),
+    ///     "http://ch-2:8123".to_string(),
+    ///     "http://ch-3:8123".to_string(),
+    /// ]);
+    /// ```
+    pub fn with_urls(mut self, urls: Vec<String>) -> Self {
+        assert!(!urls.is_empty(), "with_urls: URL list must not be empty");
+        self.urls = urls;
 
         // Assume our cached metadata is invalid.
         self.insert_metadata_cache = Default::default();
@@ -664,9 +718,30 @@ impl Client {
     /// which is pointless in that kind of tests.
     #[cfg(feature = "test-util")]
     pub fn with_mock(mut self, mock: &test::Mock) -> Self {
-        self.url = mock.real_url().to_string();
+        self.urls = vec![mock.real_url().to_string()];
         self.mocked = true;
         self
+    }
+
+    /// Pick the next URL from the round-robin list.
+    ///
+    /// If only one URL is configured the counter is never incremented — no
+    /// unnecessary atomic write on the hot path. If no URL has been configured
+    /// (default-constructed client) an empty string is returned, matching the
+    /// original behaviour of the unset `url: String` field.
+    #[inline]
+    pub(crate) fn pick_url(&self) -> &str {
+        match self.urls.len() {
+            0 => "",
+            1 => &self.urls[0],
+            n => {
+                // Relaxed ordering is fine here: we only need the counter to
+                // advance monotonically across calls; there is no dependent
+                // memory that needs to be synchronised alongside this load.
+                let idx = self.next_url_index.fetch_add(1, Ordering::Relaxed);
+                &self.urls[idx % n]
+            }
+        }
     }
 
     async fn get_insert_metadata(&self, table_name: &str) -> Result<Arc<InsertMetadata>> {
