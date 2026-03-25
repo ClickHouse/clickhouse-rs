@@ -14,12 +14,27 @@ fn get_native_client() -> NativeClient {
     let port = std::env::var("CLICKHOUSE_NATIVE_PORT").unwrap_or_else(|_| "9000".into());
     let user = std::env::var("CLICKHOUSE_USER").unwrap_or_else(|_| "default".into());
     let password = std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "".into());
+    let use_tls = std::env::var("CLICKHOUSE_TLS").unwrap_or_default() == "true";
 
     let client = NativeClient::default()
         .with_addr(format!("{host}:{port}"))
         .with_database("default")
         .with_user(user)
         .with_password(password);
+
+    // Enable TLS if CLICKHOUSE_TLS=true (requires native-tls-rustls feature).
+    // Uses the hostname from CLICKHOUSE_HOST for SNI verification.
+    #[cfg(feature = "native-tls-rustls")]
+    let client = if use_tls {
+        client.with_tls(&host)
+    } else {
+        client
+    };
+
+    #[cfg(not(feature = "native-tls-rustls"))]
+    if use_tls {
+        panic!("CLICKHOUSE_TLS=true requires native-tls-rustls feature");
+    }
 
     // On a replicated cluster, write to a quorum of replicas before returning
     // and ensure SELECT only reads quorum-committed data.  This gives

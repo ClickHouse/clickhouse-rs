@@ -8,20 +8,32 @@ use std::pin::Pin;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use tokio::io::{AsyncRead, BufReader, BufWriter, ReadBuf};
-use tokio::net::TcpStream;
 
 use crate::error::{Error, Result};
 use crate::native::protocol::{
     ChunkedProtocolMode, NativeCompressionMethod, ServerHello, DBMS_TCP_PROTOCOL_VERSION,
 };
 use crate::native::reader::{self, ServerPacket};
-use crate::native::tcp::{self, CONN_READ_BUFFER, CONN_WRITE_BUFFER};
+use crate::native::tcp::{self, MaybeTlsStream, CONN_READ_BUFFER, CONN_WRITE_BUFFER};
 use crate::native::writer;
+
+/// TLS configuration for native connections.
+///
+/// When `None`, a plain TCP connection is used (port 9000 default).
+/// When `Some`, the connection is wrapped in TLS (port 9440 default).
+#[cfg(feature = "native-tls-rustls")]
+pub(crate) type TlsConfig = Option<(
+    std::sync::Arc<rustls::ClientConfig>,
+    rustls::pki_types::ServerName<'static>,
+)>;
+
+#[cfg(not(feature = "native-tls-rustls"))]
+pub(crate) type TlsConfig = ();
 
 /// A single native TCP connection to ClickHouse.
 pub(crate) struct NativeConnection {
-    reader: BufReader<tokio::io::ReadHalf<TcpStream>>,
-    writer: BufWriter<tokio::io::WriteHalf<TcpStream>>,
+    reader: BufReader<tokio::io::ReadHalf<MaybeTlsStream>>,
+    writer: BufWriter<tokio::io::WriteHalf<MaybeTlsStream>>,
     server_hello: ServerHello,
     compression: NativeCompressionMethod,
     settings: Vec<(String, String)>,
@@ -32,6 +44,9 @@ pub(crate) struct NativeConnection {
 
 impl NativeConnection {
     /// Connect and perform the handshake.
+    ///
+    /// When `tls_config` is `Some(...)` (requires `native-tls-rustls` feature),
+    /// the TCP socket is wrapped in TLS before the ClickHouse handshake.
     pub(crate) async fn open(
         addr: &SocketAddr,
         database: &str,
@@ -39,8 +54,9 @@ impl NativeConnection {
         password: &str,
         compression: NativeCompressionMethod,
         settings: Vec<(String, String)>,
+        tls: &TlsConfig,
     ) -> Result<Self> {
-        let stream = tcp::connect(addr).await?;
+        let stream = Self::connect_stream(addr, tls).await?;
         let (read_half, write_half) = tokio::io::split(stream);
         let mut reader = BufReader::with_capacity(CONN_READ_BUFFER, read_half);
         let mut writer = BufWriter::with_capacity(CONN_WRITE_BUFFER, write_half);
@@ -122,13 +138,29 @@ impl NativeConnection {
         self.compression
     }
 
+    /// Dispatch TCP vs TLS connection based on config.
+    #[cfg(feature = "native-tls-rustls")]
+    async fn connect_stream(addr: &SocketAddr, tls: &TlsConfig) -> Result<MaybeTlsStream> {
+        match tls {
+            Some((config, server_name)) => {
+                tcp::connect_tls(addr, config.clone(), server_name.clone()).await
+            }
+            None => tcp::connect(addr).await,
+        }
+    }
+
+    #[cfg(not(feature = "native-tls-rustls"))]
+    async fn connect_stream(addr: &SocketAddr, _tls: &TlsConfig) -> Result<MaybeTlsStream> {
+        tcp::connect(addr).await
+    }
+
     /// Mutable access to the write half for sending packets.
-    pub(crate) fn writer_mut(&mut self) -> &mut BufWriter<tokio::io::WriteHalf<TcpStream>> {
+    pub(crate) fn writer_mut(&mut self) -> &mut BufWriter<tokio::io::WriteHalf<MaybeTlsStream>> {
         &mut self.writer
     }
 
     /// Mutable access to the read half for receiving packets.
-    pub(crate) fn reader_mut(&mut self) -> &mut BufReader<tokio::io::ReadHalf<TcpStream>> {
+    pub(crate) fn reader_mut(&mut self) -> &mut BufReader<tokio::io::ReadHalf<MaybeTlsStream>> {
         &mut self.reader
     }
 

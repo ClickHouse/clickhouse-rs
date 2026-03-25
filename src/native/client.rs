@@ -21,6 +21,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
+use crate::native::connection::TlsConfig;
 use crate::native::insert::NativeInsert;
 use crate::native::inserter::NativeInserter;
 use crate::native::pool::{NativePool, PoolConfig, PooledConnection, build_pool};
@@ -64,6 +65,9 @@ pub struct NativeClient {
     username: String,
     password: String,
     compression: NativeCompressionMethod,
+    /// TLS configuration.  When set, all connections use TLS (port 9440).
+    /// When `None` / `()` (depending on feature), plain TCP (port 9000).
+    tls: TlsConfig,
     /// Shared schema cache (TTL 300 s by default).
     schema_cache: Arc<NativeSchemaCache>,
     /// Per-query settings sent with every query on this client.
@@ -75,6 +79,14 @@ pub struct NativeClient {
     pool: NativePool,
 }
 
+/// Default TLS config: no TLS.
+fn default_tls_config() -> TlsConfig {
+    #[cfg(feature = "native-tls-rustls")]
+    { None }
+    #[cfg(not(feature = "native-tls-rustls"))]
+    { () }
+}
+
 impl Default for NativeClient {
     fn default() -> Self {
         let default_addr: SocketAddr = "127.0.0.1:9000".parse().expect("valid default addr");
@@ -84,6 +96,7 @@ impl Default for NativeClient {
         let password = String::new();
         let compression = NativeCompressionMethod::None;
         let settings: Vec<(String, String)> = Vec::new();
+        let tls = default_tls_config();
         let pool = build_pool(
             PoolConfig {
                 addrs: addrs.clone(),
@@ -92,6 +105,7 @@ impl Default for NativeClient {
                 password: password.clone(),
                 compression,
                 settings: settings.clone(),
+                tls: tls.clone(),
             },
             DEFAULT_POOL_SIZE,
         );
@@ -101,6 +115,7 @@ impl Default for NativeClient {
             username,
             password,
             compression,
+            tls,
             schema_cache: NativeSchemaCache::new(300),
             settings: Arc::new(settings),
             pool_size: DEFAULT_POOL_SIZE,
@@ -121,6 +136,7 @@ impl NativeClient {
                 password: self.password.clone(),
                 compression: self.compression,
                 settings: self.settings.as_ref().clone(),
+                tls: self.tls.clone(),
             },
             self.pool_size,
         );
@@ -205,6 +221,45 @@ impl NativeClient {
     #[must_use]
     pub fn with_lz4(mut self) -> Self {
         self.compression = NativeCompressionMethod::Lz4;
+        self.rebuild_pool();
+        self
+    }
+
+    /// Enable TLS for all connections.
+    ///
+    /// Loads both webpki (public CA) and native OS root certificates,
+    /// so connections work against both public ClickHouse Cloud and
+    /// internal deployments with private CAs.
+    ///
+    /// The `server_name` is used for SNI and certificate verification —
+    /// typically the hostname of the ClickHouse server.
+    /// Connect to ClickHouse's native TLS port (9440 by default).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// use clickhouse::native::NativeClient;
+    ///
+    /// let client = NativeClient::default()
+    ///     .with_addr("clickhouse.example.com:9440")
+    ///     .with_tls("clickhouse.example.com")
+    ///     .with_database("default");
+    /// # Ok(()) }
+    /// ```
+    #[cfg(feature = "native-tls-rustls")]
+    #[must_use]
+    pub fn with_tls(mut self, server_name: &str) -> Self {
+        let root_store = build_root_cert_store();
+
+        let tls_config = rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+
+        let sni = rustls::pki_types::ServerName::try_from(server_name.to_owned())
+            .expect("valid DNS server name for TLS SNI");
+
+        self.tls = Some((std::sync::Arc::new(tls_config), sni));
         self.rebuild_pool();
         self
     }
@@ -494,4 +549,25 @@ fn rb_read_string(bytes: &[u8]) -> crate::error::Result<(String, &[u8])> {
     }
     let s = String::from_utf8_lossy(&bytes[i..i + len]).into_owned();
     Ok((s, &bytes[i + len..]))
+}
+
+/// Build a root certificate store with both webpki (public) and native (OS)
+/// root certs.  This ensures TLS works against both ClickHouse Cloud (public
+/// certs) and internal deployments using private CAs (certs in the OS store).
+#[cfg(feature = "native-tls-rustls")]
+fn build_root_cert_store() -> rustls::RootCertStore {
+    let mut root_store = rustls::RootCertStore::empty();
+
+    // 1. webpki roots — covers ClickHouse Cloud and all public CAs.
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    // 2. Native OS roots — covers internal/private CAs (e.g. cert-manager,
+    //    OpenBao PKI, corporate CAs).  Errors loading individual certs are
+    //    non-fatal: webpki roots alone are sufficient for public endpoints.
+    let native = rustls_native_certs::load_native_certs();
+    for cert in native.certs {
+        let _ = root_store.add(cert);
+    }
+
+    root_store
 }

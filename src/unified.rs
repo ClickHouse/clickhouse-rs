@@ -534,6 +534,27 @@ impl UnifiedNativeBuilder {
         self
     }
 
+    /// Enable TLS for all connections using webpki root certificates.
+    ///
+    /// The `server_name` is used for SNI and certificate verification.
+    /// Connect to ClickHouse's native TLS port (9440 by default).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use clickhouse::unified::UnifiedClient;
+    /// let client = UnifiedClient::native()
+    ///     .with_addr("clickhouse.example.com:9440")
+    ///     .with_tls("clickhouse.example.com")
+    ///     .build();
+    /// ```
+    #[cfg(feature = "native-tls-rustls")]
+    #[must_use]
+    pub fn with_tls(mut self, server_name: &str) -> Self {
+        self.inner = self.inner.with_tls(server_name);
+        self
+    }
+
     /// Consume the builder and return a [`UnifiedClient`].
     pub fn build(self) -> UnifiedClient {
         UnifiedClient::new(Transport::Native(self.inner))

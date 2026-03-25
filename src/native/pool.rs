@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use deadpool::managed::{self, RecycleError, RecycleResult};
 
 use crate::error::{Error, Result};
-use crate::native::connection::NativeConnection;
+use crate::native::connection::{NativeConnection, TlsConfig};
 use crate::native::protocol::NativeCompressionMethod;
 
 /// Parameters needed to open a new connection.
@@ -36,6 +36,7 @@ pub(crate) struct PoolConfig {
     pub(crate) password: String,
     pub(crate) compression: NativeCompressionMethod,
     pub(crate) settings: Vec<(String, String)>,
+    pub(crate) tls: TlsConfig,
 }
 
 /// deadpool [`Manager`](managed::Manager) for [`NativeConnection`].
@@ -60,6 +61,7 @@ impl managed::Manager for NativeConnectionManager {
             &self.config.password,
             self.config.compression,
             self.config.settings.clone(),
+            &self.config.tls,
         )
         .await
     }
