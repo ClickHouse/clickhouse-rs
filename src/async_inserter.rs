@@ -3,7 +3,7 @@
 //! [`AsyncInserter<T>`] moves serialisation, limit-checking, and periodic
 //! flushing into a dedicated tokio task that communicates with callers via an
 //! MPSC channel.  Multiple tasks can call [`write`][AsyncInserter::write]
-//! concurrently — the bounded channel provides natural backpressure.
+//! concurrently -- the bounded channel provides natural backpressure.
 //!
 //! Ported from the HyperI DFE Loader project (`dfe-loader/src/buffer/`)
 //! where a similar architecture (per-table buffer + background flush task +
@@ -15,31 +15,31 @@
 //! # Architecture
 //!
 //! ```text
-//! ┌─ Task A ──┐  ┌─ Task B ──┐  ┌─ Task C ──┐
-//! │ tx.send() │  │ tx.send() │  │ tx.send() │
-//! └─────┬─────┘  └─────┬─────┘  └─────┬─────┘
-//!       └───────────────┴───────────────┘
-//!                       │
+//! +- Task A --+  +- Task B --+  +- Task C --+
+//! | tx.send() |  | tx.send() |  | tx.send() |
+//! +-----+-----+  +-----+-----+  +-----+-----+
+//!       +---------------+---------------+
+//!                       |
 //!                bounded mpsc channel
-//!                       │
-//!           ┌───────────▼────────────┐
-//!           │   Background Task      │
-//!           │                        │
-//!           │  select! {             │
-//!           │    cmd = rx.recv()     │
-//!           │    _ = interval.tick() │
-//!           │  }                     │
-//!           │                        │
-//!           │  serialize → buffer    │
-//!           │  check limits → flush  │
-//!           └──────────┬─────────────┘
-//!                      │ HTTP
-//!                      ▼
+//!                       |
+//!           +-----------v------------+
+//!           |   Background Task      |
+//!           |                        |
+//!           |  select! {             |
+//!           |    cmd = rx.recv()     |
+//!           |    _ = interval.tick() |
+//!           |  }                     |
+//!           |                        |
+//!           |  serialize -> buffer    |
+//!           |  check limits -> flush  |
+//!           +----------+-------------+
+//!                      | HTTP
+//!                      v
 //!              ClickHouse :8123
 //! ```
 //!
 //! The Go ClickHouse client (`clickhouse-go`) keeps batch inserts purely
-//! caller-driven (no background goroutines).  This design goes further —
+//! caller-driven (no background goroutines).  This design goes further  -- 
 //! providing the concurrent, auto-flushing inserter that Go users typically
 //! build themselves with goroutines and channels.
 
@@ -133,7 +133,7 @@ impl AsyncInserterConfig {
 }
 
 // ---------------------------------------------------------------------------
-// AsyncInserter — HTTP transport
+// AsyncInserter -- HTTP transport
 // ---------------------------------------------------------------------------
 
 /// Concurrent, auto-flushing inserter for a single ClickHouse table (HTTP).

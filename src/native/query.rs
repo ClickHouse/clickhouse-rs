@@ -1,4 +1,4 @@
-//! Native query builder — mirrors `crate::query::Query` for the native transport.
+//! Native query builder -- mirrors `crate::query::Query` for the native transport.
 
 use crate::error::{Error, Result};
 use crate::native::callbacks::QueryCallbacks;
@@ -98,7 +98,7 @@ impl NativeQuery {
     /// Bind a ClickHouse named parameter using the `{name:Type}` placeholder syntax.
     ///
     /// ClickHouse server-side named parameters use the syntax `{name:Type}` in
-    /// SQL.  The Go client — and this method — sends these as query settings
+    /// SQL.  The Go client -- and this method -- sends these as query settings
     /// with the prefix `param_`.  For example, calling
     /// `.param("id", 42u32)` adds the setting `param_id = "42"`, which
     /// ClickHouse substitutes before executing the query.
@@ -180,7 +180,7 @@ impl NativeQuery {
     /// Complex types (Array, Map, Tuple) are not yet supported.
     /// Execute a SELECT query, returning a cursor over deserialized rows.
     ///
-    /// `T` must be [`RowOwned`] — the deserialized value must not borrow from
+    /// `T` must be [`RowOwned`] -- the deserialized value must not borrow from
     /// the network buffer.
     ///
     /// # Type support

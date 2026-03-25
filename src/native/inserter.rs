@@ -1,4 +1,4 @@
-//! `NativeInserter<T>` — multi-batch INSERT wrapper for the native transport.
+//! `NativeInserter<T>` -- multi-batch INSERT wrapper for the native transport.
 //!
 //! Mirrors the public API of [`crate::inserter::Inserter`] (HTTP transport)
 //! without requiring the `inserter` crate feature.

@@ -16,7 +16,7 @@ pub(crate) const DBMS_MIN_REVISION_WITH_SERVER_DISPLAY_NAME: u64 = 54372;
 pub(crate) const DBMS_MIN_REVISION_WITH_VERSION_PATCH: u64 = 54401;
 pub(crate) const DBMS_MIN_REVISION_WITH_SERVER_LOGS: u64 = 54406;
 pub(crate) const DBMS_MIN_REVISION_WITH_CLIENT_WRITE_INFO: u64 = 54420;
-#[allow(dead_code)] // Protocol constant — used when settings serialisation as strings is wired
+#[allow(dead_code)] // Protocol constant -- used when settings serialisation as strings is wired
 pub(crate) const DBMS_MIN_REVISION_WITH_SETTINGS_SERIALIZED_AS_STRINGS: u64 = 54429;
 pub(crate) const DBMS_MIN_REVISION_WITH_OPENTELEMETRY: u64 = 54442;
 pub(crate) const DBMS_MIN_REVISION_WITH_INTERSERVER_SECRET: u64 = 54441;
@@ -24,9 +24,9 @@ pub(crate) const DBMS_MIN_PROTOCOL_VERSION_WITH_DISTRIBUTED_DEPTH: u64 = 54448;
 pub(crate) const DBMS_MIN_PROTOCOL_VERSION_WITH_QUERY_START_TIME: u64 = 54449;
 pub(crate) const DBMS_MIN_PROTOCOL_VERSION_WITH_PARALLEL_REPLICAS: u64 = 54453;
 pub(crate) const DBMS_MIN_PROTOCOL_VERSION_WITH_CUSTOM_SERIALIZATION: u64 = 54454;
-#[allow(dead_code)] // Protocol constant — used when profile events during INSERT are surfaced
+#[allow(dead_code)] // Protocol constant -- used when profile events during INSERT are surfaced
 pub(crate) const DBMS_MIN_PROTOCOL_VERSION_WITH_PROFILE_EVENTS_IN_INSERT: u64 = 54456;
-#[allow(dead_code)] // Protocol constant — used when addendum packet handling is wired
+#[allow(dead_code)] // Protocol constant -- used when addendum packet handling is wired
 pub(crate) const DBMS_MIN_PROTOCOL_VERSION_WITH_ADDENDUM: u64 = 54458;
 pub(crate) const DBMS_MIN_PROTOCOL_VERSION_WITH_QUOTA_KEY: u64 = 54458;
 pub(crate) const DBMS_MIN_PROTOCOL_VERSION_WITH_PARAMETERS: u64 = 54459;

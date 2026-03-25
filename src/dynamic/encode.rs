@@ -5,7 +5,7 @@
 //! and the efficient binary wire format that ClickHouse expects.
 //!
 //! **Performance:** avoids the JSON text overhead of JSONEachRow.
-//! ClickHouse receives pre-columnarised binary — zero server-side parsing.
+//! ClickHouse receives pre-columnarised binary -- zero server-side parsing.
 //!
 //! # Encoding Rules
 //!
@@ -46,7 +46,7 @@ pub fn encode_dynamic_row(
 ///
 /// Includes columns that are present in the row OR that have no default
 /// (must send something). Columns with defaults that aren't in the row
-/// are omitted — ClickHouse fills them server-side.
+/// are omitted -- ClickHouse fills them server-side.
 pub fn columns_to_send<'a>(
     row: &Map<String, Value>,
     schema: &'a DynamicSchema,
@@ -73,7 +73,7 @@ fn encode_value(value: &Value, col: &ColumnDef, buf: &mut Vec<u8>) -> Result<(),
         }
         buf.push(0); // is_null = false
     } else if value.is_null() {
-        // Non-nullable column with null value — write type default
+        // Non-nullable column with null value -- write type default
         write_default(pt, buf);
         return Ok(());
     }
@@ -151,15 +151,15 @@ fn encode_typed(
             encode_map(value, kt, vt, col_name, buf)?;
         }
         "JSON" => {
-            // JSON type — send as length-prefixed JSON string
+            // JSON type -- send as length-prefixed JSON string
             let json_str = value.to_string();
             write_string(json_str.as_bytes(), buf);
         }
         other => {
-            // Unknown type — try as string (forward-compatible)
+            // Unknown type -- try as string (forward-compatible)
             let s = value_to_string(value);
             write_string(s.as_bytes(), buf);
-            // Log but don't fail — ClickHouse may accept it
+            // Log but don't fail -- ClickHouse may accept it
             #[cfg(feature = "tracing")]
             tracing::debug!(
                 column = col_name,

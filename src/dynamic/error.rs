@@ -9,7 +9,7 @@ pub enum DynamicError {
     UnsupportedType { column: String, type_str: String },
     /// Value could not be encoded for the target column type.
     EncodingError { column: String, message: String },
-    /// Schema mismatch detected — server rejected the insert.
+    /// Schema mismatch detected -- server rejected the insert.
     SchemaMismatch { table: String, message: String },
     /// Schema fetch from system.columns failed.
     SchemaFetch {

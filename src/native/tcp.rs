@@ -7,7 +7,7 @@
 //!
 //! When the `native-tls-rustls` feature is enabled, [`connect_tls`] wraps the
 //! plain TCP socket in a `tokio_rustls::client::TlsStream`.  Both plain and
-//! TLS paths return a [`MaybeTlsStream`] — an enum over the two stream types
+//! TLS paths return a [`MaybeTlsStream`] -- an enum over the two stream types
 //! that implements `AsyncRead + AsyncWrite + Unpin`.
 //!
 //! This follows the same `MaybeTlsStream` pattern used by `hyper-rustls`,
@@ -37,7 +37,7 @@ pub(crate) const CONN_READ_BUFFER: usize = 1024 * 1024;
 pub(crate) const CONN_WRITE_BUFFER: usize = 10 * 1024 * 1024;
 
 // -----------------------------------------------------------------------
-// MaybeTlsStream — plain TCP or TLS, both AsyncRead + AsyncWrite + Unpin.
+// MaybeTlsStream -- plain TCP or TLS, both AsyncRead + AsyncWrite + Unpin.
 //
 // Same pattern as hyper-rustls `MaybeHttpsStream` and tungstenite
 // `MaybeTlsStream`.  We need this because NativeConnection splits the
@@ -45,7 +45,7 @@ pub(crate) const CONN_WRITE_BUFFER: usize = 10 * 1024 * 1024;
 // a single concrete type implementing AsyncRead + AsyncWrite.
 //
 // When `native-tls-rustls` is not enabled, this is a plain wrapper
-// around TcpStream — the Tls variant doesn't exist at compile time.
+// around TcpStream -- the Tls variant doesn't exist at compile time.
 // -----------------------------------------------------------------------
 
 /// A TCP stream that may or may not be wrapped in TLS.

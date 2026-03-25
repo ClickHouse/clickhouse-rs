@@ -10,26 +10,23 @@
 //! # Architecture
 //!
 //! ```text
-//! ┌─ Task A ──┐  ┌─ Task B ──┐  ┌─ Task C ──┐
-//! │ tx.send() │  │ tx.send() │  │ tx.send() │
-//! └─────┬─────┘  └─────┬─────┘  └─────┬─────┘
-//!       └───────────────┴───────────────┘
-//!                       │
+//!   Task A          Task B          Task C
+//!   tx.send()       tx.send()       tx.send()
+//!       \               |               /
+//!        +--------------+--------------+
+//!                       |
 //!                bounded mpsc channel
-//!                       │
-//!           ┌───────────▼────────────┐
-//!           │   Background Task      │
-//!           │                        │
-//!           │  select! {             │
-//!           │    cmd = rx.recv()     │
-//!           │    _ = interval.tick() │
-//!           │  }                     │
-//!           │                        │
-//!           │  serialize → buffer    │
-//!           │  check limits → flush  │
-//!           └──────────┬─────────────┘
-//!                      │ native TCP
-//!                      ▼
+//!                       |
+//!              Background Task
+//!                select! {
+//!                  cmd = rx.recv()
+//!                  _ = interval.tick()
+//!                }
+//!                serialize -> buffer
+//!                check limits -> flush
+//!                       |
+//!                       | native TCP
+//!                       v
 //!              ClickHouse :9000
 //! ```
 
@@ -119,7 +116,7 @@ impl AsyncNativeInserterConfig {
 }
 
 // ---------------------------------------------------------------------------
-// AsyncNativeInserter — native TCP transport
+// AsyncNativeInserter -- native TCP transport
 // ---------------------------------------------------------------------------
 
 /// Concurrent, auto-flushing inserter for a single ClickHouse table (native TCP).

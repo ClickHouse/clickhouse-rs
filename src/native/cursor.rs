@@ -16,12 +16,12 @@ use crate::rowbinary;
 
 /// A cursor that emits owned deserialized rows from a native TCP query.
 ///
-/// `T` must be [`RowOwned`] — i.e., the deserialized value must not borrow from
+/// `T` must be [`RowOwned`] -- i.e., the deserialized value must not borrow from
 /// the network buffer.  This covers the vast majority of use cases.
 pub struct NativeRowCursor<T: RowOwned + RowRead> {
     client: NativeClient,
     sql: String,
-    /// Query ID to send in the query packet (`""` → server generates one).
+    /// Query ID to send in the query packet (`""` -> server generates one).
     query_id: String,
     /// Merged settings (client-level + per-query overrides) for this cursor.
     settings: Vec<(String, String)>,
@@ -34,11 +34,11 @@ pub struct NativeRowCursor<T: RowOwned + RowRead> {
 }
 
 enum CursorState {
-    /// Initial state — connection not yet acquired from pool.
+    /// Initial state -- connection not yet acquired from pool.
     NotStarted,
     /// Connection open, reading packets.
     Reading(Box<PooledConnection>),
-    /// EndOfStream received — no more data.
+    /// EndOfStream received -- no more data.
     Done,
 }
 
@@ -171,7 +171,7 @@ impl<T: RowOwned + RowRead> NativeRowCursor<T> {
                             }
                         }
                         ServerPacket::Exception(err) => {
-                            // Discard the connection — the query didn't complete
+                            // Discard the connection -- the query didn't complete
                             // cleanly; subsequent reads on this conn would be misaligned.
                             if let CursorState::Reading(mut conn) =
                                 std::mem::replace(&mut self.state, CursorState::Done)

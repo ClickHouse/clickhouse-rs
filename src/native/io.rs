@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_var_uint_roundtrip_sync() {
-        // Note: ClickHouse varint uses 7 bits × 9 bytes = 63 bits max
+        // Note: ClickHouse varint uses 7 bits x 9 bytes = 63 bits max
         let test_values: &[u64] = &[0, 1, 127, 128, 255, 256, 16383, 16384, (1 << 63) - 1];
         for &val in test_values {
             let mut buf = BytesMut::new();

@@ -3,7 +3,7 @@
 //! `DynamicBatcher` is the async, multi-producer variant of `DynamicInsert`.
 //! It moves schema fetch, RowBinary encoding, and periodic flushing into a
 //! dedicated tokio task that communicates with callers via a bounded MPSC
-//! channel. Multiple tasks can call `write_map()` concurrently — the bounded
+//! channel. Multiple tasks can call `write_map()` concurrently -- the bounded
 //! channel provides natural backpressure.
 //!
 //! # Schema Recovery
@@ -14,30 +14,30 @@
 //! 3. Retries the current batch with the new schema
 //! 4. Resumes normal operation
 //!
-//! One retry attempt per mismatch — prevents infinite loops on genuine
+//! One retry attempt per mismatch -- prevents infinite loops on genuine
 //! data errors.
 //!
 //! # Architecture
 //!
 //! ```text
-//! ┌─ Task A ──┐  ┌─ Task B ──┐  ┌─ Task C ──┐
-//! │ write_map()│  │ write_map()│  │ write_map()│
-//! └─────┬─────┘  └─────┬─────┘  └─────┬─────┘
-//!       └───────────────┴───────────────┘
-//!                       │
+//! +- Task A --+  +- Task B --+  +- Task C --+
+//!   write_map()     write_map()     write_map() 
+//! +-----+-----+  +-----+-----+  +-----+-----+
+//!       +---------------+---------------+
+//!                        
 //!                bounded mpsc channel
-//!                       │
-//!           ┌───────────▼────────────┐
-//!           │   Background Task      │
-//!           │  select! {             │
-//!           │    cmd = rx.recv()     │
-//!           │    _ = interval.tick() │
-//!           │  }                     │
-//!           │  encode → RowBinary    │
-//!           │  buffer → flush        │
-//!           └──────────┬─────────────┘
-//!                      │ HTTP RowBinary
-//!                      ▼
+//!                        
+//!           +-----------v------------+
+//!               Background Task       
+//!              select! {              
+//!                cmd = rx.recv()      
+//!                _ = interval.tick()  
+//!              }                      
+//!              encode -> RowBinary     
+//!              buffer -> flush         
+//!           +----------+-------------+
+//!                        HTTP RowBinary
+//!                      v
 //!              ClickHouse :8123
 //! ```
 
@@ -280,7 +280,7 @@ async fn background_task(
                         return;
                     }
                     None => {
-                        // All senders dropped — flush and exit
+                        // All senders dropped -- flush and exit
                         let _ = flush_buffer(
                             &client, &database, &table, &schema_cache,
                             &mut buffer,
@@ -328,7 +328,7 @@ async fn flush_buffer(
     match try_insert(client, database, table, &rows).await {
         Ok(()) => Ok(count),
         Err(DynamicError::SchemaMismatch { .. }) => {
-            // Schema changed — invalidate and retry once
+            // Schema changed -- invalidate and retry once
             let full_table = format!("{database}.{table}");
             schema_cache.invalidate(&full_table);
 

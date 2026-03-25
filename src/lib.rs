@@ -536,7 +536,7 @@ impl Client {
     ///
     /// Fetches the schema from `system.columns` (cached with TTL) and encodes
     /// `Map<String, Value>` to RowBinary. As simple as JSONEachRow to use, but
-    /// ClickHouse skips JSON parsing entirely — significant CPU savings on the
+    /// ClickHouse skips JSON parsing entirely -- significant CPU savings on the
     /// cluster at scale.
     ///
     /// # Example
@@ -637,7 +637,7 @@ impl Client {
     /// [`ServerVersion`]. The version string is expected in the format returned
     /// by ClickHouse: `"major.minor.patch.revision"` (e.g. `"24.3.1.123"`).
     ///
-    /// `display_name` is always `None` for the HTTP transport — the server
+    /// `display_name` is always `None` for the HTTP transport -- the server
     /// display name is only available via the native TCP handshake.
     ///
     /// # Errors
@@ -650,7 +650,7 @@ impl Client {
             .fetch_one()
             .await?;
 
-        // Parse "major.minor.patch.revision" — ClickHouse always emits all
+        // Parse "major.minor.patch.revision" -- ClickHouse always emits all
         // four components. Any missing component defaults to 0 so that future
         // format changes degrade gracefully rather than returning an error.
         let mut parts = version_str.splitn(4, '.');
@@ -725,7 +725,7 @@ impl Client {
 
     /// Pick the next URL from the round-robin list.
     ///
-    /// If only one URL is configured the counter is never incremented — no
+    /// If only one URL is configured the counter is never incremented -- no
     /// unnecessary atomic write on the hot path. If no URL has been configured
     /// (default-constructed client) an empty string is returned, matching the
     /// original behaviour of the unset `url: String` field.

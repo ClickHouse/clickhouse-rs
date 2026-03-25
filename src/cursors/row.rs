@@ -105,7 +105,7 @@ impl<T> RowCursor<T> {
     // We hate unsafe. Genuinely. But NLL (the current borrow checker) can't
     // see that `bytes` is dead in the NotEnoughData branch of this loop.
     // The returned value borrows from `bytes`, so NLL extends that borrow
-    // to the function's return lifetime — blocking the `bytes.extend()`
+    // to the function's return lifetime -- blocking the `bytes.extend()`
     // that only runs when no value exists. Classic Polonius limitation:
     //   https://github.com/rust-lang/rust/issues/51132
     //
@@ -120,12 +120,12 @@ impl<T> RowCursor<T> {
     // crates is a good return.
     //
     // We properly tried to avoid this:
-    //   - TryRow enum (borrow still escapes via return type — same error)
+    //   - TryRow enum (borrow still escapes via return type -- same error)
     //   - async-only next() + poll_next_owned for Stream (same NLL issue)
     //   - interior mutability in BytesExt via UnsafeCell (3x the diff,
-    //     same amount of actual unsafe, just hidden — not actually better)
+    //     same amount of actual unsafe, just hidden -- not actually better)
     //   - double deserialisation / probe-then-extract (~2x deser cost on
-    //     the happy path — non-starter for a perf-sensitive cursor)
+    //     the happy path -- non-starter for a perf-sensitive cursor)
     // None compiled without unsafe somewhere, or had unacceptable costs.
     //
     // When Polonius lands in stable rustc, rip this out. We'll buy it a beer.
@@ -146,7 +146,7 @@ impl<T> RowCursor<T> {
         loop {
             // SAFETY: we create a second &mut to `bytes` via raw pointer so the
             // borrow checker releases the original. This is sound because:
-            //   - On Ok: we return immediately — only one &mut is live.
+            //   - On Ok: we return immediately -- only one &mut is live.
             //   - On NotEnoughData: the deserialized value doesn't exist, the
             //     reborrow is dead, and we fall through to extend().
             //   - On Err: we return immediately.
@@ -238,7 +238,7 @@ where
         // (not the anonymous reborrow lifetime of &mut self).
         let cursor = self.cursor.take().expect("Future polled after completion");
 
-        // SAFETY: same pattern as poll_next above — we create a second &mut
+        // SAFETY: same pattern as poll_next above -- we create a second &mut
         // via raw pointer. On Ready the reborrow escapes via the return value
         // and cursor is consumed. On Pending the reborrow is dead and we put
         // cursor back. Sound for the same reasons; Polonius would accept this.

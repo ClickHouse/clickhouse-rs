@@ -1,7 +1,7 @@
 //! Schema reflection for dynamic inserts.
 //!
 //! Fetches column definitions from `system.columns` and caches them with TTL.
-//! The schema drives runtime RowBinary encoding — each column's [`ParsedType`]
+//! The schema drives runtime RowBinary encoding -- each column's [`ParsedType`]
 //! determines how `serde_json::Value` is converted to binary.
 //!
 //! # Usage
@@ -36,7 +36,7 @@ pub struct ColumnDef {
     pub has_default: bool,
 }
 
-/// Schema for a single table — ordered list of column definitions.
+/// Schema for a single table -- ordered list of column definitions.
 #[derive(Debug, Clone)]
 pub struct DynamicSchema {
     /// Fully qualified table name (database.table).

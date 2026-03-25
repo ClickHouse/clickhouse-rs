@@ -5,7 +5,7 @@
 /// Obtain via [`crate::native::NativeClient::pool_stats`] or
 /// [`crate::unified::UnifiedClient::pool_stats`].
 ///
-/// All values are eventually-consistent — they reflect the pool state at the
+/// All values are eventually-consistent -- they reflect the pool state at the
 /// moment of the call but may already be stale by the time they are read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PoolStats {

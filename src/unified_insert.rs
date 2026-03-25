@@ -1,4 +1,4 @@
-//! [`UnifiedInsert`] — INSERT handle that dispatches to either HTTP or native
+//! [`UnifiedInsert`] -- INSERT handle that dispatches to either HTTP or native
 //! TCP transport.
 //!
 //! Returned by [`crate::unified::UnifiedClient::insert`].

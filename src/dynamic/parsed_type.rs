@@ -5,7 +5,7 @@
 //! DateTime64(precision, timezone), Decimal(precision, scale), FixedString(n),
 //! Enum8/Enum16, and all scalar types.
 //!
-//! Lifted from the HyperI DFE Loader project — generic enough for any
+//! Lifted from the HyperI DFE Loader project -- generic enough for any
 //! clickhouse-rs user with dynamic schemas.
 
 use std::fmt;

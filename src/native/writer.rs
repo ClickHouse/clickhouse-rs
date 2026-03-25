@@ -70,9 +70,9 @@ pub(crate) async fn send_query<W: ClickHouseWrite>(
     // Settings: (name, flags_varuint, value) per entry, terminated by empty name.
     //
     // Flags: 0x01 = Important, 0x02 = Custom.
-    // Regular settings: Important=1, Custom=0 → flags = 0x01
-    // Custom settings (param_*): Important=0, Custom=1 → flags = 0x02
-    //   Custom values use encodeFieldDump: string → 'escaped_value'
+    // Regular settings: Important=1, Custom=0 -> flags = 0x01
+    // Custom settings (param_*): Important=0, Custom=1 -> flags = 0x02
+    //   Custom values use encodeFieldDump: string -> 'escaped_value'
     //   (matching the Go client's encoding in proto/query.go)
     const FLAG_IMPORTANT: u8 = 0x01;
     const FLAG_CUSTOM: u8 = 0x02;
@@ -80,12 +80,12 @@ pub(crate) async fn send_query<W: ClickHouseWrite>(
     for (name, value) in settings {
         writer.write_string(name).await?;
         if name.starts_with("param_") {
-            // Custom setting — send as field dump with single-quote wrapping.
+            // Custom setting -- send as field dump with single-quote wrapping.
             writer.write_u8(FLAG_CUSTOM).await?;
             let escaped = value.replace('\'', "\\'");
             writer.write_string(&format!("'{escaped}'")).await?;
         } else {
-            // Regular setting — marked as important.
+            // Regular setting -- marked as important.
             writer.write_u8(FLAG_IMPORTANT).await?;
             writer.write_string(value).await?;
         }

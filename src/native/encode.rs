@@ -74,7 +74,7 @@ pub(crate) fn encode_columns(
         return Ok(Vec::new());
     }
 
-    // Pass 1 — extract per-column raw RowBinary value bytes (one per row).
+    // Pass 1 -- extract per-column raw RowBinary value bytes (one per row).
     let n = rows.len();
     let mut per_col: Vec<Vec<Vec<u8>>> = vec![Vec::with_capacity(n); columns.len()];
     for row in rows {
@@ -86,7 +86,7 @@ pub(crate) fn encode_columns(
         }
     }
 
-    // Pass 2 — emit header + native-encoded data for each column.
+    // Pass 2 -- emit header + native-encoded data for each column.
     let mut out = Vec::new();
     for (ci, col) in columns.iter().enumerate() {
         out.put_string(col.name.as_bytes());
@@ -174,7 +174,7 @@ fn write_col_values(values: &[Vec<u8>], col_type: &ColumnType, out: &mut Vec<u8>
             let mut indices: Vec<u32> = Vec::with_capacity(values.len());
             for v in values {
                 // For Nullable inner: strip the Nullable RowBinary wrapper.
-                // [0x01] = NULL → index 0; [0x00, bytes...] = Some(v) → extract bytes.
+                // [0x01] = NULL -> index 0; [0x00, bytes...] = Some(v) -> extract bytes.
                 let key: Option<Vec<u8>> = if is_nullable_inner {
                     if v.is_empty() || v[0] == 0x01 {
                         None // NULL
@@ -186,7 +186,7 @@ fn write_col_values(values: &[Vec<u8>], col_type: &ColumnType, out: &mut Vec<u8>
                 };
 
                 let idx = match key {
-                    None => 0, // NULL → index 0
+                    None => 0, // NULL -> index 0
                     Some(bytes) => {
                         if let Some(&i) = seen.get(&bytes) {
                             i
@@ -384,7 +384,7 @@ fn rb_advance(data: &[u8], pos: &mut usize, col_type: &ColumnType) -> Result<()>
 
 /// Write the default (zero) native encoding for `col_type`.
 ///
-/// Used to fill the value slot for NULL rows in a Nullable column —
+/// Used to fill the value slot for NULL rows in a Nullable column  -- 
 /// the native protocol requires value bytes even when the null flag is set.
 fn rb_write_default(out: &mut Vec<u8>, col_type: &ColumnType) {
     if let Some(size) = col_type.fixed_size() {

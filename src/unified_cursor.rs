@@ -1,4 +1,4 @@
-//! [`UnifiedCursor`] — streaming row cursor that dispatches to either HTTP or
+//! [`UnifiedCursor`] -- streaming row cursor that dispatches to either HTTP or
 //! native TCP transport.
 //!
 //! Returned by [`crate::unified_query::UnifiedQuery::fetch`].
@@ -25,7 +25,7 @@ enum CursorInner<T: RowOwned + RowRead> {
 ///
 /// Returned by [`crate::unified_query::UnifiedQuery::fetch`].
 ///
-/// `T` must be [`RowOwned`] — the deserialized value must not borrow from the
+/// `T` must be [`RowOwned`] -- the deserialized value must not borrow from the
 /// network buffer.  This is the common case for all derived `Row` types.
 ///
 /// # Examples

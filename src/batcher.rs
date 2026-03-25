@@ -2,7 +2,7 @@
 //!
 //! [`TableBatcher<T>`] is a thin convenience wrapper over
 //! [`AsyncInserter<T>`][crate::async_inserter::AsyncInserter] that provides
-//! ClickHouse Go client–style naming ([`append`][TableBatcher::append] /
+//! ClickHouse Go client-style naming ([`append`][TableBatcher::append] /
 //! [`flush`][TableBatcher::flush] / [`send`][TableBatcher::send]) and
 //! sensible defaults.
 //!
@@ -10,18 +10,18 @@
 //!
 //! ```text
 //!  TableBatcher (thin wrapper over AsyncInserter)
-//!  ┌───────────────────────────────────────────┐
-//!  │  append(row) ──→ AsyncInserter.write(row) │
-//!  │  flush()     ──→ AsyncInserter.flush()    │
-//!  │  send()      ──→ AsyncInserter.end()      │
-//!  └──────────────────────┬────────────────────┘
-//!                         │ mpsc channel
-//!                         ▼
+//!  +-------------------------------------------+
+//!  |  append(row) ---> AsyncInserter.write(row) |
+//!  |  flush()     ---> AsyncInserter.flush()    |
+//!  |  send()      ---> AsyncInserter.end()      |
+//!  +----------------------+--------------------+
+//!                         | mpsc channel
+//!                         v
 //!               Background Task (select!)
-//!                         │
+//!                         |
 //!                    Inserter<T>
-//!                         │ HTTP
-//!                         ▼
+//!                         | HTTP
+//!                         v
 //!                 ClickHouse :8123
 //! ```
 //!
@@ -55,7 +55,7 @@ pub struct BatchConfig {
     pub max_bytes: u64,
     /// Flush after this period regardless of row/byte counts. Default: `5 s`.
     ///
-    /// `None` disables period-based flushing — no background task is spawned.
+    /// `None` disables period-based flushing -- no background task is spawned.
     pub max_period: Option<Duration>,
 }
 
@@ -95,12 +95,12 @@ impl BatchConfig {
     }
 }
 
-// HyperI CTO moonlighting — dfe-loader needed this and no one else was going to write it.
+// HyperI CTO moonlighting -- dfe-loader needed this and no one else was going to write it.
 
 /// Thread-safe, auto-flushing batch inserter for a single ClickHouse table.
 ///
 /// Thin wrapper over [`AsyncInserter<T>`][crate::async_inserter::AsyncInserter]
-/// with Go client–style naming.
+/// with Go client-style naming.
 ///
 /// Unlike `Inserter<T>`, this type accepts `&self` on [`append`][Self::append]
 /// and [`flush`][Self::flush], so it can be shared across tasks via [`std::sync::Arc`].

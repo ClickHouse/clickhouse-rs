@@ -1,6 +1,6 @@
 //! Unified client wrapper that dispatches to either the HTTP or native TCP transport.
 //!
-//! # Design — Approach C (additive wrapper, both backends untouched)
+//! # Design -- Approach C (additive wrapper, both backends untouched)
 //!
 //! [`UnifiedClient`] holds a [`Transport`] enum and delegates every operation
 //! to whichever variant is active.  Neither [`crate::Client`] nor
@@ -43,7 +43,7 @@ use crate::native::NativeClient;
 
 /// Selects the wire protocol used by a [`UnifiedClient`].
 ///
-/// Variants are additive — new transports can be introduced without breaking
+/// Variants are additive -- new transports can be introduced without breaking
 /// existing code that already pattern-matches on this enum (add `#[non_exhaustive]`
 /// if upstream opts in to that stability guarantee).
 #[derive(Clone)]
@@ -300,7 +300,7 @@ impl UnifiedClient {
     ///
     /// Sends `KILL QUERY WHERE query_id = '{id}'` on a fresh connection so
     /// the in-flight query is not interrupted mid-stream.  ClickHouse will
-    /// attempt to cancel the query asynchronously — cancellation is
+    /// attempt to cancel the query asynchronously -- cancellation is
     /// best-effort and not guaranteed to be immediate.
     ///
     /// The `query_id` should be the same value passed to
@@ -558,7 +558,7 @@ impl UnifiedNativeBuilder {
     /// Activate one or more ClickHouse roles for all connections.
     ///
     /// Delegates to [`NativeClient::with_roles`].  Each new connection opened
-    /// by the pool will execute `SET ROLE role1, role2, …` immediately after
+    /// by the pool will execute `SET ROLE role1, role2, ...` immediately after
     /// the handshake.
     ///
     /// # Examples

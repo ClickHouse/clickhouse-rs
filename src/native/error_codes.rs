@@ -10,9 +10,9 @@ use crate::native::protocol::ServerException;
 /// Severity classification for server exceptions.
 #[derive(Debug, Clone)]
 pub(crate) enum Severity {
-    /// Fatal server-side error — connection should be dropped.
+    /// Fatal server-side error -- connection should be dropped.
     Server(ServerErrorKind),
-    /// Non-fatal query/client error — connection can be reused.
+    /// Non-fatal query/client error -- connection can be reused.
     Client(ClientErrorKind),
 }
 
@@ -55,7 +55,7 @@ pub(crate) struct ServerError {
 }
 
 impl ServerError {
-    #[allow(dead_code)] // Future error classification — used when pool recycler inspects exception severity
+    #[allow(dead_code)] // Future error classification -- used when pool recycler inspects exception severity
     pub(crate) fn is_fatal(&self) -> bool {
         matches!(self.severity, Severity::Server(_))
     }

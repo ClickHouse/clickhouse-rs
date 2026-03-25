@@ -1,4 +1,4 @@
-//! `NativeInsert<T>` — a single INSERT statement over the native TCP protocol.
+//! `NativeInsert<T>` -- a single INSERT statement over the native TCP protocol.
 //!
 //! Mirrors the public API of [`crate::insert::Insert`] so code using the HTTP
 //! client can switch to the native transport with minimal changes.
@@ -43,7 +43,7 @@ use crate::rowbinary::serialize_row_binary;
 
 /// Desired flush threshold (~256 KiB uncompressed).
 const BUFFER_SIZE: usize = 256 * 1024;
-/// Soft flush limit — slightly below `BUFFER_SIZE` to avoid one extra allocation.
+/// Soft flush limit -- slightly below `BUFFER_SIZE` to avoid one extra allocation.
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 2048;
 
 /// A single in-flight native INSERT statement.
@@ -53,7 +53,7 @@ const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 2048;
 #[must_use]
 pub struct NativeInsert<T> {
     client: NativeClient,
-    /// `INSERT INTO table(col1, col2, …) FORMAT Native`
+    /// `INSERT INTO table(col1, col2, ...) FORMAT Native`
     sql: String,
     /// Table name, used to populate the schema cache after handshake.
     table: String,
@@ -130,7 +130,7 @@ impl<T: Row> NativeInsert<T> {
     /// Must be called to commit the INSERT.  On error the connection is dropped.
     pub async fn end(mut self) -> Result<()> {
         if self.conn.is_none() {
-            // Nothing was written — open a connection and immediately close it cleanly.
+            // Nothing was written -- open a connection and immediately close it cleanly.
             if let Err(e) = self.ensure_connected().await {
                 return Err(e);
             }
@@ -149,7 +149,7 @@ impl<T: Row> NativeInsert<T> {
             match tokio::time::timeout(timeout, finish).await {
                 Ok(r) => r,
                 Err(_elapsed) => {
-                    // Poison the connection — the protocol exchange is incomplete.
+                    // Poison the connection -- the protocol exchange is incomplete.
                     self.conn.as_mut().expect("conn must be open").discard();
                     Err(Error::TimedOut)
                 }
@@ -234,7 +234,7 @@ impl<T> NativeInsert<T> {
 
     /// Abort the INSERT: discard the connection and clear the buffer.
     ///
-    /// The server-side INSERT is incomplete — we must not return this
+    /// The server-side INSERT is incomplete -- we must not return this
     /// connection to the pool as subsequent protocol exchanges would be
     /// misaligned.
     fn abort(&mut self) {

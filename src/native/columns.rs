@@ -3,7 +3,7 @@
 //! Reads ClickHouse native binary column data and re-serializes it as
 //! RowBinary so the existing `rowbinary::deserialize_row` machinery can consume it.
 //!
-//! RowBinary and native binary formats are identical for scalar types — the
+//! RowBinary and native binary formats are identical for scalar types -- the
 //! only difference is layout (columnar vs row-oriented). Nullable is the only
 //! type that differs structurally.
 
@@ -29,9 +29,9 @@ pub(crate) enum ColumnType {
     UInt256,
     Float32,
     Float64,
-    /// BFloat16 — 16-bit brain float, 2 bytes on wire.
+    /// BFloat16 -- 16-bit brain float, 2 bytes on wire.
     BFloat16,
-    /// Decimal32/64/128/256 — wire format identical to Int32/64/128/256 (raw LE bytes).
+    /// Decimal32/64/128/256 -- wire format identical to Int32/64/128/256 (raw LE bytes).
     Decimal32,
     Decimal64,
     Decimal128,
@@ -39,43 +39,43 @@ pub(crate) enum ColumnType {
     String,
     FixedString(usize),
     Uuid,
-    /// IPv4 — stored as 4-byte little-endian UInt32.
+    /// IPv4 -- stored as 4-byte little-endian UInt32.
     IPv4,
-    /// IPv6 — stored as 16 bytes.
+    /// IPv6 -- stored as 16 bytes.
     IPv6,
     Date,
     Date32,
     DateTime,
     DateTime64,
-    /// Time — stored as UInt32 (seconds since midnight).
+    /// Time -- stored as UInt32 (seconds since midnight).
     Time,
-    /// Time64 — stored as Int64 (ticks since midnight at given precision).
+    /// Time64 -- stored as Int64 (ticks since midnight at given precision).
     Time64,
     Nullable(Box<ColumnType>),
     LowCardinality(Box<ColumnType>),
-    /// Enum8/Enum16 — wire-compatible with UInt8/UInt16 respectively.
+    /// Enum8/Enum16 -- wire-compatible with UInt8/UInt16 respectively.
     Enum8,
     Enum16,
-    /// SimpleAggregateFunction(func, T) — wire-compatible with inner type T.
+    /// SimpleAggregateFunction(func, T) -- wire-compatible with inner type T.
     SimpleAggregateFunction(Box<ColumnType>),
-    /// Array(T) — n cumulative u64 offsets, then all values packed as T column.
+    /// Array(T) -- n cumulative u64 offsets, then all values packed as T column.
     Array(Box<ColumnType>),
-    /// Tuple(T1, T2, ...) — each field stored as a separate columnar block.
+    /// Tuple(T1, T2, ...) -- each field stored as a separate columnar block.
     Tuple(Vec<ColumnType>),
-    /// Map(K, V) — n cumulative u64 offsets, then K column, then V column.
+    /// Map(K, V) -- n cumulative u64 offsets, then K column, then V column.
     Map(Box<ColumnType>, Box<ColumnType>),
-    /// JSON (legacy Object('json')) — wire format is a length-prefixed String.
+    /// JSON (legacy Object('json')) -- wire format is a length-prefixed String.
     Json,
-    /// Point — pair of Float64 (16 bytes), ClickHouse geo type.
+    /// Point -- pair of Float64 (16 bytes), ClickHouse geo type.
     Point,
-    /// Variant(T1, T2, ...) — discriminated union (ClickHouse 24.x+).
+    /// Variant(T1, T2, ...) -- discriminated union (ClickHouse 24.x+).
     /// Wire prefix: u64 version (=0).
     /// Wire data: u8[n] discriminators (255=NULL, 0..k-1 = type index in definition order),
     ///            then per-variant sub-columns in definition order.
     Variant(Vec<ColumnType>),
     /// New JSON type (ClickHouse 24.x+). Complex path-based columnar format.
     /// Wire prefix: u64 JSON version (1=string, 2=object-v2, 3=object-v3).
-    /// Wire data (v2): per-path Dynamic v2 headers + discriminators + values + n×u64 shared data.
+    /// Wire data (v2): per-path Dynamic v2 headers + discriminators + values + nxu64 shared data.
     NewJson,
     /// Standalone Dynamic type (ClickHouse 24.x+).
     /// Wire prefix: u64 version (1=deprecated, 2=intermediate, 3=flat).
@@ -112,7 +112,7 @@ impl ColumnType {
             return Some(Self::Time64);
         }
 
-        // Decimal variants — scale is not needed for wire reading (raw LE bytes).
+        // Decimal variants -- scale is not needed for wire reading (raw LE bytes).
         if type_str.starts_with("Decimal32(") {
             return Some(Self::Decimal32);
         }
@@ -125,7 +125,7 @@ impl ColumnType {
         if type_str.starts_with("Decimal256(") {
             return Some(Self::Decimal256);
         }
-        // Generic Decimal(precision, scale) — map to Decimal32/64/128/256 by precision.
+        // Generic Decimal(precision, scale) -- map to Decimal32/64/128/256 by precision.
         if let Some(args_str) = strip_outer(type_str, "Decimal") {
             let args = split_type_args(args_str);
             if args.len() == 2 {
@@ -144,7 +144,7 @@ impl ColumnType {
             return None;
         }
 
-        // Enum8(...) / Enum16(...) — wire format = UInt8/UInt16
+        // Enum8(...) / Enum16(...) -- wire format = UInt8/UInt16
         if type_str.starts_with("Enum8(") {
             return Some(Self::Enum8);
         }
@@ -180,7 +180,7 @@ impl ColumnType {
             return None;
         }
 
-        // SimpleAggregateFunction(func, T) — strip wrapper, read as T
+        // SimpleAggregateFunction(func, T) -- strip wrapper, read as T
         if type_str.starts_with("SimpleAggregateFunction(") {
             if let Some(rest) = type_str.strip_prefix("SimpleAggregateFunction(") {
                 // Find first ", " at depth 0 to split function name from type
@@ -195,7 +195,7 @@ impl ColumnType {
             return None;
         }
 
-        // Variant(T1, T2, ...) — discriminated union
+        // Variant(T1, T2, ...) -- discriminated union
         if let Some(args_str) = strip_outer(type_str, "Variant") {
             let arg_strings = split_type_args(args_str);
             let fields: Vec<ColumnType> =
@@ -206,7 +206,7 @@ impl ColumnType {
             return None;
         }
 
-        // Dynamic(N) — with optional max_types param
+        // Dynamic(N) -- with optional max_types param
         if type_str.starts_with("Dynamic(") {
             return Some(Self::Dynamic);
         }
@@ -237,10 +237,10 @@ impl ColumnType {
             "Date32" => Some(Self::Date32),
             "DateTime" => Some(Self::DateTime),
             "Time" => Some(Self::Time),
-            // New JSON type (ClickHouse 24.x+) — path-based columnar format.
+            // New JSON type (ClickHouse 24.x+) -- path-based columnar format.
             "JSON" => Some(Self::NewJson),
             "Dynamic" => Some(Self::Dynamic),
-            // Legacy Object('json') — stored as a plain String on the wire.
+            // Legacy Object('json') -- stored as a plain String on the wire.
             "Object('json')" => Some(Self::Json),
             // Geo types
             "Point" => Some(Self::Point),
@@ -281,7 +281,7 @@ impl ColumnType {
             | Self::Variant(_)
             | Self::NewJson
             | Self::Dynamic
-            // Point is Tuple(Float64, Float64) in columnar format — not a flat 16-byte blob.
+            // Point is Tuple(Float64, Float64) in columnar format -- not a flat 16-byte blob.
             | Self::Point => None,
         }
     }
@@ -295,8 +295,8 @@ fn strip_outer<'a>(s: &'a str, name: &str) -> Option<&'a str> {
 
 /// Split a comma-separated type argument list respecting parentheses depth.
 ///
-/// `"String, UInt64"` → `["String", "UInt64"]`
-/// `"Array(String), UInt64"` → `["Array(String)", "UInt64"]`
+/// `"String, UInt64"` -> `["String", "UInt64"]`
+/// `"Array(String), UInt64"` -> `["Array(String)", "UInt64"]`
 fn split_type_args(s: &str) -> Vec<&str> {
     let mut result = Vec::new();
     let mut depth = 0usize;
@@ -483,10 +483,10 @@ async fn read_nullable_column<R: ClickHouseRead>(
     let mut result = Vec::with_capacity(n);
     for (flag, value) in null_flags.into_iter().zip(inner_data.into_iter()) {
         if flag != 0 {
-            // NULL — RowBinary: 1 byte = 1
+            // NULL -- RowBinary: 1 byte = 1
             result.push(vec![1u8]);
         } else {
-            // Not null — RowBinary: 0 byte then value
+            // Not null -- RowBinary: 0 byte then value
             let mut row = Vec::with_capacity(1 + value.len());
             row.push(0u8);
             row.extend_from_slice(&value);
@@ -507,12 +507,12 @@ async fn read_nullable_column<R: ClickHouseRead>(
 ///            bit  9:   has additional keys (new rows not in global dict)
 /// if bit 8 set:
 ///   u64      global_dict_size
-///   global_dict_size × inner_type values
+///   global_dict_size x inner_type values
 /// if bit 9 set:
 ///   u64      additional_keys_size
-///   additional_keys_size × inner_type values
+///   additional_keys_size x inner_type values
 /// u64      num_indices   (must equal num_rows)
-/// num_indices × index_bytes  (indices into combined dict)
+/// num_indices x index_bytes  (indices into combined dict)
 /// ```
 async fn read_low_cardinality_column<R: ClickHouseRead>(
     reader: &mut R,
@@ -526,9 +526,9 @@ async fn read_low_cardinality_column<R: ClickHouseRead>(
 
     let state = reader.read_u64_le().await?;
     let index_type = (state & 0x03) as u8;
-    // Bit 8: NEED_GLOBAL_DICTIONARY — server sends a shared global dict
+    // Bit 8: NEED_GLOBAL_DICTIONARY -- server sends a shared global dict
     let has_global_dict = (state & 0x100) != 0;
-    // Bit 9: HAS_ADDITIONAL_KEYS — server sends per-block additional keys
+    // Bit 9: HAS_ADDITIONAL_KEYS -- server sends per-block additional keys
     let has_additional_keys = (state & 0x200) != 0;
 
     // For LowCardinality(Nullable(T)), the dictionary on the wire is of type T
@@ -592,7 +592,7 @@ async fn read_low_cardinality_column<R: ClickHouseRead>(
     for _ in 0..n {
         let idx = read_index(reader, index_bytes).await? as usize;
         if is_nullable_inner {
-            // Index 0 = null sentinel → RowBinary null; other indices = Some(T).
+            // Index 0 = null sentinel -> RowBinary null; other indices = Some(T).
             if idx == 0 {
                 result.push(vec![0x01u8]); // RowBinary Nullable null flag
             } else {
@@ -621,10 +621,10 @@ async fn read_low_cardinality_column<R: ClickHouseRead>(
 ///
 /// Native wire format:
 /// ```text
-/// n × u64   cumulative end-offsets (last value = total element count)
-/// total_elements × T   values packed as a regular T column
+/// n x u64   cumulative end-offsets (last value = total element count)
+/// total_elements x T   values packed as a regular T column
 /// ```
-/// Output RowBinary per row: varuint(count) + count × T_rowbinary
+/// Output RowBinary per row: varuint(count) + count x T_rowbinary
 async fn read_array_column<R: ClickHouseRead>(
     reader: &mut R,
     n: usize,
@@ -679,11 +679,11 @@ async fn read_tuple_column<R: ClickHouseRead>(
 ///
 /// Native wire format:
 /// ```text
-/// n × u64   cumulative end-offsets
-/// total_entries × K   key column
-/// total_entries × V   value column
+/// n x u64   cumulative end-offsets
+/// total_entries x K   key column
+/// total_entries x V   value column
 /// ```
-/// Output RowBinary per row: varuint(count) + count × (K_bytes + V_bytes)
+/// Output RowBinary per row: varuint(count) + count x (K_bytes + V_bytes)
 async fn read_map_column<R: ClickHouseRead>(
     reader: &mut R,
     n: usize,
@@ -723,7 +723,7 @@ async fn read_map_column<R: ClickHouseRead>(
 /// Wire format:
 /// ```text
 /// u64      version (= 0)
-/// n × u8   discriminators  (255 = NULL, 0..k-1 = type index in definition order)
+/// n x u8   discriminators  (255 = NULL, 0..k-1 = type index in definition order)
 /// for each variant type Ti in order:
 ///   [rows where discriminator == i, in original row order]
 /// ```
@@ -808,7 +808,7 @@ async fn read_json_column<R: ClickHouseRead>(reader: &mut R, n: usize) -> Result
 /// for each path:
 ///   u8[n]   discriminators (index in sorted(typeNames+"SharedVariant"), 255=NULL)
 ///   for each type in sorted order: column data
-/// n × u64   shared data (discard)
+/// n x u64   shared data (discard)
 /// ```
 async fn read_json_object_v2_column<R: ClickHouseRead>(
     reader: &mut R,
@@ -841,7 +841,7 @@ async fn read_json_object_v2_column<R: ClickHouseRead>(
         for _ in 0..num_types {
             type_names.push(reader.read_utf8_string().await?);
         }
-        // SharedVariant is implicit — add and sort to get the discriminator indices.
+        // SharedVariant is implicit -- add and sort to get the discriminator indices.
         type_names.push("SharedVariant".to_string());
         type_names.sort();
 
@@ -888,7 +888,7 @@ async fn read_json_object_v2_column<R: ClickHouseRead>(
         path_values.push(col_values);
     }
 
-    // Discard shared data: n × u64 (one u64 per row, unused by us).
+    // Discard shared data: n x u64 (one u64 per row, unused by us).
     for _ in 0..n {
         let _ = reader.read_u64_le().await?;
     }
@@ -909,7 +909,7 @@ async fn read_json_object_v2_column<R: ClickHouseRead>(
             let k = path_sorted_types[path_idx].len();
 
             if disc == 255 || disc >= k {
-                // Absent / NULL — omit key from output.
+                // Absent / NULL -- omit key from output.
                 continue;
             }
 
@@ -1030,7 +1030,7 @@ async fn read_json_object_v3_column<R: ClickHouseRead>(
             let total_types = path_total_types[path_idx];
 
             if disc == total_types || disc > total_types {
-                // NULL — omit key.
+                // NULL -- omit key.
                 continue;
             }
 
@@ -1214,7 +1214,7 @@ async fn read_dynamic_v3_column<R: ClickHouseRead>(reader: &mut R, n: usize) -> 
 
 /// Convert a RowBinary-encoded value for `col_type` into JSON bytes.
 ///
-/// Returns `b"null"` on any parse error rather than propagating — callers should
+/// Returns `b"null"` on any parse error rather than propagating -- callers should
 /// treat this as a best-effort JSON representation for use in Dynamic/Variant columns.
 fn rowbinary_to_json(bytes: &[u8], col_type: &ColumnType) -> Vec<u8> {
     match rowbinary_to_json_inner(bytes, col_type) {
@@ -1258,7 +1258,7 @@ fn rowbinary_to_json_inner(bytes: &[u8], col_type: &ColumnType) -> Result<(Vec<u
             (v.to_string().into_bytes(), 16)
         }
         ColumnType::Int256 | ColumnType::UInt256 | ColumnType::Decimal256 => {
-            // 32-byte big integer — emit as hex string for safety
+            // 32-byte big integer -- emit as hex string for safety
             if bytes.len() < 32 { return Err(()); }
             let hex: String = bytes[..32].iter().rev().map(|b| format!("{b:02x}")).collect();
             (format!("\"{hex}\"").into_bytes(), 32)
@@ -1274,7 +1274,7 @@ fn rowbinary_to_json_inner(bytes: &[u8], col_type: &ColumnType) -> Result<(Vec<u
             (format_float_json(v).into_bytes(), 8)
         }
         ColumnType::BFloat16 => {
-            // BFloat16 is u16 mantissa — convert via f32
+            // BFloat16 is u16 mantissa -- convert via f32
             if bytes.len() < 2 { return Err(()); }
             let raw = u16::from_le_bytes([bytes[0], bytes[1]]);
             let v = f32::from_bits((raw as u32) << 16);
@@ -1316,7 +1316,7 @@ fn rowbinary_to_json_inner(bytes: &[u8], col_type: &ColumnType) -> Result<(Vec<u
             (format!("\"[{hex}]\"").into_bytes(), 16)
         }
         ColumnType::Point => {
-            // 2 × f64 LE
+            // 2 x f64 LE
             if bytes.len() < 16 { return Err(()); }
             let x = f64::from_le_bytes(bytes[..8].try_into().unwrap());
             let y = f64::from_le_bytes(bytes[8..16].try_into().unwrap());
@@ -1427,7 +1427,7 @@ fn json_quote_bytes(bytes: &[u8]) -> Vec<u8> {
             b'\r' => { out.push(b'\\'); out.push(b'r'); }
             b'\t' => { out.push(b'\\'); out.push(b't'); }
             0x00..=0x1f => {
-                // Control character — escape as \uXXXX
+                // Control character -- escape as \uXXXX
                 out.extend_from_slice(format!("\\u{b:04x}").as_bytes());
             }
             _ => out.push(b),

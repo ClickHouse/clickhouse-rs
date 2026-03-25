@@ -1,13 +1,13 @@
 //! Sparse serialization for ClickHouse native protocol.
 //!
-//! Optimization for columns with many default values — only non-default values
+//! Optimization for columns with many default values -- only non-default values
 //! are stored along with their positions. Wire format:
 //!
 //! 1. Offsets: VarUInt group sizes (count of defaults before each non-default)
 //!    - Final group has `END_OF_GRANULE_FLAG` (2^62) ORed in
 //! 2. Values: Only the non-default values
 //!
-//! Example: `[0, 0, 5, 0, 3, 0, 0, 0]` → offsets [2, 1, 3|END], values [5, 3]
+//! Example: `[0, 0, 5, 0, 3, 0, 0, 0]` -> offsets [2, 1, 3|END], values [5, 3]
 
 use crate::error::Result;
 use crate::native::io::{ClickHouseBytesRead, ClickHouseRead};
@@ -26,7 +26,7 @@ pub(crate) struct SparseDeserializeState {
 
 /// Read sparse offsets from an async stream. Returns positions of non-default values.
 ///
-/// Must loop until `END_OF_GRANULE_FLAG` — can't stop early even if we have enough
+/// Must loop until `END_OF_GRANULE_FLAG` -- can't stop early even if we have enough
 /// rows, or the stream will be misaligned for the next column.
 #[allow(clippy::cast_possible_truncation)]
 pub(crate) async fn read_sparse_offsets<R: ClickHouseRead>(
@@ -277,12 +277,12 @@ mod tests {
 
     #[test]
     fn test_consecutive_non_defaults() {
-        // [T, T, T, F, F, T] — positions 0, 1, 2, 5 are non-default.
+        // [T, T, T, F, F, T] -- positions 0, 1, 2, 5 are non-default.
         let mut data = Vec::new();
         data.extend(encode_var_uint(0)); // position 0
         data.extend(encode_var_uint(0)); // position 1
         data.extend(encode_var_uint(0)); // position 2
-        data.extend(encode_var_uint(2)); // 2 defaults → position 5
+        data.extend(encode_var_uint(2)); // 2 defaults -> position 5
         data.extend(encode_var_uint(END_OF_GRANULE_FLAG)); // 0 trailing
 
         let mut bytes = Bytes::from(data);
@@ -308,16 +308,16 @@ mod tests {
             num_trailing_defaults: 2, // 2 unconsumed defaults carried in
             has_value_after_defaults: false,
         };
-        // Stream: 0 more defaults before next value (→ pos 2), then END with 1 trailing.
+        // Stream: 0 more defaults before next value (-> pos 2), then END with 1 trailing.
         let mut data = Vec::new();
-        data.extend(encode_var_uint(0)); // 0 more defaults → value at position 2
+        data.extend(encode_var_uint(0)); // 0 more defaults -> value at position 2
         data.extend(encode_var_uint(1 | END_OF_GRANULE_FLAG)); // 1 trailing default
 
         let mut bytes = Bytes::from(data);
-        // Only 3 rows in this block — the trailing default goes past the end.
+        // Only 3 rows in this block -- the trailing default goes past the end.
         let offsets = read_sparse_offsets_sync(&mut bytes, 3, &mut state).unwrap();
 
-        // Carried 2 defaults → position 2 is the value.
+        // Carried 2 defaults -> position 2 is the value.
         // But num_rows=3, so position 2 is inside the block.
         assert_eq!(offsets, vec![2]);
         // The 1 trailing default puts current_position at 4, which is > num_rows(3).

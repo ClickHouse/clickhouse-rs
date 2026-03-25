@@ -2,14 +2,14 @@
 //!
 //! Use this when table schemas are not known at compile time.
 //! `DynamicInsert` fetches the schema from `system.columns` and encodes
-//! `Map<String, Value>` directly to RowBinary — same ease as JSONEachRow
+//! `Map<String, Value>` directly to RowBinary -- same ease as JSONEachRow
 //! but without the server-side JSON parsing overhead.
 //!
-//! # Why This Exists — End-to-End CPU Savings
+//! # Why This Exists -- End-to-End CPU Savings
 //!
 //! JSONEachRow is easy: push JSON text, ClickHouse parses it. But at scale,
 //! the ClickHouse cluster itself pays the CPU cost of parsing every JSON row
-//! on ingest. That's not "someone else's problem" — it's your total solution
+//! on ingest. That's not "someone else's problem" -- it's your total solution
 //! budget. If your ClickHouse cluster is CPU-loaded because every INSERT runs
 //! through a JSON parser, that's capacity you can't use for queries.
 //!
@@ -19,7 +19,7 @@
 //! instead of JSON serialisation), but the server does dramatically less.
 //! The big picture: total CPU across client + cluster drops significantly.
 //!
-//! "Hey, my app works — if the CH cluster is loaded, that's the infra team's
+//! "Hey, my app works -- if the CH cluster is loaded, that's the infra team's
 //! problem" is exactly the mindset this module replaces. Think end-to-end.
 //!
 //! # Three Insert Tiers

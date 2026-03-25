@@ -38,7 +38,7 @@ pub(crate) struct PoolConfig {
     pub(crate) settings: Vec<(String, String)>,
     /// Roles to activate on each new connection via `SET ROLE`.
     ///
-    /// When non-empty, the manager sends `SET ROLE role1, role2, …` once
+    /// When non-empty, the manager sends `SET ROLE role1, role2, ...` once
     /// after the handshake completes, before returning the connection to the
     /// pool.  An empty vec skips `SET ROLE` entirely (server defaults apply).
     pub(crate) roles: Vec<String>,

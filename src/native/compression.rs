@@ -125,7 +125,7 @@ pub(crate) async fn decompress_data<R: ClickHouseRead>(
     }
 }
 
-// ZSTD streaming decompression infrastructure — used when ZSTD block-at-a-time
+// ZSTD streaming decompression infrastructure -- used when ZSTD block-at-a-time
 // reading is wired up (currently LZ4 only; ZSTD uses decompress_data directly).
 #[allow(dead_code)]
 type BlockReadingFuture<'a, R> =
@@ -143,7 +143,7 @@ pub(crate) struct DecompressionReader<'a, R: ClickHouseRead + 'static> {
 
 impl<'a, R: ClickHouseRead> DecompressionReader<'a, R> {
     /// Create decompressor. Reads first chunk immediately.
-    #[allow(dead_code)] // ZSTD streaming path — wired when block-at-a-time ZSTD is enabled
+    #[allow(dead_code)] // ZSTD streaming path -- wired when block-at-a-time ZSTD is enabled
     pub(crate) async fn new(mode: NativeCompressionMethod, inner: &'a mut R) -> Result<Self> {
         let decompressed = decompress_data(inner, mode).await?;
         Ok(Self {
@@ -195,7 +195,7 @@ impl<R: ClickHouseRead> AsyncRead for DecompressionReader<'_, R> {
             return Poll::Ready(Ok(()));
         }
 
-        // Need more data — start reading next chunk
+        // Need more data -- start reading next chunk
         if let Some(inner) = self.inner.take() {
             let mode = self.mode;
             self.block_reading_future = Some(Box::pin(async move {

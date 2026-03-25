@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Shared insert statistics — used by both HTTP and native inserters.
+// Shared insert statistics -- used by both HTTP and native inserters.
 //
 // Extracted to avoid duplicating the same struct in `inserter.rs` and
 // `native/inserter.rs`.  Both re-export `Quantities` so existing code

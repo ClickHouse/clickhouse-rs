@@ -1,4 +1,4 @@
-//! [`UnifiedQuery`] — query builder that dispatches to either HTTP or native transport.
+//! [`UnifiedQuery`] -- query builder that dispatches to either HTTP or native transport.
 //!
 //! Returned by [`crate::unified::UnifiedClient::query`].
 
@@ -124,7 +124,7 @@ impl UnifiedQuery {
     /// Register a callback invoked for each [`Progress`] packet received from the server.
     ///
     /// Only available when the `native-transport` feature is enabled. For the
-    /// HTTP transport this method is a no-op — HTTP responses do not carry
+    /// HTTP transport this method is a no-op -- HTTP responses do not carry
     /// inline Progress packets.
     #[cfg(feature = "native-transport")]
     pub fn with_progress(
@@ -144,7 +144,7 @@ impl UnifiedQuery {
     /// Register a callback invoked when the server sends a [`ProfileInfo`] packet.
     ///
     /// Only available when the `native-transport` feature is enabled. For the
-    /// HTTP transport this method is a no-op — HTTP responses do not carry
+    /// HTTP transport this method is a no-op -- HTTP responses do not carry
     /// inline ProfileInfo packets.
     #[cfg(feature = "native-transport")]
     pub fn with_profile_info(

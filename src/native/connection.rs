@@ -1,6 +1,6 @@
 //! Connection management for ClickHouse native TCP protocol.
 //!
-//! Single-connection MVP — handles handshake, query execution, and packet
+//! Single-connection MVP -- handles handshake, query execution, and packet
 //! reading over a buffered TCP stream.
 
 use std::net::SocketAddr;
@@ -106,19 +106,19 @@ impl NativeConnection {
             return false;
         }
         // Leftover bytes in the read buffer mean a previous query didn't drain
-        // completely — the connection is in an unknown state.
+        // completely -- the connection is in an unknown state.
         if !self.reader.buffer().is_empty() {
             return false;
         }
         // Non-blocking poll: detect EOF or unexpected data without blocking.
-        // A Pending result means the socket is idle → connection is alive.
+        // A Pending result means the socket is idle -> connection is alive.
         let mut buf = [0u8; 1];
         let mut read_buf = ReadBuf::new(&mut buf);
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
         match Pin::new(&mut self.reader).poll_read(&mut cx, &mut read_buf) {
-            Poll::Pending => true,   // idle — connection is healthy
-            Poll::Ready(_) => false, // EOF or unexpected data — discard
+            Poll::Pending => true,   // idle -- connection is healthy
+            Poll::Ready(_) => false, // EOF or unexpected data -- discard
         }
     }
 
@@ -166,7 +166,7 @@ impl NativeConnection {
 
     /// Activate ClickHouse roles for this session.
     ///
-    /// Sends `SET ROLE role1, role2, …` as a plain query and waits for
+    /// Sends `SET ROLE role1, role2, ...` as a plain query and waits for
     /// `EndOfStream`.  Called once per new connection by the pool manager,
     /// immediately after the handshake, before the connection is handed to
     /// any query or insert.
@@ -345,7 +345,7 @@ fn merge_settings(
 
 /// A no-op [`Waker`] used for non-blocking `poll_read` calls in `check_alive`.
 ///
-/// The waker never schedules anything — it is used purely to drive a single
+/// The waker never schedules anything -- it is used purely to drive a single
 /// synchronous poll without registering for wake-up notifications.
 fn noop_waker() -> Waker {
     const VTABLE: RawWakerVTable = RawWakerVTable::new(

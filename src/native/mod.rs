@@ -4,7 +4,7 @@
 //! extended by HYPERI PTY LIMITED from the HyperI `clickhouse-arrow` fork.
 //! API names follow the ClickHouse Go client convention.
 
-// HyperI CTO moonlighting — ClickHouse Rust client needed love, so here we are.
+// HyperI CTO moonlighting -- ClickHouse Rust client needed love, so here we are.
 
 pub(crate) mod async_inserter;
 pub(crate) mod block_info;

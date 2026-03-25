@@ -99,7 +99,7 @@ impl DynamicInsert {
         let schema = self.schema.as_ref().unwrap();
 
         // On first row, determine the column list and create the INSERT.
-        // The insert data path requires HTTP transport — for native, the
+        // The insert data path requires HTTP transport -- for native, the
         // RowBinary-to-columnar conversion is not yet wired up.
         if self.insert.is_none() {
             let cols = columns_to_send(row, schema);

@@ -1,4 +1,4 @@
-//! Public `NativeClient` — a ClickHouse client using the native TCP protocol.
+//! Public `NativeClient` -- a ClickHouse client using the native TCP protocol.
 //!
 //! Mirrors the basic API of [`crate::Client`] so integration tests can switch
 //! between transports with minimal changes.
@@ -76,9 +76,9 @@ pub struct NativeClient {
     ///
     /// ClickHouse roles are session-scoped: `SET ROLE` must be issued once per
     /// connection, immediately after the handshake.  The pool manager sends
-    /// `SET ROLE role1, role2, …` before returning a new connection.
+    /// `SET ROLE role1, role2, ...` before returning a new connection.
     ///
-    /// An empty vec means "use the server default roles for this user" —
+    /// An empty vec means "use the server default roles for this user"  -- 
     /// equivalent to `SET ROLE DEFAULT`.
     roles: Vec<String>,
     /// Maximum connections (idle + in-use) in the pool.
@@ -244,7 +244,7 @@ impl NativeClient {
     /// so connections work against both public ClickHouse Cloud and
     /// internal deployments with private CAs.
     ///
-    /// The `server_name` is used for SNI and certificate verification —
+    /// The `server_name` is used for SNI and certificate verification  -- 
     /// typically the hostname of the ClickHouse server.
     /// Connect to ClickHouse's native TLS port (9440 by default).
     ///
@@ -279,7 +279,7 @@ impl NativeClient {
 
     /// Set the maximum number of connections (idle + in-use) in the pool.
     ///
-    /// Defaults to 10.  Must be called before the first query/insert —
+    /// Defaults to 10.  Must be called before the first query/insert  -- 
     /// changing it after the pool has been initialised has no effect.
     #[must_use]
     pub fn with_pool_size(mut self, size: usize) -> Self {
@@ -315,7 +315,7 @@ impl NativeClient {
     /// Activate one or more ClickHouse roles for all connections on this client.
     ///
     /// Roles are session-scoped in ClickHouse: each new connection opened by
-    /// the pool will execute `SET ROLE role1, role2, …` immediately after the
+    /// the pool will execute `SET ROLE role1, role2, ...` immediately after the
     /// handshake, before the connection is handed to any query or insert.
     ///
     /// Replaces any roles previously set by this method.  Call
@@ -512,7 +512,7 @@ impl NativeClient {
 
     /// Return a snapshot of connection pool statistics.
     ///
-    /// Values are eventually-consistent — they reflect the pool state at the
+    /// Values are eventually-consistent -- they reflect the pool state at the
     /// moment of the call.
     pub fn pool_stats(&self) -> PoolStats {
         let status = self.pool.status();
@@ -614,10 +614,10 @@ fn rb_read_string(bytes: &[u8]) -> crate::error::Result<(String, &[u8])> {
 fn build_root_cert_store() -> rustls::RootCertStore {
     let mut root_store = rustls::RootCertStore::empty();
 
-    // 1. webpki roots — covers ClickHouse Cloud and all public CAs.
+    // 1. webpki roots -- covers ClickHouse Cloud and all public CAs.
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-    // 2. Native OS roots — covers internal/private CAs (e.g. cert-manager,
+    // 2. Native OS roots -- covers internal/private CAs (e.g. cert-manager,
     //    OpenBao PKI, corporate CAs).  Errors loading individual certs are
     //    non-fatal: webpki roots alone are sufficient for public endpoints.
     let native = rustls_native_certs::load_native_certs();
