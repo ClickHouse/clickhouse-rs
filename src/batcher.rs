@@ -2,7 +2,7 @@
 //!
 //! [`TableBatcher<T>`] is a thin convenience wrapper over
 //! [`AsyncInserter<T>`][crate::async_inserter::AsyncInserter] that provides
-//! ClickHouse Go client-style naming ([`append`][TableBatcher::append] /
+//! ClickHouse batch-style naming ([`append`][TableBatcher::append] /
 //! [`flush`][TableBatcher::flush] / [`send`][TableBatcher::send]) and
 //! sensible defaults.
 //!
@@ -100,7 +100,7 @@ impl BatchConfig {
 /// Thread-safe, auto-flushing batch inserter for a single ClickHouse table.
 ///
 /// Thin wrapper over [`AsyncInserter<T>`][crate::async_inserter::AsyncInserter]
-/// with Go client-style naming.
+/// with batch-style naming.
 ///
 /// Unlike `Inserter<T>`, this type accepts `&self` on [`append`][Self::append]
 /// and [`flush`][Self::flush], so it can be shared across tasks via [`std::sync::Arc`].

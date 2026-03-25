@@ -197,24 +197,55 @@ async fn skip_settings<R: ClickHouseRead>(reader: &mut R) -> Result<()> {
     Ok(())
 }
 
-/// Read a server exception from the wire.
+/// Read a server exception chain from the wire.
+///
+/// ClickHouse sends exceptions as a linked list: each exception has a
+/// `has_nested` flag, and if true the next exception follows immediately.
+/// We MUST consume the entire chain or the stream goes out of sync.
+///
+/// Returns the outermost exception. Nested exceptions are appended to
+/// the message -- they're usually the root cause.
 pub(crate) async fn read_exception<R: ClickHouseRead>(
     reader: &mut R,
 ) -> Result<ServerException> {
-    let code = reader.read_i32_le().await?;
-    let name = reader.read_utf8_string().await?;
-    let message =
-        String::from_utf8_lossy(&reader.read_string().await?).to_string();
-    let stack_trace = reader.read_utf8_string().await?;
-    let _has_nested = reader.read_u8().await? != 0;
+    let mut first: Option<ServerException> = None;
+    let mut nested_messages = Vec::new();
 
-    Ok(ServerException {
-        code,
-        name,
-        message,
-        stack_trace,
-        _has_nested,
-    })
+    loop {
+        let code = reader.read_i32_le().await?;
+        let name = reader.read_utf8_string().await?;
+        let message =
+            String::from_utf8_lossy(&reader.read_string().await?).to_string();
+        let stack_trace = reader.read_utf8_string().await?;
+        let has_nested = reader.read_u8().await? != 0;
+
+        if first.is_none() {
+            first = Some(ServerException {
+                code,
+                name,
+                message,
+                stack_trace,
+                _has_nested: has_nested,
+            });
+        } else {
+            // Append nested exception info to help with debugging.
+            nested_messages.push(format!("{name}: {message}"));
+        }
+
+        if !has_nested {
+            break;
+        }
+    }
+
+    let mut exc = first.expect("at least one exception");
+    if !nested_messages.is_empty() {
+        exc.message = format!(
+            "{}\nCaused by: {}",
+            exc.message,
+            nested_messages.join("\nCaused by: ")
+        );
+    }
+    Ok(exc)
 }
 
 /// Read progress from the wire.

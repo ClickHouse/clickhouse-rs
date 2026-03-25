@@ -2,7 +2,7 @@
 //!
 //! Alternative transport to the default HTTP/RowBinary path. Ported and
 //! extended by HYPERI PTY LIMITED from the HyperI `clickhouse-arrow` fork.
-//! API names follow the ClickHouse Go client convention.
+//! Native TCP protocol transport for ClickHouse.
 
 // HyperI CTO moonlighting -- ClickHouse Rust client needed love, so here we are.
 

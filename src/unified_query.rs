@@ -57,7 +57,7 @@ impl UnifiedQuery {
     ///
     /// For the HTTP transport, delegates to [`crate::query::Query::param`].
     /// For the native transport, sends the parameter as a `param_<name>`
-    /// query setting (the same mechanism used by the Go client).
+    /// query setting..
     ///
     /// # Examples
     ///

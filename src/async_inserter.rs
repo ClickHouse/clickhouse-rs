@@ -38,7 +38,7 @@
 //!              ClickHouse :8123
 //! ```
 //!
-//! The Go ClickHouse client (`clickhouse-go`) keeps batch inserts purely
+//! This module keeps batch inserts purely
 //! caller-driven (no background goroutines).  This design goes further  -- 
 //! providing the concurrent, auto-flushing inserter that Go users typically
 //! build themselves with goroutines and channels.

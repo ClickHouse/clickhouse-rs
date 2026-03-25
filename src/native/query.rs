@@ -98,7 +98,7 @@ impl NativeQuery {
     /// Bind a ClickHouse named parameter using the `{name:Type}` placeholder syntax.
     ///
     /// ClickHouse server-side named parameters use the syntax `{name:Type}` in
-    /// SQL.  The Go client -- and this method -- sends these as query settings
+    /// SQL.  These are sent as query settings
     /// with the prefix `param_`.  For example, calling
     /// `.param("id", 42u32)` adds the setting `param_id = "42"`, which
     /// ClickHouse substitutes before executing the query.
