@@ -7,7 +7,32 @@
 //! **Performance:** avoids the JSON text overhead of JSONEachRow.
 //! ClickHouse receives pre-columnarised binary -- zero server-side parsing.
 //!
-//! # Encoding Rules
+//! # Hot path optimisations (ported from dfe-loader)
+//!
+//! This encoder runs once per column per row. Three optimisations reduce
+//! overhead at scale:
+//!
+//! - **`Cow<str>` in `value_to_str()`:** the common case (Value::String)
+//!   borrows the existing string directly -- zero allocation. Only non-string
+//!   types (numbers, bools) allocate a temporary for conversion. At 100k
+//!   rows x 20 string columns, that is 2M allocations avoided per batch.
+//!
+//! - **`TypeTag` enum dispatch:** `encode_typed()` matches on a pre-computed
+//!   integer discriminant (`pt.tag`) instead of `pt.base.as_str()`. String
+//!   comparison is O(n) per character; enum match is a single jump table.
+//!   The tag is resolved once at schema-fetch time, reused on every row.
+//!
+//! - **`FxHashMap` for schema lookups:** column_index, schema caches, and
+//!   metadata caches use `rustc_hash::FxHashMap` (non-cryptographic, 2-3x
+//!   faster than std HashMap for string keys). These are internal maps with
+//!   application-controlled keys -- no need for DoS-resistant hashing.
+//!
+//! Note: `serde_json::Value` in the public API is deliberate. sonic-rs (SIMD
+//! JSON) accelerates text-to-Value parsing, which happens in the *caller*
+//! (e.g. dfe-loader). This encoder only reads already-parsed Values and
+//! writes binary -- the Value type itself is not the bottleneck.
+//!
+//! # Encoding rules
 //!
 //! - Columns are written in schema order
 //! - Missing columns with server-side defaults are skipped
