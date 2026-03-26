@@ -14,9 +14,10 @@
 //! cache.insert("mydb.mytable", schema);
 //! ```
 
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+
+use rustc_hash::FxHashMap;
 
 use super::error::DynamicError;
 use super::parsed_type::ParsedType;
@@ -44,7 +45,7 @@ pub struct DynamicSchema {
     /// Columns in position order.
     pub columns: Vec<ColumnDef>,
     /// Lookup by column name for O(1) access during encoding.
-    column_index: HashMap<String, usize>,
+    column_index: FxHashMap<String, usize>,
 }
 
 impl DynamicSchema {
@@ -97,7 +98,7 @@ impl DynamicSchema {
 /// Thread-safe via `RwLock`. Designed to be shared across insert instances
 /// via `Arc`.
 pub struct DynamicSchemaCache {
-    inner: RwLock<HashMap<String, CacheEntry>>,
+    inner: RwLock<FxHashMap<String, CacheEntry>>,
     ttl: Duration,
 }
 
@@ -110,7 +111,7 @@ impl DynamicSchemaCache {
     /// Create a new cache wrapped in `Arc`.
     pub fn new(ttl: Duration) -> Arc<Self> {
         Arc::new(Self {
-            inner: RwLock::new(HashMap::new()),
+            inner: RwLock::new(FxHashMap::default()),
             ttl,
         })
     }

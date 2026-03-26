@@ -6,9 +6,10 @@
 //!
 //! The cache is shared across clones of [`crate::native::NativeClient`] via `Arc`.
 
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+
+use rustc_hash::FxHashMap;
 
 /// A cached schema entry.
 struct Entry {
@@ -19,7 +20,7 @@ struct Entry {
 
 /// TTL-based schema cache shared across [`crate::native::NativeClient`] clones.
 pub(crate) struct NativeSchemaCache {
-    inner: RwLock<HashMap<String, Entry>>,
+    inner: RwLock<FxHashMap<String, Entry>>,
     ttl: Duration,
 }
 
@@ -29,7 +30,7 @@ impl NativeSchemaCache {
     /// A TTL of 300 s (5 minutes) is a sensible default.
     pub(crate) fn new(ttl_secs: u64) -> Arc<Self> {
         Arc::new(Self {
-            inner: RwLock::new(HashMap::new()),
+            inner: RwLock::new(FxHashMap::default()),
             ttl: Duration::from_secs(ttl_secs),
         })
     }

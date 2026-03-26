@@ -32,13 +32,12 @@ impl ColumnSchema {
         headers
             .iter()
             .map(|(name, type_name)| {
-                let col_type =
-                    ColumnType::parse(type_name).ok_or_else(|| {
-                        Error::BadResponse(format!(
-                            "native INSERT: unsupported column type '{type_name}' \
+                let col_type = ColumnType::parse(type_name).ok_or_else(|| {
+                    Error::BadResponse(format!(
+                        "native INSERT: unsupported column type '{type_name}' \
                              for column '{name}'"
-                        ))
-                    })?;
+                    ))
+                })?;
                 Ok(ColumnSchema {
                     name: name.clone(),
                     type_name: type_name.clone(),
@@ -160,8 +159,8 @@ fn write_col_values(values: &[Vec<u8>], col_type: &ColumnType, out: &mut Vec<u8>
                 };
 
             let mut dict: Vec<Vec<u8>> = Vec::new();
-            let mut seen: std::collections::HashMap<Vec<u8>, u32> =
-                std::collections::HashMap::new();
+            let mut seen: rustc_hash::FxHashMap<Vec<u8>, u32> =
+                rustc_hash::FxHashMap::default();
 
             if is_nullable_inner {
                 // Index 0 = default T value, represents NULL.
@@ -384,7 +383,7 @@ fn rb_advance(data: &[u8], pos: &mut usize, col_type: &ColumnType) -> Result<()>
 
 /// Write the default (zero) native encoding for `col_type`.
 ///
-/// Used to fill the value slot for NULL rows in a Nullable column  -- 
+/// Used to fill the value slot for NULL rows in a Nullable column  --
 /// the native protocol requires value bytes even when the null flag is set.
 fn rb_write_default(out: &mut Vec<u8>, col_type: &ColumnType) {
     if let Some(size) = col_type.fixed_size() {

@@ -172,6 +172,7 @@ tokio-rustls = { version = "0.26", default-features = false, optional = true }
 webpki-roots = { version = "1", optional = true }
 rustls-native-certs = { version = "0.8", optional = true }
 serde_json = "1"
+rustc-hash = "2"
 
 [dev-dependencies]
 clickhouse-macros = { version = "0.3.0", path = "macros" }

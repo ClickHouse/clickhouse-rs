@@ -16,7 +16,9 @@ use clickhouse_types::{Column, DataTypeNode};
 use crate::_priv::row_insert_metadata_query;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::{collections::HashMap, fmt::Display, sync::Arc};
+use std::{fmt::Display, sync::Arc};
+
+use rustc_hash::FxHashMap;
 use tokio::sync::RwLock;
 
 #[cfg(feature = "async-inserter")]
@@ -95,8 +97,8 @@ pub struct Client {
     authentication: Authentication,
     compression: Compression,
     roles: HashSet<String>,
-    options: HashMap<String, String>,
-    headers: HashMap<String, String>,
+    options: FxHashMap<String, String>,
+    headers: FxHashMap<String, String>,
     products_info: Vec<ProductInfo>,
     validation: bool,
     insert_metadata_cache: Arc<InsertMetadataCache>,
@@ -147,7 +149,7 @@ impl Default for Client {
 /// Cache for [`RowMetadata`] to avoid allocating it for the same struct more than once
 /// during the application lifecycle. Key: fully qualified table name (e.g. `database.table`).
 #[derive(Default)]
-pub(crate) struct InsertMetadataCache(RwLock<HashMap<String, Arc<InsertMetadata>>>);
+pub(crate) struct InsertMetadataCache(RwLock<FxHashMap<String, Arc<InsertMetadata>>>);
 
 impl Client {
     /// Creates a new client with a specified underlying HTTP client.
@@ -162,8 +164,8 @@ impl Client {
             authentication: Authentication::default(),
             compression: Compression::default(),
             roles: HashSet::new(),
-            options: HashMap::new(),
-            headers: HashMap::new(),
+            options: FxHashMap::default(),
+            headers: FxHashMap::default(),
             products_info: Vec::default(),
             validation: true,
             insert_metadata_cache: Arc::new(InsertMetadataCache::default()),
@@ -764,7 +766,7 @@ impl Client {
 
         let mut columns = Vec::new();
         let mut column_default_kinds = Vec::new();
-        let mut column_lookup = HashMap::new();
+        let mut column_lookup = rustc_hash::FxHashMap::default();
 
         while let Some((name, type_, default_kind)) = columns_cursor.next().await? {
             let data_type = DataTypeNode::new(&type_)?;

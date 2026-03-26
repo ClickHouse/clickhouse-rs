@@ -10,6 +10,95 @@
 
 use std::fmt;
 
+/// Pre-computed discriminant for the base type, avoiding string comparison
+/// on the encode hot path. Resolved once at schema-fetch time, used on
+/// every row thereafter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeTag {
+    String,
+    FixedString,
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt64,
+    UInt128,
+    UInt256,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Int128,
+    Int256,
+    Float32,
+    Float64,
+    Bool,
+    Date,
+    Date32,
+    DateTime,
+    DateTime64,
+    Decimal32,
+    Decimal64,
+    Decimal128,
+    Decimal256,
+    UUID,
+    IPv4,
+    IPv6,
+    Enum8,
+    Enum16,
+    Array,
+    Map,
+    Tuple,
+    Point,
+    JSON,
+    /// Forward compat -- unknown types encode as String.
+    Unknown,
+}
+
+impl TypeTag {
+    /// Resolve a base type name to its tag.
+    #[must_use]
+    pub fn from_base(base: &str) -> Self {
+        match base {
+            "String" => Self::String,
+            "FixedString" => Self::FixedString,
+            "UInt8" => Self::UInt8,
+            "UInt16" => Self::UInt16,
+            "UInt32" => Self::UInt32,
+            "UInt64" => Self::UInt64,
+            "UInt128" => Self::UInt128,
+            "UInt256" => Self::UInt256,
+            "Int8" => Self::Int8,
+            "Int16" => Self::Int16,
+            "Int32" => Self::Int32,
+            "Int64" => Self::Int64,
+            "Int128" => Self::Int128,
+            "Int256" => Self::Int256,
+            "Float32" => Self::Float32,
+            "Float64" => Self::Float64,
+            "Bool" => Self::Bool,
+            "Date" => Self::Date,
+            "Date32" => Self::Date32,
+            "DateTime" => Self::DateTime,
+            "DateTime64" => Self::DateTime64,
+            "Decimal32" => Self::Decimal32,
+            "Decimal64" => Self::Decimal64,
+            "Decimal128" => Self::Decimal128,
+            "Decimal256" => Self::Decimal256,
+            "UUID" => Self::UUID,
+            "IPv4" => Self::IPv4,
+            "IPv6" => Self::IPv6,
+            "Enum8" => Self::Enum8,
+            "Enum16" => Self::Enum16,
+            "Array" => Self::Array,
+            "Map" => Self::Map,
+            "Tuple" => Self::Tuple,
+            "Point" => Self::Point,
+            "JSON" | "Object" => Self::JSON,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 /// Parsed ClickHouse type information.
 ///
 /// Runtime representation of a ClickHouse column type. Unknown types are
@@ -36,6 +125,9 @@ pub struct ParsedType {
     pub raw: String,
     /// Base type name (e.g., "String", "Int64", "DateTime64").
     pub base: String,
+    /// Pre-computed discriminant for fast dispatch in the encode hot path.
+    /// Avoids string comparison on every row.
+    pub tag: TypeTag,
     /// Whether wrapped in Nullable().
     pub nullable: bool,
     /// Whether wrapped in LowCardinality().
@@ -66,6 +158,7 @@ impl ParsedType {
         let mut result = Self {
             raw,
             base: String::new(),
+            tag: TypeTag::Unknown,
             nullable: false,
             low_cardinality: false,
             array_element: None,
@@ -100,6 +193,7 @@ impl ParsedType {
         // Check for Array
         if let Some(inner) = Self::extract_wrapper(&type_str, "Array") {
             result.base = "Array".to_string();
+            result.tag = TypeTag::Array;
             result.array_element = Some(Box::new(Self::parse(&inner)));
             return result;
         }
@@ -109,6 +203,7 @@ impl ParsedType {
             && let Some((key, value)) = Self::split_type_args(&inner)
         {
             result.base = "Map".to_string();
+            result.tag = TypeTag::Map;
             result.map_types = Some((Box::new(Self::parse(&key)), Box::new(Self::parse(&value))));
             return result;
         }
@@ -116,6 +211,7 @@ impl ParsedType {
         // Check for DateTime64(precision, 'timezone')
         if type_str.starts_with("DateTime64") {
             result.base = "DateTime64".to_string();
+            result.tag = TypeTag::DateTime64;
             if let Some(inner) = Self::extract_wrapper(&type_str, "DateTime64") {
                 let parts: Vec<&str> = inner.splitn(2, ',').collect();
                 result.precision = parts.first().and_then(|p| p.trim().parse().ok());
@@ -129,6 +225,7 @@ impl ParsedType {
         // Check for FixedString(N)
         if let Some(inner) = Self::extract_wrapper(&type_str, "FixedString") {
             result.base = "FixedString".to_string();
+            result.tag = TypeTag::FixedString;
             result.fixed_size = inner.trim().parse().ok();
             return result;
         }
@@ -136,6 +233,7 @@ impl ParsedType {
         // Check for Decimal(P, S) or Decimal32/64/128/256(S)
         if type_str.starts_with("Decimal") {
             result.base = Self::parse_decimal_base(&type_str);
+            result.tag = TypeTag::from_base(&result.base);
             if let Some(inner) = Self::extract_parens(&type_str) {
                 let parts: Vec<&str> = inner.split(',').collect();
                 if parts.len() == 2 {
@@ -150,16 +248,19 @@ impl ParsedType {
 
         // Check for Enum8/Enum16
         if type_str.starts_with("Enum8") || type_str.starts_with("Enum16") {
-            result.base = if type_str.starts_with("Enum8") {
-                "Enum8".to_string()
+            if type_str.starts_with("Enum8") {
+                result.base = "Enum8".to_string();
+                result.tag = TypeTag::Enum8;
             } else {
-                "Enum16".to_string()
-            };
+                result.base = "Enum16".to_string();
+                result.tag = TypeTag::Enum16;
+            }
             return result;
         }
 
         // Simple type
         result.base = type_str.to_string();
+        result.tag = TypeTag::from_base(&result.base);
         result
     }
 
@@ -249,8 +350,9 @@ impl ParsedType {
             "Variant" => "Variant",
             "Dynamic" => "Dynamic",
             "Enum8" | "Enum16" => "Enum",
-            "Point" | "Ring" | "Polygon" | "MultiPolygon" | "LineString"
-            | "MultiLineString" => "Geo",
+            "Point" | "Ring" | "Polygon" | "MultiPolygon" | "LineString" | "MultiLineString" => {
+                "Geo"
+            }
             _ => "String",
         }
     }

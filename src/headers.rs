@@ -1,7 +1,7 @@
 use crate::{Authentication, ProductInfo};
 use hyper::header::{AUTHORIZATION, USER_AGENT};
 use hyper::http::request::Builder;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::env::consts::OS;
 
 fn get_user_agent(products_info: &[ProductInfo]) -> String {
@@ -25,7 +25,7 @@ fn get_user_agent(products_info: &[ProductInfo]) -> String {
 #[inline]
 pub(crate) fn with_request_headers(
     mut builder: Builder,
-    headers: &HashMap<String, String>,
+    headers: &FxHashMap<String, String>,
     products_info: &[ProductInfo],
 ) -> Builder {
     for (name, value) in headers {

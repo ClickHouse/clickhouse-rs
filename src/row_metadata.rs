@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::row::RowKind;
 use clickhouse_types::Column;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
@@ -38,7 +38,7 @@ pub(crate) struct RowMetadata {
 pub(crate) struct InsertMetadata {
     pub(crate) row_metadata: RowMetadata,
     pub(crate) column_default_kinds: Vec<ColumnDefaultKind>,
-    pub(crate) column_lookup: HashMap<String, usize>,
+    pub(crate) column_lookup: FxHashMap<String, usize>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
