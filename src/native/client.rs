@@ -443,11 +443,16 @@ impl NativeClient {
         if let Some(cached) = self.schema_cache.get(table) {
             return Ok(cached);
         }
-        let db = &self.database;
+        let mut db_escaped = String::new();
+        crate::sql::escape::string(&self.database, &mut db_escaped)
+            .expect("fmt::Write on String is infallible");
+        let mut tbl_escaped = String::new();
+        crate::sql::escape::string(table, &mut tbl_escaped)
+            .expect("fmt::Write on String is infallible");
         let sql = format!(
             "SELECT name, type \
              FROM system.columns \
-             WHERE database = '{db}' AND table = '{table}' \
+             WHERE database = {db_escaped} AND table = {tbl_escaped} \
              ORDER BY position"
         );
         let columns = fetch_string_pairs(self, &sql).await?;
