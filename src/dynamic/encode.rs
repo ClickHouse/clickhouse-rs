@@ -148,8 +148,12 @@ fn encode_typed(
         TypeTag::Int8 | TypeTag::Enum8 => {
             buf.extend_from_slice(&(as_i64(value, col_name)? as i8).to_le_bytes());
         }
-        TypeTag::Int16 | TypeTag::Enum16 | TypeTag::Date => {
+        TypeTag::Int16 | TypeTag::Enum16 => {
             buf.extend_from_slice(&(as_i64(value, col_name)? as i16).to_le_bytes());
+        }
+        TypeTag::Date => {
+            // Date is UInt16 (days since 1970-01-01), not signed.
+            buf.extend_from_slice(&(as_u64(value, col_name)? as u16).to_le_bytes());
         }
         TypeTag::Int32 | TypeTag::Date32 | TypeTag::Decimal32 => {
             buf.extend_from_slice(&(as_i64(value, col_name)? as i32).to_le_bytes());
@@ -350,13 +354,6 @@ fn encode_map(
         _ => return Err(enc_err(col_name, "expected object for Map")),
     };
     write_varint(obj.len() as u64, buf);
-    let key_col = ColumnDef {
-        name: format!("{col_name}.key"),
-        raw_type: String::new(),
-        parsed_type: key_type.clone(),
-        default_kind: String::new(),
-        has_default: false,
-    };
     let val_col = ColumnDef {
         name: format!("{col_name}.value"),
         raw_type: String::new(),
@@ -365,7 +362,9 @@ fn encode_map(
         has_default: false,
     };
     for (k, v) in obj {
-        encode_value(&Value::String(k.clone()), &key_col, buf)?;
+        // Map keys are always String in ClickHouse. Write directly
+        // instead of cloning into a Value::String wrapper.
+        write_string(k.as_bytes(), buf);
         encode_value(v, &val_col, buf)?;
     }
     Ok(())
