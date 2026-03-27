@@ -63,13 +63,15 @@ async fn prepare_native_database(test_name: &str) -> NativeClient {
     let db = format!("chrs_native_{test_name}");
     let cluster = std::env::var("CLICKHOUSE_CLUSTER").ok();
 
+    // SYNC ensures the DDL propagates to all replicas before returning,
+    // preventing "already exists" races on re-runs against a cluster.
     let drop_sql = match &cluster {
-        Some(c) => format!("DROP DATABASE IF EXISTS {db} ON CLUSTER {c}"),
-        None => format!("DROP DATABASE IF EXISTS {db}"),
+        Some(c) => format!("DROP DATABASE IF EXISTS {db} ON CLUSTER {c} SYNC"),
+        None => format!("DROP DATABASE IF EXISTS {db} SYNC"),
     };
     let create_sql = match &cluster {
-        Some(c) => format!("CREATE DATABASE {db} ON CLUSTER {c}"),
-        None => format!("CREATE DATABASE {db}"),
+        Some(c) => format!("CREATE DATABASE IF NOT EXISTS {db} ON CLUSTER {c}"),
+        None => format!("CREATE DATABASE IF NOT EXISTS {db}"),
     };
 
     client
