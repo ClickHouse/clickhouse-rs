@@ -264,6 +264,7 @@ mod mock;
 mod nested;
 mod query;
 mod query_readonly;
+mod query_summary;
 mod query_syntax;
 mod rbwnat_header;
 mod rbwnat_smoke;

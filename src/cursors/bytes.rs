@@ -125,7 +125,10 @@ impl BytesCursor {
     }
 
     /// Returns the parsed `X-ClickHouse-Summary` response header, if
-    /// present. Available after the first chunk has been received.
+    /// present. Available once the response headers have been received.
+    ///
+    /// Note: the summary values may be incomplete unless the query was
+    /// executed with `wait_end_of_query=1`.
     #[inline]
     pub fn summary(&self) -> Option<&QuerySummary> {
         self.raw.summary()

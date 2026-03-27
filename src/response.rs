@@ -31,7 +31,8 @@ pub(crate) enum Response {
     Loading(Chunks),
 }
 
-pub(crate) type ResponseFuture = Pin<Box<dyn Future<Output = Result<Chunks>> + Send>>;
+pub(crate) type ResponseFuture =
+    Pin<Box<dyn Future<Output = Result<(Chunks, Option<Box<QuerySummary>>)>> + Send>>;
 
 impl Response {
     pub(crate) fn new(response: HyperResponseFuture, compression: Compression) -> Self {
@@ -51,12 +52,12 @@ impl Response {
                     .headers()
                     .get("X-ClickHouse-Summary")
                     .and_then(|v| v.to_str().ok())
-                    .and_then(|s| serde_json::from_str::<QuerySummary>(s).ok())
+                    .and_then(QuerySummary::from_header)
                     .map(Box::new);
 
                 // More likely to be successful, start streaming.
                 // It still can fail, but we'll handle it in `DetectDbException`.
-                Ok(Chunks::new(response.into_body(), compression, tag, summary))
+                Ok((Chunks::new(response.into_body(), compression, tag), summary))
             } else {
                 // An instantly failed request.
                 Err(collect_bad_response(
@@ -82,7 +83,10 @@ impl Response {
     pub(crate) async fn finish(&mut self) -> Result<()> {
         let chunks = loop {
             match self {
-                Self::Waiting(future) => *self = Self::Loading(future.await?),
+                Self::Waiting(future) => {
+                    let (chunks, _summary) = future.await?;
+                    *self = Self::Loading(chunks);
+                }
                 Self::Loading(chunks) => break chunks,
             }
         };
@@ -167,7 +171,6 @@ pub(crate) struct Chunk {
 // * Uses `Box<_>` in order to reduce the size of cursors.
 pub(crate) struct Chunks {
     inner: Option<Box<DetectDbException<Decompress<IncomingStream>>>>,
-    summary: Option<Box<QuerySummary>>,
 }
 
 impl Chunks {
@@ -175,7 +178,6 @@ impl Chunks {
         stream: Incoming,
         compression: Compression,
         exception_tag: Option<Box<[u8]>>,
-        summary: Option<Box<QuerySummary>>,
     ) -> Self {
         let stream = IncomingStream(stream);
         let stream = Decompress::new(stream, compression);
@@ -185,19 +187,11 @@ impl Chunks {
         };
         Self {
             inner: Some(Box::new(stream)),
-            summary,
         }
     }
 
     pub(crate) fn empty() -> Self {
-        Self {
-            inner: None,
-            summary: None,
-        }
-    }
-
-    pub(crate) fn summary(&self) -> Option<&QuerySummary> {
-        self.summary.as_deref()
+        Self { inner: None }
     }
 
     #[cfg(feature = "futures03")]
