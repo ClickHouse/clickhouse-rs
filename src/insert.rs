@@ -51,14 +51,15 @@ impl<T> Insert<T> {
         let fields = row::join_column_names::<T>()
             .expect("the row type must be a struct or a wrapper around it");
 
-        // TODO: what about escaping a table name?
-        // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
         let format = if row_metadata.is_some() {
             formats::ROW_BINARY_WITH_NAMES_AND_TYPES
         } else {
             formats::ROW_BINARY
         };
-        let sql = format!("INSERT INTO {table}({fields}) FORMAT {format}");
+        let mut escaped_table = String::new();
+        crate::sql::escape::identifier(table, &mut escaped_table)
+            .expect("fmt::Write on String is infallible");
+        let sql = format!("INSERT INTO {escaped_table}({fields}) FORMAT {format}");
 
         Self {
             insert: client

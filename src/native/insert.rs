@@ -80,7 +80,10 @@ impl<T: Row> NativeInsert<T> {
     pub(crate) fn new(client: NativeClient, table: &str) -> Self {
         let fields = row::join_column_names::<T>()
             .expect("the row type must be a struct or a wrapper around it");
-        let sql = format!("INSERT INTO {table}({fields}) FORMAT Native");
+        let mut escaped_table = String::new();
+        crate::sql::escape::identifier(table, &mut escaped_table)
+            .expect("fmt::Write on String is infallible");
+        let sql = format!("INSERT INTO {escaped_table}({fields}) FORMAT Native");
         Self {
             client,
             sql,
@@ -205,11 +208,13 @@ impl<T: Row> NativeInsert<T> {
         if result.is_err() {
             // Poison the connection on any error (including timeout) so it is
             // never returned to the pool mid-INSERT.
-            self.conn.as_mut().expect("conn must be open during flush").discard();
+            self.conn
+                .as_mut()
+                .expect("conn must be open during flush")
+                .discard();
         }
         result
     }
-
 }
 
 impl<T> NativeInsert<T> {

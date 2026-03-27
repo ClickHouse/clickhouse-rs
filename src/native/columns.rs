@@ -1346,9 +1346,9 @@ fn rowbinary_to_json_inner(bytes: &[u8], col_type: &ColumnType) -> Result<(Vec<u
             if bytes.len() < 16 {
                 return Err(());
             }
-            // UUID is stored as two u64s in big-endian byte order within ClickHouse
-            let hi = u64::from_be_bytes(bytes[..8].try_into().unwrap());
-            let lo = u64::from_be_bytes(bytes[8..16].try_into().unwrap());
+            // UUID in RowBinary: two u64 little-endian (msb first, lsb second).
+            let hi = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+            let lo = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
             let s = format!(
                 "\"{:08x}-{:04x}-{:04x}-{:04x}-{:012x}\"",
                 (hi >> 32) as u32,
