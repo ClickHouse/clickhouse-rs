@@ -9,16 +9,15 @@ use tokio::io::AsyncReadExt;
 
 use crate::error::{Error, Result};
 use crate::native::block_info::BlockInfo;
-use crate::native::columns::{self, ColumnData, ColumnType, transpose_to_rowbinary, write_var_uint};
-use crate::native::sparse::{SparseDeserializeState, read_sparse_offsets};
+use crate::native::columns::{
+    self, ColumnData, ColumnType, transpose_to_rowbinary, write_var_uint,
+};
 use crate::native::compression::decompress_data;
 use crate::native::error_codes::{self, ServerError};
 use crate::native::io::ClickHouseRead;
 use crate::native::protocol::DBMS_MIN_PROTOCOL_VERSION_WITH_CUSTOM_SERIALIZATION;
 use crate::native::protocol::{
-    ChunkedProtocolMode, NativeCompressionMethod, ProfileInfo, Progress, ServerException,
-    ServerHello, ServerPacketId, TableColumns,
-    DBMS_MIN_PROTOCOL_VERSION_WITH_CHUNKED_PACKETS,
+    ChunkedProtocolMode, DBMS_MIN_PROTOCOL_VERSION_WITH_CHUNKED_PACKETS,
     DBMS_MIN_PROTOCOL_VERSION_WITH_PASSWORD_COMPLEXITY_RULES,
     DBMS_MIN_PROTOCOL_VERSION_WITH_SERVER_QUERY_TIME_IN_PROGRESS,
     DBMS_MIN_PROTOCOL_VERSION_WITH_TOTAL_BYTES_IN_PROGRESS,
@@ -28,8 +27,10 @@ use crate::native::protocol::{
     DBMS_MIN_REVISION_WITH_SERVER_LOGS, DBMS_MIN_REVISION_WITH_SERVER_SETTINGS,
     DBMS_MIN_REVISION_WITH_SERVER_TIMEZONE, DBMS_MIN_REVISION_WITH_VERSION_PATCH,
     DBMS_MIN_REVISION_WITH_VERSIONED_CLUSTER_FUNCTION_PROTOCOL,
-    DBMS_MIN_REVISION_WITH_VERSIONED_PARALLEL_REPLICAS_PROTOCOL,
+    DBMS_MIN_REVISION_WITH_VERSIONED_PARALLEL_REPLICAS_PROTOCOL, NativeCompressionMethod,
+    ProfileInfo, Progress, ServerException, ServerHello, ServerPacketId, TableColumns,
 };
+use crate::native::sparse::{SparseDeserializeState, read_sparse_offsets};
 
 /// Server packet after dispatch.
 #[derive(Debug)]
@@ -48,8 +49,8 @@ pub(crate) enum ServerPacket {
 /// A fully-read data block from the server.
 #[derive(Debug)]
 pub(crate) struct DataBlock {
-    pub(crate) _info: BlockInfo,       // read from wire; not yet exposed to callers
-    pub(crate) _num_columns: u64,      // derived from column_headers.len(); wire value kept for parity
+    pub(crate) _info: BlockInfo, // read from wire; not yet exposed to callers
+    pub(crate) _num_columns: u64, // derived from column_headers.len(); wire value kept for parity
     pub(crate) num_rows: u64,
     /// Column name + type.
     pub(crate) column_headers: Vec<ColumnHeader>,
@@ -75,9 +76,7 @@ pub(crate) async fn read_hello<R: ClickHouseRead>(
 ) -> Result<ServerHello> {
     let packet_id = ServerPacketId::from_u64(reader.read_var_uint().await?)?;
     match packet_id {
-        ServerPacketId::Hello => {
-            read_hello_body(reader, client_revision, chunked_modes).await
-        }
+        ServerPacketId::Hello => read_hello_body(reader, client_revision, chunked_modes).await,
         ServerPacketId::Exception => {
             let exc = read_exception(reader).await?;
             Err(Error::BadResponse(format!(
@@ -125,27 +124,25 @@ async fn read_hello_body<R: ClickHouseRead>(
         revision
     };
 
-    let (chunked_send, chunked_recv) =
-        if revision >= DBMS_MIN_PROTOCOL_VERSION_WITH_CHUNKED_PACKETS {
-            let srv_send = ChunkedProtocolMode::from_str(
-                &String::from_utf8_lossy(&reader.read_string().await?),
-            )
-            .unwrap_or_default();
-            let srv_recv = ChunkedProtocolMode::from_str(
-                &String::from_utf8_lossy(&reader.read_string().await?),
-            )
-            .unwrap_or_default();
+    let (chunked_send, chunked_recv) = if revision >= DBMS_MIN_PROTOCOL_VERSION_WITH_CHUNKED_PACKETS
+    {
+        let srv_send =
+            ChunkedProtocolMode::from_str(&String::from_utf8_lossy(&reader.read_string().await?))
+                .unwrap_or_default();
+        let srv_recv =
+            ChunkedProtocolMode::from_str(&String::from_utf8_lossy(&reader.read_string().await?))
+                .unwrap_or_default();
 
-            (
-                ChunkedProtocolMode::negotiate(srv_send, chunked_modes.0, "send")?,
-                ChunkedProtocolMode::negotiate(srv_recv, chunked_modes.1, "recv")?,
-            )
-        } else {
-            (
-                ChunkedProtocolMode::default(),
-                ChunkedProtocolMode::default(),
-            )
-        };
+        (
+            ChunkedProtocolMode::negotiate(srv_send, chunked_modes.0, "send")?,
+            ChunkedProtocolMode::negotiate(srv_recv, chunked_modes.1, "recv")?,
+        )
+    } else {
+        (
+            ChunkedProtocolMode::default(),
+            ChunkedProtocolMode::default(),
+        )
+    };
 
     if revision >= DBMS_MIN_PROTOCOL_VERSION_WITH_PASSWORD_COMPLEXITY_RULES {
         let rules_size = reader.read_var_uint().await?;
@@ -205,17 +202,14 @@ async fn skip_settings<R: ClickHouseRead>(reader: &mut R) -> Result<()> {
 ///
 /// Returns the outermost exception. Nested exceptions are appended to
 /// the message -- they're usually the root cause.
-pub(crate) async fn read_exception<R: ClickHouseRead>(
-    reader: &mut R,
-) -> Result<ServerException> {
+pub(crate) async fn read_exception<R: ClickHouseRead>(reader: &mut R) -> Result<ServerException> {
     let mut first: Option<ServerException> = None;
     let mut nested_messages = Vec::new();
 
     loop {
         let code = reader.read_i32_le().await?;
         let name = reader.read_utf8_string().await?;
-        let message =
-            String::from_utf8_lossy(&reader.read_string().await?).to_string();
+        let message = String::from_utf8_lossy(&reader.read_string().await?).to_string();
         let stack_trace = reader.read_utf8_string().await?;
         let has_nested = reader.read_u8().await? != 0;
 
@@ -262,28 +256,24 @@ pub(crate) async fn read_progress<R: ClickHouseRead>(
         0
     };
 
-    let total_bytes_to_read =
-        if revision >= DBMS_MIN_PROTOCOL_VERSION_WITH_TOTAL_BYTES_IN_PROGRESS {
-            Some(reader.read_var_uint().await?)
-        } else {
-            None
-        };
-
-    let written = if revision >= DBMS_MIN_REVISION_WITH_CLIENT_WRITE_INFO {
-        Some((
-            reader.read_var_uint().await?,
-            reader.read_var_uint().await?,
-        ))
+    let total_bytes_to_read = if revision >= DBMS_MIN_PROTOCOL_VERSION_WITH_TOTAL_BYTES_IN_PROGRESS
+    {
+        Some(reader.read_var_uint().await?)
     } else {
         None
     };
 
-    let elapsed_ns =
-        if revision >= DBMS_MIN_PROTOCOL_VERSION_WITH_SERVER_QUERY_TIME_IN_PROGRESS {
-            Some(reader.read_var_uint().await?)
-        } else {
-            None
-        };
+    let written = if revision >= DBMS_MIN_REVISION_WITH_CLIENT_WRITE_INFO {
+        Some((reader.read_var_uint().await?, reader.read_var_uint().await?))
+    } else {
+        None
+    };
+
+    let elapsed_ns = if revision >= DBMS_MIN_PROTOCOL_VERSION_WITH_SERVER_QUERY_TIME_IN_PROGRESS {
+        Some(reader.read_var_uint().await?)
+    } else {
+        None
+    };
 
     Ok(Progress {
         read_rows,
@@ -328,9 +318,7 @@ pub(crate) async fn read_profile_info<R: ClickHouseRead>(
 }
 
 /// Read table columns packet from the wire.
-pub(crate) async fn read_table_columns<R: ClickHouseRead>(
-    reader: &mut R,
-) -> Result<TableColumns> {
+pub(crate) async fn read_table_columns<R: ClickHouseRead>(reader: &mut R) -> Result<TableColumns> {
     Ok(TableColumns {
         name: reader.read_utf8_string().await?,
         description: reader.read_utf8_string().await?,
@@ -412,12 +400,28 @@ async fn read_data_packet<R: ClickHouseRead>(
 
 /// Read a data block from already-decompressed bytes.
 async fn read_data_block<R: ClickHouseRead>(reader: &mut R, revision: u64) -> Result<ServerPacket> {
+    // Sanity caps to prevent OOM from a malicious server. ClickHouse's
+    // default max_block_size is 65536 rows, and tables rarely exceed a
+    // few thousand columns. These limits are deliberately generous.
+    const MAX_BLOCK_COLUMNS: u64 = 100_000;
+    const MAX_BLOCK_ROWS: u64 = 100_000_000;
+
     let info = BlockInfo::read_async(reader).await?;
     let num_columns = reader.read_var_uint().await?;
     let num_rows = reader.read_var_uint().await?;
 
-    let has_custom_serialization =
-        revision >= DBMS_MIN_PROTOCOL_VERSION_WITH_CUSTOM_SERIALIZATION;
+    if num_columns > MAX_BLOCK_COLUMNS {
+        return Err(Error::BadResponse(format!(
+            "block claims {num_columns} columns, limit is {MAX_BLOCK_COLUMNS}"
+        )));
+    }
+    if num_rows > MAX_BLOCK_ROWS {
+        return Err(Error::BadResponse(format!(
+            "block claims {num_rows} rows, limit is {MAX_BLOCK_ROWS}"
+        )));
+    }
+
+    let has_custom_serialization = revision >= DBMS_MIN_PROTOCOL_VERSION_WITH_CUSTOM_SERIALIZATION;
 
     let mut column_headers = Vec::with_capacity(num_columns as usize);
     let mut column_data: Vec<columns::ColumnData> = Vec::with_capacity(num_columns as usize);

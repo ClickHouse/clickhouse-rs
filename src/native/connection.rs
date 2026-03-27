@@ -5,16 +5,16 @@
 
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use std::task::{Context, Poll, Waker};
 
 use tokio::io::{AsyncRead, BufReader, BufWriter, ReadBuf};
 
 use crate::error::{Error, Result};
 use crate::native::protocol::{
-    ChunkedProtocolMode, NativeCompressionMethod, ServerHello, DBMS_TCP_PROTOCOL_VERSION,
+    ChunkedProtocolMode, DBMS_TCP_PROTOCOL_VERSION, NativeCompressionMethod, ServerHello,
 };
 use crate::native::reader::{self, ServerPacket};
-use crate::native::tcp::{self, MaybeTlsStream, CONN_READ_BUFFER, CONN_WRITE_BUFFER};
+use crate::native::tcp::{self, CONN_READ_BUFFER, CONN_WRITE_BUFFER, MaybeTlsStream};
 use crate::native::writer;
 
 /// TLS configuration for native connections.
@@ -166,19 +166,22 @@ impl NativeConnection {
 
     /// Activate ClickHouse roles for this session.
     ///
-    /// Sends `SET ROLE role1, role2, ...` as a plain query and waits for
-    /// `EndOfStream`.  Called once per new connection by the pool manager,
+    /// Sends `SET ROLE `role1`, `role2`, ...` as a plain query and waits
+    /// for `EndOfStream`. Called once per new connection by the pool manager,
     /// immediately after the handshake, before the connection is handed to
     /// any query or insert.
     ///
-    /// Role names are joined with `, ` and embedded directly in the SQL
-    /// string.  This is safe because role names are controlled by the
-    /// application (set via [`NativeClient::with_roles`]) and are not
-    /// end-user input.
+    /// Role names are backtick-escaped to prevent injection.
     pub(crate) async fn set_roles(&mut self, roles: &[String]) -> Result<()> {
         debug_assert!(!roles.is_empty(), "set_roles called with empty slice");
-        let role_list = roles.join(", ");
-        let sql = format!("SET ROLE {role_list}");
+        let mut sql = String::from("SET ROLE ");
+        for (i, role) in roles.iter().enumerate() {
+            if i > 0 {
+                sql.push_str(", ");
+            }
+            crate::sql::escape::identifier(role, &mut sql)
+                .expect("fmt::Write on String is infallible");
+        }
         self.execute_query(&sql).await
     }
 
@@ -208,12 +211,19 @@ impl NativeConnection {
         // Merge connection-level settings with per-query overrides.
         let settings = merge_settings(&self.settings, extra_settings);
 
-        writer::send_query(&mut self.writer, query_id, query, &settings, revision, compression).await?;
+        writer::send_query(
+            &mut self.writer,
+            query_id,
+            query,
+            &settings,
+            revision,
+            compression,
+        )
+        .await?;
         writer::send_empty_block(&mut self.writer, compression).await?;
 
         loop {
-            let packet =
-                reader::read_packet(&mut self.reader, revision, compression).await?;
+            let packet = reader::read_packet(&mut self.reader, revision, compression).await?;
             match packet {
                 ServerPacket::EndOfStream => break,
                 ServerPacket::Exception(err) => {
@@ -231,19 +241,23 @@ impl NativeConnection {
     /// Sends `INSERT INTO table(cols) FORMAT Native` + an empty data block,
     /// then reads server packets until the schema Data block (0 rows) arrives.
     /// Returns the column headers `(name, type_name)` declared by the server.
-    pub(crate) async fn begin_insert(
-        &mut self,
-        query: &str,
-    ) -> Result<Vec<(String, String)>> {
+    pub(crate) async fn begin_insert(&mut self, query: &str) -> Result<Vec<(String, String)>> {
         let revision = self.server_hello.revision_version;
         let compression = self.compression;
 
-        writer::send_query(&mut self.writer, "", query, &self.settings, revision, compression).await?;
+        writer::send_query(
+            &mut self.writer,
+            "",
+            query,
+            &self.settings,
+            revision,
+            compression,
+        )
+        .await?;
         writer::send_empty_block(&mut self.writer, compression).await?;
 
         loop {
-            let packet =
-                reader::read_packet(&mut self.reader, revision, compression).await?;
+            let packet = reader::read_packet(&mut self.reader, revision, compression).await?;
             match packet {
                 reader::ServerPacket::Data(block) => {
                     return Ok(block
@@ -288,8 +302,7 @@ impl NativeConnection {
         writer::send_empty_block(&mut self.writer, compression).await?;
 
         loop {
-            let packet =
-                reader::read_packet(&mut self.reader, revision, compression).await?;
+            let packet = reader::read_packet(&mut self.reader, revision, compression).await?;
             match packet {
                 reader::ServerPacket::EndOfStream => return Ok(()),
                 reader::ServerPacket::Exception(err) => {
@@ -307,8 +320,7 @@ impl NativeConnection {
 
         writer::send_ping(&mut self.writer).await?;
         loop {
-            let packet =
-                reader::read_packet(&mut self.reader, revision, compression).await?;
+            let packet = reader::read_packet(&mut self.reader, revision, compression).await?;
             match packet {
                 ServerPacket::Pong => return Ok(()),
                 ServerPacket::Exception(err) => {
@@ -325,10 +337,7 @@ impl NativeConnection {
 /// Returns a `Vec` containing all entries from `base` (with any keys that also
 /// appear in `extra` replaced by the `extra` value), followed by any `extra`
 /// keys that were not present in `base`.
-fn merge_settings(
-    base: &[(String, String)],
-    extra: &[(String, String)],
-) -> Vec<(String, String)> {
+fn merge_settings(base: &[(String, String)], extra: &[(String, String)]) -> Vec<(String, String)> {
     if extra.is_empty() {
         return base.to_vec();
     }
@@ -348,12 +357,5 @@ fn merge_settings(
 /// The waker never schedules anything -- it is used purely to drive a single
 /// synchronous poll without registering for wake-up notifications.
 fn noop_waker() -> Waker {
-    const VTABLE: RawWakerVTable = RawWakerVTable::new(
-        |p| RawWaker::new(p, &VTABLE), // clone
-        |_| {},                        // wake
-        |_| {},                        // wake_by_ref
-        |_| {},                        // drop
-    );
-    // SAFETY: the vtable is a no-op; the data pointer is never dereferenced.
-    unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
+    Waker::noop().clone()
 }

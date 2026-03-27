@@ -176,10 +176,10 @@ impl NativeClient {
                     self.addrs = vec![resolved];
                     self.rebuild_pool();
                 }
-                // No address resolved — will fail at connect time with a proper error
+                // No address resolved -- will fail at connect time with a proper error
             }
             Err(_) => {
-                // DNS resolution failed — will fail at connect time with a proper error.
+                // DNS resolution failed -- will fail at connect time with a proper error.
                 // Don't panic: callers may be validating configs or testing error paths.
             }
         }

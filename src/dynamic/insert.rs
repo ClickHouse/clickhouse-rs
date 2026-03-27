@@ -22,7 +22,7 @@ use crate::unified::UnifiedClient;
 
 use super::encode::{columns_to_send, encode_dynamic_row};
 use super::error::DynamicError;
-use super::schema::{fetch_dynamic_schema, ColumnDef, DynamicSchema, DynamicSchemaCache};
+use super::schema::{ColumnDef, DynamicSchema, DynamicSchemaCache, fetch_dynamic_schema};
 
 /// Dynamic insert for a single table.
 ///
@@ -71,7 +71,7 @@ impl DynamicInsert {
     }
 
     /// Ensure schema is loaded (from cache or system.columns).
-    async fn ensure_schema(&mut self) -> Result<&DynamicSchema, DynamicError> {
+    async fn ensure_schema(&mut self) -> Result<(), DynamicError> {
         if self.schema.is_none() {
             let full_table = format!("{}.{}", self.database, self.table);
             let schema = if let Some(cached) = self.schema_cache.get(&full_table) {
@@ -84,7 +84,7 @@ impl DynamicInsert {
             };
             self.schema = Some(schema);
         }
-        Ok(self.schema.as_ref().unwrap())
+        Ok(())
     }
 
     /// Encode and buffer a row for insert.
@@ -93,10 +93,15 @@ impl DynamicInsert {
     /// On first call, fetches the schema and creates the INSERT statement.
     pub async fn write_map(&mut self, row: &Map<String, Value>) -> Result<(), DynamicError> {
         // Ensure schema is loaded
-        if self.schema.is_none() {
-            self.ensure_schema().await?;
-        }
-        let schema = self.schema.as_ref().unwrap();
+        self.ensure_schema().await?;
+        let Some(schema) = self.schema.as_ref() else {
+            // ensure_schema always sets self.schema on success, so this
+            // branch is unreachable. Defensive check avoids .unwrap().
+            return Err(DynamicError::EncodingError {
+                column: String::new(),
+                message: "schema not available after fetch".to_string(),
+            });
+        };
 
         // On first row, determine the column list and create the INSERT.
         // The insert data path requires HTTP transport -- for native, the
@@ -104,27 +109,41 @@ impl DynamicInsert {
         if self.insert.is_none() {
             let cols = columns_to_send(row, schema);
             let col_names: Vec<String> = cols.iter().map(|c| c.name.clone()).collect();
-            let col_list = col_names.join(", ");
-            let sql = format!(
-                "INSERT INTO {}.{} ({col_list}) FORMAT RowBinary",
-                self.database, self.table
-            );
-            let formatted = self
-                .client
-                .insert_formatted_with(sql)
-                .map_err(|e| DynamicError::EncodingError {
+            // Escape all identifiers to prevent SQL injection.
+            let mut sql = String::from("INSERT INTO ");
+            crate::sql::escape::identifier(&self.database, &mut sql)
+                .expect("fmt::Write on String is infallible");
+            sql.push('.');
+            crate::sql::escape::identifier(&self.table, &mut sql)
+                .expect("fmt::Write on String is infallible");
+            sql.push_str(" (");
+            for (i, name) in col_names.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                crate::sql::escape::identifier(name, &mut sql)
+                    .expect("fmt::Write on String is infallible");
+            }
+            sql.push_str(") FORMAT RowBinary");
+            let formatted = self.client.insert_formatted_with(sql).map_err(|e| {
+                DynamicError::EncodingError {
                     column: String::new(),
                     message: e.to_string(),
-                })?;
+                }
+            })?;
             self.insert = Some(formatted.buffered());
             self.insert_columns = Some(col_names);
         }
 
-        // Build the column def refs for encoding based on stored column names
-        let col_defs: Vec<&ColumnDef> = self
-            .insert_columns
-            .as_ref()
-            .unwrap()
+        // Build the column def refs for encoding based on stored column names.
+        // insert_columns is always set together with insert above.
+        let Some(col_names) = self.insert_columns.as_ref() else {
+            return Err(DynamicError::EncodingError {
+                column: String::new(),
+                message: "insert columns not initialised".to_string(),
+            });
+        };
+        let col_defs: Vec<&ColumnDef> = col_names
             .iter()
             .filter_map(|name| schema.column(name))
             .collect();
@@ -132,8 +151,13 @@ impl DynamicInsert {
         // Encode row to RowBinary
         let rb_bytes = encode_dynamic_row(row, schema, &col_defs)?;
 
-        // Write to the HTTP insert buffer
-        let insert = self.insert.as_mut().unwrap();
+        // Write to the HTTP insert buffer. insert is always set above.
+        let Some(insert) = self.insert.as_mut() else {
+            return Err(DynamicError::EncodingError {
+                column: String::new(),
+                message: "insert not initialised".to_string(),
+            });
+        };
         insert
             .write(&rb_bytes)
             .await

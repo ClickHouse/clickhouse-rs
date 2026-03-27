@@ -186,6 +186,7 @@ pub(crate) struct ServerException {
 
 #[allow(unused)]
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ProfileInfo {
     pub rows: u64,
     pub blocks: u64,
@@ -207,6 +208,7 @@ pub(crate) struct TableColumns {
 // === Progress ===
 
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct Progress {
     pub read_rows: u64,
     pub read_bytes: u64,
@@ -293,8 +295,16 @@ impl ChunkedProtocolMode {
             return Err(Error::BadResponse(format!(
                 "native protocol: incompatible chunked mode for {direction}: \
                  client={}, server={}",
-                if client_chunked { "chunked" } else { "notchunked" },
-                if server_chunked { "chunked" } else { "notchunked" },
+                if client_chunked {
+                    "chunked"
+                } else {
+                    "notchunked"
+                },
+                if server_chunked {
+                    "chunked"
+                } else {
+                    "notchunked"
+                },
             )));
         } else {
             server_chunked

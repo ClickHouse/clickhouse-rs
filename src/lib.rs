@@ -120,7 +120,7 @@ impl Display for ProductInfo {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(crate) enum Authentication {
     Credentials {
         user: Option<String>,
@@ -129,6 +129,23 @@ pub(crate) enum Authentication {
     Jwt {
         access_token: String,
     },
+}
+
+// Manual Debug impl to redact secrets from log/panic output.
+impl std::fmt::Debug for Authentication {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Credentials { user, .. } => f
+                .debug_struct("Credentials")
+                .field("user", user)
+                .field("password", &"[REDACTED]")
+                .finish(),
+            Self::Jwt { .. } => f
+                .debug_struct("Jwt")
+                .field("access_token", &"[REDACTED]")
+                .finish(),
+        }
+    }
 }
 
 impl Default for Authentication {

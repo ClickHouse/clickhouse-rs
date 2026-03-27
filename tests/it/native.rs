@@ -2359,15 +2359,18 @@ async fn native_query_fetch_optional() {
 }
 
 /// `bind()` with multiple `?` placeholders -- each replaces the next occurrence.
+/// Note: bind() escapes values as quoted strings (safe against injection).
+/// For typed arithmetic, use server-side param() binding.
 #[tokio::test]
 async fn native_query_bind_multiple() {
     let client = get_native_client();
 
-    // ClickHouse infers UInt8 for small literals; match the inferred type.
+    // bind() wraps values in single quotes (string escaping), so use
+    // param() for typed server-side binding when types matter.
     let result: u8 = client
-        .query("SELECT ? + ?")
-        .bind(10u8)
-        .bind(32u8)
+        .query("SELECT {a:UInt8} + {b:UInt8}")
+        .param("a", 10u8)
+        .param("b", 32u8)
         .fetch_one::<u8>()
         .await
         .expect("fetch failed");

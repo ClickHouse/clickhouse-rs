@@ -123,20 +123,22 @@ impl NativeQuery {
         self
     }
 
-    /// Bind a parameter using simple string substitution.
+    /// Bind a parameter using escaped string substitution.
     ///
-    /// Replaces the next `?` placeholder in the SQL string.
+    /// Replaces the next `?` placeholder in the SQL string with the
+    /// single-quote-escaped value. Backslashes, quotes, backticks, tabs,
+    /// and newlines are all escaped.
     ///
-    /// For production use, prefer parameterized queries with ClickHouse's
-    /// `{name: Type}` syntax via the HTTP client.
+    /// For production use, prefer server-side parameter binding with
+    /// ClickHouse's `{name:Type}` syntax via [`.param()`](Self::param).
     pub fn bind(mut self, value: impl std::fmt::Display) -> Self {
         if let Some(pos) = self.sql.find('?') {
-            self.sql = format!(
-                "{}{}{}",
-                &self.sql[..pos],
-                value,
-                &self.sql[pos + 1..]
-            );
+            let raw = value.to_string();
+            let mut escaped = String::new();
+            // escape::string wraps in single quotes and escapes all special chars.
+            crate::sql::escape::string(&raw, &mut escaped)
+                .expect("fmt::Write on String is infallible");
+            self.sql = format!("{}{escaped}{}", &self.sql[..pos], &self.sql[pos + 1..]);
         }
         self
     }
@@ -166,7 +168,8 @@ impl NativeQuery {
         let query_id = self.query_id.as_deref().unwrap_or("");
         let settings = self.merged_settings();
         let mut conn = self.client.acquire().await?;
-        conn.execute_query_with(query_id, &self.sql, &settings).await
+        conn.execute_query_with(query_id, &self.sql, &settings)
+            .await
     }
 
     /// Execute a SELECT query, returning a cursor over deserialized rows.

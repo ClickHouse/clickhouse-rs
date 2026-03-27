@@ -25,8 +25,8 @@
 use std::sync::Arc;
 
 use crate::Client;
-use crate::dynamic::{DynamicBatchConfig, DynamicBatcher, DynamicSchemaCache};
 use crate::dynamic::insert::DynamicInsert;
+use crate::dynamic::{DynamicBatchConfig, DynamicBatcher, DynamicSchemaCache};
 use crate::error::Result;
 use crate::pool_stats::PoolStats;
 use crate::row::Row;
@@ -324,8 +324,10 @@ impl UnifiedClient {
     /// # Ok(()) }
     /// ```
     pub async fn cancel_query(&self, query_id: &str) -> Result<()> {
-        let sql = format!("KILL QUERY WHERE query_id = '{query_id}'");
-        self.query(&sql).execute().await
+        self.query("KILL QUERY WHERE query_id = {qid:String}")
+            .param("qid", query_id)
+            .execute()
+            .await
     }
 
     // -----------------------------------------------------------------------
