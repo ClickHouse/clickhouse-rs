@@ -15,6 +15,7 @@ use crate::{
 };
 
 const MAX_COMPRESSED_SIZE: u32 = 1024 * 1024 * 1024;
+const MAX_UNCOMPRESSED_SIZE: u32 = 1024 * 1024 * 1024;
 
 pub(crate) struct Lz4Decoder<S> {
     stream: S,
@@ -101,6 +102,10 @@ impl Lz4Meta {
 
         if compressed_size > MAX_COMPRESSED_SIZE {
             return Err(Error::Decompression("too big compressed data".into()));
+        }
+
+        if uncompressed_size > MAX_UNCOMPRESSED_SIZE {
+            return Err(Error::Decompression("too big uncompressed data".into()));
         }
 
         Ok(Lz4Meta {
