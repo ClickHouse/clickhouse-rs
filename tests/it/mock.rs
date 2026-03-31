@@ -38,10 +38,7 @@ async fn summary_header() {
         summary_json,
     ));
 
-    let mut cursor = client
-        .query("doesn't matter")
-        .fetch::<SimpleRow>()
-        .unwrap();
+    let mut cursor = client.query("doesn't matter").fetch::<SimpleRow>().unwrap();
 
     // Summary is not available before headers are received.
     assert!(cursor.summary().is_none());
@@ -73,10 +70,7 @@ async fn summary_header_absent() {
 
     mock.add(test::handlers::provide(rows.clone()));
 
-    let mut cursor = client
-        .query("doesn't matter")
-        .fetch::<SimpleRow>()
-        .unwrap();
+    let mut cursor = client.query("doesn't matter").fetch::<SimpleRow>().unwrap();
 
     while cursor.next().await.unwrap().is_some() {}
 
@@ -94,10 +88,7 @@ async fn summary_header_malformed() {
         "not valid json",
     ));
 
-    let mut cursor = client
-        .query("doesn't matter")
-        .fetch::<SimpleRow>()
-        .unwrap();
+    let mut cursor = client.query("doesn't matter").fetch::<SimpleRow>().unwrap();
 
     while cursor.next().await.unwrap().is_some() {}
 
@@ -119,10 +110,7 @@ async fn summary_header_unknown_fields() {
         summary_json,
     ));
 
-    let mut cursor = client
-        .query("doesn't matter")
-        .fetch::<SimpleRow>()
-        .unwrap();
+    let mut cursor = client.query("doesn't matter").fetch::<SimpleRow>().unwrap();
 
     while cursor.next().await.unwrap().is_some() {}
 

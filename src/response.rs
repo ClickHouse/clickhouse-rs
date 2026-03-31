@@ -174,11 +174,7 @@ pub(crate) struct Chunks {
 }
 
 impl Chunks {
-    fn new(
-        stream: Incoming,
-        compression: Compression,
-        exception_tag: Option<Box<[u8]>>,
-    ) -> Self {
+    fn new(stream: Incoming, compression: Compression, exception_tag: Option<Box<[u8]>>) -> Self {
         let stream = IncomingStream(stream);
         let stream = Decompress::new(stream, compression);
         let stream = DetectDbException {
