@@ -11,12 +11,10 @@ struct Timestamp64(u64);
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Time32(i32);
 impl Primitive for Time32 {}
-impl Primitive for Option<Time32> {}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Time64(i64);
 impl Primitive for Time64 {}
-impl Primitive for Option<Time64> {}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct FixedPoint64(i64);

@@ -425,7 +425,7 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
 
     #[inline]
     fn serialize_none(self) -> std::result::Result<Self::Ok, Self::Error> {
-        self.writer.write_str("NULL")?;
+        self.writer.write_str(r"\N")?;
         Ok(())
     }
 
@@ -527,6 +527,19 @@ pub(crate) fn write_param(writer: &mut impl Write, value: &impl Serialize) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check_param(v: impl Serialize) -> String {
+        let mut out = String::new();
+        write_param(&mut out, &v).unwrap();
+        out
+    }
+
+    #[test]
+    fn it_writes_param_options() {
+        assert_eq!(check_param(None::<i32>), r"\N");
+        assert_eq!(check_param(Some(32)), "32");
+        assert_eq!(check_param(Some(vec![42, 43])), "[42,43]");
+    }
 
     fn check(v: impl Serialize) -> String {
         let mut out = String::new();

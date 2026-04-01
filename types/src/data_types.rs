@@ -89,12 +89,19 @@ pub enum DataTypeNode {
     /// Function name and its arguments
     AggregateFunction(String, Vec<DataTypeNode>),
 
+    /// Function name and the inner type.
+    /// The wire format is identical to the inner type; the function name is
+    /// metadata for the MergeTree engine, not the client protocol.
+    SimpleAggregateFunction(String, Box<DataTypeNode>),
+
     /// Contains all possible types for this variant
     Variant(Vec<DataTypeNode>),
 
     Dynamic,
     JSON,
 
+    // TODO: Rename for better representation
+    JsonWithHint(Vec<(String, Box<DataTypeNode>)>),
     Point,
     Ring,
     LineString,
@@ -140,7 +147,7 @@ impl DataTypeNode {
             "Polygon" => Ok(Self::Polygon),
             "MultiPolygon" => Ok(Self::MultiPolygon),
 
-            str if str.starts_with("JSON") => Ok(Self::JSON),
+            str if str.starts_with("JSON(") => parse_json(str),
 
             str if str.starts_with("Decimal") => parse_decimal(str),
             str if str.starts_with("DateTime64") => parse_datetime64(str),
@@ -159,6 +166,10 @@ impl DataTypeNode {
             str if str.starts_with("Tuple") => parse_tuple(str),
             str if str.starts_with("Variant") => parse_variant(str),
 
+            str if str.starts_with("SimpleAggregateFunction(") => {
+                parse_simple_aggregate_function(str)
+            }
+
             // ...
             str => Err(TypesError::TypeParsingError(format!(
                 "Unknown data type: {str}"
@@ -170,6 +181,18 @@ impl DataTypeNode {
     pub fn remove_low_cardinality(&self) -> &DataTypeNode {
         match self {
             DataTypeNode::LowCardinality(inner) => inner,
+            _ => self,
+        }
+    }
+
+    /// SimpleAggregateFunction(fn, T) -> T
+    ///
+    /// The wire format of a `SimpleAggregateFunction` column is identical to
+    /// its inner type. This method strips the wrapper so that (de)serialization
+    /// validation can treat it as the inner type.
+    pub fn remove_simple_aggregate_function(&self) -> &DataTypeNode {
+        match self {
+            DataTypeNode::SimpleAggregateFunction(_, inner) => inner,
             _ => self,
         }
     }
@@ -257,6 +280,9 @@ impl Display for DataTypeNode {
                 }
                 write!(f, ")")
             }
+            SimpleAggregateFunction(func_name, inner) => {
+                write!(f, "SimpleAggregateFunction({func_name}, {inner})")
+            }
             FixedString(size) => {
                 write!(f, "FixedString({size})")
             }
@@ -278,8 +304,25 @@ impl Display for DataTypeNode {
             MultiLineString => write!(f, "MultiLineString"),
             Polygon => write!(f, "Polygon"),
             MultiPolygon => write!(f, "MultiPolygon"),
+            JsonWithHint(json) => format_json_with_hint(json, f),
         }
     }
+}
+
+fn format_json_with_hint(
+    json: &[(String, Box<DataTypeNode>)],
+    f: &mut Formatter<'_>,
+) -> Result<(), std::fmt::Error> {
+    write!(f, "JSON(")?;
+
+    for (i, (name, ty)) in json.iter().enumerate() {
+        if i > 0 {
+            write!(f, ", ")?;
+        }
+        write!(f, "{} {}", name, ty)?;
+    }
+
+    write!(f, ")")
 }
 
 /// Represents the underlying integer size of an Enum type.
@@ -602,6 +645,41 @@ fn parse_low_cardinality(input: &str) -> Result<DataTypeNode, TypesError> {
     )))
 }
 
+/// `SimpleAggregateFunction(func_name, InnerType)` is a transparent wrapper.
+/// The wire format is identical to `InnerType`; the function name is
+/// metadata for the MergeTree engine, not the client protocol.
+/// We preserve the full type so that it is correctly serialized back
+/// when sending column type headers during INSERT (RBWNAT format).
+fn parse_simple_aggregate_function(input: &str) -> Result<DataTypeNode, TypesError> {
+    let prefix = "SimpleAggregateFunction(";
+    let inner = &input[prefix.len()..input.len() - 1];
+    // Find the first top-level comma (not inside parentheses) to split
+    // the function name from the inner type.
+    let mut depth = 0u32;
+    let mut comma_pos = None;
+    for (i, b) in inner.bytes().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                comma_pos = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let comma_pos = comma_pos.ok_or_else(|| {
+        TypesError::TypeParsingError(format!("Invalid SimpleAggregateFunction: {input}"))
+    })?;
+    let func_name = inner[..comma_pos].trim().to_string();
+    let inner_type_str = inner[comma_pos + 1..].trim_start();
+    let inner_type = DataTypeNode::new(inner_type_str)?;
+    Ok(DataTypeNode::SimpleAggregateFunction(
+        func_name,
+        Box::new(inner_type),
+    ))
+}
+
 fn parse_nullable(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 10 {
         let inner_type_str = &input[9..input.len() - 1];
@@ -630,6 +708,41 @@ fn parse_map(input: &str) -> Result<DataTypeNode, TypesError> {
     Err(TypesError::TypeParsingError(format!(
         "Invalid Map format, expected Map(KeyType, ValueType), got {input}"
     )))
+}
+
+fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
+    let columns = remove_json_header(input)?.split(',').collect::<Vec<_>>();
+
+    let inner_types = columns
+        .into_iter()
+        .map(|column| column.trim())
+        .filter(|column| !column.contains('=') && !column.starts_with("SKIP"))
+        .map(|column| {
+            let map = column.split(' ').collect::<Vec<_>>();
+            let key_type = map[0].to_string();
+            let value_type = DataTypeNode::new(map[1])?;
+
+            Ok((key_type, Box::new(value_type)))
+        })
+        .collect::<Result<Vec<(String, Box<DataTypeNode>)>, TypesError>>()?;
+
+    if inner_types.is_empty() {
+        return Ok(DataTypeNode::JSON);
+    }
+
+    Ok(DataTypeNode::JsonWithHint(inner_types))
+}
+
+fn remove_json_header(input: &str) -> Result<&str, TypesError> {
+    if input.starts_with("JSON") && input.ends_with(')') {
+        let new = input[5..].trim();
+
+        Ok(new.trim_end_matches(')'))
+    } else {
+        Err(TypesError::TypeParsingError(format!(
+            "Invalid JSON format, expected JSON(Type), got {input}"
+        )))
+    }
 }
 
 fn parse_tuple(input: &str) -> Result<DataTypeNode, TypesError> {
@@ -865,6 +978,18 @@ mod tests {
     }
 
     #[test]
+    fn test_json_with_hint_display() {
+        let json_with_hint = DataTypeNode::JsonWithHint(vec![
+            ("foo".to_string(), Box::new(DataTypeNode::String)),
+            ("bar".to_string(), Box::new(DataTypeNode::Int32)),
+        ]);
+        assert_eq!(
+            json_with_hint.to_string(),
+            "JSON(foo String, bar Int32)".to_string()
+        );
+    }
+
+    #[test]
     fn test_enum_display() {
         let mut values1 = HashMap::new();
         values1.insert(1, "one".to_string());
@@ -956,8 +1081,21 @@ mod tests {
         assert_eq!(DataTypeNode::new("Dynamic").unwrap(), DataTypeNode::Dynamic);
         assert_eq!(DataTypeNode::new("JSON").unwrap(), DataTypeNode::JSON);
         assert_eq!(
-            DataTypeNode::new("JSON(max_dynamic_types=8, max_dynamic_paths=64)").unwrap(),
+            DataTypeNode::new(
+                "JSON(max_dynamic_types=8, max_dynamic_paths=64, SKIP internal_metrics)"
+            )
+            .unwrap(),
             DataTypeNode::JSON
+        );
+        assert_eq!(
+            DataTypeNode::new(
+                "JSON(max_dynamic_types=8, max_dynamic_paths=64, SKIP internal_metrics, foo String, bar Int32)"
+            )
+            .unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                ("foo".to_string(), Box::new(DataTypeNode::String)),
+                ("bar".to_string(), Box::new(DataTypeNode::Int32))
+            ])
         );
         assert!(DataTypeNode::new("SomeUnknownType").is_err());
     }
@@ -1813,5 +1951,96 @@ mod tests {
                 (100, "4".to_string()),
             ]),
         )
+    }
+
+    #[test]
+    fn simple_aggregate_function_min_uint32() {
+        let dt = DataTypeNode::new("SimpleAggregateFunction(min, UInt32)").unwrap();
+        match dt {
+            DataTypeNode::SimpleAggregateFunction(func, inner) => {
+                assert_eq!(func, "min");
+                assert_eq!(*inner, DataTypeNode::UInt32);
+            }
+            other => panic!("expected SimpleAggregateFunction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_aggregate_function_max_uint64() {
+        let dt = DataTypeNode::new("SimpleAggregateFunction(max, UInt64)").unwrap();
+        match dt {
+            DataTypeNode::SimpleAggregateFunction(func, inner) => {
+                assert_eq!(func, "max");
+                assert_eq!(*inner, DataTypeNode::UInt64);
+            }
+            other => panic!("expected SimpleAggregateFunction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_aggregate_function_sum_float64() {
+        let dt = DataTypeNode::new("SimpleAggregateFunction(sum, Float64)").unwrap();
+        match dt {
+            DataTypeNode::SimpleAggregateFunction(func, inner) => {
+                assert_eq!(func, "sum");
+                assert_eq!(*inner, DataTypeNode::Float64);
+            }
+            other => panic!("expected SimpleAggregateFunction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_aggregate_function_group_bit_and_uint8() {
+        let dt = DataTypeNode::new("SimpleAggregateFunction(groupBitAnd, UInt8)").unwrap();
+        match dt {
+            DataTypeNode::SimpleAggregateFunction(func, inner) => {
+                assert_eq!(func, "groupBitAnd");
+                assert_eq!(*inner, DataTypeNode::UInt8);
+            }
+            other => panic!("expected SimpleAggregateFunction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_aggregate_function_with_array_inner() {
+        let dt =
+            DataTypeNode::new("SimpleAggregateFunction(groupArrayArray, Array(UInt32))").unwrap();
+        match dt {
+            DataTypeNode::SimpleAggregateFunction(func, inner) => {
+                assert_eq!(func, "groupArrayArray");
+                assert_eq!(*inner, DataTypeNode::Array(Box::new(DataTypeNode::UInt32)));
+            }
+            other => panic!("expected SimpleAggregateFunction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_aggregate_function_invalid_format() {
+        let result = DataTypeNode::new("SimpleAggregateFunction(min)");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn simple_aggregate_function_display_roundtrip() {
+        let input = "SimpleAggregateFunction(min, UInt32)";
+        let dt = DataTypeNode::new(input).unwrap();
+        assert_eq!(dt.to_string(), input);
+
+        let input2 = "SimpleAggregateFunction(groupArrayArray, Array(UInt32))";
+        let dt2 = DataTypeNode::new(input2).unwrap();
+        assert_eq!(dt2.to_string(), input2);
+    }
+
+    #[test]
+    fn simple_aggregate_function_remove() {
+        let dt = DataTypeNode::new("SimpleAggregateFunction(min, UInt32)").unwrap();
+        assert_eq!(*dt.remove_simple_aggregate_function(), DataTypeNode::UInt32);
+
+        // Non-SimpleAggregateFunction should return self
+        let dt2 = DataTypeNode::UInt64;
+        assert_eq!(
+            *dt2.remove_simple_aggregate_function(),
+            DataTypeNode::UInt64
+        );
     }
 }

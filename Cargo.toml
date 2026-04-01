@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse"
-version = "0.14.2"
+version = "0.14.3"
 description = "Official Rust client for ClickHouse DB"
 keywords = ["clickhouse", "database", "driver", "tokio", "hyper"]
 readme = "README.md"
@@ -123,10 +123,11 @@ rustls-tls-native-roots = [
 
 [dependencies]
 clickhouse-macros = { version = "0.3.0", path = "macros" }
-clickhouse-types = { version = "0.1.1", path = "types" }
+clickhouse-types = { version = "0.1.2", path = "types" }
+
+serde = { version = "1.0.106", features = ["derive"] }
 
 thiserror = "2.0"
-serde = "1.0.106"
 bytes = { version = "1.5.0", features = ["serde"] }
 tokio = { version = "1.0.1", features = ["rt", "macros"] }
 http-body-util = "0.1.2"
@@ -141,7 +142,7 @@ hyper-rustls = { version = "0.27.3", default-features = false, features = [
 url = "2.1.1"
 futures-util = { version = "0.3.5", default-features = false, features = ["sink", "io"] }
 futures-channel = { version = "0.3.30", features = ["sink"] }
-lz4_flex = { version = "0.11.3", default-features = false, features = [
+lz4_flex = { version = "0.11.6", default-features = false, features = [
     "std",
 ], optional = true }
 cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety, this package has been stable for years

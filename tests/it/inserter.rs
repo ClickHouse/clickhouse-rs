@@ -191,7 +191,12 @@ async fn keeps_client_settings() {
     let table_name = "inserter_keeps_client_settings";
     let query_id = uuid::Uuid::new_v4().to_string();
     let (client_setting_name, client_setting_value) = ("max_block_size", "1000");
-    let (insert_setting_name, insert_setting_value) = ("async_insert", "1");
+
+    // `async_insert` setting wants to default to `1` in newer versions, which regressed these tests
+    // https://github.com/ClickHouse/ClickHouse/pull/98825#issuecomment-4004096119
+    // A safe choice seems to be setting an arbitrary timeout to a really arbitrary value
+    let (insert_setting_name, insert_setting_value) =
+        ("external_storage_connect_timeout_sec", "11");
 
     let client = prepare_database!().with_setting(client_setting_name, client_setting_value);
     create_simple_table(&client, table_name).await;
@@ -200,7 +205,7 @@ async fn keeps_client_settings() {
 
     let mut inserter = client
         .inserter::<SimpleRow>(table_name)
-        .with_setting("async_insert", "1")
+        .with_setting(insert_setting_name, insert_setting_value)
         .with_setting("query_id", &query_id);
 
     inserter.write(&row).await.unwrap();
@@ -249,7 +254,12 @@ async fn keeps_client_settings() {
 async fn overrides_client_settings() {
     let table_name = "inserter_overrides_client_settings";
     let query_id = uuid::Uuid::new_v4().to_string();
-    let (setting_name, setting_value, override_value) = ("async_insert", "0", "1");
+
+    // `async_insert` setting wants to default to `1` in newer versions, which regressed these tests
+    // https://github.com/ClickHouse/ClickHouse/pull/98825#issuecomment-4004096119
+    // A safe choice seems to be setting an arbitrary timeout to a really arbitrary value
+    let (setting_name, setting_value, override_value) =
+        ("external_storage_connect_timeout_sec", "11", "17");
 
     let client = prepare_database!().with_setting(setting_name, setting_value);
     create_simple_table(&client, table_name).await;
@@ -258,7 +268,7 @@ async fn overrides_client_settings() {
 
     let mut inserter = client
         .inserter::<SimpleRow>(table_name)
-        .with_setting("async_insert", override_value)
+        .with_setting(setting_name, override_value)
         .with_setting("query_id", &query_id);
 
     inserter.write(&row).await.unwrap();

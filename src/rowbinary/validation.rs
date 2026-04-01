@@ -229,6 +229,7 @@ pub(crate) enum InnerDataTypeValidatorKind<'caller> {
     Map(&'caller [Box<DataTypeNode>; 2], MapValidatorState),
     /// Allows supporting ClickHouse `Map<K, V>` defined as `Vec<(K, V)>` in Rust
     MapAsSequence(&'caller [Box<DataTypeNode>; 2], MapAsSequenceValidatorState),
+    JsonWithHint(&'caller Vec<(String, Box<DataTypeNode>)>),
     Tuple(&'caller [DataTypeNode]),
     /// This is a hack to support deserializing tuples/arrays (and not structs) from fetch calls
     RootTuple(&'caller [Column], usize),
@@ -289,6 +290,13 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                         result
                     }
                 }
+            }
+            InnerDataTypeValidatorKind::JsonWithHint(kv) => {
+                kv.iter().try_for_each(|(_, value)| {
+                    validate_impl(inner.root, value, &serde_type, true).map(|_| ())
+                })?;
+
+                Ok(None)
             }
             InnerDataTypeValidatorKind::Array(inner_type) => {
                 validate_impl(inner.root, inner_type, &serde_type, true)
@@ -450,7 +458,9 @@ fn validate_impl<'serde, 'caller, R: Row>(
     serde_type: &SerdeType,
     is_inner: bool,
 ) -> Result<Option<InnerDataTypeValidator<'serde, 'caller, R>>> {
-    let data_type = column_data_type.remove_low_cardinality();
+    let data_type = column_data_type
+        .remove_low_cardinality()
+        .remove_simple_aggregate_function();
     match serde_type {
         SerdeType::Bool
             if data_type == &DataTypeNode::Bool || data_type == &DataTypeNode::UInt8 =>
@@ -522,11 +532,14 @@ fn validate_impl<'serde, 'caller, R: Row>(
         SerdeType::U128 if data_type == &DataTypeNode::UInt128 => Ok(None),
         SerdeType::F32 if data_type == &DataTypeNode::Float32 => Ok(None),
         SerdeType::F64 if data_type == &DataTypeNode::Float64 => Ok(None),
-        SerdeType::Str | SerdeType::String
-            if data_type == &DataTypeNode::String || data_type == &DataTypeNode::JSON =>
-        {
-            Ok(None)
-        }
+        SerdeType::Str | SerdeType::String => match data_type {
+            DataTypeNode::JsonWithHint(kv) => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::JsonWithHint(kv),
+            })),
+            DataTypeNode::String | DataTypeNode::JSON => Ok(None),
+            _ => root.err_on_schema_mismatch(data_type, serde_type, is_inner),
+        },
         // allows to work with BLOB strings as well
         SerdeType::Bytes(_) | SerdeType::ByteBuf(_) if data_type == &DataTypeNode::String => {
             Ok(None)
@@ -650,7 +663,12 @@ fn validate_impl<'serde, 'caller, R: Row>(
         _ => root.err_on_schema_mismatch(
             data_type,
             serde_type,
-            is_inner || matches!(column_data_type, DataTypeNode::LowCardinality { .. }),
+            is_inner
+                || matches!(column_data_type, DataTypeNode::LowCardinality { .. })
+                || matches!(
+                    column_data_type,
+                    DataTypeNode::SimpleAggregateFunction { .. }
+                ),
         ),
     }
 }

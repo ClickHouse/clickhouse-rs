@@ -1,7 +1,9 @@
-use crate::{SimpleRow, create_simple_table, fetch_rows, flush_query_log};
+use crate::{SimpleRow, create_simple_table, fetch_rows, flush_query_log, get_client};
 use clickhouse::insert::Insert;
 use clickhouse::{Row, sql::Identifier};
+use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::panic::AssertUnwindSafe;
 
 #[tokio::test]
@@ -9,7 +11,12 @@ async fn keeps_client_settings() {
     let table_name = "insert_keeps_client_settings";
     let query_id = uuid::Uuid::new_v4().to_string();
     let (client_setting_name, client_setting_value) = ("max_block_size", "1000");
-    let (insert_setting_name, insert_setting_value) = ("async_insert", "1");
+
+    // `async_insert` setting wants to default to `1` in newer versions, which regressed these tests
+    // https://github.com/ClickHouse/ClickHouse/pull/98825#issuecomment-4004096119
+    // A safe choice seems to be setting an arbitrary timeout to a really arbitrary value
+    let (insert_setting_name, insert_setting_value) =
+        ("external_storage_connect_timeout_sec", "11");
 
     let client = prepare_database!().with_setting(client_setting_name, client_setting_value);
     create_simple_table(&client, table_name).await;
@@ -68,7 +75,12 @@ async fn keeps_client_settings() {
 async fn overrides_client_settings() {
     let table_name = "insert_overrides_client_settings";
     let query_id = uuid::Uuid::new_v4().to_string();
-    let (setting_name, setting_value, override_value) = ("async_insert", "0", "1");
+
+    // `async_insert` setting wants to default to `1` in newer versions, which regressed these tests
+    // https://github.com/ClickHouse/ClickHouse/pull/98825#issuecomment-4004096119
+    // A safe choice seems to be setting an arbitrary timeout to a really arbitrary value
+    let (setting_name, setting_value, override_value) =
+        ("external_storage_connect_timeout_sec", "11", "17");
 
     let client = prepare_database!().with_setting(setting_name, setting_value);
     create_simple_table(&client, table_name).await;
@@ -131,6 +143,66 @@ async fn empty_insert() {
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
     assert!(rows.is_empty())
+}
+
+#[tokio::test]
+async fn insert_with_json_hint() {
+    #[derive(Serialize, Deserialize, Row, PartialEq)]
+    struct JSONTestRow {
+        i: u8,
+        jv: String,
+    }
+
+    let table_name = "rust_json_test";
+
+    let client = prepare_database!()
+        .with_option("input_format_binary_read_json_as_string", "1")
+        .with_option("output_format_binary_write_json_as_string", "1");
+
+    client
+        .query(
+            r#"
+                CREATE TABLE ? (
+                    i UInt8,
+                    jv JSON(
+                        foo String,
+                        bar Int
+                    )
+                )
+                ENGINE = MergeTree
+                ORDER BY i
+            "#,
+        )
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+
+    let row = JSONTestRow {
+        i: 1,
+        jv: r#"{
+            "foo": "hello",
+            "bar": 123
+        }"#
+        .to_string(),
+    };
+
+    let mut insert = client.insert::<JSONTestRow>(table_name).await.unwrap();
+
+    insert.write(&row).await.unwrap();
+
+    insert.end().await.unwrap();
+
+    let rows = fetch_rows::<JSONTestRow>(&client, table_name).await;
+
+    assert!(rows.len() == 1);
+
+    assert_eq!(
+        serde_json::from_str::<Value>(&rows[0].jv).unwrap(),
+        serde_json::from_str::<Value>(&row.jv).unwrap()
+    );
+
+    assert_eq!(rows[0].i, row.i)
 }
 
 #[tokio::test]
@@ -251,7 +323,7 @@ async fn cache_row_metadata() {
     }
 
     let db_name = test_database_name!();
-    let table_name = "foo";
+    let table_name = "`foo`";
 
     let client = crate::_priv::prepare_database(&db_name)
         .await
@@ -266,21 +338,24 @@ async fn cache_row_metadata() {
     // Ensure `system.query_log` is fully written
     flush_query_log(&client).await;
 
-    let count_query = "SELECT count() FROM system.query_log WHERE query LIKE ? || '%'";
+    let count_query = "SELECT count() FROM system.query_log \n\
+        WHERE query LIKE {query:String} || '%' \n\
+        AND current_database = {db:String}";
 
-    let row_insert_metadata_query =
-        clickhouse::_priv::row_insert_metadata_query(&db_name, table_name);
+    let row_insert_metadata_query = clickhouse::_priv::row_insert_metadata_query(table_name);
 
     println!("row_insert_metadata_query: {row_insert_metadata_query:?}");
 
     let initial_count: u64 = client
         .query(count_query)
-        .bind(&row_insert_metadata_query)
+        .param("query", &row_insert_metadata_query)
+        .param("db", &db_name)
         .fetch_one()
         .await
         .unwrap();
 
-    let mut insert = client.insert::<Foo>(table_name).await.unwrap();
+    // Table name already manually escaped
+    let mut insert = client.insert_unescaped::<Foo>(table_name).await.unwrap();
 
     insert
         .write(&Foo {
@@ -297,7 +372,8 @@ async fn cache_row_metadata() {
 
     let after_insert: u64 = client
         .query(count_query)
-        .bind(&row_insert_metadata_query)
+        .param("query", &row_insert_metadata_query)
+        .param("db", &db_name)
         .fetch_one()
         .await
         .unwrap();
@@ -307,7 +383,7 @@ async fn cache_row_metadata() {
     // Instead, of asserting a specific value, we assert that the count has changed.
     assert_ne!(after_insert, initial_count);
 
-    let mut insert = client.insert::<Foo>(table_name).await.unwrap();
+    let mut insert = client.insert_unescaped::<Foo>(table_name).await.unwrap();
 
     insert
         .write(&Foo {
@@ -323,7 +399,8 @@ async fn cache_row_metadata() {
 
     let final_count: u64 = client
         .query(count_query)
-        .bind(&row_insert_metadata_query)
+        .param("query", &row_insert_metadata_query)
+        .param("db", &db_name)
         .fetch_one()
         .await
         .unwrap();
@@ -523,4 +600,146 @@ async fn insert_with_role() {
     )
     .await
     .expect_err("user should not be able to insert into `foo`");
+}
+
+#[tokio::test]
+async fn insert_into_temp_table() {
+    #[derive(
+        serde::Serialize,
+        serde::Deserialize,
+        clickhouse::Row,
+        Debug,
+        PartialEq,
+        Eq
+    )]
+    struct FooRow {
+        bar: i32,
+        baz: Option<String>,
+    }
+
+    let client = get_client().with_option(
+        "session_id",
+        Alphanumeric.sample_string(&mut rand::rng(), 16),
+    );
+
+    client
+        .query("CREATE TEMPORARY TABLE foo(bar Int32, baz Nullable(String))")
+        .execute()
+        .await
+        .unwrap();
+
+    let foos = (0..10)
+        .map(|bar| FooRow {
+            bar,
+            baz: (bar % 2 != 0).then(|| format!("baz_{bar}")),
+        })
+        .collect::<Vec<_>>();
+
+    let mut insert = client.insert::<FooRow>("foo").await.unwrap();
+
+    for foo in &foos {
+        insert.write(foo).await.unwrap();
+    }
+
+    insert.end().await.unwrap();
+
+    let foos_out = client
+        .query("SELECT * FROM foo ORDER BY bar")
+        .fetch_all::<FooRow>()
+        .await
+        .unwrap();
+
+    assert_eq!(foos, foos_out);
+}
+
+#[tokio::test]
+async fn insert_unescaped() {
+    #[derive(
+        serde::Serialize,
+        serde::Deserialize,
+        clickhouse::Row,
+        Debug,
+        PartialEq,
+        Eq
+    )]
+    struct FooRow {
+        bar: i32,
+        baz: Option<String>,
+    }
+
+    let db_name = test_database_name!();
+
+    let default_client = get_client();
+    let client = crate::_priv::prepare_database(&db_name).await;
+
+    client
+        .query("CREATE TABLE foo(bar Int32, baz Nullable(String))")
+        .execute()
+        .await
+        .unwrap();
+
+    let foos = (0..10)
+        .map(|bar| FooRow {
+            bar,
+            baz: (bar % 2 != 0).then(|| format!("baz_{bar}")),
+        })
+        .collect::<Vec<_>>();
+
+    let mut insert = default_client
+        .insert_unescaped::<FooRow>(&format!("{db_name}.foo"))
+        .await
+        .unwrap();
+
+    for foo in &foos {
+        insert.write(foo).await.unwrap();
+    }
+
+    insert.end().await.unwrap();
+
+    let foos_out = client
+        .query("SELECT * FROM foo ORDER BY bar")
+        .fetch_all::<FooRow>()
+        .await
+        .unwrap();
+
+    assert_eq!(foos, foos_out);
+}
+
+// This test is mostly to make CodeCov happy, but it's potentially useful to ensure that disabling
+// validation actually disables validation.
+#[tokio::test]
+async fn insert_unvalidated() {
+    #[derive(
+        serde::Serialize,
+        serde::Deserialize,
+        clickhouse::Row,
+        Debug,
+        PartialEq,
+        Eq
+    )]
+    struct InvalidRow {
+        foobar: u64,
+        bazquux: Option<bool>,
+    }
+
+    let client = prepare_database!().with_validation(false);
+
+    client
+        .query("CREATE TABLE foo(bar Int32, baz String)")
+        .execute()
+        .await
+        .unwrap();
+
+    let mut insert = client.insert::<InvalidRow>("foo").await.unwrap();
+
+    // An obviously invalid value
+    insert
+        .write(&InvalidRow {
+            foobar: u64::MAX,
+            bazquux: None,
+        })
+        .await
+        .unwrap();
+
+    insert.end().await.unwrap_err();
 }

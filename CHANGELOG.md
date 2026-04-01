@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.14.3] - 2026-03-27
+
+### Added
+
+* Added support for `SimpleAggregateFunction` type ([#394])
+
+### Fixed
+
+* Fixed serialization of `Option::None` with `Query::param()` ([#385])
+* Fixed handling of `Json` type with type hints ([#387])
+* Fixed `Insert` for temporary tables and qualified table names ([#391])
+* Updated `lz4_flex` to get fix for [RUSTSEC-2026-0041] ([#396])
+
+[#385]: https://github.com/ClickHouse/clickhouse-rs/pull/385
+[#387]: https://github.com/ClickHouse/clickhouse-rs/pull/387
+[#391]: https://github.com/ClickHouse/clickhouse-rs/pull/391
+[#394]: https://github.com/ClickHouse/clickhouse-rs/pull/394
+[#396]: https://github.com/ClickHouse/clickhouse-rs/pull/396
+[RUSTSEC-2026-0041]: https://rustsec.org/advisories/RUSTSEC-2026-0041
+
 ## [0.14.2] - 2026-01-14
 
 ### Added
@@ -549,7 +569,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.2...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.3...HEAD
+[0.14.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.2...v0.14.3
 [0.14.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.3...v0.14.0
