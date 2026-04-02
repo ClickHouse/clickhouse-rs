@@ -1,3 +1,5 @@
+// Large json!() invocations in dynamic_types.rs exceed the default limit.
+#![recursion_limit = "256"]
 //! # Integration tests
 //!
 //! - The `wait_end_of_query` setting that is used for all DDLs forces HTTP response buffering.
