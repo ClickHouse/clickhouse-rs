@@ -546,6 +546,73 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_json() {
+        // JSON type encodes as length-prefixed JSON string (same wire format as String).
+        // ClickHouse accepts this when input_format_binary_read_json_as_string=1.
+        let schema = DynamicSchema::from_columns("t", vec![col("data", "JSON")]);
+        let row = serde_json::json!({"data": {"key": "value", "num": 42}});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        let bytes = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols).unwrap();
+        // Should be varint(len) + JSON string bytes
+        let json_str = r#"{"key":"value","num":42}"#;
+        let mut expected = Vec::new();
+        write_varint(json_str.len() as u64, &mut expected);
+        expected.extend_from_slice(json_str.as_bytes());
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn test_encode_nullable_json_non_null() {
+        // Nullable(JSON) with a value: 0x00 (not null) + length-prefixed JSON string.
+        // This is the exact scenario that caused the 0x73 error in production.
+        let schema = DynamicSchema::from_columns("t", vec![col("tags", "Nullable(JSON)")]);
+        let row = serde_json::json!({"tags": {"env": "prod"}});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        let bytes = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols).unwrap();
+        let json_str = r#"{"env":"prod"}"#;
+        let mut expected = vec![0u8]; // not null
+        write_varint(json_str.len() as u64, &mut expected);
+        expected.extend_from_slice(json_str.as_bytes());
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn test_encode_nullable_json_null() {
+        // Nullable(JSON) with null: just 0x01 (is null).
+        let schema = DynamicSchema::from_columns("t", vec![col("tags", "Nullable(JSON)")]);
+        let row = serde_json::json!({"tags": null});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        let bytes = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols).unwrap();
+        assert_eq!(bytes, vec![1]); // is_null = true
+    }
+
+    #[test]
+    fn test_encode_json_empty_object() {
+        let schema = DynamicSchema::from_columns("t", vec![col("data", "JSON")]);
+        let row = serde_json::json!({"data": {}});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        let bytes = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols).unwrap();
+        // "{}" = 2 bytes
+        assert_eq!(bytes, vec![2, b'{', b'}']);
+    }
+
+    #[test]
+    fn test_encode_json_string_value() {
+        // When the JSON column receives a plain string value, it should still
+        // encode as a length-prefixed string (the JSON text representation).
+        let schema = DynamicSchema::from_columns("t", vec![col("data", "JSON")]);
+        let row = serde_json::json!({"data": "just a string"});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        let bytes = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols).unwrap();
+        // value.to_string() on a JSON string produces: "\"just a string\""
+        let json_str = r#""just a string""#;
+        let mut expected = Vec::new();
+        write_varint(json_str.len() as u64, &mut expected);
+        expected.extend_from_slice(json_str.as_bytes());
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
     fn test_varint_encoding() {
         let mut buf = Vec::new();
         write_varint(0, &mut buf);

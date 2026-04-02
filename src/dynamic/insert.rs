@@ -125,12 +125,21 @@ impl DynamicInsert {
                     .expect("fmt::Write on String is infallible");
             }
             sql.push_str(") FORMAT RowBinary");
-            let formatted = self.client.insert_formatted_with(sql).map_err(|e| {
+            let mut formatted = self.client.insert_formatted_with(sql).map_err(|e| {
                 DynamicError::EncodingError {
                     column: String::new(),
                     message: e.to_string(),
                 }
             })?;
+
+            // The RowBinary encoder sends JSON values as length-prefixed strings.
+            // ClickHouse's default JSON RowBinary deserializer expects a structured
+            // path-value binary format, which causes "Unknown type code: 0x73" errors.
+            // Setting this option tells ClickHouse to accept JSON as simple strings.
+            if schema.has_json_columns() {
+                formatted = formatted.with_option("input_format_binary_read_json_as_string", "1");
+            }
+
             self.insert = Some(formatted.buffered());
             self.insert_columns = Some(col_names);
         }

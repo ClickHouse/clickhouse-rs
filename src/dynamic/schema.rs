@@ -87,6 +87,18 @@ impl DynamicSchema {
     pub fn is_empty(&self) -> bool {
         self.columns.is_empty()
     }
+
+    /// Whether any column uses the JSON data type (including Nullable(JSON)).
+    ///
+    /// When true, RowBinary inserts must set `input_format_binary_read_json_as_string=1`
+    /// because the encoder sends JSON values as length-prefixed strings, not the
+    /// structured path-value binary format that ClickHouse expects by default.
+    pub fn has_json_columns(&self) -> bool {
+        use super::parsed_type::TypeTag;
+        self.columns
+            .iter()
+            .any(|c| c.parsed_type.tag == TypeTag::JSON)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +315,30 @@ mod tests {
         // After TTL expires
         std::thread::sleep(Duration::from_millis(10));
         assert!(cache.get("db.test").is_none());
+    }
+
+    #[test]
+    fn test_has_json_columns() {
+        let schema = DynamicSchema::from_columns(
+            "db.test",
+            vec![make_col("id", "UInt64", ""), make_col("name", "String", "")],
+        );
+        assert!(!schema.has_json_columns());
+
+        let schema = DynamicSchema::from_columns(
+            "db.test",
+            vec![make_col("id", "UInt64", ""), make_col("data", "JSON", "")],
+        );
+        assert!(schema.has_json_columns());
+
+        let schema = DynamicSchema::from_columns(
+            "db.test",
+            vec![
+                make_col("id", "UInt64", ""),
+                make_col("tags", "Nullable(JSON)", ""),
+            ],
+        );
+        assert!(schema.has_json_columns());
     }
 
     #[test]
