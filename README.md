@@ -602,6 +602,42 @@ The functionality can be enabled with the `test-util` feature. Use it **only** i
 
 See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs).
 
+## Native TCP Transport (HyperI Fork)
+
+This fork adds a native TCP protocol client (`feature = "native-transport"`)
+that connects on port 9000 — the same binary protocol used by `clickhouse-client`
+and the Go client.
+
+```rust
+use clickhouse::native::NativeClient;
+
+let client = NativeClient::default()
+    .with_addr("localhost:9000")
+    .with_database("default")
+    .with_lz4();
+```
+
+The same `#[derive(Row)]` structs work with both HTTP and native transports.
+
+### Additional feature flags (HyperI)
+
+| Feature | Description |
+|---|---|
+| `native-transport` | Native TCP client with connection pooling, SELECT + INSERT |
+| `async-inserter` | `AsyncInserter<T>` — concurrent MPSC-based inserter (HTTP + native) |
+| `batcher` | `TableBatcher<T>` — Go-style `append`/`flush`/`send` wrapper |
+
+### Extended documentation
+
+| Guide | Description |
+|---|---|
+| [Native Transport](docs/native-transport.md) | Connect, query, and insert over TCP |
+| [Connection Pooling](docs/connection-pooling.md) | Deadpool pool, health checks, recycling |
+| [Batching](docs/batching.md) | AsyncInserter, AsyncNativeInserter, TableBatcher |
+| [Types](docs/types.md) | Full type coverage matrix (HTTP + native) |
+| [Wire Format](docs/wire-format.md) | LowCardinality, Dynamic, Variant encoding internals |
+| [Migration](docs/migration.md) | HTTP vs native trade-offs, switching guide |
+
 ## Support Policies
 
 ### Minimum Supported Rust Version (MSRV)

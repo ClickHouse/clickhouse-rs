@@ -22,6 +22,10 @@ pub mod insert;
 pub mod insert_formatted;
 #[cfg(feature = "inserter")]
 pub mod inserter;
+#[cfg(feature = "async-inserter")]
+pub mod async_inserter;
+#[cfg(feature = "batcher")]
+pub mod batcher;
 pub mod query;
 pub mod serde;
 pub mod sql;
@@ -42,6 +46,11 @@ mod row_metadata;
 mod rowbinary;
 #[cfg(feature = "inserter")]
 mod ticks;
+
+#[cfg(feature = "native-transport")]
+pub mod native;
+
+pub mod dynamic;
 
 /// A client containing HTTP pool.
 ///
@@ -64,6 +73,7 @@ pub struct Client {
     products_info: Vec<ProductInfo>,
     validation: bool,
     insert_metadata_cache: Arc<InsertMetadataCache>,
+    pub(crate) dynamic_schema_cache: Arc<dynamic::DynamicSchemaCache>,
 
     #[cfg(feature = "test-util")]
     mocked: bool,
@@ -129,6 +139,9 @@ impl Client {
             products_info: Vec::default(),
             validation: true,
             insert_metadata_cache: Arc::new(InsertMetadataCache::default()),
+            dynamic_schema_cache: dynamic::DynamicSchemaCache::new(
+                std::time::Duration::from_secs(300),
+            ),
             #[cfg(feature = "test-util")]
             mocked: false,
         }
@@ -472,6 +485,57 @@ impl Client {
         sql: impl Into<String>,
     ) -> insert_formatted::InsertFormatted {
         insert_formatted::InsertFormatted::new(self, sql.into())
+    }
+
+    /// Start a dynamic INSERT for a table with runtime schema.
+    ///
+    /// Fetches the schema from `system.columns` (cached with TTL) and encodes
+    /// `Map<String, Value>` to RowBinary. As simple as JSONEachRow to use, but
+    /// ClickHouse skips JSON parsing entirely — significant CPU savings on the
+    /// cluster at scale.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut insert = client.dynamic_insert("mydb", "mytable");
+    /// insert.write_map(&row).await?;
+    /// insert.write_map(&row2).await?;
+    /// let rows_written = insert.end().await?;
+    /// ```
+    pub fn dynamic_insert(
+        &self,
+        database: &str,
+        table: &str,
+    ) -> dynamic::insert::DynamicInsert {
+        dynamic::insert::DynamicInsert::new(
+            self.clone(),
+            database.to_string(),
+            table.to_string(),
+            self.dynamic_schema_cache.clone(),
+        )
+    }
+
+    /// Start an async auto-flushing dynamic batcher for a table.
+    ///
+    /// Same as [`dynamic_insert`][Self::dynamic_insert] but with a background
+    /// task that auto-flushes on row count and time thresholds. Multiple tasks
+    /// can write concurrently via [`DynamicBatcherHandle`][dynamic::DynamicBatcherHandle].
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let batcher = client.dynamic_batcher("mydb", "mytable", Default::default());
+    /// let handle = batcher.handle();
+    /// handle.write_map(row).await?;
+    /// batcher.end().await?;
+    /// ```
+    pub fn dynamic_batcher(
+        &self,
+        database: &str,
+        table: &str,
+        config: dynamic::DynamicBatchConfig,
+    ) -> dynamic::DynamicBatcher {
+        dynamic::DynamicBatcher::new(self, database, table, config)
     }
 
     /// Starts a new SELECT/DDL query.
