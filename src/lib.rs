@@ -623,7 +623,7 @@ impl Client {
 
         let mut columns_cursor = self
             .query(&_priv::row_insert_metadata_query(raw_table_name))
-            .with_option("describe_include_subcolumns", "0")
+            .with_setting("describe_include_subcolumns", "0")
             .fetch::<DescribeColumn>()?;
 
         let mut columns = Vec::new();
