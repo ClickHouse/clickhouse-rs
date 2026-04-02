@@ -92,8 +92,11 @@ pub fn columns_to_send<'a>(
 fn encode_value(value: &Value, col: &ColumnDef, buf: &mut Vec<u8>) -> Result<(), DynamicError> {
     let pt = &col.parsed_type;
 
-    // Handle Nullable wrapper
-    if pt.nullable {
+    // Handle Nullable wrapper.
+    // JSON columns skip the Nullable prefix — ClickHouse RowBinary uses a
+    // different encoding for Nullable(JSON) where NULL is represented within
+    // the JSON binary format itself, not with a 0x00/0x01 prefix byte.
+    if pt.nullable && pt.tag != super::parsed_type::TypeTag::JSON {
         if value.is_null() {
             buf.push(1); // is_null = true
             return Ok(());
@@ -185,9 +188,15 @@ fn encode_typed(
             encode_map(value, kt, vt, col_name, buf)?;
         }
         TypeTag::JSON => {
-            // JSON type -- send as length-prefixed JSON string
-            let json_str = value.to_string();
-            write_string(json_str.as_bytes(), buf);
+            // JSON type -- send as length-prefixed JSON string.
+            // For Nullable(JSON), NULL values send an empty string (ClickHouse
+            // interprets a zero-length RowBinary string as NULL for JSON columns).
+            if value.is_null() {
+                write_string(b"", buf);
+            } else {
+                let json_str = value.to_string();
+                write_string(json_str.as_bytes(), buf);
+            }
         }
         // 128/256-bit types, Point, Tuple: encode as string (forward-compat).
         // These are rarely used in dynamic insert paths.
