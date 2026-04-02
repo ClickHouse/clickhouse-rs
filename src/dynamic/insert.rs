@@ -169,15 +169,57 @@ impl DynamicInsert {
 
     /// Flush the buffer and finalise the INSERT.
     ///
-    /// Returns the number of rows written.
+    /// Returns the number of rows written. On `SchemaMismatch` errors, the
+    /// schema cache is automatically invalidated so the next insert re-fetches
+    /// from `system.columns`.
+    ///
+    /// Since `end()` consumes `self`, use [`schema_cache()`][Self::schema_cache]
+    /// before calling `end()` if you need the cache handle for custom recovery.
     pub async fn end(mut self) -> Result<u64, DynamicError> {
         if let Some(mut insert) = self.insert.take() {
-            insert
-                .end()
-                .await
-                .map_err(|e| classify_error(&self.database, &self.table, e))?;
+            match insert.end().await {
+                Ok(()) => {}
+                Err(e) => {
+                    let err = classify_error(&self.database, &self.table, e);
+                    // Auto-invalidate on schema mismatch so the next insert
+                    // re-fetches the schema without caller intervention.
+                    if matches!(err, DynamicError::SchemaMismatch { .. }) {
+                        self.schema_cache
+                            .invalidate(&format!("{}.{}", self.database, self.table));
+                    }
+                    return Err(err);
+                }
+            }
         }
         Ok(self.rows_written)
+    }
+
+    /// Get the schema cache and table identifier for external invalidation.
+    ///
+    /// Use when you need to invalidate after [`end()`][Self::end] fails, since
+    /// `end()` consumes `self`. Extract the cache handle *before* calling `end()`:
+    ///
+    /// ```ignore
+    /// let (cache, db, table) = insert.schema_cache();
+    /// match insert.end().await {
+    ///     Ok(count) => Ok(count),
+    ///     Err(DynamicError::SchemaMismatch { .. }) => {
+    ///         cache.invalidate(&format!("{db}.{table}"));
+    ///         // retry...
+    ///     }
+    ///     Err(e) => Err(e),
+    /// }
+    /// ```
+    ///
+    /// Note: `end()` already auto-invalidates on `SchemaMismatch`, so this
+    /// accessor is only needed for custom recovery logic (e.g. retry loops
+    /// that create a new `DynamicInsert` after invalidation).
+    pub fn schema_cache(&self) -> (Arc<DynamicSchemaCache>, String, String) {
+        (
+            Arc::clone(&self.schema_cache),
+            self.database.clone(),
+            self.table.clone(),
+        )
     }
 
     /// Invalidate the cached schema, forcing a re-fetch on next insert.
