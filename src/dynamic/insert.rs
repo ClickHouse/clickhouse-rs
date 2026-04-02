@@ -202,6 +202,10 @@ impl DynamicInsert {
 }
 
 /// Classify a ClickHouse error as schema mismatch or generic encoding error.
+///
+/// Schema mismatch covers both explicit column/type errors and data format errors
+/// that indicate schema drift (e.g. sending JSON to a column that changed type,
+/// or RowBinary data that no longer matches the cached schema).
 fn classify_error(database: &str, table: &str, e: crate::error::Error) -> DynamicError {
     let msg = e.to_string();
     if msg.contains("UNKNOWN_IDENTIFIER")
@@ -209,6 +213,15 @@ fn classify_error(database: &str, table: &str, e: crate::error::Error) -> Dynami
         || msg.contains("THERE_IS_NO_COLUMN")
         || msg.contains("TYPE_MISMATCH")
         || msg.contains("ILLEGAL_COLUMN")
+        // Data format errors that indicate schema drift — the cached schema no
+        // longer matches what the server expects, so RowBinary decoding fails.
+        || msg.contains("CANNOT_PARSE")
+        || msg.contains("cannot parse")
+        || msg.contains("INCORRECT_DATA")
+        || msg.contains("incorrect data")
+        // ClickHouse error code 117 (INCORRECT_DATA) sometimes appears as a
+        // numeric code prefix in error messages.
+        || msg.contains("Code: 117")
     {
         DynamicError::SchemaMismatch {
             table: format!("{database}.{table}"),
