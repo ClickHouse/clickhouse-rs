@@ -22,6 +22,8 @@ pub mod insert;
 pub mod insert_formatted;
 #[cfg(feature = "inserter")]
 pub mod inserter;
+#[cfg(feature = "batcher")]
+pub mod batcher;
 pub mod query;
 pub mod serde;
 pub mod sql;
@@ -42,6 +44,9 @@ mod row_metadata;
 mod rowbinary;
 #[cfg(feature = "inserter")]
 mod ticks;
+
+#[cfg(feature = "native-transport")]
+pub mod native;
 
 /// A client containing HTTP pool.
 ///
