@@ -1,0 +1,190 @@
+//! Single-table dynamic insert with automatic schema fetch and recovery.
+//!
+//! `DynamicInsert` fetches the table schema from `system.columns` on first use,
+//! encodes `Map<String, Value>` to RowBinary, and sends via HTTP `InsertFormatted`.
+//!
+//! On schema mismatch errors (e.g. `ALTER TABLE ADD COLUMN`), it automatically
+//! invalidates the cached schema so the next insert re-fetches. The caller's
+//! retry/salvage logic handles re-sending failed rows.
+//!
+//! # End-to-End Efficiency
+//!
+//! This replaces the "push JSON, let ClickHouse parse it" approach with
+//! schema-reflected binary. Your app does roughly the same work (binary encoding
+//! instead of JSON serialisation), but the ClickHouse cluster does zero parsing
+//! on ingest. Think total CPU across client + cluster, not just your app.
+
+use std::sync::Arc;
+
+use serde_json::{Map, Value};
+
+use crate::Client;
+
+use super::encode::{columns_to_send, encode_dynamic_row};
+use super::error::DynamicError;
+use super::schema::{fetch_dynamic_schema, ColumnDef, DynamicSchema, DynamicSchemaCache};
+
+/// Dynamic insert for a single table.
+///
+/// Encodes `Map<String, Value>` to RowBinary using a schema fetched from
+/// `system.columns`. As simple to use as JSONEachRow, but binary wire format.
+///
+/// # Schema Recovery
+///
+/// If ClickHouse rejects an insert due to schema mismatch (column added/removed,
+/// type changed), call [`invalidate_schema()`][Self::invalidate_schema] and create
+/// a new `DynamicInsert`. The next insert will re-fetch the schema automatically.
+///
+/// For automatic recovery in a pipeline context, use `DynamicBatcher` which
+/// handles this transparently.
+pub struct DynamicInsert {
+    client: Client,
+    database: String,
+    table: String,
+    schema_cache: Arc<DynamicSchemaCache>,
+    schema: Option<DynamicSchema>,
+    /// Column list for the current INSERT (determined from first row).
+    insert_columns: Option<Vec<String>>,
+    /// The active HTTP insert (created lazily on first write_map).
+    insert: Option<crate::insert_formatted::BufInsertFormatted>,
+    rows_written: u64,
+}
+
+impl DynamicInsert {
+    /// Create a new `DynamicInsert`. Schema is fetched lazily on first `write_map()`.
+    pub(crate) fn new(
+        client: Client,
+        database: String,
+        table: String,
+        schema_cache: Arc<DynamicSchemaCache>,
+    ) -> Self {
+        Self {
+            client,
+            database,
+            table,
+            schema_cache,
+            schema: None,
+            insert_columns: None,
+            insert: None,
+            rows_written: 0,
+        }
+    }
+
+    /// Ensure schema is loaded (from cache or system.columns).
+    async fn ensure_schema(&mut self) -> Result<&DynamicSchema, DynamicError> {
+        if self.schema.is_none() {
+            let full_table = format!("{}.{}", self.database, self.table);
+            let schema = if let Some(cached) = self.schema_cache.get(&full_table) {
+                cached
+            } else {
+                let fetched =
+                    fetch_dynamic_schema(&self.client, &self.database, &self.table).await?;
+                self.schema_cache.insert(&full_table, fetched.clone());
+                fetched
+            };
+            self.schema = Some(schema);
+        }
+        Ok(self.schema.as_ref().unwrap())
+    }
+
+    /// Encode and buffer a row for insert.
+    ///
+    /// The row is encoded to RowBinary and written to the HTTP insert buffer.
+    /// On first call, fetches the schema and creates the INSERT statement.
+    pub async fn write_map(&mut self, row: &Map<String, Value>) -> Result<(), DynamicError> {
+        // Ensure schema is loaded
+        if self.schema.is_none() {
+            self.ensure_schema().await?;
+        }
+        let schema = self.schema.as_ref().unwrap();
+
+        // On first row, determine the column list and create the INSERT
+        if self.insert.is_none() {
+            let cols = columns_to_send(row, schema);
+            let col_names: Vec<String> = cols.iter().map(|c| c.name.clone()).collect();
+            let col_list = col_names.join(", ");
+            let sql = format!(
+                "INSERT INTO {}.{} ({col_list}) FORMAT RowBinary",
+                self.database, self.table
+            );
+            self.insert = Some(self.client.insert_formatted_with(sql).buffered());
+            self.insert_columns = Some(col_names);
+        }
+
+        // Build the column def refs for encoding based on stored column names
+        let col_defs: Vec<&ColumnDef> = self
+            .insert_columns
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter_map(|name| schema.column(name))
+            .collect();
+
+        // Encode row to RowBinary
+        let rb_bytes = encode_dynamic_row(row, schema, &col_defs)?;
+
+        // Write to the HTTP insert buffer
+        let insert = self.insert.as_mut().unwrap();
+        insert
+            .write(&rb_bytes)
+            .await
+            .map_err(|e| classify_error(&self.database, &self.table, e))?;
+
+        self.rows_written += 1;
+        Ok(())
+    }
+
+    /// Flush the buffer and finalise the INSERT.
+    ///
+    /// Returns the number of rows written.
+    pub async fn end(mut self) -> Result<u64, DynamicError> {
+        if let Some(mut insert) = self.insert.take() {
+            insert
+                .end()
+                .await
+                .map_err(|e| classify_error(&self.database, &self.table, e))?;
+        }
+        Ok(self.rows_written)
+    }
+
+    /// Invalidate the cached schema, forcing a re-fetch on next insert.
+    ///
+    /// Call this after a schema mismatch error before creating a new
+    /// `DynamicInsert` for the same table.
+    pub fn invalidate_schema(&mut self) {
+        let full_table = format!("{}.{}", self.database, self.table);
+        self.schema_cache.invalidate(&full_table);
+        self.schema = None;
+    }
+
+    /// Number of rows written so far.
+    pub fn rows_written(&self) -> u64 {
+        self.rows_written
+    }
+
+    /// Get the current schema (if loaded).
+    pub fn schema(&self) -> Option<&DynamicSchema> {
+        self.schema.as_ref()
+    }
+}
+
+/// Classify a ClickHouse error as schema mismatch or generic encoding error.
+fn classify_error(database: &str, table: &str, e: crate::error::Error) -> DynamicError {
+    let msg = e.to_string();
+    if msg.contains("UNKNOWN_IDENTIFIER")
+        || msg.contains("NO_SUCH_COLUMN")
+        || msg.contains("THERE_IS_NO_COLUMN")
+        || msg.contains("TYPE_MISMATCH")
+        || msg.contains("ILLEGAL_COLUMN")
+    {
+        DynamicError::SchemaMismatch {
+            table: format!("{database}.{table}"),
+            message: msg,
+        }
+    } else {
+        DynamicError::EncodingError {
+            column: String::new(),
+            message: msg,
+        }
+    }
+}

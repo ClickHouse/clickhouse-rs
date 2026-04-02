@@ -92,11 +92,16 @@ default = ["lz4"]
 
 test-util = ["hyper/server"]
 inserter = ["dep:quanta"]
+async-inserter = ["inserter", "tokio/time", "tokio/sync"]
+batcher = ["async-inserter"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
 lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
 chrono = ["dep:chrono"]
 futures03 = []
+
+## Native TCP protocol transport
+native-transport = ["dep:cityhash-rs", "dep:lz4_flex", "dep:zstd", "dep:socket2", "dep:deadpool", "tokio/net", "tokio/io-util"]
 
 ##  TLS
 native-tls = ["dep:hyper-tls"]
@@ -146,14 +151,16 @@ lz4_flex = { version = "0.11.6", default-features = false, features = [
     "std",
 ], optional = true }
 cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety, this package has been stable for years
+zstd = { version = "0.13", optional = true }
+socket2 = { version = "0.6", features = ["all"], optional = true }
 uuid = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
 chrono = { version = "0.4", optional = true, features = ["serde"] }
 bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
-polonius-the-crab = "0.5.0"
-
 bnum = "0.13.0"
+deadpool = { version = "0.12", features = ["managed", "rt_tokio_1"], optional = true }
+serde_json = "1"
 
 [dev-dependencies]
 clickhouse-macros = { version = "0.3.0", path = "macros" }
