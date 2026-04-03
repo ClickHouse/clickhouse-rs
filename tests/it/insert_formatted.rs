@@ -24,7 +24,7 @@ async fn empty_insert() {
 
     let insert = client
         .insert_formatted_with(format!("INSERT INTO {table_name} FORMAT TabSeparated"))
-        .with_option("query_id", query_id);
+        .with_setting("query_id", query_id);
     insert.end().await.unwrap();
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;

@@ -27,7 +27,7 @@ async fn main() -> clickhouse::error::Result<()> {
     client
         .query("DROP TABLE IF EXISTS ?")
         .bind(Identifier(table_name))
-        .with_option("wait_end_of_query", "1")
+        .with_setting("wait_end_of_query", "1")
         .execute()
         .await?;
 
@@ -38,7 +38,7 @@ async fn main() -> clickhouse::error::Result<()> {
     client
         .query("CREATE TABLE ? (id Int32, name String) ENGINE MergeTree ORDER BY id")
         .bind(Identifier(table_name))
-        .with_option("wait_end_of_query", "1")
+        .with_setting("wait_end_of_query", "1")
         .execute()
         .await?;
 
@@ -56,7 +56,7 @@ async fn main() -> clickhouse::error::Result<()> {
         .bind(Identifier(table_name))
         // This setting is optional; use it when you need strong consistency guarantees on the reads
         // See https://clickhouse.com/docs/en/cloud/reference/shared-merge-tree#consistency
-        .with_option("select_sequential_consistency", "1")
+        .with_setting("select_sequential_consistency", "1")
         .fetch_all::<MyRow>()
         .await?;
 

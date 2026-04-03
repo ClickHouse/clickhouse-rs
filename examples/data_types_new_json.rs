@@ -12,13 +12,13 @@ async fn main() -> Result<()> {
     let table_name = "chrs_data_types_new_json";
     let client = Client::default()
         .with_url("http://localhost:8123")
-        // All these settings can instead be applied on the query or insert level with the same `with_option` method.
+        // All these settings can instead be applied on the query or insert level with the same `with_setting` method.
         // Enable new JSON type usage
-        .with_option("allow_experimental_json_type", "1")
+        .with_setting("allow_experimental_json_type", "1")
         // Enable inserting JSON columns as a string
-        .with_option("input_format_binary_read_json_as_string", "1")
+        .with_setting("input_format_binary_read_json_as_string", "1")
         // Enable selecting JSON columns as a string
-        .with_option("output_format_binary_write_json_as_string", "1");
+        .with_setting("output_format_binary_write_json_as_string", "1");
 
     client
         .query(

@@ -165,7 +165,7 @@ impl SimpleRow {
 pub(crate) async fn create_simple_table(client: &Client, table_name: &str) {
     client
         .query("CREATE TABLE ?(id UInt64, data String) ENGINE = MergeTree ORDER BY id")
-        .with_option("wait_end_of_query", "1")
+        .with_setting("wait_end_of_query", "1")
         .bind(Identifier(table_name))
         .execute()
         .await
@@ -187,7 +187,7 @@ where
 pub(crate) async fn flush_query_log(client: &Client) {
     client
         .query("SYSTEM FLUSH LOGS")
-        .with_option("wait_end_of_query", "1")
+        .with_setting("wait_end_of_query", "1")
         .execute()
         .await
         .unwrap();
@@ -197,7 +197,7 @@ pub(crate) async fn execute_statements(client: &Client, statements: &[&str]) {
     for statement in statements {
         client
             .query(statement)
-            .with_option("wait_end_of_query", "1")
+            .with_setting("wait_end_of_query", "1")
             .execute()
             .await
             .unwrap_or_else(|err| panic!("cannot execute statement '{statement}', cause: {err}"));
@@ -408,7 +408,7 @@ mod _priv {
 
         client
             .query("DROP DATABASE IF EXISTS ?")
-            .with_option("wait_end_of_query", "1")
+            .with_setting("wait_end_of_query", "1")
             .bind(Identifier(db_name))
             .execute()
             .await
@@ -416,7 +416,7 @@ mod _priv {
 
         client
             .query("CREATE DATABASE ?")
-            .with_option("wait_end_of_query", "1")
+            .with_setting("wait_end_of_query", "1")
             .bind(Identifier(db_name))
             .execute()
             .await

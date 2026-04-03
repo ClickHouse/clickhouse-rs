@@ -185,10 +185,10 @@ async fn limited_by_time() {
     assert_eq!(sum, (1..=rows).sum::<u64>());
 }
 
-/// Similar to [`crate::insert::keeps_client_options`] with minor differences.
+/// Similar to [`crate::insert::keeps_client_settings`] with minor differences.
 #[tokio::test]
-async fn keeps_client_options() {
-    let table_name = "inserter_keeps_client_options";
+async fn keeps_client_settings() {
+    let table_name = "inserter_keeps_client_settings";
     let query_id = uuid::Uuid::new_v4().to_string();
     let (client_setting_name, client_setting_value) = ("max_block_size", "1000");
 
@@ -198,15 +198,15 @@ async fn keeps_client_options() {
     let (insert_setting_name, insert_setting_value) =
         ("external_storage_connect_timeout_sec", "11");
 
-    let client = prepare_database!().with_option(client_setting_name, client_setting_value);
+    let client = prepare_database!().with_setting(client_setting_name, client_setting_value);
     create_simple_table(&client, table_name).await;
 
     let row = SimpleRow::new(42, "foo");
 
     let mut inserter = client
         .inserter::<SimpleRow>(table_name)
-        .with_option(insert_setting_name, insert_setting_value)
-        .with_option("query_id", &query_id);
+        .with_setting(insert_setting_name, insert_setting_value)
+        .with_setting("query_id", &query_id);
 
     inserter.write(&row).await.unwrap();
     inserter.end().await.unwrap();
@@ -234,14 +234,14 @@ async fn keeps_client_options() {
         has_insert_setting,
         "{}",
         format!(
-            "should contain {insert_setting_name} = {insert_setting_value} (from the insert options)"
+            "should contain {insert_setting_name} = {insert_setting_value} (from the insert settings)"
         )
     );
     assert!(
         has_client_setting,
         "{}",
         format!(
-            "should contain {client_setting_name} = {client_setting_value} (from the client options)"
+            "should contain {client_setting_name} = {client_setting_value} (from the client settings)"
         )
     );
 
@@ -249,10 +249,10 @@ async fn keeps_client_options() {
     assert_eq!(rows, vec!(row))
 }
 
-/// Similar to [`crate::insert::overrides_client_options`] with minor differences.
+/// Similar to [`crate::insert::overrides_client_settings`] with minor differences.
 #[tokio::test]
-async fn overrides_client_options() {
-    let table_name = "inserter_overrides_client_options";
+async fn overrides_client_settings() {
+    let table_name = "inserter_overrides_client_settings";
     let query_id = uuid::Uuid::new_v4().to_string();
 
     // `async_insert` setting wants to default to `1` in newer versions, which regressed these tests
@@ -261,15 +261,15 @@ async fn overrides_client_options() {
     let (setting_name, setting_value, override_value) =
         ("external_storage_connect_timeout_sec", "11", "17");
 
-    let client = prepare_database!().with_option(setting_name, setting_value);
+    let client = prepare_database!().with_setting(setting_name, setting_value);
     create_simple_table(&client, table_name).await;
 
     let row = SimpleRow::new(42, "foo");
 
     let mut inserter = client
         .inserter::<SimpleRow>(table_name)
-        .with_option(setting_name, override_value)
-        .with_option("query_id", &query_id);
+        .with_setting(setting_name, override_value)
+        .with_setting("query_id", &query_id);
 
     inserter.write(&row).await.unwrap();
     inserter.end().await.unwrap();
@@ -294,7 +294,7 @@ async fn overrides_client_options() {
     assert!(
         has_setting_override,
         "{}",
-        format!("should contain {setting_name} = {override_value} (from the inserter options)")
+        format!("should contain {setting_name} = {override_value} (from the inserter settings)")
     );
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;

@@ -21,9 +21,9 @@ async fn main() -> Result<()> {
     let client = Client::default()
         .with_url("http://localhost:8123")
         // https://clickhouse.com/docs/en/operations/settings/settings#async-insert
-        .with_option("async_insert", "1")
+        .with_setting("async_insert", "1")
         // https://clickhouse.com/docs/en/operations/settings/settings#wait-for-async-insert
-        .with_option("wait_for_async_insert", "0");
+        .with_setting("wait_for_async_insert", "0");
 
     client
         .query(

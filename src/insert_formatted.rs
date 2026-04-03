@@ -101,7 +101,7 @@ impl InsertState {
     #[inline]
     fn expect_client_mut(&mut self) -> &mut Client {
         let Self::NotStarted { client, .. } = self else {
-            panic!("cannot modify client options while an insert is in-progress")
+            panic!("cannot modify client settings while an insert is in-progress")
         };
 
         client
@@ -160,8 +160,8 @@ impl InsertFormatted {
 
     /// Configure the [roles] to use when executing `INSERT` statements.
     ///
-    /// Overrides any roles previously set by this method, [`InsertFormatted::with_option`],
-    /// [`Client::with_roles`] or [`Client::with_option`].
+    /// Overrides any roles previously set by this method, [`InsertFormatted::with_setting`],
+    /// [`Client::with_roles`] or [`Client::with_setting`].
     ///
     /// An empty iterator may be passed to clear the set roles.
     ///
@@ -176,8 +176,8 @@ impl InsertFormatted {
 
     /// Clear any explicit [roles] previously set on this `Insert` or inherited from [`Client`].
     ///
-    /// Overrides any roles previously set by [`InsertFormatted::with_roles`], [`InsertFormatted::with_option`],
-    /// [`Client::with_roles`] or [`Client::with_option`].
+    /// Overrides any roles previously set by [`InsertFormatted::with_roles`], [`InsertFormatted::with_setting`],
+    /// [`Client::with_roles`] or [`Client::with_setting`].
     ///
     /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
     ///
@@ -194,8 +194,20 @@ impl InsertFormatted {
     /// # Panics
     /// If called after the request is started, e.g., after [`InsertFormatted::send`].
     #[track_caller]
+    #[deprecated(since = "0.14.3", note = "please use `with_setting` instead")]
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.state.expect_client_mut().set_option(name, value);
+        self.state.expect_client_mut().set_setting(name, value);
+        self
+    }
+
+    /// Similar to [`Client::with_setting`], but for this particular INSERT
+    /// statement only.
+    ///
+    /// # Panics
+    /// If called after the request is started, e.g., after [`InsertFormatted::send`].
+    #[track_caller]
+    pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.state.expect_client_mut().set_setting(name, value);
         self
     }
 
@@ -376,7 +388,7 @@ impl InsertFormatted {
             pairs.append_pair(settings::DECOMPRESS, "1");
         }
 
-        for (name, value) in &client.options {
+        for (name, value) in &client.settings {
             pairs.append_pair(name, value);
         }
 
