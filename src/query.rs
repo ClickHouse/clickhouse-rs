@@ -194,8 +194,8 @@ impl Query {
             db.response.status_code = tracing::field::Empty,
             db.response.returned_rows = tracing::field::Empty,
             // ClickHouse-specific extension fields
-            clickhouse.request.session_id = self.client.get_option(settings::SESSION_ID),
-            clickhouse.request.query_id = self.client.get_option(settings::QUERY_ID),
+            clickhouse.request.session_id = self.client.get_setting(settings::SESSION_ID),
+            clickhouse.request.query_id = self.client.get_setting(settings::QUERY_ID),
             clickhouse.response.received_bytes = tracing::field::Empty,
             clickhouse.response.decoded_bytes = tracing::field::Empty,
             clickhouse.response.format = response_format,

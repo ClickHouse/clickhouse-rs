@@ -29,9 +29,4 @@ async fn main() {
     for opts in BenchmarkOpts::permutations() {
         bench(opts).await;
     }
-    #[cfg(feature = "zstd")]
-    for level in [-4, -1, 1, zstd::DEFAULT_COMPRESSION_LEVEL] {
-        bench(Compression::Zstd(level), false).await;
-        bench(Compression::Zstd(level), true).await;
-    }
 }

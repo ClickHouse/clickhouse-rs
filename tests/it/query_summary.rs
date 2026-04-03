@@ -13,8 +13,8 @@ async fn summary_with_wait_end_of_query() {
 
     let mut cursor = client
         .query("SELECT * FROM test")
-        .with_option("send_progress_in_http_headers", "1")
-        .with_option("wait_end_of_query", "1")
+        .with_setting("send_progress_in_http_headers", "1")
+        .with_setting("wait_end_of_query", "1")
         .fetch::<SimpleRow>()
         .unwrap();
 
@@ -44,7 +44,7 @@ async fn summary_without_wait_end_of_query() {
 
     let mut cursor = client
         .query("SELECT * FROM test")
-        .with_option("send_progress_in_http_headers", "1")
+        .with_setting("send_progress_in_http_headers", "1")
         .fetch::<SimpleRow>()
         .unwrap();
 
@@ -84,8 +84,8 @@ async fn summary_generic_get() {
 
     let mut cursor = client
         .query("SELECT * FROM test")
-        .with_option("send_progress_in_http_headers", "1")
-        .with_option("wait_end_of_query", "1")
+        .with_setting("send_progress_in_http_headers", "1")
+        .with_setting("wait_end_of_query", "1")
         .fetch::<SimpleRow>()
         .unwrap();
 
@@ -112,8 +112,8 @@ async fn summary_with_fetch_bytes() {
 
     let mut cursor = client
         .query("SELECT * FROM test")
-        .with_option("send_progress_in_http_headers", "1")
-        .with_option("wait_end_of_query", "1")
+        .with_setting("send_progress_in_http_headers", "1")
+        .with_setting("wait_end_of_query", "1")
         .fetch_bytes("RowBinaryWithNamesAndTypes")
         .unwrap();
 

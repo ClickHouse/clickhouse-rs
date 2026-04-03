@@ -168,6 +168,14 @@ impl BenchmarkOpts {
             Compression::None,
             #[cfg(feature = "lz4")]
             Compression::Lz4,
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(-4),
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(-1),
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(1),
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(zstd::DEFAULT_COMPRESSION_LEVEL),
         ];
 
         let validation_modes = [false, true];

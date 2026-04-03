@@ -158,8 +158,8 @@ impl InsertFormatted {
                 db.operation.name = "INSERT",
                 db.collection.name = collection_name,
                 // ClickHouse-specific extension fields
-                clickhouse.request.session_id = client.get_option(settings::SESSION_ID),
-                clickhouse.request.query_id = client.get_option(settings::QUERY_ID),
+                clickhouse.request.session_id = client.get_setting(settings::SESSION_ID),
+                clickhouse.request.query_id = client.get_setting(settings::QUERY_ID),
                 clickhouse.request.sent_rows = tracing::field::Empty,
                 clickhouse.request.sent_bytes = tracing::field::Empty,
                 clickhouse.request.encoded_bytes = tracing::field::Empty,
@@ -299,14 +299,10 @@ impl InsertFormatted {
 
         #[cfg(any(feature = "lz4", feature = "zstd"))]
         let data = if self.compression.is_enabled() {
-            CompressedData::from_slice(&data)
-                .compressed
+            CompressedData::new(&data, self.compression)?.compressed
         } else {
             data
         };
-
-        #[cfg(not(feature = "lz4"))]
-        let original_size = to_u64_saturating(data.len());
 
         self.send_inner(data, original_size).await
     }
@@ -785,19 +781,23 @@ mod compression {
         /// # Errors
         /// Returns [`Error::Compression`] if `compression` is [`Compression::None`].
         pub fn new(data: &[u8], compression: Compression) -> Result<Self> {
+            let original_size = to_u64_saturating(data.len());
+
             match compression {
                 Compression::None => Err(Error::Compression(
                     "cannot pre-compress data when compression is disabled".into(),
                 )),
                 #[cfg(feature = "lz4")]
                 #[allow(deprecated)]
-                Compression::Lz4 | Compression::Lz4Hc(_) => {
-                    Ok(Self(crate::compression::lz4::compress(data)?))
-                }
+                Compression::Lz4 | Compression::Lz4Hc(_) => Ok(Self {
+                    compressed: crate::compression::lz4::compress(data)?,
+                    original_size,
+                }),
                 #[cfg(feature = "zstd")]
-                Compression::Zstd(level) => {
-                    Ok(Self(crate::compression::zstd::compress(data, Some(level))?))
-                }
+                Compression::Zstd(level) => Ok(Self {
+                    compressed: crate::compression::zstd::compress(data, Some(level))?,
+                    original_size,
+                }),
             }
         }
 

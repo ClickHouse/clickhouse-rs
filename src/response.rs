@@ -62,7 +62,10 @@ impl Response {
     pub(crate) async fn finish(&mut self) -> Result<()> {
         let chunks = loop {
             match self {
-                Self::Waiting(future) => *self = Self::Loading(future.await?),
+                Self::Waiting(future) => {
+                    let (chunks, _summary) = future.await?;
+                    *self = Self::Loading(chunks);
+                }
                 Self::Loading(chunks) => break chunks,
             }
         };
@@ -75,7 +78,7 @@ impl Response {
 async fn collect_response(
     response: HyperResponseFuture,
     compression: Compression,
-) -> Result<Chunks> {
+) -> Result<(Chunks, Option<Box<QuerySummary>>)> {
     let response = response.await?;
 
     let status = response.status();
@@ -94,11 +97,11 @@ async fn collect_response(
             .map(|value| value.as_bytes().into());
 
         let summary = response
-                    .headers()
-                    .get("X-ClickHouse-Summary")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(QuerySummary::from_header)
-                    .map(Box::new);// More likely to be successful, start streaming.
+            .headers()
+            .get("X-ClickHouse-Summary")
+            .and_then(|v| v.to_str().ok())
+            .and_then(QuerySummary::from_header)
+            .map(Box::new); // More likely to be successful, start streaming.
         // It still can fail, but we'll handle it in `DetectDbException`.
         Ok((Chunks::new(response.into_body(), compression, tag), summary))
     } else {
@@ -116,28 +119,6 @@ async fn collect_response(
         error.record_in_current_span("response error");
 
         Err(error)
-    }
-
-    pub(crate) fn into_future(self) -> ResponseFuture {
-        match self {
-            Self::Waiting(future) => future,
-            Self::Loading(_) => panic!("response is already streaming"),
-        }
-    }
-
-    pub(crate) async fn finish(&mut self) -> Result<()> {
-        let chunks = loop {
-            match self {
-                Self::Waiting(future) => {
-                    let (chunks, _summary) = future.await?;
-                    *self = Self::Loading(chunks);
-                }
-                Self::Loading(chunks) => break chunks,
-            }
-        };
-
-        while chunks.try_next().await?.is_some() {}
-        Ok(())
     }
 }
 

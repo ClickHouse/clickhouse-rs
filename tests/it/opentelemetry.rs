@@ -31,7 +31,7 @@ async fn query_with_opentelemetry() {
 
     let _numbers = client
         .query("SELECT * FROM system.numbers LIMIT 10")
-        .with_option("query_id", query_id.clone())
+        .with_setting("query_id", query_id.clone())
         .fetch_all::<u64>()
         .instrument(span)
         .await
@@ -90,7 +90,7 @@ async fn insert_with_opentelemetry() {
             .insert::<FooRow>("foo")
             .await
             .unwrap()
-            .with_option("query_id", &query_id);
+            .with_setting("query_id", &query_id);
 
         for i in 0..10 {
             insert
