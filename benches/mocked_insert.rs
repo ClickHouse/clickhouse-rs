@@ -44,6 +44,8 @@ async fn serve(
             Compression::None => Bytes::from(buffer),
             #[cfg(feature = "lz4")]
             Compression::Lz4 => clickhouse::_priv::lz4_compress(&buffer).unwrap(),
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(_) => clickhouse::_priv::zstd_compress(&buffer).unwrap(),
             _ => unreachable!(),
         }
     } else {
@@ -141,6 +143,14 @@ where
             Compression::None,
             #[cfg(feature = "lz4")]
             Compression::Lz4,
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(-4),
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(-1),
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(1),
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(zstd::DEFAULT_COMPRESSION_LEVEL),
         ] {
             group.bench_function(
                 format!("validation={validation}/compression={compression:?}"),

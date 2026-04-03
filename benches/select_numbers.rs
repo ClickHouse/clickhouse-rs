@@ -35,4 +35,9 @@ async fn main() {
         bench(Compression::Lz4, false).await;
         bench(Compression::Lz4, true).await;
     }
+    #[cfg(feature = "zstd")]
+    for level in [-4, -1, 1, zstd::DEFAULT_COMPRESSION_LEVEL] {
+        bench(Compression::Zstd(level), false).await;
+        bench(Compression::Zstd(level), true).await;
+    }
 }

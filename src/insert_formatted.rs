@@ -18,7 +18,7 @@ use tokio::{
 };
 use url::Url;
 
-#[cfg(feature = "lz4")]
+#[cfg(any(feature = "lz4", feature = "zstd"))]
 pub use compression::CompressedData;
 
 // The desired max frame size.
@@ -42,7 +42,7 @@ const BUFFER_SIZE: usize = 256 * 1024;
 #[must_use]
 pub struct InsertFormatted {
     state: InsertState,
-    #[cfg(feature = "lz4")]
+    #[cfg(any(feature = "lz4", feature = "zstd"))]
     compression: Compression,
     send_timeout: Option<Timeout>,
     end_timeout: Option<Timeout>,
@@ -127,7 +127,7 @@ impl InsertFormatted {
                 client: Box::new(client.clone()),
                 sql,
             },
-            #[cfg(feature = "lz4")]
+            #[cfg(any(feature = "lz4", feature = "zstd"))]
             compression: client.compression,
             send_timeout: None,
             end_timeout: None,
@@ -250,9 +250,9 @@ impl InsertFormatted {
     ///
     /// Use [`Self::buffered()`] for a buffered implementation which also implements [`AsyncWrite`].
     pub async fn send(&mut self, data: Bytes) -> Result<()> {
-        #[cfg(feature = "lz4")]
-        let data = if self.compression.is_lz4() {
-            CompressedData::from_slice(&data).0
+        #[cfg(any(feature = "lz4", feature = "zstd"))]
+        let data = if self.compression.is_enabled() {
+            CompressedData::new(&data, self.compression)?.0
         } else {
             data
         };
@@ -384,7 +384,7 @@ impl InsertFormatted {
 
         pairs.append_pair(settings::QUERY, sql);
 
-        if client.compression.is_lz4() {
+        if client.compression.is_enabled() {
             pairs.append_pair(settings::DECOMPRESS, "1");
         }
 
@@ -549,9 +549,9 @@ impl BufInsertFormatted {
 
         let data = self.buffer.split().freeze();
 
-        #[cfg(feature = "lz4")]
-        let data = if self.insert.compression.is_lz4() {
-            CompressedData::from(data).0
+        #[cfg(any(feature = "lz4", feature = "zstd"))]
+        let data = if self.insert.compression.is_enabled() {
+            CompressedData::new(&data, self.insert.compression)?.0
         } else {
             data
         };
@@ -666,18 +666,42 @@ impl Timeout {
 }
 
 // Just so I don't have to repeat this feature flag a hundred times.
-#[cfg(feature = "lz4")]
+#[cfg(any(feature = "lz4", feature = "zstd"))]
 mod compression {
+    use crate::Compression;
     use crate::error::{Error, Result};
     use crate::insert_formatted::InsertFormatted;
     use bytes::Bytes;
 
     /// A chunk of pre-compressed data.
-    #[cfg_attr(docsrs, doc(cfg(feature = "lz4")))]
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "lz4", feature = "zstd"))))]
     pub struct CompressedData(pub(crate) Bytes);
 
     impl CompressedData {
-        /// Compress a slice of bytes.
+        /// Compress a slice of bytes using the specified compression method.
+        ///
+        /// # Errors
+        /// Returns [`Error::Compression`] if `compression` is [`Compression::None`].
+        pub fn new(data: &[u8], compression: Compression) -> Result<Self> {
+            match compression {
+                Compression::None => Err(Error::Compression(
+                    "cannot pre-compress data when compression is disabled".into(),
+                )),
+                #[cfg(feature = "lz4")]
+                #[allow(deprecated)]
+                Compression::Lz4 | Compression::Lz4Hc(_) => {
+                    Ok(Self(crate::compression::lz4::compress(data)?))
+                }
+                #[cfg(feature = "zstd")]
+                Compression::Zstd(level) => {
+                    Ok(Self(crate::compression::zstd::compress(data, Some(level))?))
+                }
+            }
+        }
+
+        /// Compress a slice of bytes using LZ4.
+        #[cfg(feature = "lz4")]
+        #[deprecated(note = "use `CompressedData::new()` instead")]
         #[inline(always)]
         pub fn from_slice(slice: &[u8]) -> Self {
             Self(
@@ -687,11 +711,13 @@ mod compression {
         }
     }
 
+    #[cfg(feature = "lz4")]
     impl<T> From<T> for CompressedData
     where
         T: AsRef<[u8]>,
     {
         #[inline(always)]
+        #[allow(deprecated)]
         fn from(value: T) -> Self {
             Self::from_slice(value.as_ref())
         }
@@ -704,7 +730,7 @@ mod compression {
         /// In addition to network errors, this will return [`Error::Compression`] if the
         /// [`Client`][crate::Client] does not have compression enabled.
         pub async fn send_compressed(&mut self, data: CompressedData) -> Result<()> {
-            if !self.compression.is_lz4() {
+            if !self.compression.is_enabled() {
                 return Err(Error::Compression(
                     "attempting to send compressed data, but compression is not enabled".into(),
                 ));

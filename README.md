@@ -26,7 +26,7 @@ Official pure Rust typed client for ClickHouse DB.
     * It is possible to switch to `RowBinary`, which can potentially lead to increased performance ([see below](#validation)).
     * There are plans to implement `Native` format over TCP.
 * Supports TLS (see `native-tls` and `rustls-tls` features below).
-* Supports compression and decompression (LZ4 and LZ4HC).
+* Supports compression and decompression (LZ4, LZ4HC, and ZSTD).
 * Provides API for selecting.
 * Provides API for inserting.
 * Provides API for infinite transactional (see below) inserting.
@@ -229,6 +229,7 @@ async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
 
 ## Feature Flags
 * `lz4` (enabled by default) — enables `Compression::Lz4`. If enabled, `Compression::Lz4` is used by default for all queries.
+* `zstd` — enables `Compression::Zstd(level)`. If enabled and `lz4` is not, `Compression::zstd()` is used by default for all queries. Uses `enable_http_compression` for responses instead of native framing.
 * `inserter` — enables `client.inserter()`.
 * `test-util` — adds mocks. See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs). Use it only in `dev-dependencies`.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
