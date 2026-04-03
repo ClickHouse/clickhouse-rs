@@ -506,7 +506,8 @@ impl Client {
         &self,
         sql: impl Into<String>,
     ) -> insert_formatted::InsertFormatted {
-        insert_formatted::InsertFormatted::new(self, sql.into())
+        // TODO: extract collection name from query
+        insert_formatted::InsertFormatted::new(self, sql.into(), None)
     }
 
     /// Starts a new SELECT/DDL query.
@@ -676,6 +677,8 @@ mod settings {
     pub(crate) const ENABLE_HTTP_COMPRESSION: &str = "enable_http_compression";
     pub(crate) const ROLE: &str = "role";
     pub(crate) const QUERY: &str = "query";
+    pub(crate) const QUERY_ID: &str = "query_id";
+    pub(crate) const SESSION_ID: &str = "session_id";
 }
 
 /// This is a private API exported only for internal purposes.

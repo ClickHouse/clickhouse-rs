@@ -27,10 +27,14 @@ If something is missing, or you found a mistake in one of these examples, please
 
 - [custom_http_client.rs](custom_http_client.rs) - using a custom Hyper client, tweaking its connection pool settings
 - [custom_http_headers.rs](custom_http_headers.rs) - setting additional HTTP headers to the client, or overriding the generated ones
+- [opentelemetry.rs](opentelemetry.rs) - configuring the integration with [`tracing`] and [the OpenTelemetry Rust SDK]
 - [query_id.rs](query_id.rs) - setting a specific `query_id` on the query level
 - [session_id.rs](session_id.rs) - using the client in the session context with temporary tables
 - [stream_into_file.rs](stream_into_file.rs) - streaming the query result as raw bytes into a file in an arbitrary format. Required cargo features: `futures03`.
 - [stream_arbitrary_format_rows.rs](stream_arbitrary_format_rows.rs) - streaming the query result in an arbitrary format, row by row. Required cargo features: `futures03`.
+
+[`tracing`]: https://crates.io/crates/tracing
+[the OpenTelemetry Rust SDK]: https://opentelemetry.io/docs/languages/rust/getting-started/
 
 ## How to run
 

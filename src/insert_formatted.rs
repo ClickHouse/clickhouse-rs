@@ -49,6 +49,7 @@ pub struct InsertFormatted {
     // Use boxed `Sleep` to reuse a timer entry, it improves performance.
     // Also, `tokio::time::timeout()` significantly increases a future's size.
     sleep: Pin<Box<Sleep>>,
+    span: tracing::Span,
 }
 
 struct Timeout {
@@ -64,6 +65,8 @@ enum InsertState {
     Active {
         sender: ChunkSender,
         handle: JoinHandle<Result<()>>,
+        sent_bytes: u64,
+        encoded_bytes: u64,
     },
     Terminated {
         handle: JoinHandle<Result<()>>,
@@ -107,11 +110,22 @@ impl InsertState {
         client
     }
 
-    fn terminated(&mut self) {
+    fn terminated(&mut self, span: &tracing::Span) {
         match mem::replace(self, InsertState::Completed) {
             InsertState::NotStarted { .. } | InsertState::Completed => (),
-            InsertState::Active { handle, .. } => {
+            InsertState::Active {
+                handle,
+                sent_bytes,
+                encoded_bytes,
+                ..
+            } => {
                 *self = InsertState::Terminated { handle };
+
+                tracing::record_all!(
+                    span,
+                    clickhouse.request.sent_bytes = sent_bytes,
+                    clickhouse.request.encoded_bytes = encoded_bytes,
+                );
             }
             InsertState::Terminated { handle } => {
                 *self = InsertState::Terminated { handle };
@@ -121,8 +135,35 @@ impl InsertState {
 }
 
 impl InsertFormatted {
-    pub(crate) fn new(client: &Client, sql: String) -> Self {
+    pub(crate) fn new(client: &Client, sql: String, collection_name: Option<&str>) -> Self {
+        // https://opentelemetry.io/docs/specs/semconv/db/sql/
+        // TODO: write our own Semantic Conventions for ClickHouse
         Self {
+            span: tracing::info_span!(
+                "clickhouse.insert",
+                // OTel conventional fields
+                // Note that `Empty` or `Option::None` fields are not reported,
+                // so we can avoid adding noise to logs when the `opentelemetry` feature is disabled.
+                otel.status_code = tracing::field::Empty,
+                otel.kind = cfg!(feature = "opentelemetry").then_some("client"),
+                error.type = tracing::field::Empty,
+                db.system.name = cfg!(feature = "opentelemetry").then_some("clickhouse"),
+                // Only log full query text at TRACE level
+                // Important that this is taken before client-side parameters are populated
+                // FIXME: we can't use `enabled!` due to https://github.com/tokio-rs/tracing/issues/2448
+                // but we don't want to log the full query at all verbosity levels.
+                // db.query.text = tracing::enabled!(tracing::Level::TRACE).then_some(&sql),
+                // TODO: generate summary
+                db.query.summary = tracing::field::Empty,
+                db.operation.name = "INSERT",
+                db.collection.name = collection_name,
+                // ClickHouse-specific extension fields
+                clickhouse.request.session_id = client.get_setting(settings::SESSION_ID),
+                clickhouse.request.query_id = client.get_setting(settings::QUERY_ID),
+                clickhouse.request.sent_rows = tracing::field::Empty,
+                clickhouse.request.sent_bytes = tracing::field::Empty,
+                clickhouse.request.encoded_bytes = tracing::field::Empty,
+            ),
             state: InsertState::NotStarted {
                 client: Box::new(client.clone()),
                 sql,
@@ -220,6 +261,10 @@ impl InsertFormatted {
         self.end_timeout = Timeout::new_opt(end_timeout);
     }
 
+    pub(crate) fn span(&self) -> &tracing::Span {
+        &self.span
+    }
+
     /// Wrap this `InsertFormatted` with a buffer of a default size.
     ///
     /// The returned type also implements [`AsyncWrite`].
@@ -250,17 +295,19 @@ impl InsertFormatted {
     ///
     /// Use [`Self::buffered()`] for a buffered implementation which also implements [`AsyncWrite`].
     pub async fn send(&mut self, data: Bytes) -> Result<()> {
+        let original_size = to_u64_saturating(data.len());
+
         #[cfg(any(feature = "lz4", feature = "zstd"))]
         let data = if self.compression.is_enabled() {
-            CompressedData::new(&data, self.compression)?.0
+            CompressedData::new(&data, self.compression)?.compressed
         } else {
             data
         };
 
-        self.send_inner(data).await
+        self.send_inner(data, original_size).await
     }
 
-    async fn send_inner(&mut self, mut data: Bytes) -> Result<()> {
+    async fn send_inner(&mut self, mut data: Bytes, original_size: u64) -> Result<()> {
         if self.state.is_not_started() {
             self.init_request()?;
         }
@@ -268,7 +315,7 @@ impl InsertFormatted {
         std::future::poll_fn(move |cx| {
             loop {
                 // Potentially cheaper than cloning `data` which touches the refcount
-                match self.try_send(mem::take(&mut data)) {
+                match self.try_send(mem::take(&mut data), original_size) {
                     ControlFlow::Break(Ok(())) => return Poll::Ready(Ok(())),
                     ControlFlow::Break(Err(_)) => {
                         // If the channel is closed, we should return the actual error
@@ -314,14 +361,31 @@ impl InsertFormatted {
     }
 
     #[inline(always)]
-    pub(crate) fn try_send(&mut self, bytes: Bytes) -> ControlFlow<Result<()>, Bytes> {
-        let Some(sender) = self.state.sender() else {
+    pub(crate) fn try_send(
+        &mut self,
+        bytes: Bytes,
+        original_size: u64,
+    ) -> ControlFlow<Result<()>, Bytes> {
+        let InsertState::Active {
+            sender,
+            sent_bytes,
+            encoded_bytes,
+            ..
+        } = &mut self.state
+        else {
             return ControlFlow::Break(Err(Error::Network("channel closed".into())));
         };
 
-        sender
-            .try_send(bytes)
-            .map_break(|res| res.map_err(|e| Error::Network(e.into())))
+        let send_size = bytes.len();
+
+        sender.try_send(bytes).map_break(|res| match res {
+            Ok(()) => {
+                *sent_bytes += to_u64_saturating(send_size);
+                *encoded_bytes += original_size;
+                Ok(())
+            }
+            Err(e) => Err(Error::Network(e.into())),
+        })
     }
 
     /// Ends `INSERT`, the server starts processing the data.
@@ -335,7 +399,7 @@ impl InsertFormatted {
     }
 
     pub(crate) fn poll_end(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
-        self.state.terminated();
+        self.state.terminated(&self.span);
         self.poll_wait_handle(cx)
     }
 
@@ -353,6 +417,7 @@ impl InsertFormatted {
 
             // We can do nothing useful here, so just shut down the background task.
             handle.abort();
+            tracing::debug!("insert timed out");
             return Poll::Ready(Err(Error::TimedOut));
         };
 
@@ -364,7 +429,9 @@ impl InsertFormatted {
 
         self.state = InsertState::Completed;
 
-        Poll::Ready(res)
+        tracing::trace!("finished insert");
+
+        Poll::Ready(res.inspect_err(|e| e.record_in_current_span("error from insert query")))
     }
 
     #[cold]
@@ -373,6 +440,10 @@ impl InsertFormatted {
     fn init_request(&mut self) -> Result<()> {
         debug_assert!(matches!(self.state, InsertState::NotStarted { .. }));
         let (client, sql) = self.state.client_with_sql().unwrap(); // checked above
+
+        let _span = self.span.enter();
+
+        tracing::trace!("beginning insert");
 
         let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
         let mut pairs = url.query_pairs_mut();
@@ -400,23 +471,37 @@ impl InsertFormatted {
 
         let (sender, body) = RequestBody::chunked();
 
-        let request = builder
-            .body(body)
-            .map_err(|err| Error::InvalidParams(Box::new(err)))?;
+        let request = builder.body(body).map_err(|err| {
+            let err = Error::InvalidParams(Box::new(err));
+            err.record_in_current_span("invalid params in insert request");
+            err
+        })?;
 
         let future = client.http.request(request);
-        // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.
-        let handle =
-            tokio::spawn(async move { Response::new(future, Compression::None).finish().await });
 
-        self.state = InsertState::Active { handle, sender };
+        // Ensure the span created internally is captured as a child of the current span.
+        let mut response = Response::new(future, Compression::None);
+
+        // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.
+        let handle = tokio::spawn(async move { response.finish().await });
+
+        self.state = InsertState::Active {
+            handle,
+            sender,
+            sent_bytes: 0,
+            encoded_bytes: 0,
+        };
         Ok(())
     }
 
     pub(crate) fn abort(&mut self) {
-        if let Some(sender) = self.state.sender() {
+        let _span = self.span.enter();
+
+        if let InsertState::Active { sender, .. } = &mut self.state {
             sender.abort();
         }
+
+        self.state.terminated(&self.span);
     }
 }
 
@@ -476,6 +561,10 @@ impl BufInsertFormatted {
         end_timeout: Option<Duration>,
     ) {
         self.insert.set_timeouts(send_timeout, end_timeout);
+    }
+
+    pub(crate) fn span(&self) -> &tracing::Span {
+        self.insert.span()
     }
 
     /// Write data to the buffer without waiting for it to be flushed.
@@ -549,14 +638,16 @@ impl BufInsertFormatted {
 
         let data = self.buffer.split().freeze();
 
+        let original_size: u64 = data.len().try_into().unwrap_or(u64::MAX);
+
         #[cfg(any(feature = "lz4", feature = "zstd"))]
         let data = if self.insert.compression.is_enabled() {
-            CompressedData::new(&data, self.insert.compression)?.0
+            CompressedData::new(&data, self.insert.compression)?.compressed
         } else {
             data
         };
 
-        let ControlFlow::Break(res) = self.insert.try_send(data) else {
+        let ControlFlow::Break(res) = self.insert.try_send(data, original_size) else {
             unreachable!("BUG: we just checked that `ChunkSender` was ready")
         };
 
@@ -665,17 +756,24 @@ impl Timeout {
     }
 }
 
+fn to_u64_saturating(n: usize) -> u64 {
+    n.try_into().unwrap_or(u64::MAX)
+}
+
 // Just so I don't have to repeat this feature flag a hundred times.
 #[cfg(any(feature = "lz4", feature = "zstd"))]
 mod compression {
     use crate::Compression;
     use crate::error::{Error, Result};
-    use crate::insert_formatted::InsertFormatted;
+    use crate::insert_formatted::{InsertFormatted, to_u64_saturating};
     use bytes::Bytes;
 
     /// A chunk of pre-compressed data.
     #[cfg_attr(docsrs, doc(cfg(any(feature = "lz4", feature = "zstd"))))]
-    pub struct CompressedData(pub(crate) Bytes);
+    pub struct CompressedData {
+        pub(crate) compressed: Bytes,
+        pub(crate) original_size: u64,
+    }
 
     impl CompressedData {
         /// Compress a slice of bytes using the specified compression method.
@@ -683,19 +781,23 @@ mod compression {
         /// # Errors
         /// Returns [`Error::Compression`] if `compression` is [`Compression::None`].
         pub fn new(data: &[u8], compression: Compression) -> Result<Self> {
+            let original_size = to_u64_saturating(data.len());
+
             match compression {
                 Compression::None => Err(Error::Compression(
                     "cannot pre-compress data when compression is disabled".into(),
                 )),
                 #[cfg(feature = "lz4")]
                 #[allow(deprecated)]
-                Compression::Lz4 | Compression::Lz4Hc(_) => {
-                    Ok(Self(crate::compression::lz4::compress(data)?))
-                }
+                Compression::Lz4 | Compression::Lz4Hc(_) => Ok(Self {
+                    compressed: crate::compression::lz4::compress(data)?,
+                    original_size,
+                }),
                 #[cfg(feature = "zstd")]
-                Compression::Zstd(level) => {
-                    Ok(Self(crate::compression::zstd::compress(data, Some(level))?))
-                }
+                Compression::Zstd(level) => Ok(Self {
+                    compressed: crate::compression::zstd::compress(data, Some(level))?,
+                    original_size,
+                }),
             }
         }
 
@@ -704,10 +806,11 @@ mod compression {
         #[deprecated(note = "use `CompressedData::new()` instead")]
         #[inline(always)]
         pub fn from_slice(slice: &[u8]) -> Self {
-            Self(
-                crate::compression::lz4::compress(slice)
+            Self {
+                original_size: to_u64_saturating(slice.len()),
+                compressed: crate::compression::lz4::compress(slice)
                     .expect("BUG: `lz4::compress()` should not error"),
-            )
+            }
         }
     }
 
@@ -736,7 +839,7 @@ mod compression {
                 ));
             }
 
-            self.send_inner(data.0).await
+            self.send_inner(data.compressed, data.original_size).await
         }
     }
 }

@@ -1,6 +1,7 @@
 use hyper::{Method, Request, header::CONTENT_LENGTH};
 use serde::Serialize;
 use std::fmt::Display;
+use tracing::Instrument;
 use url::Url;
 
 use crate::{
@@ -59,7 +60,21 @@ impl Query {
 
     /// Executes the query.
     pub async fn execute(self) -> Result<()> {
-        self.do_execute(None)?.finish().await
+        // Enter the span for the `self.do_execute()` call
+        let span = self.make_span(None);
+
+        async {
+            let mut response = self
+                .do_execute(None)
+                .inspect_err(|e| e.record_in_current_span("error executing query"))?;
+
+            response
+                .finish()
+                .await
+                .inspect_err(|e| e.record_in_current_span("response error"))
+        }
+        .instrument(span)
+        .await
     }
 
     /// Executes the query, returning a [`RowCursor`] to obtain results.
@@ -84,8 +99,6 @@ impl Query {
     /// # Ok(()) }
     /// ```
     pub fn fetch<T: Row>(mut self) -> Result<RowCursor<T>> {
-        self.sql.bind_fields::<T>();
-
         let validation = self.client.get_validation();
         let format = if validation {
             formats::ROW_BINARY_WITH_NAMES_AND_TYPES
@@ -93,8 +106,15 @@ impl Query {
             formats::ROW_BINARY
         };
 
-        let response = self.do_execute(Some(format))?;
-        Ok(RowCursor::new(response, validation))
+        let span = self.make_span(Some(format)).entered();
+
+        self.sql.bind_fields::<T>();
+
+        let response = self
+            .do_execute(Some(format))
+            .inspect_err(|e| e.record_in_current_span("error executing fetch"))?;
+
+        Ok(RowCursor::new(response, validation, span.exit()))
     }
 
     /// Executes the query and returns just a single row.
@@ -144,8 +164,42 @@ impl Query {
     ///
     /// [provided format]: https://clickhouse.com/docs/en/interfaces/formats
     pub fn fetch_bytes(self, format: impl AsRef<str>) -> Result<BytesCursor> {
-        let response = self.do_execute(Some(format.as_ref()))?;
-        Ok(BytesCursor::new(response))
+        let format = format.as_ref();
+
+        let span = self.make_span(Some(format)).entered();
+
+        let response = self.do_execute(Some(format))?;
+        Ok(BytesCursor::new(response, span.exit()))
+    }
+
+    pub(crate) fn make_span(&self, response_format: Option<&str>) -> tracing::Span {
+        // https://opentelemetry.io/docs/specs/semconv/db/sql/
+        // TODO: write our own Semantic Conventions for ClickHouse
+        tracing::info_span!(
+            "clickhouse.query",
+            // OTel conventional fields
+            // Note that `Empty` or `Option::None` fields are not reported,
+            // so we can avoid adding noise to logs when the `opentelemetry` feature is disabled.
+            otel.status_code = tracing::field::Empty,
+            otel.kind = cfg!(feature = "opentelemetry").then_some("client"),
+            error.type = tracing::field::Empty,
+            db.system.name = cfg!(feature = "opentelemetry").then_some("clickhouse"),
+            // Only log full query text at TRACE level
+            // Important that this is taken before client-side parameters are populated
+            // FIXME: we can't use `enabled!` due to https://github.com/tokio-rs/tracing/issues/2448
+            // but we don't want to log the full query at all verbosity levels.
+            // db.query.text = tracing::enabled!(tracing::Level::TRACE).then(|| self.sql.to_string()),
+            // TODO: generate summary
+            db.query.summary = tracing::field::Empty,
+            db.response.status_code = tracing::field::Empty,
+            db.response.returned_rows = tracing::field::Empty,
+            // ClickHouse-specific extension fields
+            clickhouse.request.session_id = self.client.get_setting(settings::SESSION_ID),
+            clickhouse.request.query_id = self.client.get_setting(settings::QUERY_ID),
+            clickhouse.response.received_bytes = tracing::field::Empty,
+            clickhouse.response.decoded_bytes = tracing::field::Empty,
+            clickhouse.response.format = response_format,
+        )
     }
 
     pub(crate) fn do_execute(self, default_format: Option<&str>) -> Result<Response> {
@@ -196,9 +250,11 @@ impl Query {
         let content_length = query.len();
         builder = builder.header(CONTENT_LENGTH, content_length.to_string());
 
-        let request = builder
-            .body(RequestBody::full(query))
-            .map_err(|err| Error::InvalidParams(Box::new(err)))?;
+        let request = builder.body(RequestBody::full(query)).map_err(|err| {
+            let err = Error::InvalidParams(Box::new(err));
+            err.record_in_current_span("invalid params in query");
+            err
+        })?;
 
         let future = self.client.http.request(request);
         Ok(Response::new(future, self.client.compression))

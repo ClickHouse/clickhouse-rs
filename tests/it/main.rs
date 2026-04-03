@@ -262,6 +262,8 @@ mod int256;
 mod ip;
 mod mock;
 mod nested;
+#[cfg(feature = "opentelemetry")]
+mod opentelemetry;
 mod query;
 mod query_readonly;
 mod query_summary;

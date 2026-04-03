@@ -27,17 +27,21 @@ pub struct RowCursor<T> {
     /// [`None`] until the first call to [`RowCursor::next()`],
     /// as [`RowCursor::new`] is not `async`, so it loads lazily.
     row_metadata: Option<RowMetadata>,
+    span: tracing::Span,
+    returned_rows: u64,
     _marker: PhantomData<fn() -> T>,
 }
 
 impl<T> RowCursor<T> {
-    pub(crate) fn new(response: Response, validation: bool) -> Self {
+    pub(crate) fn new(response: Response, validation: bool, span: tracing::Span) -> Self {
         Self {
             _marker: PhantomData,
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
             row_metadata: None,
             validation,
+            span,
+            returned_rows: 0,
         }
     }
 
@@ -47,6 +51,8 @@ impl<T> RowCursor<T> {
     where
         T: RowRead,
     {
+        let _span = self.span.enter();
+
         loop {
             if self.bytes.remaining() > 0 {
                 let mut slice = self.bytes.slice();
@@ -111,6 +117,8 @@ impl<T> RowCursor<T> {
             debug_assert!(self.row_metadata.is_some());
         }
 
+        let _span = self.span.enter();
+
         let mut bytes = &mut self.bytes;
 
         loop {
@@ -124,23 +132,38 @@ impl<T> RowCursor<T> {
 
                     match result {
                         Ok(value) => {
+                            self.returned_rows += 1;
                             bytes.set_remaining(slice.len());
                             polonius_return!(Poll::Ready(Ok(Some(value))))
                         }
                         Err(Error::NotEnoughData) => {}
-                        Err(err) => polonius_return!(Poll::Ready(Err(err))),
+                        Err(err) => {
+                            tracing::debug!(error=?err, "error deserializing row");
+                            polonius_return!(Poll::Ready(Err(err)))
+                        }
                     }
                 }
             });
 
-            match ready!(self.raw.poll_next(cx))? {
-                Some(chunk) => bytes.extend(chunk),
-                None if bytes.remaining() > 0 => {
-                    // If some data is left, we have an incomplete row in the buffer.
-                    // This is usually a schema mismatch on the client side.
-                    return Poll::Ready(Err(Error::NotEnoughData));
+            match ready!(self.raw.poll_next(cx)) {
+                Ok(Some(chunk)) => bytes.extend(chunk),
+                Ok(None) => {
+                    return if bytes.remaining() > 0 {
+                        // If some data is left, we have an incomplete row in the buffer.
+                        // This is usually a schema mismatch on the client side.
+                        tracing::warn!(
+                            bytes_remaining = bytes.remaining(),
+                            "incomplete read from cursor"
+                        );
+                        Poll::Ready(Err(Error::NotEnoughData))
+                    } else {
+                        Poll::Ready(Ok(None))
+                    };
                 }
-                None => return Poll::Ready(Ok(None)),
+                Err(e) => {
+                    tracing::debug!(error=?e, "error from raw cursor");
+                    return Poll::Ready(Err(e));
+                }
             }
         }
     }
@@ -161,6 +184,12 @@ impl<T> RowCursor<T> {
         self.raw.decoded_bytes()
     }
 
+    /// Returns the total number of rows that have been decoded so far.
+    #[inline]
+    pub fn returned_rows(&self) -> u64 {
+        self.returned_rows
+    }
+
     /// Returns the parsed `X-ClickHouse-Summary` response header, if
     /// present. Available once the response headers have been received.
     ///
@@ -169,6 +198,21 @@ impl<T> RowCursor<T> {
     #[inline]
     pub fn summary(&self) -> Option<&QuerySummary> {
         self.raw.summary()
+    }
+}
+
+impl<T> Drop for RowCursor<T> {
+    fn drop(&mut self) {
+        let _span = self.span.enter();
+
+        tracing::record_all!(
+            self.span,
+            db.response.returned_rows = self.returned_rows,
+            clickhouse.response.received_bytes = self.received_bytes(),
+            clickhouse.response.decoded_bytes = self.decoded_bytes(),
+        );
+
+        tracing::debug!("finished typed query");
     }
 }
 

@@ -1,7 +1,8 @@
 use crate::common_select::{
-    BenchmarkRow, WithAccessType, WithId, do_select_bench, print_header, print_results,
+    BenchmarkOpts, BenchmarkRow, WithAccessType, WithId, do_select_bench, print_header,
+    print_results,
 };
-use clickhouse::{Client, Compression, Row};
+use clickhouse::{Client, Row};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
@@ -93,26 +94,18 @@ async fn prepare_data() {
     insert.end().await.unwrap();
 }
 
-async fn bench(compression: Compression, validation: bool) {
-    let stats =
-        do_select_bench::<L2Update>("SELECT * FROM l2_book_log", compression, validation).await;
+async fn bench(opts: BenchmarkOpts) {
+    let stats = do_select_bench::<L2Update>("SELECT * FROM l2_book_log", opts).await;
     assert_eq!(stats.result, 420000000);
-    print_results::<L2Update>(&stats, compression, validation);
+    print_results::<L2Update>(&stats, opts);
 }
 
 #[tokio::main]
 async fn main() {
     prepare_data().await;
     print_header(None);
-    #[cfg(feature = "lz4")]
-    bench(Compression::Lz4, false).await;
-    #[cfg(feature = "lz4")]
-    bench(Compression::Lz4, true).await;
-    bench(Compression::None, false).await;
-    bench(Compression::None, true).await;
-    #[cfg(feature = "zstd")]
-    for level in [-4, -1, 1, zstd::DEFAULT_COMPRESSION_LEVEL] {
-        bench(Compression::Zstd(level), false).await;
-        bench(Compression::Zstd(level), true).await;
+
+    for opts in BenchmarkOpts::permutations() {
+        bench(opts).await;
     }
 }

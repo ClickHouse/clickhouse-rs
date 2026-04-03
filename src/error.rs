@@ -112,6 +112,49 @@ impl From<io::Error> for Error {
     }
 }
 
+impl Error {
+    /// https://opentelemetry.io/docs/specs/semconv/registry/attributes/error/#error-type
+    #[cfg(feature = "opentelemetry")]
+    pub(crate) fn error_type(&self) -> &str {
+        match self {
+            Error::InvalidParams(_) => "InvalidParams",
+            Error::Network(_) => "Network",
+            Error::Compression(_) => "Compression",
+            Error::Decompression(_) => "Decompression",
+            Error::RowNotFound => "RowNotFound",
+            Error::SequenceMustHaveLength => "SequenceMustHaveLength",
+            Error::DeserializeAnyNotSupported => "DeserializeAnyNotSupported",
+            Error::NotEnoughData => "NotEnoughData",
+            Error::InvalidUtf8Encoding(_) => "InvalidUtf8Encoding",
+            Error::InvalidTagEncoding(_) => "InvalidTagEncoding",
+            Error::VariantDiscriminatorIsOutOfBound(_) => "VariantDiscriminatorIsOutOfBound",
+            Error::Custom(_) => "Custom",
+            Error::BadResponse(_) => "BadResponse",
+            Error::TimedOut => "TimedOut",
+            Error::InvalidColumnsHeader(_) => "InvalidColumnsHeader",
+            Error::SchemaMismatch(_) => "SchemaMismatch",
+            Error::Unsupported(_) => "Unsupported",
+            Error::Other(_) => "Other",
+        }
+    }
+
+    /// Record this `Error` in the context of the current `tracing::Span`,
+    /// setting the OpenTelemetry conventional fields if the `opentelemetry` feature is enabled.
+    pub(crate) fn record_in_current_span(&self, msg: &str) {
+        // Span fields that remain unpopulated are not reported,
+        // so we can avoid adding noise to logs if the user isn't utilizing this feature.
+        #[cfg(feature = "opentelemetry")]
+        tracing::record_all!(
+            tracing::Span::current(),
+            otel.status_code = "Error",
+            otel.status_description = format!("{msg}: {self}"),
+            error.type = self.error_type(),
+        );
+
+        tracing::debug!(error=%self, "{msg}");
+    }
+}
+
 #[cfg(tests)]
 mod tests {
     use crate::error::Error;

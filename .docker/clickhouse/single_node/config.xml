@@ -32,6 +32,16 @@
     <flush_interval_milliseconds>1000</flush_interval_milliseconds>
   </query_log>
 
+  <opentelemetry_span_log>
+    <database>system</database>
+    <table>opentelemetry_span_log</table>
+    <engine>
+      engine MergeTree
+      partition by toYYYYMM(finish_date)
+      order by (finish_date, finish_time_us, trace_id)
+    </engine>
+  </opentelemetry_span_log>
+
   <!-- required after 25.1+ -->
   <format_schema_path>/var/lib/clickhouse/format_schemas/</format_schema_path>
   <user_directories>
