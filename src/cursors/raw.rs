@@ -68,9 +68,9 @@ impl RawCursor {
         let mut summary = None;
         let res = res
             .map(|(c, s)| {
-            chunks = c;
-            summary = s;
-        })
+                chunks = c;
+                summary = s;
+            })
             .inspect_err(|e| e.record_in_current_span("response error"));
 
         self.0 = RawCursorState::Loading(RawCursorLoading {
