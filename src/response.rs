@@ -18,6 +18,7 @@ use crate::compression::lz4::Lz4Decoder;
 use crate::{
     compression::Compression,
     error::{Error, Result},
+    query_summary::QuerySummary,
 };
 
 // === Response ===
@@ -30,7 +31,8 @@ pub(crate) enum Response {
     Loading(Chunks),
 }
 
-pub(crate) type ResponseFuture = Pin<Box<dyn Future<Output = Result<Chunks>> + Send>>;
+pub(crate) type ResponseFuture =
+    Pin<Box<dyn Future<Output = Result<(Chunks, Option<Box<QuerySummary>>)>> + Send>>;
 
 impl Response {
     pub(crate) fn new(response: HyperResponseFuture, compression: Compression) -> Self {
@@ -46,9 +48,16 @@ impl Response {
                     .get("X-ClickHouse-Exception-Tag")
                     .map(|value| value.as_bytes().into());
 
+                let summary = response
+                    .headers()
+                    .get("X-ClickHouse-Summary")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(QuerySummary::from_header)
+                    .map(Box::new);
+
                 // More likely to be successful, start streaming.
                 // It still can fail, but we'll handle it in `DetectDbException`.
-                Ok(Chunks::new(response.into_body(), compression, tag))
+                Ok((Chunks::new(response.into_body(), compression, tag), summary))
             } else {
                 // An instantly failed request.
                 Err(collect_bad_response(
@@ -74,7 +83,10 @@ impl Response {
     pub(crate) async fn finish(&mut self) -> Result<()> {
         let chunks = loop {
             match self {
-                Self::Waiting(future) => *self = Self::Loading(future.await?),
+                Self::Waiting(future) => {
+                    let (chunks, _summary) = future.await?;
+                    *self = Self::Loading(chunks);
+                }
                 Self::Loading(chunks) => break chunks,
             }
         };
@@ -157,7 +169,9 @@ pub(crate) struct Chunk {
 
 // * Uses `Option<_>` to make this stream fused.
 // * Uses `Box<_>` in order to reduce the size of cursors.
-pub(crate) struct Chunks(Option<Box<DetectDbException<Decompress<IncomingStream>>>>);
+pub(crate) struct Chunks {
+    inner: Option<Box<DetectDbException<Decompress<IncomingStream>>>>,
+}
 
 impl Chunks {
     fn new(stream: Incoming, compression: Compression, exception_tag: Option<Box<[u8]>>) -> Self {
@@ -167,16 +181,18 @@ impl Chunks {
             stream,
             exception_tag,
         };
-        Self(Some(Box::new(stream)))
+        Self {
+            inner: Some(Box::new(stream)),
+        }
     }
 
     pub(crate) fn empty() -> Self {
-        Self(None)
+        Self { inner: None }
     }
 
     #[cfg(feature = "futures03")]
     pub(crate) fn is_terminated(&self) -> bool {
-        self.0.is_none()
+        self.inner.is_none()
     }
 }
 
@@ -185,11 +201,11 @@ impl Stream for Chunks {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // We use `take()` to make the stream fused, including the case of panics.
-        if let Some(mut stream) = self.0.take() {
+        if let Some(mut stream) = self.inner.take() {
             let res = Pin::new(&mut stream).poll_next(cx);
 
             if matches!(res, Poll::Pending | Poll::Ready(Some(Ok(_)))) {
-                self.0 = Some(stream);
+                self.inner = Some(stream);
             }
 
             res

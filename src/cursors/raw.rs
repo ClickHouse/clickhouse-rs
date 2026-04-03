@@ -1,5 +1,6 @@
 use crate::{
     error::Result,
+    query_summary::QuerySummary,
     response::{Chunks, Response, ResponseFuture},
 };
 use bytes::Bytes;
@@ -20,6 +21,7 @@ enum RawCursorState {
 
 struct RawCursorLoading {
     chunks: Chunks,
+    summary: Option<Box<QuerySummary>>,
     net_size: u64,
     data_size: u64,
 }
@@ -63,10 +65,15 @@ impl RawCursor {
         // in order to provide proper fused behavior of the cursor.
         let res = ready!(future.as_mut().poll(cx));
         let mut chunks = Chunks::empty();
-        let res = res.map(|c| chunks = c);
+        let mut summary = None;
+        let res = res.map(|(c, s)| {
+            chunks = c;
+            summary = s;
+        });
 
         self.0 = RawCursorState::Loading(RawCursorLoading {
             chunks,
+            summary,
             net_size: 0,
             data_size: 0,
         });
@@ -85,6 +92,13 @@ impl RawCursor {
         match &self.0 {
             RawCursorState::Loading(state) => state.data_size,
             RawCursorState::Waiting(_) => 0,
+        }
+    }
+
+    pub(crate) fn summary(&self) -> Option<&QuerySummary> {
+        match &self.0 {
+            RawCursorState::Loading(state) => state.summary.as_deref(),
+            RawCursorState::Waiting(_) => None,
         }
     }
 
