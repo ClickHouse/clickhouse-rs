@@ -13,7 +13,6 @@ use crate::{
 use bytes::Buf;
 use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
-use polonius_the_crab::prelude::*;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
@@ -101,6 +100,38 @@ impl<T> RowCursor<T> {
         Next::new(self).await
     }
 
+    // -----------------------------------------------------------------------
+    // Why the unsafe reborrow?
+    //
+    // We hate unsafe. Genuinely. But NLL (the current borrow checker) can't
+    // see that `bytes` is dead in the NotEnoughData branch of this loop.
+    // The returned value borrows from `bytes`, so NLL extends that borrow
+    // to the function's return lifetime — blocking the `bytes.extend()`
+    // that only runs when no value exists. Classic Polonius limitation:
+    //   https://github.com/rust-lang/rust/issues/51132
+    //
+    // This used to be the `polonius-the-crab` crate, which wraps the exact
+    // same raw-pointer reborrow behind a macro. We dropped it because
+    // polonius-the-crab has so many abandonment issues it needs therapy:
+    //   - `paste` transitive dep: RUSTSEC-2024-0436 (unmaintained)
+    //   - `polonius-the-crab` itself: no meaningful commits in 12+ months
+    //   - `higher-kinded-types`, `macro_rules_attribute`: same story
+    // Four stagnant crates, two RustSec advisories, all for a macro that
+    // expands to one line of unsafe. Two lines of unsafe instead of four
+    // crates is a good return.
+    //
+    // We properly tried to avoid this:
+    //   - TryRow enum (borrow still escapes via return type — same error)
+    //   - async-only next() + poll_next_owned for Stream (same NLL issue)
+    //   - interior mutability in BytesExt via UnsafeCell (3x the diff,
+    //     same amount of actual unsafe, just hidden — not actually better)
+    //   - double deserialisation / probe-then-extract (~2x deser cost on
+    //     the happy path — non-starter for a perf-sensitive cursor)
+    // None compiled without unsafe somewhere, or had unacceptable costs.
+    //
+    // When Polonius lands in stable rustc, rip this out. We'll buy it a beer.
+    // -----------------------------------------------------------------------
+
     #[inline]
     fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<T::Value<'_>>>>
     where
@@ -111,27 +142,34 @@ impl<T> RowCursor<T> {
             debug_assert!(self.row_metadata.is_some());
         }
 
-        let mut bytes = &mut self.bytes;
+        let bytes = &mut self.bytes;
 
         loop {
-            polonius!(|bytes| -> Poll<Result<Option<T::Value<'polonius>>>> {
-                if bytes.remaining() > 0 {
-                    let mut slice = bytes.slice();
-                    let result = rowbinary::deserialize_row::<T::Value<'_>>(
-                        &mut slice,
-                        self.row_metadata.as_ref(),
-                    );
+            // SAFETY: we create a second &mut to `bytes` via raw pointer so the
+            // borrow checker releases the original. This is sound because:
+            //   - On Ok: we return immediately — only one &mut is live.
+            //   - On NotEnoughData: the deserialized value doesn't exist, the
+            //     reborrow is dead, and we fall through to extend().
+            //   - On Err: we return immediately.
+            // Polonius would prove this automatically. NLL can't (yet).
+            let reborrowed = unsafe { &mut *(bytes as *mut BytesExt) };
 
-                    match result {
-                        Ok(value) => {
-                            bytes.set_remaining(slice.len());
-                            polonius_return!(Poll::Ready(Ok(Some(value))))
-                        }
-                        Err(Error::NotEnoughData) => {}
-                        Err(err) => polonius_return!(Poll::Ready(Err(err))),
+            if reborrowed.remaining() > 0 {
+                let mut slice = reborrowed.slice();
+                let result = rowbinary::deserialize_row::<T::Value<'_>>(
+                    &mut slice,
+                    self.row_metadata.as_ref(),
+                );
+
+                match result {
+                    Ok(value) => {
+                        reborrowed.set_remaining(slice.len());
+                        return Poll::Ready(Ok(Some(value)));
                     }
+                    Err(Error::NotEnoughData) => {}
+                    Err(err) => return Poll::Ready(Err(err)),
                 }
-            });
+            }
 
             match ready!(self.raw.poll_next(cx))? {
                 Some(chunk) => bytes.extend(chunk),
@@ -207,18 +245,22 @@ where
 
     #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Temporarily take the cursor out in order for `cursor.poll_next` to return a value with
-        // the correct lifetime `'a` rather than the unnamed lifetime of `&mut self`.
-        let mut cursor = self.cursor.take().expect("Future polled after completion");
+        // Take cursor out so poll_next's return value gets lifetime 'a
+        // (not the anonymous reborrow lifetime of &mut self).
+        let cursor = self.cursor.take().expect("Future polled after completion");
 
-        polonius!(|cursor| -> Poll<Result<Option<T::Value<'polonius>>>> {
-            match cursor.poll_next(cx) {
-                Poll::Ready(value) => polonius_return!(Poll::Ready(value)),
-                Poll::Pending => {}
+        // SAFETY: same pattern as poll_next above — we create a second &mut
+        // via raw pointer. On Ready the reborrow escapes via the return value
+        // and cursor is consumed. On Pending the reborrow is dead and we put
+        // cursor back. Sound for the same reasons; Polonius would accept this.
+        let reborrowed = unsafe { &mut *(cursor as *mut RowCursor<T>) };
+
+        match reborrowed.poll_next(cx) {
+            Poll::Ready(value) => Poll::Ready(value),
+            Poll::Pending => {
+                self.cursor = Some(cursor);
+                Poll::Pending
             }
-        });
-
-        self.cursor = Some(cursor);
-        Poll::Pending
+        }
     }
 }
