@@ -156,8 +156,8 @@ async fn insert_with_json_hint() {
     let table_name = "rust_json_test";
 
     let client = prepare_database!()
-        .with_option("input_format_binary_read_json_as_string", "1")
-        .with_option("output_format_binary_write_json_as_string", "1");
+        .with_setting("input_format_binary_read_json_as_string", "1")
+        .with_setting("output_format_binary_write_json_as_string", "1");
 
     client
         .query(
