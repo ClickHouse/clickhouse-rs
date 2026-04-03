@@ -617,7 +617,7 @@ async fn insert_into_temp_table() {
         baz: Option<String>,
     }
 
-    let client = get_client().with_option(
+    let client = get_client().with_setting(
         "session_id",
         Alphanumeric.sample_string(&mut rand::rng(), 16),
     );
