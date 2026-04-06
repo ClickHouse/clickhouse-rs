@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.15.0] - 2026-04-03
+
+### Added
+
+* Deprecated `::*_option()` methods in favor of `::*_setting()` ([#380])
+    * This is to match the terminology [used by ClickHouse Server][ch-settings].
+* Added support for `zstd` compression ([#388])
+* Added support for [`tracing`] and OpenTelemetry [trace propagation to ClickHouse][ch-tracing] ([#390])
+    * See [examples/opentelemetry.rs](./examples/opentelemetry.rs) for usage.
+* Exposed `X-ClickHouse-Summary` fields from server response ([#397])
+    * Added `RowCursor::summary()` and `BytesCursor::summary()` which is populated 
+      once the response from the server is received, containing potentially useful statistics about the query.
+
+### Changed
+
+* Dropped abandoned `fxhash` and `linked-hash-map` dev-dependencies ([#403])
+
+
+[ch-settings]: https://clickhouse.com/docs/operations/settings/overview
+[`tracing`]: https://crates.io/crates/tracing
+[ch-tracing]: https://clickhouse.com/docs/operations/opentelemetry
+
+[#380]: https://github.com/ClickHouse/clickhouse-rs/pull/380
+[#388]: https://github.com/ClickHouse/clickhouse-rs/pull/388
+[#390]: https://github.com/ClickHouse/clickhouse-rs/pull/390
+[#397]: https://github.com/ClickHouse/clickhouse-rs/pull/397
+[#403]: https://github.com/ClickHouse/clickhouse-rs/pull/403
+
 ## [0.14.3] - 2026-03-27
 
 ### Added
@@ -569,7 +597,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.3...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.3...v0.15.0
 [0.14.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.2...v0.14.3
 [0.14.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.0...v0.14.1
