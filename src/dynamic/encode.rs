@@ -59,9 +59,41 @@ pub fn encode_dynamic_row(
     _schema: &DynamicSchema,
     columns_to_send: &[&ColumnDef],
 ) -> Result<Vec<u8>, DynamicError> {
+    encode_dynamic_row_with_raw(row, _schema, columns_to_send, &[])
+}
+
+/// Encode a JSON row map to RowBinary, with raw byte passthrough for named columns.
+///
+/// `raw_columns` provides pre-encoded bytes for specific columns. When a column
+/// name appears in `raw_columns`, its raw bytes are written directly as a
+/// length-prefixed string (varint + bytes) instead of going through the normal
+/// `Value` encoding path. This enables zero-copy for columns like `_json` where
+/// the caller already has the raw bytes and wants to avoid `Value::String`
+/// wrapping + `to_string()` re-serialisation.
+///
+/// For Nullable raw columns, the non-null marker (`0x00`) is written before
+/// the raw bytes. NULL raw columns are not supported — omit from `raw_columns`
+/// and let the normal encoding path handle it.
+pub fn encode_dynamic_row_with_raw(
+    row: &Map<String, Value>,
+    _schema: &DynamicSchema,
+    columns_to_send: &[&ColumnDef],
+    raw_columns: &[(&str, &[u8])],
+) -> Result<Vec<u8>, DynamicError> {
     let mut buf = Vec::with_capacity(256);
 
     for col in columns_to_send {
+        // Check if this column has raw bytes provided.
+        if let Some((_, raw_bytes)) = raw_columns.iter().find(|(name, _)| *name == col.name) {
+            // Raw passthrough: write Nullable prefix if needed, then raw bytes
+            // as a length-prefixed string (same wire format as JSON/String).
+            if col.parsed_type.nullable {
+                buf.push(0); // not null
+            }
+            write_string(raw_bytes, &mut buf);
+            continue;
+        }
+
         let value = row.get(&col.name).unwrap_or(&Value::Null);
         encode_value(value, col, &mut buf)?;
     }
@@ -324,8 +356,7 @@ fn datetime64_to_epoch(value: &Value, precision: u8, col: &str) -> Result<i64, D
                 return Ok(n);
             }
             // Parse datetime string -> (unix_seconds, fractional_nanoseconds)
-            let (secs, frac_nanos) =
-                parse_datetime_str(s).map_err(|msg| enc_err(col, &msg))?;
+            let (secs, frac_nanos) = parse_datetime_str(s).map_err(|msg| enc_err(col, &msg))?;
             // Scale to target precision
             let multiplier = 10i64.pow(precision as u32);
             let base = secs
@@ -423,8 +454,12 @@ fn parse_datetime_str(s: &str) -> Result<(i64, u32), String> {
     let month: u32 = s[5..7].parse().map_err(|_| "invalid month".to_string())?;
     let day: u32 = s[8..10].parse().map_err(|_| "invalid day".to_string())?;
     let hour: u32 = s[11..13].parse().map_err(|_| "invalid hour".to_string())?;
-    let min: u32 = s[14..16].parse().map_err(|_| "invalid minute".to_string())?;
-    let sec: u32 = s[17..19].parse().map_err(|_| "invalid second".to_string())?;
+    let min: u32 = s[14..16]
+        .parse()
+        .map_err(|_| "invalid minute".to_string())?;
+    let sec: u32 = s[17..19]
+        .parse()
+        .map_err(|_| "invalid second".to_string())?;
 
     if month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || min > 59 || sec > 59 {
         return Err("invalid DateTime64 string".into());
@@ -815,6 +850,68 @@ mod tests {
         write_varint(json_str.len() as u64, &mut expected);
         expected.extend_from_slice(json_str.as_bytes());
         assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn test_encode_raw_json_passthrough() {
+        // Raw bytes written directly for a JSON column — zero-copy path.
+        // The row map does NOT contain _json; raw bytes are passed separately.
+        let schema = DynamicSchema::from_columns(
+            "t",
+            vec![col("id", "UInt32"), col("_json", "Nullable(JSON)")],
+        );
+        let row = serde_json::json!({"id": 1});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        // _json has no default and is not in the row, so columns_to_send includes it.
+        assert!(cols.iter().any(|c| c.name == "_json"));
+
+        let raw_payload = br#"{"event":"login","user":"alice"}"#;
+        let bytes = encode_dynamic_row_with_raw(
+            row.as_object().unwrap(),
+            &schema,
+            &cols,
+            &[("_json", raw_payload.as_slice())],
+        )
+        .unwrap();
+
+        let mut expected = Vec::new();
+        // id: UInt32 LE
+        expected.extend_from_slice(&1u32.to_le_bytes());
+        // _json: Nullable(JSON) — 0x00 (not null) + varint(len) + raw bytes
+        expected.push(0); // not null
+        write_varint(raw_payload.len() as u64, &mut expected);
+        expected.extend_from_slice(raw_payload);
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn test_encode_raw_passthrough_matches_value_path() {
+        // Verify that raw passthrough produces identical wire format to the
+        // normal Value::String encoding path for JSON columns.
+        let schema = DynamicSchema::from_columns("t", vec![col("data", "JSON")]);
+        let raw_payload = br#"{"key":"value","num":42}"#;
+
+        // Normal path: Value::String with JSON content
+        let row_normal = serde_json::json!({"data": std::str::from_utf8(raw_payload).unwrap()});
+        let cols = columns_to_send(row_normal.as_object().unwrap(), &schema);
+        let bytes_normal =
+            encode_dynamic_row(row_normal.as_object().unwrap(), &schema, &cols).unwrap();
+
+        // Raw passthrough: empty row + raw bytes
+        let row_raw = serde_json::json!({});
+        let cols_raw = columns_to_send(row_raw.as_object().unwrap(), &schema);
+        let bytes_raw = encode_dynamic_row_with_raw(
+            row_raw.as_object().unwrap(),
+            &schema,
+            &cols_raw,
+            &[("data", raw_payload.as_slice())],
+        )
+        .unwrap();
+
+        assert_eq!(
+            bytes_normal, bytes_raw,
+            "raw passthrough must match Value::String encoding"
+        );
     }
 
     #[test]

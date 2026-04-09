@@ -20,7 +20,7 @@ use serde_json::{Map, Value};
 
 use crate::unified::UnifiedClient;
 
-use super::encode::{columns_to_send, encode_dynamic_row};
+use super::encode::{columns_to_send, encode_dynamic_row, encode_dynamic_row_with_raw};
 use super::error::DynamicError;
 use super::schema::{ColumnDef, DynamicSchema, DynamicSchemaCache, fetch_dynamic_schema};
 
@@ -161,6 +161,100 @@ impl DynamicInsert {
         let rb_bytes = encode_dynamic_row(row, schema, &col_defs)?;
 
         // Write to the HTTP insert buffer. insert is always set above.
+        let Some(insert) = self.insert.as_mut() else {
+            return Err(DynamicError::EncodingError {
+                column: String::new(),
+                message: "insert not initialised".to_string(),
+            });
+        };
+        insert
+            .write(&rb_bytes)
+            .await
+            .map_err(|e| classify_error(&self.database, &self.table, e))?;
+
+        self.rows_written += 1;
+        Ok(())
+    }
+
+    /// Encode and buffer a row, with raw byte passthrough for named columns.
+    ///
+    /// Like [`write_map`], but `raw_columns` provides pre-encoded bytes for
+    /// specific columns (e.g. `_json`). These bytes are written directly as
+    /// length-prefixed strings in the RowBinary output, avoiding intermediate
+    /// `Value::String` wrapping and `to_string()` re-serialisation.
+    ///
+    /// This enables zero-copy for columns where the caller already has the
+    /// raw bytes (e.g. raw Kafka payload for a JSON column).
+    pub async fn write_map_with_raw(
+        &mut self,
+        row: &Map<String, Value>,
+        raw_columns: &[(&str, &[u8])],
+    ) -> Result<(), DynamicError> {
+        // Ensure schema is loaded
+        self.ensure_schema().await?;
+        let Some(schema) = self.schema.as_ref() else {
+            return Err(DynamicError::EncodingError {
+                column: String::new(),
+                message: "schema not available after fetch".to_string(),
+            });
+        };
+
+        // On first row, determine the column list and create the INSERT.
+        if self.insert.is_none() {
+            // Include raw columns in the column list even if they're not in the row map.
+            let mut cols = columns_to_send(row, schema);
+            for (name, _) in raw_columns {
+                if !cols.iter().any(|c| c.name == *name)
+                    && let Some(col_def) = schema.column(name)
+                {
+                    cols.push(col_def);
+                }
+            }
+            let col_names: Vec<String> = cols.iter().map(|c| c.name.clone()).collect();
+            let mut sql = String::from("INSERT INTO ");
+            crate::sql::escape::identifier(&self.database, &mut sql)
+                .expect("fmt::Write on String is infallible");
+            sql.push('.');
+            crate::sql::escape::identifier(&self.table, &mut sql)
+                .expect("fmt::Write on String is infallible");
+            sql.push_str(" (");
+            for (i, name) in col_names.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                crate::sql::escape::identifier(name, &mut sql)
+                    .expect("fmt::Write on String is infallible");
+            }
+            sql.push_str(") FORMAT RowBinary");
+            let mut formatted = self.client.insert_formatted_with(sql).map_err(|e| {
+                DynamicError::EncodingError {
+                    column: String::new(),
+                    message: e.to_string(),
+                }
+            })?;
+
+            if schema.has_json_columns() {
+                formatted = formatted.with_option("input_format_binary_read_json_as_string", "1");
+            }
+
+            self.insert = Some(formatted.buffered());
+            self.insert_columns = Some(col_names);
+        }
+
+        let Some(col_names) = self.insert_columns.as_ref() else {
+            return Err(DynamicError::EncodingError {
+                column: String::new(),
+                message: "insert columns not initialised".to_string(),
+            });
+        };
+        let col_defs: Vec<&ColumnDef> = col_names
+            .iter()
+            .filter_map(|name| schema.column(name))
+            .collect();
+
+        // Encode row to RowBinary with raw passthrough
+        let rb_bytes = encode_dynamic_row_with_raw(row, schema, &col_defs, raw_columns)?;
+
         let Some(insert) = self.insert.as_mut() else {
             return Err(DynamicError::EncodingError {
                 column: String::new(),
