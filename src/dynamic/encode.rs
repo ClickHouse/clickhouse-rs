@@ -192,9 +192,13 @@ fn encode_typed(
         TypeTag::JSON => {
             // JSON type -- send as length-prefixed JSON string.
             // When the value is already a String (e.g. raw JSON payload stored
-            // as Value::String by the caller), write the content directly —
+            // as Value::String by the caller), write the content directly.
             // value.to_string() would double-quote and escape it, producing
             // "\"{ ... }\"" which ClickHouse rejects.
+            //
+            // Caller responsibility: if sending Value::String to a JSON column,
+            // the string content must be valid JSON. Non-JSON strings (e.g.
+            // "hello") will be accepted here but rejected by ClickHouse.
             let json_bytes = match value {
                 Value::String(s) => Cow::Borrowed(s.as_bytes()),
                 _ => Cow::Owned(value.to_string().into_bytes()),
@@ -298,7 +302,7 @@ fn as_f64(value: &Value, col: &str) -> Result<f64, DynamicError> {
 }
 
 // ---------------------------------------------------------------------------
-// DateTime64 string → epoch conversion
+// DateTime64 string -> epoch conversion
 // ---------------------------------------------------------------------------
 
 /// Convert a JSON value to a DateTime64 epoch value scaled to the given precision.
@@ -307,7 +311,10 @@ fn as_f64(value: &Value, col: &str) -> Result<f64, DynamicError> {
 /// - Numeric values (already epoch-scaled, passed through)
 /// - Numeric strings (parsed as i64)
 /// - Datetime strings: `"YYYY-MM-DD HH:MM:SS"`, `"YYYY-MM-DD HH:MM:SS.fff"`,
-///   ISO 8601 with `T` separator, optional `Z` or `+00:00` suffix
+///   ISO 8601 with `T` separator, optional `Z` suffix.
+///   Non-zero timezone offsets (e.g. `+05:30`) are rejected -- all values
+///   must be UTC. ClickHouse DateTime64 stores UTC epoch values; silently
+///   dropping offsets would produce wrong timestamps.
 fn datetime64_to_epoch(value: &Value, precision: u8, col: &str) -> Result<i64, DynamicError> {
     match value {
         Value::Number(_) => as_i64(value, col),
@@ -316,12 +323,14 @@ fn datetime64_to_epoch(value: &Value, precision: u8, col: &str) -> Result<i64, D
             if let Ok(n) = s.parse::<i64>() {
                 return Ok(n);
             }
-            // Parse datetime string → (unix_seconds, fractional_nanoseconds)
+            // Parse datetime string -> (unix_seconds, fractional_nanoseconds)
             let (secs, frac_nanos) =
-                parse_datetime_str(s).ok_or_else(|| enc_err(col, "invalid DateTime64 string"))?;
+                parse_datetime_str(s).map_err(|msg| enc_err(col, &msg))?;
             // Scale to target precision
             let multiplier = 10i64.pow(precision as u32);
-            let base = secs.checked_mul(multiplier).unwrap_or(secs);
+            let base = secs
+                .checked_mul(multiplier)
+                .ok_or_else(|| enc_err(col, "DateTime64 epoch overflow"))?;
             let frac_scaled =
                 (frac_nanos as i64) / 10i64.pow(9u32.saturating_sub(precision as u32));
             Ok(base + frac_scaled)
@@ -333,73 +342,99 @@ fn datetime64_to_epoch(value: &Value, precision: u8, col: &str) -> Result<i64, D
 /// Lightweight datetime string parser (no chrono dependency).
 ///
 /// Handles: `YYYY-MM-DD HH:MM:SS[.fff...]`, ISO 8601 `T` separator,
-/// optional `Z` or `+HH:MM` timezone suffix (stripped, assumed UTC).
+/// optional `Z` suffix (UTC). Non-zero timezone offsets are rejected.
 ///
-/// Returns `(unix_seconds, fractional_nanoseconds)` or `None` on parse failure.
-fn parse_datetime_str(s: &str) -> Option<(i64, u32)> {
-    // Normalise: replace 'T' with space, strip timezone suffix
-    let s = s.replace('T', " ");
-    let s = s.strip_suffix('Z').unwrap_or(&s);
-    // Strip +HH:MM or -HH:MM timezone offset
-    let s = if s.len() > 6 {
-        let tail = &s[s.len() - 6..];
-        if (tail.starts_with('+') || tail.starts_with('-'))
-            && tail.as_bytes()[3] == b':'
-            && tail[1..3].bytes().all(|b| b.is_ascii_digit())
-            && tail[4..6].bytes().all(|b| b.is_ascii_digit())
-        {
-            &s[..s.len() - 6]
-        } else {
-            s
-        }
-    } else {
-        s
-    };
+/// Returns `(unix_seconds, fractional_nanoseconds)` or an error message.
+fn parse_datetime_str(s: &str) -> Result<(i64, u32), String> {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
 
-    // Split into date-time and optional fractional seconds
-    let (datetime_part, frac_nanos) = if let Some(dot_pos) = s.rfind('.') {
-        let frac_str = &s[dot_pos + 1..];
-        // Parse fractional part, pad/truncate to nanoseconds (9 digits)
-        let mut frac: u32 = frac_str.parse().ok()?;
-        let digits = frac_str.len();
-        if digits < 9 {
-            frac *= 10u32.pow(9 - digits as u32);
-        } else if digits > 9 {
-            frac /= 10u32.pow(digits as u32 - 9);
-        }
-        (&s[..dot_pos], frac)
-    } else {
-        (s, 0u32)
-    };
-
-    // Parse "YYYY-MM-DD HH:MM:SS"
-    let parts: Vec<&str> = datetime_part.split(' ').collect();
-    if parts.len() != 2 {
-        return None;
+    // Find the separator between date and time: space or 'T'
+    // Minimum valid: "YYYY-MM-DD HH:MM:SS" = 19 chars
+    if len < 19 {
+        return Err("invalid DateTime64 string".into());
+    }
+    let sep = bytes[10];
+    if sep != b' ' && sep != b'T' {
+        return Err("invalid DateTime64 string".into());
     }
 
-    let date_parts: Vec<&str> = parts[0].split('-').collect();
-    let time_parts: Vec<&str> = parts[1].split(':').collect();
-    if date_parts.len() != 3 || time_parts.len() != 3 {
-        return None;
+    // Work out where the datetime core ends (before fractional / suffix)
+    // After the 19-char core we may have: nothing, '.fff...', 'Z', '+HH:MM', or combos
+    let mut pos = 19; // past "YYYY-MM-DD_HH:MM:SS"
+
+    // Parse optional fractional seconds
+    let frac_nanos = if pos < len && bytes[pos] == b'.' {
+        pos += 1; // skip dot
+        let frac_start = pos;
+        while pos < len && bytes[pos].is_ascii_digit() {
+            pos += 1;
+        }
+        let frac_digits = pos - frac_start;
+        if frac_digits == 0 {
+            return Err("invalid DateTime64 string".into());
+        }
+        // Parse up to 9 digits to avoid u32 overflow. Truncate extra precision.
+        let clamped = if frac_digits > 9 { 9 } else { frac_digits };
+        let frac_slice = &s[frac_start..frac_start + clamped];
+        let mut frac: u32 = frac_slice
+            .parse()
+            .map_err(|_| "invalid fractional seconds".to_string())?;
+        if clamped < 9 {
+            frac *= 10u32.pow(9 - clamped as u32);
+        }
+        frac
+    } else {
+        0u32
+    };
+
+    // Handle trailing timezone: 'Z', '+HH:MM', '-HH:MM'
+    if pos < len {
+        if bytes[pos] == b'Z' {
+            pos += 1;
+        } else if (bytes[pos] == b'+' || bytes[pos] == b'-') && pos + 6 <= len {
+            // Check format: +HH:MM or -HH:MM
+            let sign = bytes[pos];
+            let tz_slice = &s[pos + 1..pos + 6];
+            if tz_slice.len() == 5
+                && tz_slice.as_bytes()[2] == b':'
+                && tz_slice[..2].bytes().all(|b| b.is_ascii_digit())
+                && tz_slice[3..].bytes().all(|b| b.is_ascii_digit())
+            {
+                // Reject non-zero offsets -- silent drop is data corruption
+                if sign == b'-' || &tz_slice[..2] != "00" || &tz_slice[3..] != "00" {
+                    return Err(format!(
+                        "non-UTC timezone offset '{}{}' not supported; convert to UTC first",
+                        sign as char, tz_slice
+                    ));
+                }
+                pos += 6;
+            }
+        }
     }
 
-    let year: i32 = date_parts[0].parse().ok()?;
-    let month: u32 = date_parts[1].parse().ok()?;
-    let day: u32 = date_parts[2].parse().ok()?;
-    let hour: u32 = time_parts[0].parse().ok()?;
-    let min: u32 = time_parts[1].parse().ok()?;
-    let sec: u32 = time_parts[2].parse().ok()?;
+    // Reject trailing garbage
+    if pos != len {
+        return Err("invalid DateTime64 string".into());
+    }
+
+    // Parse date and time components from the first 19 bytes
+    let year: i32 = s[0..4].parse().map_err(|_| "invalid year".to_string())?;
+    let month: u32 = s[5..7].parse().map_err(|_| "invalid month".to_string())?;
+    let day: u32 = s[8..10].parse().map_err(|_| "invalid day".to_string())?;
+    let hour: u32 = s[11..13].parse().map_err(|_| "invalid hour".to_string())?;
+    let min: u32 = s[14..16].parse().map_err(|_| "invalid minute".to_string())?;
+    let sec: u32 = s[17..19].parse().map_err(|_| "invalid second".to_string())?;
 
     if month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || min > 59 || sec > 59 {
-        return None;
+        return Err("invalid DateTime64 string".into());
     }
 
     // Civil date to Unix timestamp (Howard Hinnant algorithm)
     let days = civil_days_from_epoch(year, month, day);
     let secs = days as i64 * 86400 + hour as i64 * 3600 + min as i64 * 60 + sec as i64;
 
-    Some((secs, frac_nanos))
+    Ok((secs, frac_nanos))
 }
 
 /// Convert a civil date to days since 1970-01-01 (Howard Hinnant algorithm).
@@ -726,10 +761,9 @@ mod tests {
 
     #[test]
     fn test_encode_json_string_value() {
-        // When the JSON column receives a Value::String, write the string
-        // content directly — it's already JSON text from the caller (e.g. raw
-        // Kafka payload stored as Value::String by dfe-loader). Previously
-        // this double-quoted to "\"..\"" which ClickHouse rejected.
+        // Value::String writes content directly -- no double-quoting.
+        // Caller is responsible for ensuring the string is valid JSON
+        // when targeting a JSON column.
         let schema = DynamicSchema::from_columns("t", vec![col("data", "JSON")]);
         let row = serde_json::json!({"data": "just a string"});
         let cols = columns_to_send(row.as_object().unwrap(), &schema);
@@ -753,6 +787,33 @@ mod tests {
         let mut expected = Vec::new();
         write_varint(json_payload.len() as u64, &mut expected);
         expected.extend_from_slice(json_payload.as_bytes());
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn test_encode_json_number_value() {
+        // Non-string values go through value.to_string() -- verify numbers work.
+        let schema = DynamicSchema::from_columns("t", vec![col("data", "JSON")]);
+        let row = serde_json::json!({"data": 42});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        let bytes = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols).unwrap();
+        let mut expected = Vec::new();
+        write_varint(2, &mut expected); // "42" = 2 bytes
+        expected.extend_from_slice(b"42");
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn test_encode_json_array_value() {
+        // JSON column receiving a JSON array (not Value::String).
+        let schema = DynamicSchema::from_columns("t", vec![col("data", "JSON")]);
+        let row = serde_json::json!({"data": [1, 2, 3]});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        let bytes = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols).unwrap();
+        let json_str = "[1,2,3]";
+        let mut expected = Vec::new();
+        write_varint(json_str.len() as u64, &mut expected);
+        expected.extend_from_slice(json_str.as_bytes());
         assert_eq!(bytes, expected);
     }
 
@@ -824,7 +885,7 @@ mod tests {
 
     #[test]
     fn test_encode_datetime64_no_fractional() {
-        // No fractional seconds — should produce .000
+        // No fractional seconds -- should produce .000
         let schema = DynamicSchema::from_columns("t", vec![col("ts", "DateTime64(3)")]);
         let row = serde_json::json!({"ts": "2026-04-07 07:03:00"});
         let cols = columns_to_send(row.as_object().unwrap(), &schema);
@@ -834,13 +895,35 @@ mod tests {
 
     #[test]
     fn test_encode_datetime64_precision_6() {
-        // DateTime64(6) — microseconds
+        // DateTime64(6) -- microseconds
         let schema = DynamicSchema::from_columns("t", vec![col("ts", "DateTime64(6)")]);
         let row = serde_json::json!({"ts": "2026-04-07 07:03:00.095123"});
         let cols = columns_to_send(row.as_object().unwrap(), &schema);
         let bytes = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols).unwrap();
         let expected_us: i64 = 1_775_545_380_095_123;
         assert_eq!(bytes, expected_us.to_le_bytes().to_vec());
+    }
+
+    #[test]
+    fn test_encode_datetime64_precision_9() {
+        // DateTime64(9) -- nanoseconds
+        let schema = DynamicSchema::from_columns("t", vec![col("ts", "DateTime64(9)")]);
+        let row = serde_json::json!({"ts": "2026-04-07 07:03:00.095123456"});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        let bytes = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols).unwrap();
+        let expected_ns: i64 = 1_775_545_380_095_123_456;
+        assert_eq!(bytes, expected_ns.to_le_bytes().to_vec());
+    }
+
+    #[test]
+    fn test_encode_datetime64_precision_0() {
+        // DateTime64(0) -- whole seconds only
+        let schema = DynamicSchema::from_columns("t", vec![col("ts", "DateTime64(0)")]);
+        let row = serde_json::json!({"ts": "2026-04-07 07:03:00.999"});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        let bytes = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols).unwrap();
+        // precision 0: just seconds, fractional part truncated
+        assert_eq!(bytes, 1_775_545_380_i64.to_le_bytes().to_vec());
     }
 
     #[test]
@@ -862,6 +945,10 @@ mod tests {
         expected.extend_from_slice(&1_775_545_380_095_i64.to_le_bytes());
         assert_eq!(bytes, expected);
     }
+
+    // -----------------------------------------------------------------------
+    // DateTime64 parser unit tests
+    // -----------------------------------------------------------------------
 
     #[test]
     fn test_parse_datetime_str_basic() {
@@ -885,10 +972,78 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_datetime_str_with_tz_offset() {
-        // Timezone offset stripped (treated as UTC)
+    fn test_parse_datetime_str_utc_offset_zero() {
+        // +00:00 is accepted (it's UTC)
         let (secs, _) = parse_datetime_str("2026-04-07 07:03:00+00:00").unwrap();
         assert_eq!(secs, 1_775_545_380);
+    }
+
+    #[test]
+    fn test_parse_datetime_str_rejects_nonzero_positive_offset() {
+        let err = parse_datetime_str("2026-04-07 07:03:00+05:30").unwrap_err();
+        assert!(err.contains("non-UTC timezone offset"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_datetime_str_rejects_nonzero_negative_offset() {
+        let err = parse_datetime_str("2026-04-07 07:03:00-05:00").unwrap_err();
+        assert!(err.contains("non-UTC timezone offset"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_datetime_str_high_precision_fractional() {
+        // 12 fractional digits -- truncated to 9 (nanoseconds)
+        let (secs, frac) = parse_datetime_str("2026-04-07 07:03:00.123456789012").unwrap();
+        assert_eq!(secs, 1_775_545_380);
+        assert_eq!(frac, 123_456_789); // truncated, not overflowed
+    }
+
+    #[test]
+    fn test_parse_datetime_str_single_fractional_digit() {
+        // "0.1" = 100ms = 100,000,000 ns
+        let (_, frac) = parse_datetime_str("2026-04-07 07:03:00.1").unwrap();
+        assert_eq!(frac, 100_000_000);
+    }
+
+    #[test]
+    fn test_parse_datetime_str_rejects_garbage() {
+        assert!(parse_datetime_str("not a date").is_err());
+        assert!(parse_datetime_str("2026-04-07").is_err()); // date only, no time
+        assert!(parse_datetime_str("").is_err());
+        assert!(parse_datetime_str("2026-04-07 07:03:00JUNK").is_err());
+    }
+
+    #[test]
+    fn test_parse_datetime_str_rejects_invalid_components() {
+        assert!(parse_datetime_str("2026-13-07 07:03:00").is_err()); // month 13
+        assert!(parse_datetime_str("2026-00-07 07:03:00").is_err()); // month 0
+        assert!(parse_datetime_str("2026-04-00 07:03:00").is_err()); // day 0
+        assert!(parse_datetime_str("2026-04-07 25:03:00").is_err()); // hour 25
+        assert!(parse_datetime_str("2026-04-07 07:60:00").is_err()); // min 60
+        assert!(parse_datetime_str("2026-04-07 07:03:60").is_err()); // sec 60
+    }
+
+    #[test]
+    fn test_datetime64_epoch_overflow_returns_error() {
+        // i64::MAX as seconds * 1000 would overflow
+        let schema = DynamicSchema::from_columns("t", vec![col("ts", "DateTime64(3)")]);
+        // Year 9999 * 1000 should still fit in i64, just verifying no panic.
+        let row = serde_json::json!({"ts": "9999-12-31 23:59:59"});
+        let cols = columns_to_send(row.as_object().unwrap(), &schema);
+        // Year 9999 * 1000 should still fit in i64, so this should succeed.
+        // The overflow guard is for extreme values close to i64::MAX seconds.
+        let result = encode_dynamic_row(row.as_object().unwrap(), &schema, &cols);
+        assert!(result.is_ok()); // 9999 is fine, just verifying no panic
+
+        // But a direct call with absurd seconds would overflow:
+        let bad = datetime64_to_epoch(
+            &serde_json::json!("9999-12-31 23:59:59"),
+            18, // precision 18 = 10^18 multiplier, guaranteed overflow
+            "ts",
+        );
+        assert!(bad.is_err());
+        let msg = format!("{}", bad.unwrap_err());
+        assert!(msg.contains("overflow"), "got: {msg}");
     }
 
     #[test]
@@ -900,5 +1055,20 @@ mod tests {
     fn test_civil_days_known_date() {
         // 2026-04-07 = day 20,550 from epoch
         assert_eq!(civil_days_from_epoch(2026, 4, 7), 20_550);
+    }
+
+    #[test]
+    fn test_civil_days_pre_epoch() {
+        // 1969-12-31 = day -1
+        assert_eq!(civil_days_from_epoch(1969, 12, 31), -1);
+    }
+
+    #[test]
+    fn test_civil_days_leap_year() {
+        // 2000-02-29 exists (leap year)
+        // 2000-03-01 should be one day later
+        let feb29 = civil_days_from_epoch(2000, 2, 29);
+        let mar01 = civil_days_from_epoch(2000, 3, 1);
+        assert_eq!(mar01 - feb29, 1);
     }
 }
