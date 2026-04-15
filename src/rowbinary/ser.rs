@@ -4,6 +4,7 @@ use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
 use crate::types::int256;
+use crate::types::bf16;
 use bytes::BufMut;
 use clickhouse_types::put_leb128;
 use serde::ser::SerializeMap;
@@ -183,15 +184,20 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
         name: &'static str,
         value: &T,
     ) -> Result<()> {
-        if name.starts_with(int256::MODULE_PATH) {
-            self.validator
-                .validate(SerdeType::Bytes(int256::BYTE_LEN))?;
+        // (module_path, byte_len) for fixed-size types that skip length prefix
+        const FIXED_BYTES: &[(&str, usize)] = &[
+            (int256::MODULE_PATH,             int256::BYTE_LEN),
+            (bf16::MODULE_PATH, bf16::BYTE_LEN),
+        ];
 
-            value.serialize(WithoutLenPrefix {
-                buffer: &mut self.buffer,
-            })
-        } else {
-            value.serialize(self)
+        match FIXED_BYTES.iter().find(|(prefix, _)| name.starts_with(prefix)) {
+            Some(&(_, len)) => {
+                self.validator.validate(SerdeType::Bytes(len))?;
+                value.serialize(WithoutLenPrefix {
+                    buffer: &mut self.buffer,
+                })
+            }
+            None => value.serialize(self),
         }
     }
 

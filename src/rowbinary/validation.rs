@@ -544,9 +544,13 @@ fn validate_impl<'serde, 'caller, R: Row>(
         SerdeType::Bytes(_) | SerdeType::ByteBuf(_) if data_type == &DataTypeNode::String => {
             Ok(None)
         }
-        // Serde's data model doesn't have `(u)int256` so instead we just try to deserialize `[u8; 32]`
         SerdeType::Bytes(int256::BYTE_LEN)
             if data_type == &DataTypeNode::Int256 || data_type == &DataTypeNode::UInt256 =>
+        {
+            Ok(None)
+        }
+        SerdeType::Bytes(crate::types::bf16::BYTE_LEN)
+            if data_type == &DataTypeNode::BFloat16 =>
         {
             Ok(None)
         }
