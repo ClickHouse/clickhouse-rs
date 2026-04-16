@@ -186,7 +186,7 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
     ) -> Result<()> {
         // (module_path, byte_len) for fixed-size types that skip length prefix
         const FIXED_BYTES: &[(&str, usize)] = &[
-            (int256::MODULE_PATH,             int256::BYTE_LEN),
+            (int256::MODULE_PATH, int256::BYTE_LEN),
             (bf16::MODULE_PATH, bf16::BYTE_LEN),
         ];
 

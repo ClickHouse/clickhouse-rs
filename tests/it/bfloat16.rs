@@ -29,7 +29,7 @@ async fn bfloat16() {
     // ordering/equality semantics for NaN are unspecified.
     let values = [
         0.0f32,
-        -0.0,  // NEG_ZERO: should round-trip as bits, not float-equal to 0.0
+        -0.0,
         1.0,
         -1.0,
         -1.5,
@@ -37,7 +37,7 @@ async fn bfloat16() {
         100.0,
         f32::INFINITY,
         f32::NEG_INFINITY,
-        f32::MIN_POSITIVE, // smallest positive f32; bf16 will truncate but stay positive
+        f32::MIN_POSITIVE,
         BFloat16::MAX.to_f32(),
         BFloat16::MIN.to_f32(),
     ];
