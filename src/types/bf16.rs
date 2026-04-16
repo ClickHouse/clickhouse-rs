@@ -146,7 +146,7 @@ impl From<BFloat16> for f64 {
     }
 }
 
-// Error type, по образцу TryFromUInt256Error
+// Error type, based on TryFromUInt256Error
 #[derive(Debug, thiserror::Error)]
 #[error("`BFloat16` value is not finite and cannot be converted to the target type")]
 pub struct TryFromBFloat16Error(());
