@@ -25,8 +25,8 @@ async fn bfloat16() {
         .await
         .unwrap();
 
-    // NaN is excluded: NaN != NaN by definition, and ClickHouse's
-    // ordering/equality semantics for NaN are unspecified.
+    // NaN values are intentionally omitted from this test.
+    // IEEE 754 defines NaN as unequal to itself (NaN != NaN),
     let values = [
         0.0f32,
         -0.0,
