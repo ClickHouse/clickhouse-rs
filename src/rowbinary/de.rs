@@ -303,7 +303,7 @@ where
         visitor: V,
     ) -> Result<V::Value> {
         const FIXED_BYTES: &[(&str, usize)] = &[
-            (int256::MODULE_PATH,             int256::BYTE_LEN),
+            (int256::MODULE_PATH, int256::BYTE_LEN),
             (bf16::MODULE_PATH, bf16::BYTE_LEN),
         ];
 
