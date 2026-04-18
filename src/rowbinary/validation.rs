@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::types::int256;
+use crate::types::bf16;
 use crate::{Row, row::RowKind, row_metadata::RowMetadata};
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
@@ -550,7 +551,7 @@ fn validate_impl<'serde, 'caller, R: Row>(
         {
             Ok(None)
         }
-        SerdeType::Bytes(crate::types::bf16::BYTE_LEN)
+        SerdeType::Bytes(bf16::BYTE_LEN)
             if data_type == &DataTypeNode::BFloat16 =>
         {
             Ok(None)
