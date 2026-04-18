@@ -5,11 +5,8 @@ use std::fmt::{Debug, Display, Formatter};
 
 /// A 16-bit brain floating point number (bfloat16).
 ///
-/// See [the `BFloat16` type in the ClickHouse reference](https://clickhouse.com/docs/sql-reference/data-types/float)
-/// for details.
-///
 /// # Note: Not for General Use
-/// This type is primarily intended for input/output with ClickHouse,
+/// This type is primarily intended for input/output purposes,
 /// and is not designed to be a general-purpose bfloat16 type.
 ///
 /// Notably, this does not support:
@@ -17,16 +14,13 @@ use std::fmt::{Debug, Display, Formatter};
 /// * formatting in different radixes
 /// * parsing from strings
 ///
-/// Additionally, the Serde trait impls are not guaranteed to work with
-/// anything but the serializers and deserializers defined in the `clickhouse` crate.
-///
 /// It should be possible to convert to other crates' types using [`Self::to_bits()`]
 /// and using the corresponding `from_bits()` method on the other type,
 /// and vice versa with [`Self::from_bits()`].
 ///
 /// Conversions to/from standard float types are supported:
-///
 /// * `f32`, `f64` via `From` and `Into`
+
 #[derive(Copy, Clone, PartialEq)]
 pub struct BFloat16 {
     bits: u16,
