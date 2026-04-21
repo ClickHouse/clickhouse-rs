@@ -309,7 +309,6 @@ where
 
         match FIXED_BYTES.iter().find(|(prefix, _)| name.starts_with(prefix)) {
             Some(&(_, len)) => {
-                // Validate before reading to avoid consuming bytes on error
                 self.validator.validate(SerdeType::Bytes(len))?;
                 let slice = self.read_slice(len)?;
                 BytesDeserializer::new(slice).deserialize_bytes(visitor)
