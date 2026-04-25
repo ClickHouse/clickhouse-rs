@@ -320,3 +320,132 @@ fn it_time_serializes_time64_nanos_overflow_fails() {
         "Unexpected error message: {err}"
     );
 }
+
+// --- IPv4 / IPv6 / FixedString round-trip coverage --------------------------
+//
+// The clickhouse-rs spec (`upstream-clickhouse-rs.md` §1.4) describes
+// surprising behaviour when round-tripping native `IPv4` / `IPv6` /
+// `FixedString(N)` columns through `#[derive(Row)]`. These tests pin the
+// expected wire format byte-for-byte so future regressions are caught
+// without needing a live ClickHouse server.
+
+mod ip_and_fixed_string {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use serde::{Deserialize, Serialize};
+
+    use crate::Row;
+
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    struct IpRow {
+        // IPv4 must be serialised as a little-endian u32 to match the
+        // ClickHouse `IPv4` wire format. The default `Ipv4Addr` serde
+        // produces a 4-tuple of u8 in network order, so this annotation
+        // is required.
+        #[serde(with = "crate::serde::ipv4")]
+        ipv4: Ipv4Addr,
+
+        // IPv6 round-trips correctly via the default `Ipv6Addr` serde.
+        // `Ipv6Addr::octets()` returns network-order bytes and the
+        // ClickHouse `IPv6` wire format is also network-order, so the
+        // shapes match. Including a no-annotation field here pins that
+        // contract.
+        ipv6_default: Ipv6Addr,
+
+        // `clickhouse::serde::ipv6` is a pass-through helper provided
+        // for symmetry; it must produce the same bytes as the default.
+        #[serde(with = "crate::serde::ipv6")]
+        ipv6_via_helper: Ipv6Addr,
+
+        // `FixedString(4)` ↔ `[u8; 4]`: exactly N bytes on the wire,
+        // user is responsible for any padding.
+        fixed4: [u8; 4],
+    }
+
+    impl Row for IpRow {
+        const NAME: &'static str = "IpRow";
+        const COLUMN_NAMES: &'static [&'static str] =
+            &["ipv4", "ipv6_default", "ipv6_via_helper", "fixed4"];
+        const COLUMN_COUNT: usize = 4;
+        const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
+        type Value<'a> = IpRow;
+    }
+
+    fn sample() -> IpRow {
+        IpRow {
+            ipv4: Ipv4Addr::new(192, 168, 0, 1),
+            ipv6_default: Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0xafc8, 0x10, 0x1),
+            ipv6_via_helper: Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0xafc8, 0x10, 0x1),
+            fixed4: [b'B', b'T', b'C', 0x00],
+        }
+    }
+
+    fn sample_serialised() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        // IPv4 192.168.0.1 → u32 0xC0A80001 → LE bytes 01 00 A8 C0
+        bytes.extend_from_slice(&u32::from(Ipv4Addr::new(192, 168, 0, 1)).to_le_bytes());
+        // IPv6 2001:0db8::afc8:0010:0001 → 16 bytes network order, twice.
+        let ipv6_octets = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0xafc8, 0x10, 0x1).octets();
+        bytes.extend_from_slice(&ipv6_octets);
+        bytes.extend_from_slice(&ipv6_octets);
+        // FixedString(4) "BTC\0"
+        bytes.extend_from_slice(&[b'B', b'T', b'C', 0x00]);
+        bytes
+    }
+
+    #[test]
+    fn ipv4_ipv6_fixedstring_serialise_to_expected_bytes() {
+        let mut actual = Vec::new();
+        crate::rowbinary::serialize_row_binary(&mut actual, &sample()).unwrap();
+        assert_eq!(
+            actual,
+            sample_serialised(),
+            "IPv4/IPv6/FixedString wire format diverged from spec"
+        );
+    }
+
+    #[test]
+    fn ipv4_ipv6_fixedstring_round_trip() {
+        let bytes = sample_serialised();
+        let decoded: IpRow =
+            crate::rowbinary::deserialize_row(&mut bytes.as_slice(), None).unwrap();
+        assert_eq!(decoded, sample(), "round-trip diverged from original");
+    }
+
+    #[test]
+    fn ipv6_helper_matches_default_serde() {
+        // The whole point of the `serde::ipv6` helper is that it's a
+        // pass-through. Serialise just the IPv6 fields in two rows
+        // (one through default, one through helper) and assert byte
+        // equality so we catch any future divergence.
+        #[derive(Serialize)]
+        struct Default(Ipv6Addr);
+        #[derive(Serialize)]
+        struct ViaHelper(#[serde(with = "crate::serde::ipv6")] Ipv6Addr);
+
+        impl Row for Default {
+            const NAME: &'static str = "Default";
+            const COLUMN_NAMES: &'static [&'static str] = &["ipv6"];
+            const COLUMN_COUNT: usize = 1;
+            const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
+            type Value<'a> = Default;
+        }
+        impl Row for ViaHelper {
+            const NAME: &'static str = "ViaHelper";
+            const COLUMN_NAMES: &'static [&'static str] = &["ipv6"];
+            const COLUMN_COUNT: usize = 1;
+            const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
+            type Value<'a> = ViaHelper;
+        }
+
+        let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0xafc8, 0x10, 0x1);
+
+        let mut a = Vec::new();
+        crate::rowbinary::serialize_row_binary(&mut a, &Default(addr)).unwrap();
+
+        let mut b = Vec::new();
+        crate::rowbinary::serialize_row_binary(&mut b, &ViaHelper(addr)).unwrap();
+
+        assert_eq!(a, b, "ipv6 helper must produce same bytes as default serde");
+    }
+}
