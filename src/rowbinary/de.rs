@@ -2,7 +2,7 @@ use crate::Row;
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
-use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
+use crate::rowbinary::validation::{DataTypeValidator, NullEncoding, SchemaValidator, SerdeType};
 use crate::types::int256;
 use bytes::Buf;
 use core::mem::size_of;
@@ -248,6 +248,22 @@ where
     #[inline(always)]
     fn deserialize_option<V: Visitor<'data>>(self, visitor: V) -> Result<V::Value> {
         ensure_size(&mut self.input, 1)?;
+
+        if self.validator.null_encoding() == Some(NullEncoding::Discriminator) {
+            // variant-style null: 0xFF discriminator = NULL, no value bytes follow.
+            // any other byte is a valid discriminator that deserialize_enum must read,
+            // so we only consume the byte on NULL and leave it for the enum path.
+            if self.input[0] == 0xFF {
+                self.input.advance(1);
+                // advance the validator past this column
+                let _ = self.inner(SerdeType::Option)?;
+                return visitor.visit_none();
+            }
+            let deserializer = &mut self.inner(SerdeType::Option)?;
+            return visitor.visit_some(deserializer);
+        }
+
+        // standard Nullable encoding: leading byte 0 = not null, 1 = null
         let is_null = self.input.get_u8();
         let deserializer = &mut self.inner(SerdeType::Option)?;
         match is_null {

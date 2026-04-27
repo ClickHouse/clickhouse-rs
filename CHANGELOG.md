@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+* `Variant` columns containing NULL values no longer fail with a schema mismatch error. Use `Option<MyEnum>` to deserialize nullable Variant columns. ([#400])
+
+[#400]: https://github.com/ClickHouse/clickhouse-rs/pull/400
+
 ## [0.15.0] - 2026-04-03
 
 ### Added
