@@ -98,6 +98,7 @@ default = ["lz4"]
 
 test-util = ["hyper/server"]
 inserter = ["dep:quanta"]
+batcher = ["inserter", "tokio/time"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
 lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]

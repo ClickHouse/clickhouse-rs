@@ -257,6 +257,8 @@ mod insert;
 mod insert_formatted;
 #[cfg(feature = "inserter")]
 mod inserter;
+#[cfg(feature = "batcher")]
+mod batcher;
 mod int128;
 mod int256;
 mod ip;

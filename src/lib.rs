@@ -23,6 +23,8 @@ pub mod insert;
 pub mod insert_formatted;
 #[cfg(feature = "inserter")]
 pub mod inserter;
+#[cfg(feature = "batcher")]
+pub mod batcher;
 pub mod query;
 pub mod serde;
 pub mod sql;
