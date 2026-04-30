@@ -87,6 +87,7 @@ async fn variant_null_cast() {
 
     let result = client
         .query("SELECT NULL::Variant(String, UInt64) AS v")
+        .with_setting("allow_experimental_variant_type", "1")
         .fetch_one::<Wrapper>()
         .await
         .unwrap();
