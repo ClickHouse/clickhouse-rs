@@ -32,7 +32,7 @@ async fn variant_null_values() {
             ENGINE = MergeTree
             ORDER BY id",
         )
-        .with_option("allow_experimental_variant_type", "1")
+        .with_setting("allow_experimental_variant_type", "1")
         .execute()
         .await
         .unwrap();
