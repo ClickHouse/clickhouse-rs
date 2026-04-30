@@ -216,14 +216,25 @@ impl<'caller, R: Row> SchemaValidator<R> for DataTypeValidator<'caller, R> {
         if self.current_column_idx >= self.metadata.columns.len() {
             return None;
         }
-        let data_type = self.metadata.columns[self.current_column_idx]
-            .data_type
-            .remove_low_cardinality();
-        match data_type {
-            DataTypeNode::Nullable(_) => Some(NullEncoding::Nullable),
-            DataTypeNode::Variant(_) => Some(NullEncoding::Discriminator),
-            _ => None,
-        }
+        null_encoding_for(&self.metadata.columns[self.current_column_idx].data_type)
+    }
+}
+
+/// Returns the wire-level null encoding of the given type, transparently
+/// stripping `LowCardinality(T)` and `SimpleAggregateFunction(_, T)` since
+/// those are encoded identically to the inner `T`.
+///
+/// This must stay aligned with the same wrapper stripping in `validate_impl`.
+/// If the two drift, `deserialize_option` and `validate(SerdeType::Option)`
+/// will disagree on the NULL marker length and the input stream goes out of sync.
+fn null_encoding_for(node: &DataTypeNode) -> Option<NullEncoding> {
+    let node = node
+        .remove_low_cardinality()
+        .remove_simple_aggregate_function();
+    match node {
+        DataTypeNode::Nullable(_) => Some(NullEncoding::Nullable),
+        DataTypeNode::Variant(_) => Some(NullEncoding::Discriminator),
+        _ => None,
     }
 }
 
@@ -465,6 +476,38 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
     #[cold]
     fn get_schema_index(&self, _struct_idx: usize) -> Result<usize> {
         unreachable!()
+    }
+
+    /// Reports the null encoding of the next nested column the validator is
+    /// about to descend into. Required so that `deserialize_option` picks the
+    /// correct null-reading strategy for nested cases such as
+    /// `Vec<Option<Variant>>` (over `Array(Variant(...))`) or
+    /// `(_, Option<Variant>)` (over `Tuple(_, Variant(...))`).
+    fn null_encoding(&self) -> Option<NullEncoding> {
+        let inner = self.as_ref()?;
+        let node: &DataTypeNode = match &inner.kind {
+            InnerDataTypeValidatorKind::Array(t) => t,
+            InnerDataTypeValidatorKind::RootArray(t) => t,
+            InnerDataTypeValidatorKind::Nullable(t) => t,
+            InnerDataTypeValidatorKind::Tuple(elements) => elements.first()?,
+            InnerDataTypeValidatorKind::RootTuple(cols, idx) => &cols.get(*idx)?.data_type,
+            InnerDataTypeValidatorKind::Map(kv, MapValidatorState::Key) => &kv[0],
+            InnerDataTypeValidatorKind::Map(kv, MapValidatorState::Value) => &kv[1],
+            InnerDataTypeValidatorKind::MapAsSequence(kv, state) => match state {
+                // tuple state is a passthrough: the next validate call only
+                // updates state without consuming any wire bytes
+                MapAsSequenceValidatorState::Tuple => return None,
+                MapAsSequenceValidatorState::Key => &kv[0],
+                MapAsSequenceValidatorState::Value => &kv[1],
+            },
+            InnerDataTypeValidatorKind::Variant(types, VariantValidationState::Identifier(v)) => {
+                types.get(*v as usize)?
+            }
+            // FixedString / Enum / JsonWithHint / Variant(Pending) cannot
+            // host an Option<T> at this position
+            _ => return None,
+        };
+        null_encoding_for(node)
     }
 
     fn check_tuple_fully_validated(&self) -> Result<()> {
