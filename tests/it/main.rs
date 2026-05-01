@@ -250,6 +250,7 @@ mod chrono;
 mod cloud_jwt;
 mod compression;
 mod cursor_error;
+mod cursor_reborrow;
 mod cursor_stats;
 mod fetch_bytes;
 mod https_errors;
