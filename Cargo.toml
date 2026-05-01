@@ -161,8 +161,6 @@ time = { version = "0.3", optional = true }
 chrono = { version = "0.4", optional = true, features = ["serde"] }
 bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
-polonius-the-crab = "0.5.0"
-
 bnum = "0.13.0"
 
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
