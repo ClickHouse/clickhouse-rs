@@ -18,6 +18,8 @@ use std::collections::HashSet;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
+#[cfg(feature = "arrow")]
+pub mod arrow;
 pub mod error;
 pub mod insert;
 pub mod insert_formatted;
