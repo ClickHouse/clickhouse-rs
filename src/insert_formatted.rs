@@ -516,7 +516,7 @@ pub struct BufInsertFormatted {
     insert: InsertFormatted,
     buffer: BytesMut,
     /// Nominal capacity, stored separately because [`Self::write_buffered()`] can grow the buffer.
-    capacity: usize,
+    nominal_capacity: usize,
 }
 
 impl BufInsertFormatted {
@@ -524,7 +524,7 @@ impl BufInsertFormatted {
         Self {
             insert,
             buffer: BytesMut::with_capacity(capacity),
-            capacity,
+            nominal_capacity: capacity,
         }
     }
 
@@ -544,6 +544,11 @@ impl BufInsertFormatted {
     #[inline(always)]
     pub fn capacity(&self) -> usize {
         self.buffer.capacity()
+    }
+
+    #[inline(always)]
+    pub(crate) fn nominal_capacity(&self) -> usize {
+        self.nominal_capacity
     }
 
     #[inline(always)]
@@ -599,20 +604,20 @@ impl BufInsertFormatted {
 
         // Capacity calculations change a little bit from those in, e.g., `tokio::io::BufWriter`
         // since we always need to copy into the buffer to send chunks on the connection.
-        if self.buffer.len() >= self.capacity {
+        if self.buffer.len() >= self.nominal_capacity {
             ready!(self.poll_flush_inner(cx))?;
             debug_assert!(self.buffer.is_empty());
         }
 
         // Eliminates the need for a special check in `write_all()`;
         // we need to copy to *some* buffer anyway because of how this type works.
-        if self.capacity == 0 {
+        if self.nominal_capacity == 0 {
             self.buffer.extend_from_slice(data);
             return Poll::Ready(Ok(data.len()));
         }
 
         // Guaranteed to be >= 1 by the above checks.
-        let remaining_capacity = self.capacity - self.buffer.len();
+        let remaining_capacity = self.nominal_capacity - self.buffer.len();
 
         let write_len = cmp::min(remaining_capacity, data.len());
 
