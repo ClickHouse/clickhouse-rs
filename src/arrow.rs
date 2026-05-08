@@ -9,6 +9,7 @@ use arrow_ipc::reader::StreamDecoder;
 use arrow_ipc::writer::StreamWriter;
 use arrow_schema::{Schema, SchemaRef};
 use std::io::Write;
+use std::num::Saturating;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker, ready};
 use tokio::io::AsyncWrite;
@@ -34,11 +35,15 @@ impl Client {
                 },
                 schema,
             )?,
+            sent_rows: Saturating(0),
         })
     }
 }
 
 impl Query {
+    /// Executes the query, returning the results in the [Arrow streaming format].
+    ///
+    /// [Arrow streaming format]: https://clickhouse.com/docs/interfaces/formats/ArrowStream
     pub fn fetch_arrow(self) -> Result<ArrowCursor, Error> {
         let span = self.make_span(Some("ArrowStream"));
 
@@ -52,22 +57,46 @@ impl Query {
     }
 }
 
+/// Performs an `INSERT` query accepting Arrow [`RecordBatch`]es.
 pub struct ArrowInsert {
     writer: StreamWriter<InsertWriter>,
+    sent_rows: Saturating<u64>,
 }
 
 impl ArrowInsert {
+    /// Write an Arrow [`RecordBatch`].
+    ///
+    /// The batch is encoded to an internal buffer, which is flushed when it becomes full.
+    /// Because encoding the batch is synchronous, the buffer may need to grow to accommodate the
+    /// whole batch if the connection is not ready to accept it.
+    ///
+    /// The buffer does not need to be manually flushed.
     pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), Error> {
         if self.writer.get_ref().should_flush() {
             self.writer.get_mut().insert.flush().await?;
         }
 
         self.writer.write(batch)?;
+        self.sent_rows += batch.num_rows() as u64;
+
         Ok(())
     }
 
+    /// Flush the buffered data without ending the request.
+    ///
+    /// It is not necessary to call this method.
+    pub async fn flush(&mut self) -> Result<(), Error> {
+        self.writer.get_mut().insert.flush().await
+    }
+
+    /// Flush the remaining data and finish the `INSERT` request.
     pub async fn end(self) -> Result<(), Error> {
         let mut writer = self.writer.into_inner()?;
+
+        tracing::record_all!(
+            writer.insert.span(),
+            clickhouse.request.sent_rows = self.sent_rows.0,
+        );
 
         writer.insert.end().await
     }
