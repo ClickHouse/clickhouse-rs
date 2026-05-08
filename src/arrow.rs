@@ -149,6 +149,26 @@ impl ArrowCursor {
     pub async fn next(&mut self) -> Result<Option<RecordBatch>, Error> {
         std::future::poll_fn(|cx| self.poll_next(cx)).await
     }
+
+    pub async fn collect(&mut self) -> Result<Vec<RecordBatch>, Error> {
+        let mut out = Vec::new();
+
+        while let Some(batch) = self.next().await? {
+            out.push(batch);
+        }
+
+        Ok(out)
+    }
+
+    pub async fn collect_merged(&mut self) -> Result<RecordBatch, Error> {
+        let batches = self.collect().await?;
+
+        let Some(schema) = batches.first().map(|batch| batch.schema()) else {
+            return Ok(RecordBatch::new_empty(Schema::empty().into()));
+        };
+
+        arrow_select::concat::concat_batches(&schema, &batches).map_err(wrap_arrow_error)
+    }
 }
 
 fn wrap_arrow_error(e: ArrowError) -> Error {
