@@ -7,7 +7,7 @@ use arrow_array::RecordBatch;
 use arrow_buffer::Buffer;
 use arrow_ipc::reader::StreamDecoder;
 use arrow_ipc::writer::StreamWriter;
-use arrow_schema::{ArrowError, Schema, SchemaRef};
+use arrow_schema::{Schema, SchemaRef};
 use std::io::Write;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker, ready};
@@ -33,8 +33,7 @@ impl Client {
                     .buffered(),
                 },
                 schema,
-            )
-            .map_err(wrap_arrow_error)?,
+            )?,
         })
     }
 }
@@ -63,11 +62,12 @@ impl ArrowInsert {
             self.writer.get_mut().insert.flush().await?;
         }
 
-        self.writer.write(batch).map_err(wrap_arrow_error)
+        self.writer.write(batch)?;
+        Ok(())
     }
 
     pub async fn end(self) -> Result<(), Error> {
-        let mut writer = self.writer.into_inner().map_err(wrap_arrow_error)?;
+        let mut writer = self.writer.into_inner()?;
 
         writer.insert.end().await
     }
@@ -130,17 +130,13 @@ impl ArrowCursor {
                     continue;
                 }
 
-                self.decoder.finish().map_err(wrap_arrow_error)?;
+                self.decoder.finish()?;
 
                 return Poll::Ready(Ok(None));
             }
 
             // Note: some bytes may be left in `buffer` which is why we need to store it
-            if let Some(batch) = self
-                .decoder
-                .decode(&mut self.buffer)
-                .map_err(wrap_arrow_error)?
-            {
+            if let Some(batch) = self.decoder.decode(&mut self.buffer)? {
                 return Poll::Ready(Ok(Some(batch)));
             }
         }
@@ -167,10 +163,6 @@ impl ArrowCursor {
             return Ok(RecordBatch::new_empty(Schema::empty().into()));
         };
 
-        arrow_select::concat::concat_batches(&schema, &batches).map_err(wrap_arrow_error)
+        Ok(arrow_select::concat::concat_batches(&schema, &batches)?)
     }
-}
-
-fn wrap_arrow_error(e: ArrowError) -> Error {
-    Error::Other(e.into())
 }

@@ -47,6 +47,15 @@ pub enum Error {
     SchemaMismatch(String),
     #[error("unsupported: {0}")]
     Unsupported(String),
+
+    #[cfg(feature = "arrow")]
+    #[error("Arrow format error: {0}")]
+    Arrow(
+        #[from]
+        #[source]
+        arrow_schema::ArrowError,
+    ),
+
     #[error("{0}")]
     Other(BoxedError),
 }
@@ -134,6 +143,8 @@ impl Error {
             Error::InvalidColumnsHeader(_) => "InvalidColumnsHeader",
             Error::SchemaMismatch(_) => "SchemaMismatch",
             Error::Unsupported(_) => "Unsupported",
+            #[cfg(feature = "arrow")]
+            Error::Arrow(_) => "Arrow",
             Error::Other(_) => "Other",
         }
     }
