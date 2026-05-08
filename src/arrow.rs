@@ -133,6 +133,8 @@ impl Write for InsertWriter {
     }
 }
 
+/// A cursor that emits Arrow [`RecordBatch`]es.
+#[must_use = "the query is not sent until the cursor is polled"]
 pub struct ArrowCursor {
     cursor: RawCursor,
     buffer: Buffer,
@@ -141,6 +143,7 @@ pub struct ArrowCursor {
 }
 
 impl ArrowCursor {
+    /// Return the response schema if it is available.
     #[inline(always)]
     pub fn schema(&self) -> Option<SchemaRef> {
         self.decoder.schema()
@@ -171,10 +174,14 @@ impl ArrowCursor {
         }
     }
 
+    /// Read the next batch of records. Cancel-safe.
     pub async fn next(&mut self) -> Result<Option<RecordBatch>, Error> {
         std::future::poll_fn(|cx| self.poll_next(cx)).await
     }
 
+    /// Collect the full response into a vector of batches.
+    ///
+    /// See also [`Self::collect_merged()`].
     pub async fn collect(&mut self) -> Result<Vec<RecordBatch>, Error> {
         let mut out = Vec::new();
 
@@ -185,6 +192,11 @@ impl ArrowCursor {
         Ok(out)
     }
 
+    /// Collect the full response and merge it into a single [`RecordBatch`].
+    ///
+    /// This generally requires copying the full dataset into a new allocation, so this is
+    /// less efficient than [`Self::collect()`] but may be more convenient when a single batch
+    /// is preferred/expected.
     pub async fn collect_merged(&mut self) -> Result<RecordBatch, Error> {
         let batches = self.collect().await?;
 
