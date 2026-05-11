@@ -546,6 +546,7 @@ impl BufInsertFormatted {
         self.buffer.capacity()
     }
 
+    #[cfg(feature = "arrow")] // Not used otherwise but go ahead and use this if you need it.
     #[inline(always)]
     pub(crate) fn nominal_capacity(&self) -> usize {
         self.nominal_capacity
