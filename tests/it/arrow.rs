@@ -50,8 +50,8 @@ async fn insert() {
         .await
         .unwrap();
 
-    let batch_size = 5;
-    let num_batches = 10;
+    let batch_size = 100;
+    let num_batches = 100;
     let mut next_id = 1..;
 
     let mut batches = Vec::new();
@@ -60,7 +60,7 @@ async fn insert() {
         Field::new("baz", DataType::Utf8, false),
     ]));
 
-    for batch in 0..num_batches {
+    for batch in 1..=num_batches {
         let bars: PrimitiveArray<Int32Type> = (0..batch_size)
             .zip(&mut next_id)
             .map(|(_, id)| id)
@@ -118,12 +118,23 @@ async fn insert() {
         vec![
             create_array!(UInt64, [expected_count]),
             create_array!(Int32, [1]),
-            create_array!(Utf8, ["batch_0_bar_1"]),
+            create_array!(Utf8, ["batch_1_bar_1"]),
             create_array!(Int32, [expected_count as i32]),
-            create_array!(Utf8, ["batch_9_bar_50"]),
+            create_array!(Utf8, ["batch_100_bar_10000"]),
         ],
     )
     .unwrap();
 
     assert_eq!(result, expected);
+}
+
+#[tokio::test]
+async fn query_empty_response() {
+    let client = get_client();
+
+    let mut cursor = client.query("SYSTEM FLUSH LOGS").fetch_arrow().unwrap();
+
+    let batch = cursor.next().await.unwrap();
+    assert_eq!(batch, None);
+    assert_eq!(cursor.schema(), None);
 }
