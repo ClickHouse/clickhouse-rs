@@ -351,6 +351,21 @@ Usage of all mentioned data types are covered in the following examples:
     }
     ```
     </details>
+* `Array(UUID)` maps to/from `Vec<uuid::Uuid>` by using `serde::uuid_vec`. Requires the `uuid` feature.
+    <details>
+    <summary>Example</summary>
+
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::uuid_vec")]
+        uuids: Vec<uuid::Uuid>,
+    }
+    ```
+    </details>
 * `IPv6` maps to/from [`std::net::Ipv6Addr`](https://doc.rust-lang.org/stable/std/net/struct.Ipv6Addr.html).
 * `IPv4` maps to/from [`std::net::Ipv4Addr`](https://doc.rust-lang.org/stable/std/net/struct.Ipv4Addr.html) by using `serde::ipv4`.
     <details>
