@@ -10,18 +10,20 @@ rust-version.workspace = true
 
 [features]
 lz4 = ["arrow-ipc/lz4", "clickhouse/lz4"]
-zstd = ["arrow-ipc/zstd", "clickhouse/zstd"]
+# Note: zstd compression is handled by ClickHouse at the HTTP body level. `arrow-ipc` doesn't need to support it.
 
 [dependencies]
-arrow-array = { version = "58.2.0" }
-arrow-buffer = { version = "58.2.0" }
-arrow-ipc = { version = "58.2.0" }
-arrow-schema = { version = "58.2.0" }
-arrow-select = { version = "58.2.0" }
+# We depend on the constituent crates rather than the `arrow` crate directly so that we only pull in the code
+# we need to compile. The versions here should match the `arrow` crate.
+arrow-array = { version = "58" }
+arrow-buffer = { version = "58" }
+arrow-ipc = { version = "58" }
+arrow-schema = { version = "58" }
+arrow-select = { version = "58" }
 
 tokio = "1"
 tracing = "0.1"
 
 [dependencies.clickhouse]
-version = "0.15"
+version = "0.15.1"
 path = ".."

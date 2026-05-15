@@ -252,6 +252,21 @@ impl InsertFormatted {
         self
     }
 
+    /// Returns the compression setting for this insert request.
+    pub fn get_compression(&self) -> Compression {
+        self.compression
+    }
+
+    /// Set the compression level to be used for this insert request only.
+    ///
+    /// # Panics
+    /// If called after the request is started, e.g., after [`InsertFormatted::send`].
+    pub fn with_compression(mut self, compression: Compression) -> Self {
+        self.state.expect_client_mut().compression = compression;
+        self.compression = compression;
+        self
+    }
+
     pub(crate) fn set_timeouts(
         &mut self,
         send_timeout: Option<Duration>,

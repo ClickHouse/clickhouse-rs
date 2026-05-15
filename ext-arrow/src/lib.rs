@@ -1,12 +1,13 @@
+#![doc=include_str!("../README.md")]
 use arrow_array::RecordBatch;
 use arrow_buffer::Buffer;
 use arrow_ipc::reader::StreamDecoder;
 use arrow_ipc::writer::StreamWriter;
 use arrow_schema::{Schema, SchemaRef};
-use clickhouse::Client;
 use clickhouse::error::Error;
 use clickhouse::insert_formatted::BufInsertFormatted;
 use clickhouse::query::{BytesCursor, Query};
+use clickhouse::{Client, Compression};
 use std::io::Write;
 use std::mem;
 use std::num::Saturating;
@@ -15,6 +16,10 @@ use std::task::{Context, Poll, Waker, ready};
 use tokio::io::AsyncWrite;
 
 /// Extension methods for [`clickhouse::Client`] for use with Arrow.
+///
+/// # Note: LZ4 Compression
+/// LZ4 compression will be automatically downgraded to no compression if the `lz4` feature of this
+/// crate is not enabled. See crate root docs for details.
 pub trait ArrowClientExt {
     /// Begin inserting Arrow [`RecordBatch`]es into the target table.
     ///
@@ -28,9 +33,18 @@ impl ArrowClientExt for Client {
         clickhouse::_priv::sql_escape_identifier(table, &mut escaped_table)
             .map_err(|e| Error::Other(e.into()))?;
 
-        let insert = self
-            .insert_formatted_with(format!("INSERT INTO {escaped_table} FORMAT ArrowStream"))
-            .buffered();
+        let mut insert =
+            self.insert_formatted_with(format!("INSERT INTO {escaped_table} FORMAT ArrowStream"));
+
+        let compression = insert.get_compression();
+        if compression.is_lz4() && !cfg!(feature = "lz4") {
+            tracing::debug!(
+                "`ArrowClientExt::insert_arrow()`: downgrading compression to `None`, was {compression:?}; `clickhouse-ext-arrow/lz4` feature must be enabled"
+            );
+            insert = insert.with_compression(Compression::None);
+        }
+
+        let insert = insert.buffered();
 
         tracing::record_all!(insert._priv_span(), db.collection.name = table);
 
@@ -42,6 +56,10 @@ impl ArrowClientExt for Client {
 }
 
 /// Extension methods for [`clickhouse::query::Query`] for use with Arrow.
+///
+/// # Note: LZ4 Compression
+/// LZ4 compression will be automatically downgraded to no compression if the `lz4` feature of this
+/// crate is not enabled. See crate root docs for details.
 pub trait ArrowQueryExt {
     /// Executes the query, returning as Arrow [`RecordBatch`]es.
     ///
@@ -50,7 +68,15 @@ pub trait ArrowQueryExt {
 }
 
 impl ArrowQueryExt for Query {
-    fn fetch_arrow(self) -> Result<ArrowCursor, Error> {
+    fn fetch_arrow(mut self) -> Result<ArrowCursor, Error> {
+        let compression = self.get_compression();
+        if compression.is_lz4() && !cfg!(feature = "lz4") {
+            tracing::debug!(
+                "`ArrowQueryExt::fetch_arrow()`: downgrading compression to `None`, was {compression:?}; `clickhouse-ext-arrow/lz4` feature must be enabled"
+            );
+            self = self.with_compression(Compression::None);
+        }
+
         Ok(ArrowCursor {
             cursor: self.fetch_bytes("ArrowStream")?,
             buffer: Buffer::default(),
