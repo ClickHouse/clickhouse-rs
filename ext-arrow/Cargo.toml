@@ -8,10 +8,6 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-[features]
-lz4 = ["arrow-ipc/lz4", "clickhouse/lz4"]
-# Note: zstd compression is handled by ClickHouse at the HTTP body level. `arrow-ipc` doesn't need to support it.
-
 [dependencies]
 # We depend on the constituent crates rather than the `arrow` crate directly so that we only pull in the code
 # we need to compile. The versions here should match the `arrow` crate.

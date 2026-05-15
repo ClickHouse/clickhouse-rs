@@ -5,7 +5,7 @@ use tracing::Instrument;
 use url::Url;
 
 use crate::{
-    Client, Compression,
+    Client,
     error::{Error, Result},
     formats,
     headers::with_request_headers,
@@ -298,17 +298,6 @@ impl Query {
     /// Similar to [`Client::with_setting`], but for this particular query only.
     pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.client.set_setting(name, value);
-        self
-    }
-
-    /// Returns the compression setting that will be used for this query.
-    pub fn get_compression(&self) -> Compression {
-        self.client.compression
-    }
-
-    /// Set the compression that will be used for this query.
-    pub fn with_compression(mut self, compression: Compression) -> Self {
-        self.client.compression = compression;
         self
     }
 

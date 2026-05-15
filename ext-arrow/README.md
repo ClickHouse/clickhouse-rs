@@ -24,24 +24,6 @@ clickhouse-ext-arrow = "0.1.0"
 
 [carat-versions]: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#version-requirement-syntax
 
-## Note: LZ4 Compression
-When using the `lz4` feature of the `clickhouse` crate, the `lz4` feature of this crate must be enabled as well
-in order to use LZ4 compression with Arrow queries and inserts. 
-
-This is because, when requesting LZ4 compression, the ClickHouse server will return 
-[individually compressed `RecordBatch` messages][arrow-ipc-compression] rather than use its own LZ4 compression framing.
-Thus, we need to transitively enable the `lz4` feature of the Arrow crates so that they can decompress the message frames.
-
-If the `lz4` feature of this crate is not enabled but [compression is enabled in the ClickHouse client][clickhouse-rs-compression],
-compression will be automatically disabled for a given Arrow query or insert by this crate and a `DEBUG` message will be 
-logged. This prevents an error from occurring at runtime.
-
-This does not affect Zstd compression because that is done at the HTTP transport level, 
-which is handled transparently by the `clickhouse` crate.
-
-[arrow-ipc-compression]: https://arrow.apache.org/docs/format/Columnar.html#compression
-[clickhouse-rs-compression]: https://docs.rs/clickhouse/latest/clickhouse/struct.Client.html#method.with_compression
-
 ## Why a Separate Crate?
 
 At the time of the creation of this crate, the `arrow` family of crates has an unconventionally fast release cadence, 

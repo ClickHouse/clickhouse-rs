@@ -64,16 +64,6 @@ impl Compression {
         Compression::Zstd(::zstd::DEFAULT_COMPRESSION_LEVEL)
     }
 
-    /// Returns `true` if `self` is `Lz4` or `Lz4Hc`
-    pub fn is_lz4(&self) -> bool {
-        match self {
-            #[cfg(feature = "lz4")]
-            #[expect(deprecated)]
-            Self::Lz4 | Self::Lz4Hc(_) => true,
-            _ => false,
-        }
-    }
-
     pub(crate) fn is_enabled(&self) -> bool {
         *self != Compression::None
     }
