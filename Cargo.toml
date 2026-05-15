@@ -100,11 +100,6 @@ test-util = ["hyper/server"]
 inserter = ["dep:quanta"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
-# Note: weak features may cause `arrow-ipc` to appear in your `Cargo.lock` even when not enabled:
-# https://github.com/rust-lang/cargo/issues/10801
-# Tools that generate alerts for dependencies (such as `cargo-geiger`) may trigger false-positives because of this.
-# This does not necessarily mean that it's being compiled or included in the final binary;
-# you can verify this yourself by running a clean build.
 lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
 zstd = ["dep:zstd", "dep:cityhash-rs"]
 chrono = ["dep:chrono"]
