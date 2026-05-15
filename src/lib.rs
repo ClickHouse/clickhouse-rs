@@ -18,8 +18,6 @@ use std::collections::HashSet;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
-#[cfg(feature = "arrow")]
-pub mod arrow;
 pub mod error;
 pub mod insert;
 pub mod insert_formatted;
@@ -703,6 +701,8 @@ pub mod _priv {
     pub fn row_insert_metadata_query(raw_table: &str) -> String {
         format!("DESCRIBE TABLE {raw_table}")
     }
+
+    pub use crate::sql::escape::identifier as sql_escape_identifier;
 }
 
 #[cfg(test)]

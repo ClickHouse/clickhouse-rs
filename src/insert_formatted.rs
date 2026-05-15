@@ -546,9 +546,12 @@ impl BufInsertFormatted {
         self.buffer.capacity()
     }
 
-    #[cfg(feature = "arrow")] // Not used otherwise but go ahead and use this if you need it.
+    /// Return the set capacity of the buffer.
+    ///
+    /// The current capacity may be larger than this if a call to [`Self::write_buffered()`]
+    /// caused the buffer to expand.
     #[inline(always)]
-    pub(crate) fn nominal_capacity(&self) -> usize {
+    pub fn nominal_capacity(&self) -> usize {
         self.nominal_capacity
     }
 
@@ -569,7 +572,8 @@ impl BufInsertFormatted {
         self.insert.set_timeouts(send_timeout, end_timeout);
     }
 
-    pub(crate) fn span(&self) -> &tracing::Span {
+    #[doc(hidden)]
+    pub fn _priv_span(&self) -> &tracing::Span {
         self.insert.span()
     }
 

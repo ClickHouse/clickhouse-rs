@@ -1,8 +1,10 @@
 use crate::get_client;
-use arrow_array::types::Int32Type;
-use arrow_array::{PrimitiveArray, RecordBatch, StringArray, create_array};
-use arrow_schema::{DataType, Field, Schema};
+use arrow::array::types::Int32Type;
+use arrow::array::{PrimitiveArray, RecordBatch, StringArray, create_array};
+use arrow::datatypes::{DataType, Field, Schema};
 use std::sync::Arc;
+
+use clickhouse_ext_arrow::{ArrowClientExt, ArrowQueryExt};
 
 #[tokio::test]
 async fn basic_query() {
@@ -80,7 +82,7 @@ async fn insert() {
         );
     }
 
-    let mut insert = client.insert_arrow("arrow_insert_test", &schema).unwrap();
+    let mut insert = client.insert_arrow("arrow_insert_test").unwrap();
 
     for batch in batches {
         insert.write(&batch).await.unwrap();

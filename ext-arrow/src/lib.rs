@@ -1,69 +1,91 @@
-use crate::Client;
-use crate::cursors::RawCursor;
-use crate::error::Error;
-use crate::insert_formatted::{BufInsertFormatted, InsertFormatted};
-use crate::query::Query;
 use arrow_array::RecordBatch;
 use arrow_buffer::Buffer;
 use arrow_ipc::reader::StreamDecoder;
 use arrow_ipc::writer::StreamWriter;
 use arrow_schema::{Schema, SchemaRef};
+use clickhouse::Client;
+use clickhouse::error::Error;
+use clickhouse::insert_formatted::BufInsertFormatted;
+use clickhouse::query::{BytesCursor, Query};
 use std::io::Write;
+use std::mem;
 use std::num::Saturating;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker, ready};
 use tokio::io::AsyncWrite;
 
-impl Client {
+/// Extension methods for [`clickhouse::Client`] for use with Arrow.
+pub trait ArrowClientExt {
     /// Begin inserting Arrow [`RecordBatch`]es into the target table.
     ///
     /// The request isn't begun until the first batch is written.
-    pub fn insert_arrow(&self, table: &str, schema: &Schema) -> Result<ArrowInsert, Error> {
+    fn insert_arrow(&self, table: &str) -> Result<ArrowInsert, Error>;
+}
+
+impl ArrowClientExt for Client {
+    fn insert_arrow(&self, table: &str) -> Result<ArrowInsert, Error> {
         let mut escaped_table = String::new();
-        crate::sql::escape::identifier(table, &mut escaped_table)
+        clickhouse::_priv::sql_escape_identifier(table, &mut escaped_table)
             .map_err(|e| Error::Other(e.into()))?;
 
+        let insert = self
+            .insert_formatted_with(format!("INSERT INTO {escaped_table} FORMAT ArrowStream"))
+            .buffered();
+
+        tracing::record_all!(insert._priv_span(), db.collection.name = table);
+
         Ok(ArrowInsert {
-            writer: StreamWriter::try_new(
-                InsertWriter {
-                    insert: InsertFormatted::new(
-                        self,
-                        format!("INSERT INTO {escaped_table} FORMAT ArrowStream"),
-                        Some(table),
-                    )
-                    .buffered(),
-                },
-                schema,
-            )?,
+            state: InsertState::NotStarted(insert),
             sent_rows: Saturating(0),
         })
     }
 }
 
-impl Query {
-    /// Executes the query, returning the results in the [Arrow streaming format].
+/// Extension methods for [`clickhouse::query::Query`] for use with Arrow.
+pub trait ArrowQueryExt {
+    /// Executes the query, returning as Arrow [`RecordBatch`]es.
     ///
-    /// [Arrow streaming format]: https://clickhouse.com/docs/interfaces/formats/ArrowStream
-    pub fn fetch_arrow(self) -> Result<ArrowCursor, Error> {
-        let span = self.make_span(Some("ArrowStream"));
+    /// The resultset is streamed in the [`ArrowStream` format](https://clickhouse.com/docs/interfaces/formats/ArrowStream).
+    fn fetch_arrow(self) -> Result<ArrowCursor, Error>;
+}
 
-        let response = self.do_execute(Some("ArrowStream"))?;
+impl ArrowQueryExt for Query {
+    fn fetch_arrow(self) -> Result<ArrowCursor, Error> {
         Ok(ArrowCursor {
-            cursor: RawCursor::new(response),
+            cursor: self.fetch_bytes("ArrowStream")?,
             buffer: Buffer::default(),
             decoder: StreamDecoder::new(),
-            span,
         })
     }
 }
 
 /// Performs an `INSERT` query accepting Arrow [`RecordBatch`]es.
 pub struct ArrowInsert {
-    writer: StreamWriter<InsertWriter>,
+    state: InsertState,
     sent_rows: Saturating<u64>,
 }
 
+enum InsertState {
+    NotStarted(BufInsertFormatted),
+    Started(StreamWriter<InsertWriter>),
+    Finished,
+}
+
 impl ArrowInsert {
+    /// Write the [Arrow Schema message] to the buffer, beginning the `INSERT` request.
+    ///
+    /// This can be used to begin the request eagerly if a [`Schema`] is available before
+    /// the first [`RecordBatch`].
+    ///
+    /// [Arrow Schema message]: https://arrow.apache.org/docs/format/Columnar.html#schema-message
+    pub fn write_schema(&mut self, schema: &Schema) -> Result<(), Error> {
+        if !self.state.is_started() {
+            self.state.start(schema)?;
+        }
+
+        Ok(())
+    }
+
     /// Write an Arrow [`RecordBatch`].
     ///
     /// The batch is encoded to an internal buffer, which is flushed when it becomes full.
@@ -72,11 +94,17 @@ impl ArrowInsert {
     ///
     /// The buffer does not need to be manually flushed.
     pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), Error> {
-        if self.writer.get_ref().should_flush() {
-            self.writer.get_mut().insert.flush().await?;
+        if !self.state.is_started() {
+            self.state.start(batch.schema_ref())?;
         }
 
-        self.writer.write(batch)?;
+        let writer = self.state.writer();
+
+        if writer.get_ref().should_flush() {
+            writer.get_mut().insert.flush().await?;
+        }
+
+        writer.write(batch).map_err(wrap_arrow_err)?;
         self.sent_rows += batch.num_rows() as u64;
 
         Ok(())
@@ -86,19 +114,61 @@ impl ArrowInsert {
     ///
     /// It is not necessary to call this method.
     pub async fn flush(&mut self) -> Result<(), Error> {
-        self.writer.get_mut().insert.flush().await
+        if !self.state.is_started() {
+            return Ok(());
+        }
+
+        self.state.writer().get_mut().insert.flush().await
     }
 
     /// Flush the remaining data and finish the `INSERT` request.
     pub async fn end(self) -> Result<(), Error> {
-        let mut writer = self.writer.into_inner()?;
+        let mut insert = match self.state {
+            InsertState::NotStarted(insert) => insert,
+            InsertState::Started(writer) => writer.into_inner().map_err(wrap_arrow_err)?.insert,
+            InsertState::Finished => return Ok(()),
+        };
 
         tracing::record_all!(
-            writer.insert.span(),
+            insert._priv_span(),
             clickhouse.request.sent_rows = self.sent_rows.0,
         );
 
-        writer.insert.end().await
+        insert.end().await
+    }
+}
+
+impl InsertState {
+    #[inline(always)]
+    fn is_started(&self) -> bool {
+        matches!(self, Self::Started(_))
+    }
+
+    fn start(&mut self, schema: &Schema) -> Result<(), Error> {
+        match mem::replace(self, Self::Finished) {
+            Self::NotStarted(insert) => {
+                *self = Self::Started(
+                    StreamWriter::try_new(InsertWriter { insert }, schema)
+                        .map_err(wrap_arrow_err)?,
+                );
+                Ok(())
+            }
+            Self::Started(writer) => {
+                *self = Self::Started(writer);
+                Ok(())
+            }
+            Self::Finished => Err(Error::Other(
+                "`ArrowInsert` previously returned an error".into(),
+            )),
+        }
+    }
+
+    #[inline]
+    fn writer(&mut self) -> &mut StreamWriter<InsertWriter> {
+        match self {
+            Self::Started(writer) => writer,
+            _ => panic!("BUG: invalid state for `ArrowInsert`"),
+        }
     }
 }
 
@@ -128,6 +198,7 @@ impl Write for InsertWriter {
         Ok(buf.len())
     }
 
+    #[inline(always)]
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
@@ -136,10 +207,9 @@ impl Write for InsertWriter {
 /// A cursor that emits Arrow [`RecordBatch`]es.
 #[must_use = "the query is not sent until the cursor is polled"]
 pub struct ArrowCursor {
-    cursor: RawCursor,
+    cursor: BytesCursor,
     buffer: Buffer,
     decoder: StreamDecoder,
-    span: tracing::Span,
 }
 
 impl ArrowCursor {
@@ -153,7 +223,7 @@ impl ArrowCursor {
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RecordBatch>, Error>> {
-        let _span = self.span.enter();
+        let _span = self.cursor._priv_span().clone().entered();
 
         loop {
             if self.buffer.is_empty() {
@@ -162,13 +232,17 @@ impl ArrowCursor {
                     continue;
                 }
 
-                self.decoder.finish()?;
+                self.decoder.finish().map_err(wrap_arrow_err)?;
 
                 return Poll::Ready(Ok(None));
             }
 
             // Note: some bytes may be left in `buffer` which is why we need to store it
-            if let Some(batch) = self.decoder.decode(&mut self.buffer)? {
+            if let Some(batch) = self
+                .decoder
+                .decode(&mut self.buffer)
+                .map_err(wrap_arrow_err)?
+            {
                 return Poll::Ready(Ok(Some(batch)));
             }
         }
@@ -179,7 +253,7 @@ impl ArrowCursor {
         std::future::poll_fn(|cx| self.poll_next(cx)).await
     }
 
-    /// Collect the full response into a vector of batches.
+    /// Collect the full response into a vector of [`RecordBatch`]es.
     ///
     /// See also [`Self::collect_merged()`].
     pub async fn collect(&mut self) -> Result<Vec<RecordBatch>, Error> {
@@ -204,6 +278,11 @@ impl ArrowCursor {
             return Ok(RecordBatch::new_empty(Schema::empty().into()));
         };
 
-        Ok(arrow_select::concat::concat_batches(&schema, &batches)?)
+        arrow_select::concat::concat_batches(&schema, &batches).map_err(wrap_arrow_err)
     }
+}
+
+#[cold]
+fn wrap_arrow_err(e: arrow_schema::ArrowError) -> Error {
+    Error::Other(e.into())
 }

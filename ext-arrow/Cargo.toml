@@ -1,0 +1,27 @@
+[package]
+name = "clickhouse-ext-arrow"
+version = "0.1.0"
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+lz4 = ["arrow-ipc/lz4", "clickhouse/lz4"]
+zstd = ["arrow-ipc/zstd", "clickhouse/zstd"]
+
+[dependencies]
+arrow-array = { version = "58.2.0" }
+arrow-buffer = { version = "58.2.0" }
+arrow-ipc = { version = "58.2.0" }
+arrow-schema = { version = "58.2.0" }
+arrow-select = { version = "58.2.0" }
+
+tokio = "1"
+tracing = "0.1"
+
+[dependencies.clickhouse]
+version = "0.15"
+path = ".."
