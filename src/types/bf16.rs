@@ -98,7 +98,7 @@ impl BFloat16 {
 
 impl PartialOrd for BFloat16 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.to_f32().partial_cmp(&other.to_f32())
+        bf16::from_bits(self.bits).partial_cmp(&bf16::from_bits(other.bits))
     }
 }
 
