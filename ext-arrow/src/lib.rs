@@ -310,7 +310,10 @@ impl ArrowCursor {
         let batches = self.collect().await?;
 
         let Some(schema) = batches.first().map(|batch| batch.schema()) else {
-            return Ok(RecordBatch::new_empty(Schema::empty().into()));
+            return Ok(RecordBatch::new_empty(
+                // Return the correct schema if we got one, but don't error if we didn't.
+                self.schema().unwrap_or_else(|| Schema::empty().into()),
+            ));
         };
 
         arrow_select::concat::concat_batches(&schema, &batches).map_err(wrap_arrow_err)
