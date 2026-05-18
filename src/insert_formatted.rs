@@ -252,6 +252,18 @@ impl InsertFormatted {
         self
     }
 
+    /// Similar to [`Client::with_product_info()`], but for this `INSERT` statement only.
+    pub fn with_product_info(
+        mut self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        self.state
+            .expect_client_mut()
+            .add_product_info(product_name.into(), product_version.into());
+        self
+    }
+
     pub(crate) fn set_timeouts(
         &mut self,
         send_timeout: Option<Duration>,

@@ -5,7 +5,7 @@ Extension traits for the [official ClickHouse Rust client][clickhouse-rs] adding
 ## `arrow`/`clickhouse` Version Matrix
 
 Use the following table to choose compatible versions of the `clickhouse`, `arrow`, and `clickhouse-ext-arrow` crates
-(using Cargo's [default version requirement syntax][carat-versions]):
+(using Cargo's [default version requirement syntax][caret-versions]):
 
 <!-- Sorting by the `clickhouse` crate version first makes it easier to maintain the table. -->
 
@@ -22,7 +22,7 @@ arrow = "58.3.0"
 clickhouse-ext-arrow = "0.1.0"
 ```
 
-[carat-versions]: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#version-requirement-syntax
+[caret-versions]: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#version-requirement-syntax
 
 ## Why a Separate Crate?
 

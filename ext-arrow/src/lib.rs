@@ -20,6 +20,9 @@ pub trait ArrowClientExt {
     /// Begin inserting Arrow [`RecordBatch`]es into the target table.
     ///
     /// The request isn't begun until the first batch is written.
+    ///
+    /// # Errors
+    /// Any [`ArrowError`][arrow_schema::ArrowError]s are wrapped as [`Error::Other`].
     fn insert_arrow(&self, table: &str) -> Result<ArrowInsert, Error>;
 }
 
@@ -33,6 +36,12 @@ impl ArrowClientExt for Client {
             .insert_formatted_with(format!("INSERT INTO {escaped_table} FORMAT ArrowStream"))
             // Prevent ClickHouse from double-compressing
             .with_setting("output_format_arrow_compression_method", "none")
+            // Add specific product info to let us track Arrow adoption
+            .with_product_info(
+                "clickhouse-ext-arrow",
+                // Don't error if not building under Cargo
+                option_env!("CARGO_PKG_VERSION").unwrap_or("unknown"),
+            )
             .buffered();
 
         tracing::record_all!(insert._priv_span(), db.collection.name = table);
@@ -49,6 +58,9 @@ pub trait ArrowQueryExt {
     /// Executes the query, returning as Arrow [`RecordBatch`]es.
     ///
     /// The resultset is streamed in the [`ArrowStream` format](https://clickhouse.com/docs/interfaces/formats/ArrowStream).
+    ///
+    /// # Errors
+    /// Any [`ArrowError`][arrow_schema::ArrowError]s are wrapped as [`Error::Other`].
     fn fetch_arrow(self) -> Result<ArrowCursor, Error>;
 }
 
@@ -58,6 +70,12 @@ impl ArrowQueryExt for Query {
             cursor: self
                 // Prevent ClickHouse from double-compressing
                 .with_setting("output_format_arrow_compression_method", "none")
+                // Add specific product info to let us track Arrow adoption
+                .with_product_info(
+                    "clickhouse-ext-arrow",
+                    // Don't error if not building under Cargo
+                    option_env!("CARGO_PKG_VERSION").unwrap_or("unknown"),
+                )
                 .fetch_bytes("ArrowStream")?,
             buffer: Buffer::default(),
             decoder: StreamDecoder::new(),
@@ -66,6 +84,9 @@ impl ArrowQueryExt for Query {
 }
 
 /// Performs an `INSERT` query accepting Arrow [`RecordBatch`]es.
+///
+/// # Errors
+/// Any [`ArrowError`][arrow_schema::ArrowError]s are wrapped as [`Error::Other`].
 pub struct ArrowInsert {
     state: InsertState,
     sent_rows: Saturating<u64>,
@@ -211,6 +232,9 @@ impl Write for InsertWriter {
 }
 
 /// A cursor that emits Arrow [`RecordBatch`]es.
+///
+/// # Errors
+/// Any [`ArrowError`][arrow_schema::ArrowError]s are wrapped as [`Error::Other`].
 #[must_use = "the query is not sent until the cursor is polled"]
 pub struct ArrowCursor {
     cursor: BytesCursor,
@@ -244,6 +268,11 @@ impl ArrowCursor {
             }
 
             // Note: some bytes may be left in `buffer` which is why we need to store it
+            //
+            // By design, `StreamDecoder::decode()` fully consumes the buffer unless it has a
+            // `RecordBatch` to return (it copies the remaining data to an internal buffer),
+            // so we don't actually need to read more until this is empty:
+            // https://docs.rs/arrow-ipc/latest/arrow_ipc/reader/struct.StreamDecoder.html#method.decode
             if let Some(batch) = self
                 .decoder
                 .decode(&mut self.buffer)

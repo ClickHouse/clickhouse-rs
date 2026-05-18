@@ -393,11 +393,15 @@ impl Client {
         product_name: impl Into<String>,
         product_version: impl Into<String>,
     ) -> Self {
-        self.products_info.push(ProductInfo {
-            name: product_name.into(),
-            version: product_version.into(),
-        });
+        self.add_product_info(product_name.into(), product_version.into());
         self
+    }
+
+    pub(crate) fn add_product_info(&mut self, product_name: String, product_version: String) {
+        self.products_info.push(ProductInfo {
+            name: product_name,
+            version: product_version,
+        });
     }
 
     /// Set a setting on this instance of [`Client`].
