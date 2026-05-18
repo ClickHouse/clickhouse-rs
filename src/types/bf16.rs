@@ -140,11 +140,6 @@ impl From<BFloat16> for f64 {
     }
 }
 
-// Error type, based on TryFromUInt256Error
-#[derive(Debug, thiserror::Error)]
-#[error("`BFloat16` value is not finite and cannot be converted to the target type")]
-pub struct TryFromBFloat16Error(());
-
 impl Serialize for BFloat16 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
