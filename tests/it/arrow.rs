@@ -38,6 +38,16 @@ async fn basic_query() {
     let actual = cursor.collect_merged().await.unwrap();
 
     assert_eq!(actual, expected);
+
+    // An empty result should still include the schema.
+    let mut cursor = client
+        .query("SELECT number, 'test_' || number as name FROM system.numbers LIMIT 0")
+        .fetch_arrow()
+        .unwrap();
+
+    let actual = cursor.collect_merged().await.unwrap();
+
+    assert_eq!(actual, RecordBatch::new_empty(expected.schema()));
 }
 
 #[tokio::test]
