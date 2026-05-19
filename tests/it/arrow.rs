@@ -182,6 +182,8 @@ async fn ext_arrow_adds_user_agent() {
 
     assert_eq!(records.num_rows(), 10);
 
+    crate::flush_query_log(&client).await;
+
     let recorded_user_agents = client
         .query(
             "
