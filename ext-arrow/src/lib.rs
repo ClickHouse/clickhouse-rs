@@ -99,10 +99,11 @@ enum InsertState {
 }
 
 impl ArrowInsert {
-    /// Write the [Arrow Schema message] to the buffer, beginning the `INSERT` request.
+    /// Write the [Arrow Schema message] to the buffer, eagerly beginning the `INSERT` request.
     ///
-    /// This can be used to begin the request eagerly if a [`Schema`] is available before
-    /// the first [`RecordBatch`].
+    /// This is not necessary to call, but can be used to begin the request immediately
+    /// if a [`Schema`] is available before the first [`RecordBatch`] is.
+    /// Otherwise, the [`RecordBatch::schema()`] of the first batch is sent as the Schema message.
     ///
     /// [Arrow Schema message]: https://arrow.apache.org/docs/format/Columnar.html#schema-message
     pub fn write_schema(&mut self, schema: &Schema) -> Result<(), Error> {
@@ -115,11 +116,28 @@ impl ArrowInsert {
 
     /// Write an Arrow [`RecordBatch`].
     ///
-    /// The batch is encoded to an internal buffer, which is flushed when it becomes full.
+    /// The batch is encoded to an internal buffer, which is flushed if it is already full.
+    ///
     /// Because encoding the batch is synchronous, the buffer may need to grow to accommodate the
     /// whole batch if the connection is not ready to accept it.
     ///
-    /// The buffer does not need to be manually flushed.
+    /// The buffer does not need to be manually flushed. However, this method only checks if the
+    /// buffer is full _before_ encoding the `RecordBatch` to avoid waiting after each one is
+    /// written, which would otherwise make this method not cancel-safe.
+    ///
+    /// Thus, it may be desirable to manually flush the buffer after a large `RecordBatch` if
+    /// another isn't going to be written immediately following it.
+    ///
+    /// # Cancel-Safe
+    /// The only time this method may suspend execution is _before_ `batch` is written to the buffer,
+    /// so it is safe to cancel. This returns immediately after `batch` is encoded.
+    ///
+    /// # Note: Schema Must Not Change
+    /// It is a logic error to write a batch with one given schema, and then another batch with
+    /// a schema of a different shape in the same `INSERT`. Server errors or data corruption
+    /// may occur as a result.
+    ///
+    /// For performance reasons, schema equality is not checked between batches.
     pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), Error> {
         if !self.state.is_started() {
             self.state.start(batch.schema_ref())?;
@@ -139,7 +157,13 @@ impl ArrowInsert {
 
     /// Flush the buffered data without ending the request.
     ///
-    /// It is not necessary to call this method.
+    /// The buffer is flushed automatically by [`Self::write()`] if it is already full.
+    ///
+    /// Manual flushing can be used after writing a large [`RecordBatch`] to ensure it is fully
+    /// sent to the server, if another batch isn't going to be written immediately after it.
+    ///
+    /// # Cancel-Safe
+    /// Flushing the buffer is an all-or-nothing operation.
     pub async fn flush(&mut self) -> Result<(), Error> {
         if !self.state.is_started() {
             return Ok(());
@@ -149,6 +173,15 @@ impl ArrowInsert {
     }
 
     /// Flush the remaining data and finish the `INSERT` request.
+    ///
+    /// # Not Cancel-Safe
+    /// If this method is canceled while data is being flushed, any data left in the buffer is lost.
+    ///
+    /// However, because ClickHouse immediately inserts data as it is received,
+    /// explicitly flushing the buffer first (with [`Self::flush()`]) _should_ avoid the risk of
+    /// data loss in cancelling this call.
+    ///
+    /// Then, only the response status and headers of the request would be lost.
     pub async fn end(self) -> Result<(), Error> {
         let mut insert = match self.state {
             InsertState::NotStarted(insert) => insert,
@@ -214,7 +247,7 @@ impl Write for InsertWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut noop_context = Context::from_waker(Waker::noop());
 
-        // `.poll_write()` checks the buffer size and queues a flush if necessary and possible
+        // `.poll_write()` checks the buffer capacity and queues a flush if necessary and possible
         // which hopefully avoids us having too much buffered in memory at once
         if let Poll::Ready(res) = Pin::new(&mut self.insert).poll_write(&mut noop_context, buf) {
             return res;
@@ -235,7 +268,7 @@ impl Write for InsertWriter {
 ///
 /// # Errors
 /// Any [`ArrowError`][arrow_schema::ArrowError]s are wrapped as [`Error::Other`].
-#[must_use = "the query is not sent until the cursor is polled"]
+#[must_use = "the query is not sent until `.next().await`"]
 pub struct ArrowCursor {
     cursor: BytesCursor,
     buffer: Buffer,
@@ -244,6 +277,11 @@ pub struct ArrowCursor {
 
 impl ArrowCursor {
     /// Return the response schema if it is available.
+    ///
+    /// The schema will not be available until the first call to [`Self::next()`] returns.
+    ///
+    /// If the query does not return a result set (i.e. it is not a `SELECT` or similar query),
+    /// this will still be `None` after `Self::next()` returns.
     #[inline(always)]
     pub fn schema(&self) -> Option<SchemaRef> {
         self.decoder.schema()
@@ -291,6 +329,10 @@ impl ArrowCursor {
     /// Collect the full response into a vector of [`RecordBatch`]es.
     ///
     /// See also [`Self::collect_merged()`].
+    ///
+    /// # Note: Not Cancel-Safe
+    /// Cancelling the `Future` created by this method will discard any record batches that have
+    /// already been read.
     pub async fn collect(&mut self) -> Result<Vec<RecordBatch>, Error> {
         let mut out = Vec::new();
 
@@ -306,6 +348,10 @@ impl ArrowCursor {
     /// This generally requires copying the full dataset into a new allocation, so this is
     /// less efficient than [`Self::collect()`] but may be more convenient when a single batch
     /// is preferred/expected.
+    ///
+    /// # Note: Not Cancel-Safe
+    /// Cancelling the `Future` created by this method will discard any record batches that have
+    /// already been read.
     pub async fn collect_merged(&mut self) -> Result<RecordBatch, Error> {
         let batches = self.collect().await?;
 
