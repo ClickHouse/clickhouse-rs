@@ -37,11 +37,7 @@ impl ArrowClientExt for Client {
             // Prevent ClickHouse from double-compressing
             .with_setting("output_format_arrow_compression_method", "none")
             // Add specific product info to let us track Arrow adoption
-            .with_product_info(
-                "clickhouse-ext-arrow",
-                // Don't error if not building under Cargo
-                option_env!("CARGO_PKG_VERSION").unwrap_or("unknown"),
-            )
+            .with_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
             .buffered();
 
         tracing::record_all!(insert._priv_span(), db.collection.name = table);
@@ -71,11 +67,7 @@ impl ArrowQueryExt for Query {
                 // Prevent ClickHouse from double-compressing
                 .with_setting("output_format_arrow_compression_method", "none")
                 // Add specific product info to let us track Arrow adoption
-                .with_product_info(
-                    "clickhouse-ext-arrow",
-                    // Don't error if not building under Cargo
-                    option_env!("CARGO_PKG_VERSION").unwrap_or("unknown"),
-                )
+                .with_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
                 .fetch_bytes("ArrowStream")?,
             buffer: Buffer::default(),
             decoder: StreamDecoder::new(),
@@ -369,4 +361,17 @@ impl ArrowCursor {
 #[cold]
 fn wrap_arrow_err(e: arrow_schema::ArrowError) -> Error {
     Error::Other(e.into())
+}
+
+#[doc(hidden)]
+pub mod _priv {
+    //noinspection RsReplaceMatchExpr
+    pub const CARGO_PKG_VERSION: &str = const {
+        // Don't error if not building under Cargo
+        // FIXME: `Option::unwrap_or()` is unstable in `const`
+        match option_env!("CARGO_PKG_VERSION") {
+            Some(version) => version,
+            None => "unknown",
+        }
+    };
 }

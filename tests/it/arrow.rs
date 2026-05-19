@@ -2,9 +2,13 @@ use crate::get_client;
 use arrow::array::types::Int32Type;
 use arrow::array::{PrimitiveArray, RecordBatch, StringArray, create_array};
 use arrow::datatypes::{DataType, Field, Schema};
+use std::env::consts::OS;
 use std::sync::Arc;
 
+use clickhouse_ext_arrow::_priv::CARGO_PKG_VERSION as ARROW_EXT_VER;
 use clickhouse_ext_arrow::{ArrowClientExt, ArrowQueryExt};
+
+use crate::user_agent::{PKG_VER, RUST_VER};
 
 #[tokio::test]
 async fn basic_query() {
@@ -144,9 +148,62 @@ async fn insert() {
 async fn query_empty_response() {
     let client = get_client();
 
+    // Don't error if the response doesn't return anything
     let mut cursor = client.query("SYSTEM FLUSH LOGS").fetch_arrow().unwrap();
 
     let batch = cursor.next().await.unwrap();
     assert_eq!(batch, None);
     assert_eq!(cursor.schema(), None);
+}
+
+#[tokio::test]
+async fn ext_arrow_adds_user_agent() {
+    let client = prepare_database!();
+
+    client.query("CREATE TABLE arrow_product_info_test(foo Int32, bar String) ENGINE = MergeTree ORDER BY foo")
+        .execute()
+        .await
+        .unwrap();
+
+    client
+        .query(
+            "INSERT INTO arrow_product_info_test(foo, bar)\n\
+         SELECT number, 'test_' || number FROM system.numbers LIMIT 10",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    let query = "SELECT * FROM arrow_product_info_test";
+
+    let mut cursor = client.query(query).fetch_arrow().unwrap();
+
+    let records = cursor.collect_merged().await.unwrap();
+
+    assert_eq!(records.num_rows(), 10);
+
+    let recorded_user_agents = client
+        .query(
+            "
+            SELECT http_user_agent
+            FROM system.query_log
+            WHERE type = 'QueryFinish'
+            AND (
+              query LIKE {query:String}
+            )
+            ORDER BY event_time_microseconds DESC
+            LIMIT 1
+            ",
+        )
+        .param("query", query)
+        .fetch_all::<String>()
+        .await
+        .unwrap();
+
+    let expected_user_agent = format!(
+        "clickhouse-ext-arrow/{ARROW_EXT_VER} clickhouse-rs/{PKG_VER} (lv:rust/{RUST_VER}; os:{OS})"
+    );
+
+    assert_eq!(recorded_user_agents.len(), 1);
+    assert_eq!(recorded_user_agents[0], expected_user_agent);
 }

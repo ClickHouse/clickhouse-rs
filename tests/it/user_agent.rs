@@ -2,9 +2,10 @@ use crate::{SimpleRow, create_simple_table, flush_query_log};
 use clickhouse::Client;
 use clickhouse::sql::Identifier;
 
-const PKG_VER: &str = env!("CARGO_PKG_VERSION");
-const RUST_VER: &str = env!("CARGO_PKG_RUST_VERSION");
-const OS: &str = std::env::consts::OS;
+use std::env::consts::OS;
+
+pub(crate) const PKG_VER: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const RUST_VER: &str = env!("CARGO_PKG_RUST_VERSION");
 
 #[tokio::test]
 async fn default_user_agent() {
