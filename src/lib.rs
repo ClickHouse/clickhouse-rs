@@ -128,7 +128,7 @@ impl std::fmt::Debug for Client {
             .field("authentication", &authentication_redacted)
             .field("compression", &self.compression)
             .field("roles", &self.roles)
-            .field("settings", &self.settings.keys()) // redact values
+            .field("settings", &self.settings)
             .field("headers", &self.headers.keys()) // redact values
             .field("products_info", &self.products_info)
             .field("validation", &self.validation)
@@ -949,9 +949,9 @@ Client {
     roles: {
         \"reader\",
     },
-    settings: [
-        \"async_insert\",
-    ],
+    settings: {
+        \"async_insert\": \"1\",
+    },
     headers: [
         \"X-Trace-Id\",
     ],
