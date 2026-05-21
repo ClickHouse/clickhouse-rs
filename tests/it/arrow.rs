@@ -2,11 +2,12 @@ use crate::get_client;
 use arrow::array::types::Int32Type;
 use arrow::array::{PrimitiveArray, RecordBatch, StringArray, create_array, record_batch};
 use arrow::datatypes::{DataType, Field, Schema};
-use std::env::consts::OS;
-use std::sync::Arc;
-
+use arrow_schema::ArrowError;
+use clickhouse::error::Error;
 use clickhouse_ext_arrow::_priv::CARGO_PKG_VERSION as ARROW_EXT_VER;
 use clickhouse_ext_arrow::{ArrowClientExt, ArrowQueryExt};
+use std::env::consts::OS;
+use std::sync::Arc;
 
 use crate::user_agent::{PKG_VER, RUST_VER};
 
@@ -238,5 +239,30 @@ async fn schema_mismatch_throws_error() {
     assert!(
         err.contains("alpha"),
         "expected error to mention column name, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn query_non_utf8() {
+    let client = get_client();
+
+    let mut cursor = client
+        .query("SELECT 'invalid UTF-8: \\xC0\\xC1' AS test_text")
+        .fetch_arrow()
+        .unwrap();
+
+    let err = cursor.collect_merged().await.unwrap_err();
+
+    let Error::Other(e) = err else {
+        panic!("unexpected error kind: {err:?}");
+    };
+
+    let e = e
+        .downcast::<ArrowError>()
+        .expect("unexpected Other error type");
+
+    assert!(
+        matches!(*e, ArrowError::InvalidArgumentError(_)),
+        "unexpected ArrowError kind: {e:?}"
     );
 }

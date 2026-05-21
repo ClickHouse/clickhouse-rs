@@ -67,6 +67,24 @@ pub trait ArrowQueryExt {
     ///
     /// The resultset is streamed in the [`ArrowStream` format](https://clickhouse.com/docs/interfaces/formats/ArrowStream).
     ///
+    /// # Note: String Encodings
+    /// ClickHouse's [`String`][ch-string] type is _customarily_ UTF-8,
+    /// but is allowed to contain arbitrary binary data.
+    ///
+    /// For convenience, ClickHouse defaults to encoding `String`s as the Arrow `STRING` type
+    /// (assuming they are UTF-8) when returning records in the Arrow format.
+    /// However, for performance reasons, this is not validated on the server-side as of writing.
+    ///
+    /// If ClickHouse returns an Arrow string that contains invalid UTF-8,
+    /// [`ArrowError::ArugmentError`] will be returned when trying to decode the `RecordBatch`
+    /// from [`ArrowCursor::next()`].
+    ///
+    /// To instead have ClickHouse return strings as the Arrow `BINARY` type,
+    /// set [`output_format_arrow_string_as_string=0`], e.g. using [`Query::with_setting()`].
+    ///
+    /// [ch-string]: https://clickhouse.com/docs/sql-reference/data-types/string
+    /// [`output_format_arrow_string_as_string=0`]: https://clickhouse.com/docs/operations/settings/formats#output_format_arrow_string_as_string
+    ///
     /// # Errors
     /// Any [`ArrowError`][arrow_schema::ArrowError]s are wrapped as [`Error::Other`].
     fn fetch_arrow(self) -> Result<ArrowCursor, Error>;
