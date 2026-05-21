@@ -1,6 +1,6 @@
 use crate::get_client;
 use arrow::array::types::Int32Type;
-use arrow::array::{PrimitiveArray, RecordBatch, StringArray, create_array};
+use arrow::array::{PrimitiveArray, RecordBatch, StringArray, create_array, record_batch};
 use arrow::datatypes::{DataType, Field, Schema};
 use std::env::consts::OS;
 use std::sync::Arc;
@@ -208,4 +208,35 @@ async fn ext_arrow_adds_user_agent() {
 
     assert_eq!(recorded_user_agents.len(), 1);
     assert_eq!(recorded_user_agents[0], expected_user_agent);
+}
+
+#[tokio::test]
+async fn schema_mismatch_throws_error() {
+    let client = prepare_database!();
+
+    client.query("CREATE TABLE arrow_schema_mismatch_throws_error(foo Int32, bar String) ENGINE = MergeTree ORDER BY foo")
+        .execute()
+        .await
+        .unwrap();
+
+    let record_batch = record_batch!(
+        ("alpha", UInt64, [0, 1, 2, 3, 4]),
+        ("beta", Float32, [0.0, 1.1, 2.2, 3.3, 4.4])
+    )
+    .unwrap();
+
+    let mut insert = client
+        .insert_arrow("arrow_schema_mismatch_throws_error")
+        .unwrap();
+
+    insert.write(&record_batch).await.unwrap();
+
+    let res = insert.end().await;
+
+    let err = res.unwrap_err().to_string();
+
+    assert!(
+        err.contains("alpha"),
+        "expected error to mention column name, got {err:?}"
+    );
 }

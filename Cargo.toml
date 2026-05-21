@@ -190,6 +190,8 @@ rand = { version = "0.9", features = ["small_rng"] }
 trybuild = "1.0"
 
 arrow = "58.2.0"
+# Required by `record_batch!()`
+arrow-schema = "58.2.0"
 
 # Only used in testing and examples if the `opentelemetry` feature is enabled,
 # but dev-dependencies cannot be optional.

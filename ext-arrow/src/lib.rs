@@ -22,6 +22,24 @@ pub trait ArrowClientExt {
     ///
     /// The request isn't begun until the first batch is written.
     ///
+    /// # Missing or Unknown Columns
+    /// Given the fields from the first record batch, the SQL statement sent to the server will be
+    /// _something_ like this:
+    /// ```sql
+    /// INSERT INTO `{table}`(`{field_1}`, `{field_2}`, ...) FORMAT ArrowStream
+    /// ```
+    ///
+    /// This ensures that the column names in the record stream actually match the target table.
+    /// If any columns in the record stream do not exist in the target table,
+    /// [`Error::BadResponse`] will be returned from [`ArrowInsert::end()`].
+    ///
+    /// Otherwise, the server would simply ignore the unknown fields, which could lead to data loss
+    /// if this is the result of a typo; the intended field in the table would be filled with the
+    /// default value for the type instead.
+    ///
+    /// Missing or omitted fields are filled with the appropriate default value on the server-side.
+    /// This is the default behavior of ClickHouse.
+    ///
     /// # Errors
     /// Any [`ArrowError`][arrow_schema::ArrowError]s are wrapped as [`Error::Other`].
     fn insert_arrow(&self, table: &str) -> Result<ArrowInsert, Error>;
@@ -91,6 +109,9 @@ impl ArrowInsert {
     /// if a [`Schema`] is available before the first [`RecordBatch`] is.
     /// Otherwise, the [`RecordBatch::schema()`] of the first batch is sent as the Schema message.
     ///
+    /// It is a logic error to write the schema message and then send record batches with an
+    /// incompatible schema.
+    ///
     /// [Arrow Schema message]: https://arrow.apache.org/docs/format/Columnar.html#schema-message
     pub fn write_schema(&mut self, schema: &Schema) -> Result<(), Error> {
         if !self.state.is_started() {
@@ -118,7 +139,26 @@ impl ArrowInsert {
     /// The only time this method may suspend execution is _before_ `batch` is written to the buffer,
     /// so it is safe to cancel. This returns immediately after `batch` is encoded.
     ///
-    /// # Note: Schema Must Not Change
+    /// # Missing or Unknown Columns
+    /// Given the fields from the first record batch, the SQL statement sent to the server will be
+    /// _something_ like this:
+    /// ```sql
+    /// INSERT INTO `{table}`(`{field_1}`, `{field_2}`, ...) FORMAT ArrowStream
+    /// ```
+    ///
+    /// This ensures that the column names in the record stream actually match the target table.
+    /// If any columns in the record stream do not exist in the target table,
+    /// [`Error::BadResponse`] will be returned from [`ArrowInsert::end()`].
+    ///
+    /// Otherwise, the server would simply ignore the unknown fields, which could lead to data loss;
+    /// if a mismatch were to occur as the result of a typo, the intended column in the table
+    /// would be filled with the default value for the type instead.
+    ///
+    /// Columns in the table that are missing from the record stream are filled with
+    /// the appropriate default value (based on the type or column definition) on the server-side.
+    /// This is the default expected behavior for ClickHouse.
+    ///
+    /// # Note: Schema Must Not Change During the `INSERT`
     /// It is a logic error to write a batch with one given schema, and then another batch with
     /// a schema of a different shape in the same `INSERT`. Server errors or data corruption
     /// may occur as a result.
@@ -190,6 +230,12 @@ impl InsertState {
     }
 
     fn start(&mut self, schema: &Schema) -> Result<(), Error> {
+        if schema.fields.is_empty() {
+            return Err(Error::InvalidParams(
+                "Arrow schema for insert contains no fields".into(),
+            ));
+        }
+
         match mem::replace(self, Self::Finished) {
             Self::NotStarted { table, client } => {
                 let mut query_string = "INSERT INTO ".to_string();
@@ -197,11 +243,7 @@ impl InsertState {
                 sql_escape_identifier(&table, &mut query_string)
                     .map_err(|e| Error::Other(e.into()))?;
 
-                if schema.fields.is_empty() {
-                    return Err(Error::InvalidParams(
-                        "Arrow schema for `InsertArrow` contains no fields".into(),
-                    ));
-                }
+                query_string.push('(');
 
                 let mut comma = false;
                 for field in &schema.fields {
