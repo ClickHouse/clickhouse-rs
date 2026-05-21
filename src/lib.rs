@@ -109,26 +109,27 @@ impl Default for Client {
     }
 }
 
-/// Manual `Debug` implementation in order to (1) remove http/insert metadata cache and (2) redact
-/// sensitive information.
-///
-/// Redactions:
-/// - `authentication` is variant tag only (`"credentials"` or `"jwt"`)
-/// - `headers` is keys-only
+/// Manual `Debug` implementation to redact sensitive information and omit internal implementation
+/// details from the output.
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // redact auth
         let authentication_redacted = match &self.authentication {
             Authentication::Credentials { .. } => "credentials",
             Authentication::Jwt { .. } => "jwt",
         };
+        // redact user/pass in Url
+        let origin = url::Url::parse(&self.url)
+            .map(|url| url.origin().ascii_serialization())
+            .unwrap_or_else(|_| "<invalid url>".to_owned());
         f.debug_struct("Client")
-            .field("url", &self.url)
+            .field("origin", &origin)
             .field("database", &self.database)
             .field("authentication", &authentication_redacted)
             .field("compression", &self.compression)
             .field("roles", &self.roles)
             .field("settings", &self.settings)
-            .field("headers", &self.headers.keys())
+            .field("headers", &self.headers.keys()) // redact values
             .field("products_info", &self.products_info)
             .field("validation", &self.validation)
             .finish_non_exhaustive()
@@ -939,7 +940,7 @@ mod client_tests {
         let dbg = format!("{client:#?}");
         let expected = "\
 Client {
-    url: \"http://localhost:8123\",
+    origin: \"http://localhost:8123\",
     database: Some(
         \"mydb\",
     ),
@@ -969,7 +970,7 @@ Client {
     #[test]
     fn client_debug_redaction() {
         let client = Client::default()
-            .with_url("http://localhost:8123")
+            .with_url("http://urluser:urlsecret@localhost:8123")
             .with_database("mydb")
             .with_user("zach")
             .with_password("verysecretpassword")
@@ -982,9 +983,15 @@ Client {
             "password leaked: {dbg}"
         );
         assert!(!dbg.contains("zach"), "user leaked: {dbg}");
+        // credentials embedded in the URL are redacted down to the origin
+        assert!(!dbg.contains("urluser"), "url user leaked: {dbg}");
+        assert!(!dbg.contains("urlsecret"), "url password leaked: {dbg}");
         assert!(!dbg.contains("super-secret"), "header value leaked: {dbg}");
         assert!(dbg.contains("\"credentials\""), "missing auth tag: {dbg}");
-        assert!(dbg.contains("http://localhost:8123"), "missing url: {dbg}");
+        assert!(
+            dbg.contains("http://localhost:8123"),
+            "missing origin: {dbg}"
+        );
         assert!(dbg.contains("mydb"), "missing database: {dbg}");
         // header names visible
         assert!(dbg.contains("Authorization"), "missing header name: {dbg}");
@@ -995,6 +1002,29 @@ Client {
         let dbg = format!("{client:?}");
         assert!(!dbg.contains("eyJhbGciOi"), "access token leaked: {dbg}");
         assert!(dbg.contains("\"jwt\""), "missing auth tag: {dbg}");
+    }
+
+    #[test]
+    fn client_debug_invalid_url() {
+        // An empty URL (the default) cannot be parsed; `origin` falls back to a
+        // placeholder rather than echoing the raw string.
+        let dbg = format!("{:?}", Client::default());
+        assert!(
+            dbg.contains("origin: \"<invalid url>\""),
+            "unexpected: {dbg}"
+        );
+
+        // A malformed URL must not be echoed verbatim even on the fallback path,
+        // since it may still contain credentials.
+        let dbg = format!(
+            "{:?}",
+            Client::default().with_url("not a url but has a secret hunter2")
+        );
+        assert!(
+            dbg.contains("origin: \"<invalid url>\""),
+            "unexpected: {dbg}"
+        );
+        assert!(!dbg.contains("hunter2"), "raw url leaked: {dbg}");
     }
 
     #[test]
