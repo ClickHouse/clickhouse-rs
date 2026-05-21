@@ -123,12 +123,12 @@ impl std::fmt::Debug for Client {
             .map(|url| url.origin().ascii_serialization())
             .unwrap_or_else(|_| "<invalid url>".to_owned());
         f.debug_struct("Client")
-            .field("origin", &origin)
+            .field("url", &origin)
             .field("database", &self.database)
             .field("authentication", &authentication_redacted)
             .field("compression", &self.compression)
             .field("roles", &self.roles)
-            .field("settings", &self.settings)
+            .field("settings", &self.settings.keys()) // redact values
             .field("headers", &self.headers.keys()) // redact values
             .field("products_info", &self.products_info)
             .field("validation", &self.validation)
@@ -940,7 +940,7 @@ mod client_tests {
         let dbg = format!("{client:#?}");
         let expected = "\
 Client {
-    origin: \"http://localhost:8123\",
+    url: \"http://localhost:8123\",
     database: Some(
         \"mydb\",
     ),
@@ -949,9 +949,9 @@ Client {
     roles: {
         \"reader\",
     },
-    settings: {
-        \"async_insert\": \"1\",
-    },
+    settings: [
+        \"async_insert\",
+    ],
     headers: [
         \"X-Trace-Id\",
     ],
@@ -1009,10 +1009,7 @@ Client {
         // An empty URL (the default) cannot be parsed; `origin` falls back to a
         // placeholder rather than echoing the raw string.
         let dbg = format!("{:?}", Client::default());
-        assert!(
-            dbg.contains("origin: \"<invalid url>\""),
-            "unexpected: {dbg}"
-        );
+        assert!(dbg.contains("url: \"<invalid url>\""), "unexpected: {dbg}");
 
         // A malformed URL must not be echoed verbatim even on the fallback path,
         // since it may still contain credentials.
@@ -1020,10 +1017,7 @@ Client {
             "{:?}",
             Client::default().with_url("not a url but has a secret hunter2")
         );
-        assert!(
-            dbg.contains("origin: \"<invalid url>\""),
-            "unexpected: {dbg}"
-        );
+        assert!(dbg.contains("url: \"<invalid url>\""), "unexpected: {dbg}");
         assert!(!dbg.contains("hunter2"), "raw url leaked: {dbg}");
     }
 
