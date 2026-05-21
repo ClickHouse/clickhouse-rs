@@ -4,6 +4,7 @@ use arrow_buffer::Buffer;
 use arrow_ipc::reader::StreamDecoder;
 use arrow_ipc::writer::StreamWriter;
 use arrow_schema::{Schema, SchemaRef};
+use clickhouse::_priv::sql_escape_identifier;
 use clickhouse::Client;
 use clickhouse::error::Error;
 use clickhouse::insert_formatted::BufInsertFormatted;
@@ -28,22 +29,15 @@ pub trait ArrowClientExt {
 
 impl ArrowClientExt for Client {
     fn insert_arrow(&self, table: &str) -> Result<ArrowInsert, Error> {
-        let mut escaped_table = String::new();
-        clickhouse::_priv::sql_escape_identifier(table, &mut escaped_table)
+        let mut query_prefix = "INSERT INTO (".to_string();
+        clickhouse::_priv::sql_escape_identifier(table, &mut query_prefix)
             .map_err(|e| Error::Other(e.into()))?;
 
-        let insert = self
-            .insert_formatted_with(format!("INSERT INTO {escaped_table} FORMAT ArrowStream"))
-            // Prevent ClickHouse from double-compressing
-            .with_setting("output_format_arrow_compression_method", "none")
-            // Add specific product info to let us track Arrow adoption
-            .with_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
-            .buffered();
-
-        tracing::record_all!(insert._priv_span(), db.collection.name = table);
-
         Ok(ArrowInsert {
-            state: InsertState::NotStarted(insert),
+            state: InsertState::NotStarted {
+                client: self.clone(),
+                table: table.to_string(),
+            },
             sent_rows: Saturating(0),
         })
     }
@@ -85,7 +79,7 @@ pub struct ArrowInsert {
 }
 
 enum InsertState {
-    NotStarted(BufInsertFormatted),
+    NotStarted { table: String, client: Client },
     Started(StreamWriter<InsertWriter>),
     Finished,
 }
@@ -176,9 +170,8 @@ impl ArrowInsert {
     /// Then, only the response status and headers of the request would be lost.
     pub async fn end(self) -> Result<(), Error> {
         let mut insert = match self.state {
-            InsertState::NotStarted(insert) => insert,
             InsertState::Started(writer) => writer.into_inner().map_err(wrap_arrow_err)?.insert,
-            InsertState::Finished => return Ok(()),
+            InsertState::NotStarted { .. } | InsertState::Finished => return Ok(()),
         };
 
         tracing::record_all!(
@@ -198,7 +191,42 @@ impl InsertState {
 
     fn start(&mut self, schema: &Schema) -> Result<(), Error> {
         match mem::replace(self, Self::Finished) {
-            Self::NotStarted(insert) => {
+            Self::NotStarted { table, client } => {
+                let mut query_string = "INSERT INTO ".to_string();
+
+                sql_escape_identifier(&table, &mut query_string)
+                    .map_err(|e| Error::Other(e.into()))?;
+
+                if schema.fields.is_empty() {
+                    return Err(Error::InvalidParams(
+                        "Arrow schema for `InsertArrow` contains no fields".into(),
+                    ));
+                }
+
+                let mut comma = false;
+                for field in &schema.fields {
+                    if comma {
+                        query_string.push_str(", ");
+                    }
+
+                    sql_escape_identifier(field.name(), &mut query_string)
+                        .map_err(|e| Error::Other(e.into()))?;
+
+                    comma = true;
+                }
+
+                query_string.push_str(") FORMAT ArrowStream");
+
+                let insert = client
+                    .insert_formatted_with(query_string)
+                    // Prevent ClickHouse from double-compressing
+                    .with_setting("output_format_arrow_compression_method", "none")
+                    // Add specific product info to let us track Arrow adoption
+                    .with_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
+                    .buffered();
+
+                tracing::record_all!(insert._priv_span(), db.collection.name = table);
+
                 *self = Self::Started(
                     StreamWriter::try_new(InsertWriter { insert }, schema)
                         .map_err(wrap_arrow_err)?,
