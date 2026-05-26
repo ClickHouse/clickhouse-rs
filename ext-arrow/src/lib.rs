@@ -132,8 +132,8 @@ impl ArrowInsert {
     /// buffer is full _before_ encoding the `RecordBatch` to avoid waiting after each one is
     /// written, which would otherwise make this method not cancel-safe.
     ///
-    /// Thus, it may be desirable to manually flush the buffer after a large `RecordBatch` if
-    /// another isn't going to be written immediately following it.
+    /// Thus, it may be desirable to manually flush the buffer with [`Self::flush()`] after a large
+    /// `RecordBatch` if another isn't going to be written immediately following it.
     ///
     /// # Cancel-Safe
     /// The only time this method may suspend execution is _before_ `batch` is written to the buffer,
@@ -152,7 +152,7 @@ impl ArrowInsert {
     ///
     /// Otherwise, the server would simply ignore the unknown fields, which could lead to data loss;
     /// if a mismatch were to occur as the result of a typo, the intended column in the table
-    /// would be filled with the default value for the type instead.
+    /// would be filled with the default value instead.
     ///
     /// Columns in the table that are missing from the record stream are filled with
     /// the appropriate default value (based on the type or column definition) on the server-side.
@@ -207,7 +207,7 @@ impl ArrowInsert {
     /// explicitly flushing the buffer first (with [`Self::flush()`]) _should_ avoid the risk of
     /// data loss in cancelling this call.
     ///
-    /// Then, only the response status and headers of the request would be lost.
+    /// Then, only the response status and headers would be lost.
     pub async fn end(self) -> Result<(), Error> {
         let mut insert = match self.state {
             InsertState::Started(writer) => writer.into_inner().map_err(wrap_arrow_err)?.insert,
