@@ -301,6 +301,19 @@ impl Query {
         self
     }
 
+    // Used in `clickhouse-ext-arrow` to track Arrow adoption.
+    /// Similar to [`Client::with_product_info()`], but for this query only.
+    pub fn with_product_info(
+        self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: self.client.with_product_info(product_name, product_version),
+            ..self
+        }
+    }
+
     /// Specify server side parameter for query.
     ///
     /// In queries, you can reference params as {name: type} e.g. {val: Int32}.

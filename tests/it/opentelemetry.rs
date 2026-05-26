@@ -139,7 +139,7 @@ async fn error_sets_span_status() {
         .set_default();
 
     let res = get_client()
-        .query("SELECT throwif(true, 'test error'")
+        .query("SELECT throwif(true, 'test error')")
         .execute()
         .await;
 
