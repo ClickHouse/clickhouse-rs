@@ -121,24 +121,6 @@ enum InsertState {
 }
 
 impl ArrowInsert {
-    /// Write the [Arrow Schema message] to the buffer, eagerly beginning the `INSERT` request.
-    ///
-    /// This is not necessary to call, but can be used to begin the request immediately
-    /// if a [`Schema`] is available before the first [`RecordBatch`] is.
-    /// Otherwise, the [`RecordBatch::schema()`] of the first batch is sent as the Schema message.
-    ///
-    /// It is a logic error to write the schema message and then send record batches with an
-    /// incompatible schema.
-    ///
-    /// [Arrow Schema message]: https://arrow.apache.org/docs/format/Columnar.html#schema-message
-    pub fn write_schema(&mut self, schema: &Schema) -> Result<(), Error> {
-        if !self.state.is_started() {
-            self.state.start(schema)?;
-        }
-
-        Ok(())
-    }
-
     /// Write an Arrow [`RecordBatch`].
     ///
     /// The batch is encoded to an internal buffer, which is flushed if it is already full.
