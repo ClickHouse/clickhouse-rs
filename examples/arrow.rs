@@ -13,19 +13,18 @@ use clickhouse_ext_arrow::{ArrowClientExt, ArrowQueryExt};
 //
 // See also: tests/it/arrow.rs
 
-const TABLE_NAME: &str = "chrs_arrow_example";
-
 async fn ddl(client: &Client) -> Result<()> {
     client
-        .query(&format!(
-            "CREATE OR REPLACE TABLE {TABLE_NAME}(bar Int32, baz String) \
-             ENGINE = MergeTree ORDER BY bar"
-        ))
+        .query(
+            "CREATE OR REPLACE TABLE {table:Identifier} (bar Int32, baz String) \
+             ENGINE = MergeTree ORDER BY bar",
+        )
+        .param("table", "chrs_arrow_example")
         .execute()
         .await
 }
 
-// `insert_arrow()` writes one or more `RecordBatch`es to a target table.
+// `insert_arrow()` writes Arrow `RecordBatch`es to a target table.
 //
 // The Arrow field names are used as the target table's column list for the
 // generated `INSERT ... FORMAT ArrowStream` query.
@@ -35,19 +34,29 @@ async fn insert(client: &Client) -> Result<()> {
         Field::new("baz", DataType::Utf8, false),
     ]));
 
-    let batch = RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(Int32Array::from(vec![1, 2, 3])),
-            Arc::new(StringArray::from(vec!["one", "two", "three"])),
-        ],
-    )
-    .unwrap();
+    let batches = [
+        RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int32Array::from(vec![1, 2])),
+                Arc::new(StringArray::from(vec!["one", "two"])),
+            ],
+        )
+        .unwrap(),
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int32Array::from(vec![3])),
+                Arc::new(StringArray::from(vec!["three"])),
+            ],
+        )
+        .unwrap(),
+    ];
 
-    let mut insert = client.insert_arrow(TABLE_NAME)?;
-    insert.write(&batch).await?;
-    // For a multi-batch insert, call `insert.write(&batch).await?` repeatedly,
-    // then `insert.end().await?` to flush and finish the request.
+    let mut insert = client.insert_arrow("chrs_arrow_example")?;
+    for batch in &batches {
+        insert.write(batch).await?;
+    }
     insert.end().await?;
 
     Ok(())
@@ -56,7 +65,8 @@ async fn insert(client: &Client) -> Result<()> {
 // `fetch_arrow()` streams the response as a sequence of Arrow `RecordBatch`es.
 async fn select(client: &Client) -> Result<()> {
     let mut cursor = client
-        .query(&format!("SELECT bar, baz FROM {TABLE_NAME} ORDER BY bar"))
+        .query("SELECT bar, baz FROM {table:Identifier} ORDER BY bar")
+        .param("table", "chrs_arrow_example")
         .fetch_arrow()?;
 
     while let Some(batch) = cursor.next().await? {
@@ -71,7 +81,8 @@ async fn select(client: &Client) -> Result<()> {
 // above when you want to process batches as they arrive instead.
 async fn select_merged(client: &Client) -> Result<()> {
     let batch = client
-        .query(&format!("SELECT bar, baz FROM {TABLE_NAME} ORDER BY bar"))
+        .query("SELECT bar, baz FROM {table:Identifier} ORDER BY bar")
+        .param("table", "chrs_arrow_example")
         .fetch_arrow()?
         .collect_merged()
         .await?;

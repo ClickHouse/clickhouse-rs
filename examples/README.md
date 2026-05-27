@@ -22,10 +22,10 @@ If something is missing, or you found a mistake in one of these examples, please
 - [data_types_derive_containers.rs](data_types_derive_containers.rs) - deriving container-like (Array, Tuple, Map, Nested, Geo) ClickHouse data types in a struct.
 - [data_types_variant.rs](data_types_variant.rs) - working with the [Variant data type](https://clickhouse.com/docs/en/sql-reference/data-types/variant).
 - [data_types_new_json.rs](data_types_new_json.rs) - working with the [new JSON data type](https://clickhouse.com/docs/en/sql-reference/data-types/newjson) as a String.
-- [arrow.rs](arrow.rs) - reading and writing [Apache Arrow](https://arrow.apache.org/) `RecordBatch`es via the [`clickhouse-ext-arrow`](../ext-arrow) crate.
 
 ### Special cases
 
+- [arrow.rs](arrow.rs) - reading and writing [Apache Arrow](https://arrow.apache.org/) `RecordBatch`es via the [`clickhouse-ext-arrow`](../ext-arrow) crate.
 - [custom_http_client.rs](custom_http_client.rs) - using a custom Hyper client, tweaking its connection pool settings
 - [custom_http_headers.rs](custom_http_headers.rs) - setting additional HTTP headers to the client, or overriding the generated ones
 - [opentelemetry.rs](opentelemetry.rs) - configuring the integration with [`tracing`] and [the OpenTelemetry Rust SDK]
