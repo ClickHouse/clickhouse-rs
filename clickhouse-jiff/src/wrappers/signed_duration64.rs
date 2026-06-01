@@ -22,7 +22,7 @@ pub struct SignedDuration64<const PRECISION: u8>(jiff::SignedDuration);
 pub struct SignedDuration64OutOfRange;
 
 impl fmt::Display for SignedDuration64OutOfRange {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("SignedDuration is out of range, valid values are [-999:59:59.999999999, 999:59:59.999999999].")
     }
 }
@@ -77,7 +77,7 @@ macro_rules! impl_signed_duration64 {
                 impl<'de> Visitor<'de> for TsVisitor {
                     type Value = SignedDuration64<$precision>;
 
-                    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> fmt::Result {
+                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                         formatter.write_str("an i64 representation of a ClickHouse Time64")
                     }
 

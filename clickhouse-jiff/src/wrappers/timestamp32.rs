@@ -16,7 +16,7 @@ pub struct Timestamp32(jiff::Timestamp);
 pub struct Timestamp32OutOfRange;
 
 impl fmt::Display for Timestamp32OutOfRange {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Timestamp is out of range, valid values are [1970-01-01 00:00:00, 2106-02-07 06:28:15].")
     }
 }
@@ -68,7 +68,7 @@ impl<'de> Deserialize<'de> for Timestamp32 {
         impl<'de> Visitor<'de> for TsVisitor {
             type Value = Timestamp32;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a u32 representation of a ClickHouse DateTime")
             }
 

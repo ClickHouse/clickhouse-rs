@@ -22,7 +22,7 @@ pub struct Timestamp64<const PRECISION: u8>(jiff::Timestamp);
 pub struct Timestamp64OutOfRange;
 
 impl fmt::Display for Timestamp64OutOfRange {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // f.write_str("Timestamp is out of range, valid values are [1900-01-01 00:00:00, 2229-12-31 23:59:59.99999999].") // DateTime64(8)
         f.write_str("Timestamp is out of range, valid values are [1900-01-01 00:00:00, 2262-04-11 23:47:16.854775807].")
     }
@@ -78,7 +78,7 @@ macro_rules! impl_timestamp64 {
                 impl<'de> Visitor<'de> for TsVisitor {
                     type Value = Timestamp64<$precision>;
 
-                    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> fmt::Result {
+                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                         formatter.write_str("an i64 representation of a ClickHouse DateTime64")
                     }
 

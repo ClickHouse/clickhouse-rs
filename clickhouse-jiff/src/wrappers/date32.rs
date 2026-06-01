@@ -16,7 +16,7 @@ pub struct Date32(jiff::civil::Date);
 pub struct Date32OutOfRange;
 
 impl fmt::Display for Date32OutOfRange {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Date is out of range, valid values are [1900-01-01, 2299-12-31].")
     }
 }
@@ -66,7 +66,7 @@ impl<'de> Deserialize<'de> for Date32 {
         impl<'de> Visitor<'de> for DateVisitor {
             type Value = Date32;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("an i32 representation of a ClickHouse Date32")
             }
 

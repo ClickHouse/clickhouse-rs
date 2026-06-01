@@ -16,7 +16,7 @@ pub struct SignedDuration32(jiff::SignedDuration);
 pub struct SignedDuration32OutOfRange;
 
 impl fmt::Display for SignedDuration32OutOfRange {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("SignedDuration is out of range, valid values are [-999:59:59, 999:59:59].")
     }
 }
@@ -65,7 +65,7 @@ impl<'de> Deserialize<'de> for SignedDuration32 {
         impl<'de> Visitor<'de> for DurationVisitor {
             type Value = SignedDuration32;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("an i32 representation of a ClickHouse Time")
             }
 
