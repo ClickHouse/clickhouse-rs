@@ -12,7 +12,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [workspace]
-members = ["ext-arrow", "macros", "types"]
+members = ["clickhouse-jiff", "ext-arrow", "macros", "types"]
 # `rust-version`-aware dependency resolution;
 # applies to all workspace members
 resolver = "3"
