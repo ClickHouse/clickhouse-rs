@@ -8,11 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.15.1] - 2026-06-01
+
+### Added
+
+* Introduced support for [Apache Arrow in Rust] via a new extension crate, [`clickhouse-ext-arrow`]. ([#423])
+    * The CHANGELOG for this new crate is tracked in [ext-arrow/CHANGELOG.md](ext-arrow/CHANGELOG.md).
+    * Usage example 
+* Added `BytesCursor::poll_next()` ([#423])
+
 ### Fixed
 
-* `Variant` columns containing NULL values no longer fail with a schema mismatch error. Use `Option<MyEnum>` to deserialize nullable Variant columns. ([#400])
+* `Variant` columns containing NULL values no longer fail with a schema mismatch error. 
+  Use `Option<MyEnum>` to deserialize nullable Variant columns. ([#400])
+* Changed `User-Agent` header generation to use correct format for server-side logging/metrics. ([#428])
+
+[Apache Arrow in Rust]: https://crates.io/crates/arrow
+[`clickhouse-ext-arrow`]: https://crates.io/crates/clickhouse-ext-arrow
 
 [#400]: https://github.com/ClickHouse/clickhouse-rs/pull/400
+[#423]: https://github.com/ClickHouse/clickhouse-rs/pull/423
+[#428]: https://github.com/ClickHouse/clickhouse-rs/pull/428
 
 ## [0.15.0] - 2026-04-03
 
