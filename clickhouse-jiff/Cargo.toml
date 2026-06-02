@@ -12,7 +12,3 @@ rust-version.workspace = true
 [dependencies]
 jiff = { version = "0.2.28", default-features = false }
 serde_core = { version = "1.0.228", default-features = false }
-
-[build-dependencies]
-clickhouse = { version = "0.15.1", path = ".." }
-tokio = "1"
