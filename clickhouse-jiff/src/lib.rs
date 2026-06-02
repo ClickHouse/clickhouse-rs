@@ -27,6 +27,8 @@ driver does not introspect that information.
 
 */
 
+#![forbid(missing_docs, unsafe_code)]
+
 mod wrappers;
 
 pub use self::wrappers::*;

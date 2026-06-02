@@ -1,6 +1,3 @@
-#![forbid(unsafe_code)]
-#![forbid(missing_docs)]
-
 mod date16;
 mod date32;
 mod signed_duration32;
