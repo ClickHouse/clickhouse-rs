@@ -12,5 +12,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial release.
 
-* Added `ArrowClientExt`, implemented for `clickhouse::Client` and providing `insert_arrow()`
+* Added `ArrowClientExt`, implemented for `clickhouse::Client` and providing `insert_arrow()` and `insert_arrow_with()`
 * Added `ArrowQueryExt`, implemented for `clickhouse::query::Query` and providing `fetch_arrow()`
