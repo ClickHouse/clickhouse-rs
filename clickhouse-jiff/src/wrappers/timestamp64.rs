@@ -23,19 +23,40 @@ pub struct Timestamp64OutOfRange;
 
 impl fmt::Display for Timestamp64OutOfRange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // f.write_str("Timestamp is out of range, valid values are [1900-01-01 00:00:00, 2299-12-31 23:59:59.99999999].") // DateTime64(8)
-        f.write_str("Timestamp is out of range, valid values are [1900-01-01 00:00:00, 2262-04-11 23:47:16.854775807].")
+        f.write_str("Timestamp is out of range, valid values are [1900-01-01 00:00:00, 2299-12-31 23:59:59.99999999].")
     }
 }
 
 impl error::Error for Timestamp64OutOfRange {}
 
+/// An error that occurs when [`jiff::Timestamp`]
+/// cannot be represented as a `DateTime64(9)` in ClickHouse.
+#[derive(Debug)]
+pub struct Timestamp64NanosecondsOutOfRange;
+
+impl fmt::Display for Timestamp64NanosecondsOutOfRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Timestamp is out of range, valid values are [1900-01-01 00:00:00, 2262-04-11 23:47:16.854775807].")
+    }
+}
+
+impl error::Error for Timestamp64NanosecondsOutOfRange {}
+
 const FROM: jiff::Timestamp = jiff::Timestamp::constant(-2208988800, 0);
-// const TO: jiff::Timestamp = jiff::Timestamp::constant(10413791999, 999999990); // DateTime64(8)
-const TO: jiff::Timestamp = jiff::Timestamp::constant(9223372036, 854775807);
+const TO: jiff::Timestamp = jiff::Timestamp::constant(10413791999, 999999990); // Datetime64(<= 8)
+const TO_NANOSECONDS: jiff::Timestamp = jiff::Timestamp::constant(9223372036, 854775807); // DateTime64(9)
 
 macro_rules! impl_timestamp64 {
     ($precision:literal, $ser_conv:ident, $de_conv:ident) => {
+        impl_timestamp64!($precision, $ser_conv, $de_conv, upper_range = TO, try_from_error = Timestamp64OutOfRange);
+    };
+    (
+        $precision:literal,
+        $ser_conv:ident,
+        $de_conv:ident,
+        upper_range = $upper_range:ident,
+        try_from_error = $try_from_error:ident
+    ) => {
         impl Timestamp64<$precision> {
             #[doc = concat!("Convert `Timestamp64<", stringify!($precision), ">` to the underlying type.")]
             #[inline]
@@ -45,12 +66,12 @@ macro_rules! impl_timestamp64 {
         }
 
         impl TryFrom<jiff::Timestamp> for Timestamp64<$precision> {
-            type Error = Timestamp64OutOfRange;
+            type Error = $try_from_error;
             fn try_from(value: jiff::Timestamp) -> Result<Self, Self::Error> {
-                if value >= FROM && value <= TO {
+                if value >= FROM && value <= $upper_range {
                     Ok(Self(value))
                 } else {
-                    Err(Timestamp64OutOfRange)
+                    Err($try_from_error)
                 }
             }
         }
@@ -109,4 +130,10 @@ macro_rules! impl_timestamp64 {
 impl_timestamp64!(0, as_second, from_second);
 impl_timestamp64!(3, as_millisecond, from_millisecond);
 impl_timestamp64!(6, as_microsecond, from_microsecond);
-impl_timestamp64!(9, as_nanosecond, from_nanosecond);
+impl_timestamp64!(
+    9,
+    as_nanosecond,
+    from_nanosecond,
+    upper_range = TO_NANOSECONDS,
+    try_from_error = Timestamp64NanosecondsOutOfRange
+);
