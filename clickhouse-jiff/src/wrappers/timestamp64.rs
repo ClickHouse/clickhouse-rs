@@ -88,7 +88,7 @@ macro_rules! impl_timestamp64 {
             where
                 S: Serializer,
             {
-                // `TO` is defined as `from_nanosecond(i64::MAX as i128)`.
+                // `TO_NANOSECONDS` is defined as `from_nanosecond(i64::MAX as i128)`.
                 //
                 // Therefore, it's perfectly fine to cast `as_nanosecond`
                 // to i64.
