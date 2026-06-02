@@ -72,9 +72,9 @@ macro_rules! impl_signed_duration64 {
             where
                 D: serde_core::Deserializer<'de>,
             {
-                struct TsVisitor;
+                struct DurationVisitor;
 
-                impl<'de> Visitor<'de> for TsVisitor {
+                impl<'de> Visitor<'de> for DurationVisitor {
                     type Value = SignedDuration64<$precision>;
 
                     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -90,7 +90,7 @@ macro_rules! impl_signed_duration64 {
                     }
                 }
 
-                deserializer.deserialize_i64(TsVisitor)
+                deserializer.deserialize_i64(DurationVisitor)
             }
         }
     };
