@@ -36,6 +36,14 @@ const TO: jiff::Timestamp = jiff::Timestamp::constant(9223372036, 854775807);
 
 macro_rules! impl_timestamp64 {
     ($precision:literal, $ser_conv:ident, $de_conv:ident) => {
+        impl Timestamp64<$precision> {
+            #[doc = concat!("Convert `Timestamp64<", stringify!($precision), ">` to the underlying type.")]
+            #[inline]
+            pub fn into_inner(self) -> jiff::Timestamp {
+                self.0
+            }
+        }
+
         impl TryFrom<jiff::Timestamp> for Timestamp64<$precision> {
             type Error = Timestamp64OutOfRange;
             fn try_from(value: jiff::Timestamp) -> Result<Self, Self::Error> {

@@ -27,6 +27,14 @@ const ORIGIN: jiff::civil::Date = jiff::civil::Date::constant(1970, 1, 1);
 const FROM: jiff::civil::Date = jiff::civil::Date::constant(1900, 1, 1);
 const TO: jiff::civil::Date = jiff::civil::Date::constant(2299, 12, 31);
 
+impl Date32 {
+    /// Convert `Date32` to the underlying type.
+    #[inline]
+    pub fn into_inner(self) -> jiff::civil::Date {
+        self.0
+    }
+}
+
 impl TryFrom<jiff::civil::Date> for Date32 {
     type Error = Date32OutOfRange;
     fn try_from(value: jiff::civil::Date) -> Result<Self, Self::Error> {

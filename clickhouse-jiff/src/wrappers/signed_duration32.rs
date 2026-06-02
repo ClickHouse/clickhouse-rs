@@ -26,6 +26,14 @@ impl error::Error for SignedDuration32OutOfRange {}
 const FROM: jiff::SignedDuration = jiff::SignedDuration::new(-3599999, 0);
 const TO: jiff::SignedDuration = jiff::SignedDuration::new(3599999, 0);
 
+impl SignedDuration32 {
+    /// Convert `SignedDuration32` to the underlying type.
+    #[inline]
+    pub fn into_inner(self) -> jiff::SignedDuration {
+        self.0
+    }
+}
+
 impl TryFrom<jiff::SignedDuration> for SignedDuration32 {
     type Error = SignedDuration32OutOfRange;
     fn try_from(value: jiff::SignedDuration) -> Result<Self, Self::Error> {

@@ -26,6 +26,14 @@ impl error::Error for Timestamp32OutOfRange {}
 const FROM: jiff::Timestamp = jiff::Timestamp::UNIX_EPOCH;
 const TO: jiff::Timestamp = jiff::Timestamp::constant(u32::MAX as i64, 0);
 
+impl Timestamp32 {
+    /// Convert `Timestamp32` to the underlying type.
+    #[inline]
+    pub fn into_inner(self) -> jiff::Timestamp {
+        self.0
+    }
+}
+
 impl TryFrom<jiff::Timestamp> for Timestamp32 {
     type Error = Timestamp32OutOfRange;
     fn try_from(value: jiff::Timestamp) -> Result<Self, Self::Error> {

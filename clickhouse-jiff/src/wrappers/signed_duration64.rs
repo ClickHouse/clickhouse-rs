@@ -34,6 +34,14 @@ const TO: jiff::SignedDuration = jiff::SignedDuration::new(3599999, 999999999);
 
 macro_rules! impl_signed_duration64 {
     ($precision:literal, $ser_conv:ident, $de_conv:ident) => {
+        impl SignedDuration64<$precision> {
+            #[doc = concat!("Convert `SignedDuration64<", stringify!($precision), ">` to the underlying type.")]
+            #[inline]
+            pub fn into_inner(self) -> jiff::SignedDuration {
+                self.0
+            }
+        }
+
         impl TryFrom<jiff::SignedDuration> for SignedDuration64<$precision> {
             type Error = SignedDuration64OutOfRange;
             fn try_from(value: jiff::SignedDuration) -> Result<Self, Self::Error> {

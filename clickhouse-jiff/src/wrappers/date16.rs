@@ -26,6 +26,14 @@ impl error::Error for Date16OutOfRange {}
 const FROM: jiff::civil::Date = jiff::civil::Date::constant(1970, 1, 1);
 const TO: jiff::civil::Date = jiff::civil::Date::constant(2149, 6, 6);
 
+impl Date16 {
+    /// Convert `Date16` to the underlying type.
+    #[inline]
+    pub fn into_inner(self) -> jiff::civil::Date {
+        self.0
+    }
+}
+
 impl TryFrom<jiff::civil::Date> for Date16 {
     type Error = Date16OutOfRange;
     fn try_from(value: jiff::civil::Date) -> Result<Self, Self::Error> {
