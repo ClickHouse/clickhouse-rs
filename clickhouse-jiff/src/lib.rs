@@ -1,8 +1,8 @@
 /*!
 
 This crate provides wrappers for various types from [`jiff`]
-that, at the moment, provide implementations of [`serde`]'s
-`Deserialize` and `Serialize` that are compatible with [`clickhouse`].
+that, at the moment, implement [`serde`]'s `Deserialize` and `Serialize`
+in a way that is compatible with [`clickhouse`].
 
 # Available types
 

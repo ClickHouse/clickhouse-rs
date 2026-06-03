@@ -8,10 +8,10 @@ use serde_core::{
 /// that corresponds to `DateTime64` in ClickHouse.
 ///
 /// Supported precision:
-/// * Timestamp64<0> - seconds;
-/// * Timestamp64<3> - milliseconds;
-/// * Timestamp64<6> - microseconds;
-/// * Timestamp64<9> - nanoseconds.
+/// * `Timestamp64<0>` - seconds;
+/// * `Timestamp64<3>` - milliseconds;
+/// * `Timestamp64<6>` - microseconds;
+/// * `Timestamp64<9>` - nanoseconds.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Timestamp64<const PRECISION: u8>(jiff::Timestamp);
