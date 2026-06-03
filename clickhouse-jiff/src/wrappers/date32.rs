@@ -1,6 +1,6 @@
 use core::{error, fmt};
 use serde_core::{
-    de::{Deserialize, Visitor},
+    de::{Deserialize, Deserializer, Visitor},
     ser::{Serialize, Serializer},
 };
 
@@ -67,7 +67,7 @@ impl Serialize for Date32 {
 impl<'de> Deserialize<'de> for Date32 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde_core::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
         struct DateVisitor;
 

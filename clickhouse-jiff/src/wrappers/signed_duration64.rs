@@ -1,6 +1,6 @@
 use core::{error, fmt};
 use serde_core::{
-    de::{Deserialize, Visitor},
+    de::{Deserialize, Deserializer, Visitor},
     ser::{Serialize, Serializer},
 };
 
@@ -78,7 +78,7 @@ macro_rules! impl_signed_duration64 {
         impl<'de> Deserialize<'de> for SignedDuration64<$precision> {
             fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
             where
-                D: serde_core::Deserializer<'de>,
+                D: Deserializer<'de>,
             {
                 struct DurationVisitor;
 
