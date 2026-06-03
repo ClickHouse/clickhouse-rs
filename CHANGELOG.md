@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * Introduced support for [Apache Arrow in Rust] via a new extension crate, [`clickhouse-ext-arrow`]. ([#423])
     * The CHANGELOG for this new crate is tracked in [ext-arrow/CHANGELOG.md](ext-arrow/CHANGELOG.md).
-    * Usage example 
+    * See [examples/arrow.rs](examples/arrow.rs) for usage.
 * Added `BytesCursor::poll_next()` ([#423])
 
 ### Fixed
