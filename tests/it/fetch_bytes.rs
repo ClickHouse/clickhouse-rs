@@ -59,7 +59,17 @@ async fn error() {
 
     let err = bytes_cursor.next().await;
     println!("{err:?}");
-    assert!(matches!(err, Err(Error::BadResponse(_))));
+    // CH 25.x returns a typed exception (Code: 159 / TIMEOUT_EXCEEDED) which
+    // we surface as `Error::ServerError`. Older / proxy responses fall back
+    // to `Error::BadResponse`. Accept either; the important property is that
+    // the error reaches the caller.
+    assert!(
+        matches!(
+            err,
+            Err(Error::ServerError { code: 159, .. }) | Err(Error::BadResponse(_))
+        ),
+        "expected ServerError {{ code: 159, .. }} or BadResponse, got: {err:?}"
+    );
 }
 
 #[tokio::test]
