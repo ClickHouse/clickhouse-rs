@@ -11,6 +11,8 @@ already enforce — call those out only when CI would fail.
 
 ## How to review
 
+- Review effort level: medium — provide a balanced review that surfaces
+  substantive issues without exhaustive nitpicking.
 - Prioritize correctness, public-API design, backwards compatibility, and
   security over stylistic nits.
 - Prefer the smallest change that fully addresses an issue. Apply YAGNI: do not
