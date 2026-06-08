@@ -24,6 +24,15 @@ clickhouse-ext-arrow = "0.1.0"
 
 [caret-versions]: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#version-requirement-syntax
 
+## Usage
+
+See [`examples/arrow.rs`](../examples/arrow.rs) in the parent crate for a runnable example that
+covers both `fetch_arrow()` (`SELECT`) and `insert_arrow()` (`INSERT`). Run it with:
+
+```sh
+cargo run --package clickhouse --example arrow
+```
+
 ## Why a Separate Crate?
 
 At the time of the creation of this crate, the `arrow` family of crates has an unconventionally fast release cadence, 

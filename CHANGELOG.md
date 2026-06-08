@@ -8,11 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.15.1] - 2026-06-01
+
+### Added
+
+* Introduced support for [Apache Arrow in Rust] via a new extension crate, [`clickhouse-ext-arrow`](ext-arrow/README.md). ([#423])
+    * The CHANGELOG for this new crate is tracked in [ext-arrow/CHANGELOG.md](ext-arrow/CHANGELOG.md).
+    * See [examples/arrow.rs](examples/arrow.rs) for usage.
+* Added `BytesCursor::poll_next()` ([#423])
+
 ### Fixed
 
-* `Variant` columns containing NULL values no longer fail with a schema mismatch error. Use `Option<MyEnum>` to deserialize nullable Variant columns. ([#400])
+* `Variant` columns containing NULL values no longer fail with a schema mismatch error. 
+  Use `Option<MyEnum>` to deserialize nullable Variant columns. ([#400])
+* Changed `User-Agent` header generation to use correct format for server-side logging/metrics. ([#428])
+
+[Apache Arrow in Rust]: https://crates.io/crates/arrow
 
 [#400]: https://github.com/ClickHouse/clickhouse-rs/pull/400
+[#423]: https://github.com/ClickHouse/clickhouse-rs/pull/423
+[#428]: https://github.com/ClickHouse/clickhouse-rs/pull/428
 
 ## [0.15.0] - 2026-04-03
 
@@ -603,7 +618,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.3...v0.15.0
 [0.14.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.2...v0.14.3
 [0.14.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.1...v0.14.2

@@ -1,7 +1,8 @@
 [package]
 name = "clickhouse-ext-arrow"
 version = "0.1.0"
-authors.workspace = true
+authors = ["ClickHouse Contributors"]
+description = "Adds support for Apache Arrow to the official ClickHouse client"
 repository.workspace = true
 homepage.workspace = true
 edition.workspace = true

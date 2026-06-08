@@ -43,6 +43,20 @@ pub trait ArrowClientExt {
     /// # Errors
     /// Any [`ArrowError`][arrow_schema::ArrowError]s are wrapped as [`Error::Other`].
     fn insert_arrow(&self, table: &str) -> Result<ArrowInsert, Error>;
+
+    /// Begin inserting Arrow [`RecordBatch`]es into the target table.
+    ///
+    /// The request isn't begun until the first batch is written.
+    ///
+    /// `sql` should be of the form `INSERT INTO [<schema>.]<table>[(<column>, ...)] FORMAT ArrowStream`.
+    ///
+    /// # Note: Missing or Unknown Columns
+    /// Any fields in the record stream which do not match the target table are silently ignored
+    /// by default, which could lead to data loss if this is the result of a typo;
+    /// the intended field in the table would be filled with the default value for the type instead.
+    ///
+    /// This method is intended for advanced usage only.
+    fn insert_arrow_with(&self, sql: &str) -> ArrowInsert;
 }
 
 impl ArrowClientExt for Client {
@@ -52,12 +66,22 @@ impl ArrowClientExt for Client {
             .map_err(|e| Error::Other(e.into()))?;
 
         Ok(ArrowInsert {
-            state: InsertState::NotStarted {
+            state: InsertState::TableName {
                 client: self.clone(),
                 table: table.to_string(),
             },
             sent_rows: Saturating(0),
         })
+    }
+
+    fn insert_arrow_with(&self, sql: &str) -> ArrowInsert {
+        ArrowInsert {
+            state: InsertState::PresetSql {
+                sql: sql.to_string(),
+                client: self.clone(),
+            },
+            sent_rows: Saturating(0),
+        }
     }
 }
 
@@ -115,7 +139,8 @@ pub struct ArrowInsert {
 }
 
 enum InsertState {
-    NotStarted { table: String, client: Client },
+    TableName { table: String, client: Client },
+    PresetSql { sql: String, client: Client },
     Started(StreamWriter<InsertWriter>),
     Finished,
 }
@@ -200,6 +225,8 @@ impl ArrowInsert {
 
     /// Flush the remaining data and finish the `INSERT` request.
     ///
+    /// If no data has been written, no request will be sent.
+    ///
     /// # Not Cancel-Safe
     /// If this method is canceled while data is being flushed, any data left in the buffer is lost.
     ///
@@ -211,7 +238,9 @@ impl ArrowInsert {
     pub async fn end(self) -> Result<(), Error> {
         let mut insert = match self.state {
             InsertState::Started(writer) => writer.into_inner().map_err(wrap_arrow_err)?.insert,
-            InsertState::NotStarted { .. } | InsertState::Finished => return Ok(()),
+            InsertState::TableName { .. }
+            | InsertState::PresetSql { .. }
+            | InsertState::Finished => return Ok(()),
         };
 
         tracing::record_all!(
@@ -237,7 +266,7 @@ impl InsertState {
         }
 
         match mem::replace(self, Self::Finished) {
-            Self::NotStarted { table, client } => {
+            Self::TableName { table, client } => {
                 let mut query_string = "INSERT INTO ".to_string();
 
                 sql_escape_identifier(&table, &mut query_string)
@@ -261,13 +290,24 @@ impl InsertState {
 
                 let insert = client
                     .insert_formatted_with(query_string)
-                    // Prevent ClickHouse from double-compressing
-                    .with_setting("output_format_arrow_compression_method", "none")
                     // Add specific product info to let us track Arrow adoption
                     .with_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
                     .buffered();
 
                 tracing::record_all!(insert._priv_span(), db.collection.name = table);
+
+                *self = Self::Started(
+                    StreamWriter::try_new(InsertWriter { insert }, schema)
+                        .map_err(wrap_arrow_err)?,
+                );
+                Ok(())
+            }
+            Self::PresetSql { sql, client } => {
+                let insert = client
+                    .insert_formatted_with(sql)
+                    // Add specific product info to let us track Arrow adoption
+                    .with_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
+                    .buffered();
 
                 *self = Self::Started(
                     StreamWriter::try_new(InsertWriter { insert }, schema)
