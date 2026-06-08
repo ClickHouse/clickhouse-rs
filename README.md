@@ -510,7 +510,21 @@ Usage of all mentioned data types are covered in the following examples:
     ```
     </details>
 * `Tuple(A, B, ...)` maps to/from `(A, B, ...)` or a newtype around it.
-* `Array(_)` maps to/from any slice, e.g. `Vec<_>`, `&[_]`. Newtypes are also supported.
+* `Array(_)` maps to/from any slice, e.g. `Vec<_>`, `&[_]`, and `UUID` (using `serde::uuid_vec`). Newtypes are also supported. 
+    <details>
+    <summary>Example</summary>
+
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::uuid_vec")]
+        uuids: Vec<uuid::Uuid>,
+    }
+    ```
+    </details>
 * `Map(K, V)` can be deserialized as `HashMap<K, V>` or `Vec<(K, V)>`.
 * `LowCardinality(_)` is supported seamlessly.
 * `Nullable(_)` maps to/from `Option<_>`. For `clickhouse::serde::*` helpers add `::option`.
