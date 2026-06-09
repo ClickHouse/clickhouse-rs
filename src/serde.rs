@@ -44,6 +44,33 @@ macro_rules! option {
 }
 
 /// Ser/de [`std::net::Ipv4Addr`] to/from `IPv4`.
+///
+/// **This module is required for `Ipv4Addr` fields backed by `IPv4` columns.**
+/// `Ipv4Addr`'s default serde implementation produces a 4-element tuple of
+/// bytes in network (big-endian) order, but ClickHouse's RowBinary wire
+/// format for `IPv4` is a little-endian 32-bit integer. Without this module,
+/// schema validation rejects the row with a `SchemaMismatch` error pointing
+/// at the column.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use std::net::Ipv4Addr;
+/// use serde::{Deserialize, Serialize};
+/// use clickhouse::Row;
+///
+/// #[derive(Row, Serialize, Deserialize)]
+/// struct MyRow {
+///     #[serde(with = "clickhouse::serde::ipv4")]
+///     ipv4: Ipv4Addr,
+///     #[serde(with = "clickhouse::serde::ipv4::option")]
+///     ipv4_opt: Option<Ipv4Addr>,
+/// }
+/// ```
+///
+/// `Ipv6Addr` does not need an analogous annotation by default; its
+/// serde representation already matches the `IPv6` wire format. [`ipv6`]
+/// is provided for symmetry and explicit intent.
 pub mod ipv4 {
     use std::net::Ipv4Addr;
 
@@ -67,6 +94,62 @@ pub mod ipv4 {
     {
         let ip: u32 = Deserialize::deserialize(deserializer)?;
         Ok(Ipv4Addr::from(ip))
+    }
+}
+
+/// Ser/de [`std::net::Ipv6Addr`] to/from `IPv6`.
+///
+/// `Ipv6Addr` already round-trips correctly without an annotation in the
+/// current implementation. Its default serde representation is 16 bytes
+/// in network (big-endian) order, which is exactly the RowBinary wire
+/// format for `IPv6`. This module is provided so that users can:
+///
+/// 1. Mirror the [`ipv4`] pattern for visual consistency in row
+///    definitions that mix v4 and v6 columns.
+/// 2. Make the IP-address-byte-order contract explicit at the call site.
+/// 3. Be insulated from any future wire-format change in ClickHouse.
+///
+/// The (de)serialize functions are pass-throughs to `Ipv6Addr`'s default
+/// serde implementation; using or omitting this annotation produces the
+/// same bytes. Prefer using it explicitly for readability.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use std::net::Ipv6Addr;
+/// use serde::{Deserialize, Serialize};
+/// use clickhouse::Row;
+///
+/// #[derive(Row, Serialize, Deserialize)]
+/// struct MyRow {
+///     #[serde(with = "clickhouse::serde::ipv6")]
+///     ipv6: Ipv6Addr,
+///     #[serde(with = "clickhouse::serde::ipv6::option")]
+///     ipv6_opt: Option<Ipv6Addr>,
+/// }
+/// ```
+pub mod ipv6 {
+    use std::net::Ipv6Addr;
+
+    use super::*;
+
+    option!(
+        Ipv6Addr,
+        "Ser/de `Option<Ipv6Addr>` to/from `Nullable(IPv6)`."
+    );
+
+    pub fn serialize<S>(ipv6: &Ipv6Addr, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        ipv6.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Ipv6Addr, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ipv6Addr::deserialize(deserializer)
     }
 }
 
