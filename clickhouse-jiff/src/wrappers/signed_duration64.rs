@@ -29,7 +29,7 @@ impl fmt::Display for SignedDuration64OutOfRange {
 
 impl error::Error for SignedDuration64OutOfRange {}
 
-const FROM: jiff::SignedDuration = jiff::SignedDuration::new(-3599999, 999999999);
+const FROM: jiff::SignedDuration = jiff::SignedDuration::new(-3599999, -999999999);
 const TO: jiff::SignedDuration = jiff::SignedDuration::new(3599999, 999999999);
 
 macro_rules! impl_signed_duration64 {
