@@ -11,7 +11,7 @@ use serde_core::{
 pub struct Timestamp32(jiff::Timestamp);
 
 /// An error that occurs when [`jiff::Timestamp`]
-/// cannot be represented as a `DateTime64` in ClickHouse.
+/// cannot be represented as a `DateTime` in ClickHouse.
 #[derive(Debug)]
 pub struct Timestamp32OutOfRange;
 
