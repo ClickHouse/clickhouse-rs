@@ -96,3 +96,9 @@ impl Debug for MaybeUtf8 {
         }
     }
 }
+
+impl hashbrown::Equivalent<MaybeUtf8> for str {
+    fn equivalent(&self, key: &MaybeUtf8) -> bool {
+        key == self
+    }
+}

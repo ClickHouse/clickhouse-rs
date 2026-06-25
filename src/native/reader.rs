@@ -39,6 +39,12 @@ impl BlockReader {
         let num_columns = self.read_varuint().await?;
         let num_rows = self.read_varuint().await?;
 
+        let num_rows = usize::try_from(num_rows).map_err(|_| {
+            Error::Custom(format!(
+                "number of rows in block is out of range: {num_rows}"
+            ))
+        })?;
+
         if num_columns == 0 {
             return Ok(None);
         }
@@ -52,10 +58,10 @@ impl BlockReader {
             columns.push(self.read_column(num_rows).await?);
         }
 
-        Ok(Some(Block::from_columns(columns)))
+        Ok(Some(Block::from_columns(columns, num_rows)))
     }
 
-    async fn read_column(&mut self, num_rows: u64) -> Result<Column, Error> {
+    async fn read_column(&mut self, num_rows: usize) -> Result<Column, Error> {
         let name = self.read_string().await?;
         let data_type = self.read_string().await?;
 
@@ -75,14 +81,8 @@ impl BlockReader {
         self.buffer.split();
 
         if let Some(type_width) = super::fixed_width(&data_type) {
-            let rows_usize = usize::try_from(num_rows).map_err(|_| {
-                Error::Custom(format!(
-                    "number of rows in column {name:?} is out of range: {num_rows}"
-                ))
-            })?;
-
             let total_bytes = type_width
-                .checked_mul(rows_usize)
+                .checked_mul(num_rows)
                 .ok_or_else(|| Error::Custom(format!("data size of column {name:?} is too large: {num_rows} rows X {type_width} bytes")))?;
 
             self.read_bytes(total_bytes).await?;
@@ -95,9 +95,34 @@ impl BlockReader {
             });
         }
 
-        Err(Error::Custom(
-            "TODO: non-fixed-width column types not yet implemented".into(),
-        ))
+        match data_type {
+            DataTypeNode::String => {
+                let mut offsets = Vec::with_capacity(num_rows);
+
+                for row in 0..num_rows {
+                    offsets.push(self.buffer.marker);
+                    let len = self.read_varuint().await?;
+
+                    let len = usize::try_from(len).map_err(|_| {
+                        Error::Custom(format!(
+                            "string length {len} of row {row} of column {name:?} is out of range"
+                        ))
+                    })?;
+
+                    self.read_bytes(len).await?;
+                }
+
+                Ok(Column {
+                    name,
+                    data_type,
+                    data: self.buffer.split().freeze(),
+                    layout: Layout::Offsets(offsets.into()),
+                })
+            }
+            _ => Err(Error::Custom(format!(
+                "data type {data_type:?} of column {name:?} not implemented"
+            ))),
+        }
     }
 
     async fn read_string(&mut self) -> Result<MaybeUtf8, Error> {
@@ -111,7 +136,7 @@ impl BlockReader {
 
     async fn read_varuint(&mut self) -> Result<u64, Error> {
         loop {
-            match self.buffer.parse_varuint() {
+            match self.buffer.read_varuint() {
                 ControlFlow::Break(res) => return res,
                 ControlFlow::Continue(_) => {
                     let chunk = self
@@ -167,29 +192,42 @@ impl Buffer {
         Ok(ret)
     }
 
-    fn parse_varuint(&mut self) -> ControlFlow<Result<u64, Error>, usize> {
-        const MAX_LEN: usize = 10;
+    fn read_varuint(&mut self) -> ControlFlow<Result<u64, Error>, usize> {
+        let mut tail = self.tail();
 
-        let mut accumulator = 0u64;
-
-        for (pos, b) in self.tail().iter().enumerate().take(MAX_LEN) {
-            accumulator |= u64::from(b & 0x7F);
-            if b & 0x80 != 0 {
-                accumulator <<= 7;
-            } else {
-                self.marker += pos;
-                return ControlFlow::Break(Ok(accumulator));
+        match parse_varuint(&mut tail) {
+            ControlFlow::Break(Ok(res)) => {
+                self.marker = self.bytes.len() - tail.len();
+                ControlFlow::Break(Ok(res))
             }
+            other => other,
         }
+    }
+}
 
-        if self.tail().len() < MAX_LEN {
-            ControlFlow::Continue(MAX_LEN - self.tail().len())
+pub(super) fn parse_varuint(buf: &mut &[u8]) -> ControlFlow<Result<u64, Error>, usize> {
+    const MAX_LEN: usize = 10;
+
+    let mut accumulator = 0u64;
+
+    let mut iter = buf.iter();
+
+    for b in iter.by_ref().take(MAX_LEN) {
+        accumulator |= u64::from(b & 0x7F);
+        if *b >= 0x80 {
+            accumulator <<= 7;
         } else {
-            // TODO: better errors
-            ControlFlow::Break(Err(Error::Custom(format!(
-                "terminating byte missing in VarUInt encoding: {:?}",
-                self.tail()
-            ))))
+            *buf = iter.as_slice();
+            return ControlFlow::Break(Ok(accumulator));
         }
+    }
+
+    if buf.len() < MAX_LEN {
+        ControlFlow::Continue(MAX_LEN - buf.len())
+    } else {
+        // TODO: better errors
+        ControlFlow::Break(Err(Error::Custom(format!(
+            "terminating byte missing in VarUInt encoding: {buf:?}",
+        ))))
     }
 }
