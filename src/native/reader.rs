@@ -44,7 +44,7 @@ impl BlockReader {
         }
 
         // Remove the block header from the buffer
-        self.buffer.commit();
+        self.buffer.split();
 
         let mut columns = Vec::new();
 
@@ -71,19 +71,42 @@ impl BlockReader {
             ))
         })?;
 
-        let layout = if let Some(type_width) = super::fixed_width(&data_type) {
-            Layout::Fixed { type_width }
-        } else if let DataTypeNode::LowCardinality(_) = data_type {
-            Layout::LowCardinality(todo!())
-        } else {
-            Layout::Offsets(todo!())
-        };
+        // Split the column header from the data
+        self.buffer.split();
 
-        todo!()
+        if let Some(type_width) = super::fixed_width(&data_type) {
+            let rows_usize = usize::try_from(num_rows).map_err(|_| {
+                Error::Custom(format!(
+                    "number of rows in column {name:?} is out of range: {num_rows}"
+                ))
+            })?;
+
+            let total_bytes = type_width
+                .checked_mul(rows_usize)
+                .ok_or_else(|| Error::Custom(format!("data size of column {name:?} is too large: {num_rows} rows X {type_width} bytes")))?;
+
+            self.read_bytes(total_bytes).await?;
+
+            return Ok(Column {
+                name,
+                data_type,
+                data: self.buffer.split().freeze(),
+                layout: Layout::Fixed { type_width },
+            });
+        }
+
+        Err(Error::Custom(
+            "TODO: non-fixed-width column types not yet implemented".into(),
+        ))
     }
 
     async fn read_string(&mut self) -> Result<MaybeUtf8, Error> {
-        todo!()
+        let len = self.read_varuint().await?;
+
+        let len = usize::try_from(len)
+            .map_err(|_| Error::Custom(format!("string length too large: {len}")))?;
+
+        Ok(self.read_bytes(len).await?.into())
     }
 
     async fn read_varuint(&mut self) -> Result<u64, Error> {
@@ -102,14 +125,29 @@ impl BlockReader {
             }
         }
     }
+
+    async fn read_bytes(&mut self, len: usize) -> Result<&[u8], Error> {
+        while self.buffer.tail().len() < len {
+            let chunk = self
+                .chunks
+                .next()
+                .await
+                .transpose()?
+                .ok_or_else(|| Error::NotEnoughData)?;
+
+            self.buffer.push(chunk);
+        }
+
+        self.buffer.advance(len)
+    }
 }
 
 impl Buffer {
     fn push(&mut self, chunk: Chunk) {
-        self.bytes.extend(chunk.data);
+        self.bytes.extend_from_slice(&chunk.data);
     }
 
-    fn commit(&mut self) -> BytesMut {
+    fn split(&mut self) -> BytesMut {
         let ret = self.bytes.split_to(self.marker);
         self.marker = 0;
         ret
