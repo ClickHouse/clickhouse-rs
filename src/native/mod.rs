@@ -72,15 +72,24 @@ pub struct Column {
     data_type: DataTypeNode,
     data: Bytes,
     layout: Layout,
+    null_map: Option<Bytes>,
 }
 
 enum Layout {
     /// Fixed layout. Width of each cell depends only on [`DataTypeNode`].
     Fixed { type_width: usize },
-    /// Layout determined by `LowCardinality` metadata.
-    LowCardinality(Arc<LowCardinality>),
     /// Offset of each item in the column data.
     Offsets(Box<[usize]>),
+    /// Layout determined by `LowCardinality` metadata.
+    LowCardinality(Arc<LowCardinality>),
+    FixedArray {
+        type_width: usize,
+        lengths: Box<[usize]>,
+    },
+    Array {
+        lengths: Box<[usize]>,
+        elem_layouts: Box<[Layout]>,
+    },
 }
 
 impl Column {
@@ -112,8 +121,17 @@ impl Column {
             kind: match self.layout {
                 Layout::Fixed { type_width } => IterKind::Fixed(self.data.chunks_exact(type_width)),
                 Layout::Offsets(ref offsets) => IterKind::Offsets(offsets.iter()),
-                _ => todo!("unsupported layout kind"),
+                Layout::FixedArray {
+                    type_width,
+                    ref lengths,
+                } => IterKind::FixedArray {
+                    lengths: lengths.iter(),
+                    type_width,
+                },
+                Layout::Array { .. } => todo!("implement DynamicArray"),
+                Layout::LowCardinality(_) => todo!("implement LowCardinality"),
             },
+            nulls: self.null_map.as_ref().map(|nulls| nulls.iter()),
             column: self,
             ty: PhantomData,
         })
@@ -122,6 +140,7 @@ impl Column {
 
 pub struct ColumnIter<'a, T: 'a> {
     kind: IterKind<'a>,
+    nulls: Option<slice::Iter<'a, u8>>,
     column: &'a Column,
     ty: PhantomData<fn() -> T>,
 }
@@ -129,6 +148,10 @@ pub struct ColumnIter<'a, T: 'a> {
 enum IterKind<'a> {
     Fixed(slice::ChunksExact<'a, u8>),
     Offsets(slice::Iter<'a, usize>),
+    FixedArray {
+        lengths: slice::Iter<'a, usize>,
+        type_width: usize,
+    },
 }
 
 impl<'a, T: 'a> Iterator for ColumnIter<'a, T>
@@ -140,10 +163,27 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.kind {
             IterKind::Fixed(iter) => {
-                Some(T::decode(&self.column.data_type, iter.next()?).map_err(Error::Other))
+                let native_bytes = iter.next()?;
+
+                if let Some(nulls) = &mut self.nulls {
+                    // not-null = 0x0
+                    if *nulls.next()? != 0 {
+                        return Some(T::decode_null(&self.column.data_type).map_err(Error::Other));
+                    }
+                }
+
+                Some(T::decode(&self.column.data_type, native_bytes).map_err(Error::Other))
             }
             IterKind::Offsets(iter) => {
                 let start = *iter.next()?;
+
+                if let Some(nulls) = &mut self.nulls {
+                    // not-null = 0x0
+                    if *nulls.next()? != 0 {
+                        return Some(T::decode_null(&self.column.data_type).map_err(Error::Other));
+                    }
+                }
+
                 let end = iter
                     .as_slice()
                     .first()
@@ -158,6 +198,8 @@ where
         }
     }
 }
+
+pub struct ArrayColumnIter<'i, 'a: 'i, T: 'a> {}
 
 struct LowCardinality {}
 
@@ -197,9 +239,8 @@ fn fixed_width(data_type: &DataTypeNode) -> Option<usize> {
         DataTypeNode::Interval(_) => Some(8),
         DataTypeNode::IPv4 => Some(4),
         DataTypeNode::IPv6 => Some(8),
-        DataTypeNode::Nullable(inner) => fixed_width(inner)
-            // Nullable adds one byte per element
-            .and_then(|size| size.checked_add(1)),
+        // Nullable needs to be handled specially
+        DataTypeNode::Nullable(_) => None,
         // Type width determined by metadata that comes before column data.
         DataTypeNode::LowCardinality(_) => None,
         DataTypeNode::Array(_) => None,

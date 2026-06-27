@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::native::string::MaybeUtf8;
-use crate::native::{Block, Column, Layout};
+use crate::native::{Block, Column, Layout, fixed_width};
 use crate::response::{Chunk, Chunks};
 use bytes::{Bytes, BytesMut};
 use clickhouse_types::DataTypeNode;
@@ -80,19 +80,48 @@ impl BlockReader {
         // Split the column header from the data
         self.buffer.split();
 
-        if let Some(type_width) = super::fixed_width(&data_type) {
+        if let DataTypeNode::Nullable(inner) = &data_type {
+            // Read off the null bitmap
+            self.read_bytes(num_rows).await?;
+
+            let null_map = self.buffer.split().freeze();
+
+            let (data, layout) = self.read_column_data(&name, &inner, num_rows).await?;
+
+            Ok(Column {
+                name,
+                data_type,
+                data,
+                layout,
+                null_map: Some(null_map),
+            })
+        } else {
+            let (data, layout) = self.read_column_data(&name, &data_type, num_rows).await?;
+
+            Ok(Column {
+                name,
+                data_type,
+                data,
+                layout,
+                null_map: None,
+            })
+        }
+    }
+
+    async fn read_column_data(
+        &mut self,
+        name: &MaybeUtf8,
+        data_type: &DataTypeNode,
+        num_rows: usize,
+    ) -> Result<(Bytes, Layout), Error> {
+        if let Some(type_width) = fixed_width(data_type) {
             let total_bytes = type_width
                 .checked_mul(num_rows)
                 .ok_or_else(|| Error::Custom(format!("data size of column {name:?} is too large: {num_rows} rows X {type_width} bytes")))?;
 
             self.read_bytes(total_bytes).await?;
 
-            return Ok(Column {
-                name,
-                data_type,
-                data: self.buffer.split().freeze(),
-                layout: Layout::Fixed { type_width },
-            });
+            return Ok((self.buffer.split().freeze(), Layout::Fixed { type_width }));
         }
 
         match data_type {
@@ -112,12 +141,48 @@ impl BlockReader {
                     self.read_bytes(len).await?;
                 }
 
-                Ok(Column {
-                    name,
-                    data_type,
-                    data: self.buffer.split().freeze(),
-                    layout: Layout::Offsets(offsets.into()),
-                })
+                Ok((
+                    self.buffer.split().freeze(),
+                    Layout::Offsets(offsets.into()),
+                ))
+            }
+            DataTypeNode::Array(elem_type) => {
+                let mut lengths = Vec::with_capacity(num_rows);
+                let mut total_len = 0;
+
+                for _ in 0..num_rows {
+                    // Note: cumulative length
+                    let length = u64::from_le_bytes(self.read_bytes(8).await?.try_into().unwrap());
+
+                    let length = usize::try_from(length).map_err(|_| {
+                        Error::Custom(format!("array length out of range: {length}"))
+                    })?;
+
+                    lengths.push(length - total_len);
+                    total_len = length;
+                }
+
+                self.buffer.split();
+
+                if let Some(type_width) = fixed_width(elem_type) {
+                    if let Some(&total_len) = lengths.last() {
+                        let total_bytes = total_len
+                            .checked_mul(type_width)
+                            .ok_or_else(|| Error::Custom(format!("data size of column {name:?} is too large: {num_rows} rows X {type_width} bytes")))?;
+
+                        self.read_bytes(total_bytes).await?;
+                    }
+
+                    return Ok((
+                        self.buffer.split().freeze(),
+                        Layout::FixedArray {
+                            type_width,
+                            lengths: lengths.into(),
+                        },
+                    ));
+                }
+
+                todo!("Arrays of variable-length types")
             }
             _ => Err(Error::Custom(format!(
                 "data type {data_type:?} of column {name:?} not implemented"

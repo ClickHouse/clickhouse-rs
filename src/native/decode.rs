@@ -10,6 +10,12 @@ pub trait Decode<'a>: Sized {
         data_type: &DataTypeNode,
         native_bytes: &'a [u8],
     ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>>;
+
+    fn decode_null(
+        data_type: &DataTypeNode,
+    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        Err(format!("data type {data_type:?} cannot be NULL").into())
+    }
 }
 
 impl<'a> Decode<'a> for u64 {
@@ -41,6 +47,19 @@ impl<'a> Decode<'a> for &'a str {
     }
 }
 
+impl<'a> Decode<'a> for String {
+    fn compatible(data_type: &DataTypeNode) -> bool {
+        <&str as Decode>::compatible(data_type)
+    }
+
+    fn decode(
+        data_type: &DataTypeNode,
+        native_bytes: &'a [u8],
+    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        Ok(<&str as Decode>::decode(data_type, native_bytes)?.into())
+    }
+}
+
 impl<'a> Decode<'a> for &'a [u8] {
     fn compatible(data_type: &DataTypeNode) -> bool {
         matches!(
@@ -56,6 +75,7 @@ impl<'a> Decode<'a> for &'a [u8] {
         let len = if let DataTypeNode::FixedString(len) = *data_type {
             len
         } else {
+            // Read `VarUInt` length prefix for `String`
             let len = match parse_varuint(&mut native_bytes) {
                 ControlFlow::Break(Ok(len)) => len,
                 ControlFlow::Break(Err(e)) => return Err(e.into()),
@@ -82,3 +102,49 @@ impl<'a> Decode<'a> for &'a [u8] {
         Ok(native_bytes)
     }
 }
+
+impl<'a, T: Decode<'a>> Decode<'a> for Option<T> {
+    fn compatible(data_type: &DataTypeNode) -> bool {
+        if let DataTypeNode::Nullable(inner) = data_type {
+            T::compatible(inner)
+        } else {
+            false
+        }
+    }
+
+    fn decode(
+        data_type: &DataTypeNode,
+        native_bytes: &'a [u8],
+    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        let DataTypeNode::Nullable(inner_type) = data_type else {
+            return Err(format!("expected `Nullable(_)`, got {data_type:?}").into());
+        };
+
+        Ok(Some(T::decode(inner_type, native_bytes)?))
+    }
+
+    fn decode_null(
+        _data_type: &DataTypeNode,
+    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        Ok(None)
+    }
+}
+
+// FIXME: need to decide if `Vec<u8>` corresponds to `String` or `Array<UInt8>`
+// impl<'a, T: Decode<'a>> Decode<'a> for Vec<T> {
+//     fn compatible(data_type: &DataTypeNode) -> bool {
+//         if let DataTypeNode::Array(elem_type) = data_type {
+//             T::compatible(elem_type)
+//         } else {
+//             false
+//         }
+//     }
+//
+//     fn decode(data_type: &DataTypeNode, native_bytes: &'a [u8]) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+//         let DataTypeNode::Array(elem_type) = data_type else {
+//             return Err(format!("expected array type, got {data_type:?}").into());
+//         };
+//
+//
+//     }
+// }

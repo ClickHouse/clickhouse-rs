@@ -3,7 +3,6 @@ use crate::native::Block;
 use crate::native::reader::BlockReader;
 use crate::response::{Response, ResponseFuture};
 use futures_util::future::BoxFuture;
-use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
