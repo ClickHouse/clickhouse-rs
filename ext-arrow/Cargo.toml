@@ -1,0 +1,26 @@
+[package]
+name = "clickhouse-ext-arrow"
+version = "0.1.0"
+authors = ["ClickHouse Contributors"]
+description = "Adds support for Apache Arrow to the official ClickHouse client"
+repository.workspace = true
+homepage.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# We depend on the constituent crates rather than the `arrow` crate directly so that we only pull in the code
+# we need to compile. The versions here should match the `arrow` crate.
+arrow-array = { version = "58" }
+arrow-buffer = { version = "58" }
+arrow-ipc = { version = "58" }
+arrow-schema = { version = "58" }
+arrow-select = { version = "58" }
+
+tokio = "1"
+tracing = "0.1"
+
+[dependencies.clickhouse]
+version = "0.15.1"
+path = ".."

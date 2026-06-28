@@ -105,7 +105,88 @@ pub mod uuid {
         }
     }
 }
+/// Ser/de `Vec<`[`::uuid::Uuid`]`>` to/from `Array(UUID)`.
+#[cfg(feature = "uuid")]
+pub mod uuid_vec {
+    use super::*;
+    use ::uuid::Uuid;
+    use serde::de::{Error, SeqAccess, Visitor};
+    use serde::ser::SerializeSeq;
+    use std::fmt;
 
+    pub mod option {
+        use super::*;
+        use ::uuid::Uuid;
+
+        pub fn serialize<S>(uuids: &Option<Vec<Uuid>>, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match uuids {
+                Some(uuids) => super::serialize(uuids, serializer),
+                None => serializer.serialize_none(),
+            }
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<Uuid>>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Option::<Vec<Uuid>>::deserialize(deserializer)
+        }
+    }
+
+    pub fn serialize<S>(uuids: &[Uuid], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let human_readable = serializer.is_human_readable();
+        let mut seq = serializer.serialize_seq(Some(uuids.len()))?;
+        if human_readable {
+            for uuid in uuids {
+                seq.serialize_element(&uuid.to_string())?;
+            }
+        } else {
+            for uuid in uuids {
+                seq.serialize_element(&uuid.as_u64_pair())?;
+            }
+        }
+        seq.end()
+    }
+
+    struct UuidVecVisitor {
+        human_readable: bool,
+    }
+
+    impl<'de> Visitor<'de> for UuidVecVisitor {
+        type Value = Vec<Uuid>;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "a sequence of UUID values")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let mut uuids = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            if self.human_readable {
+                while let Some(s) = seq.next_element::<&str>()? {
+                    uuids.push(Uuid::parse_str(s).map_err(A::Error::custom)?);
+                }
+            } else {
+                while let Some((high, low)) = seq.next_element::<(u64, u64)>()? {
+                    uuids.push(Uuid::from_u64_pair(high, low));
+                }
+            }
+            Ok(uuids)
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Uuid>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let human_readable = deserializer.is_human_readable();
+        deserializer.deserialize_seq(UuidVecVisitor { human_readable })
+    }
+}
 #[cfg(feature = "chrono")]
 pub mod chrono {
     use super::*;
