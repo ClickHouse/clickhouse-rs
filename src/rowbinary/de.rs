@@ -3,8 +3,8 @@ use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
-use crate::types::int256;
 use crate::types::bf16;
+use crate::types::int256;
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
@@ -307,7 +307,10 @@ where
             (bf16::MODULE_PATH, bf16::BYTE_LEN),
         ];
 
-        match FIXED_BYTES.iter().find(|(prefix, _)| name.starts_with(prefix)) {
+        match FIXED_BYTES
+            .iter()
+            .find(|(prefix, _)| name.starts_with(prefix))
+        {
             Some(&(_, len)) => {
                 self.validator.validate(SerdeType::Bytes(len))?;
                 let slice = self.read_slice(len)?;

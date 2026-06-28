@@ -246,6 +246,7 @@ pub(crate) mod decimals {
     pub(crate) type Decimal128 = FixedPoint<i128, U12>; // Decimal(38, 12) = Decimal128(12)
 }
 
+mod bfloat16;
 mod chrono;
 mod cloud_jwt;
 mod compression;
@@ -275,7 +276,6 @@ mod time;
 mod user_agent;
 mod uuid;
 mod variant;
-mod bfloat16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TestEnv {

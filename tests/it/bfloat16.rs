@@ -8,7 +8,7 @@ async fn bfloat16() {
 
     #[derive(Debug, PartialEq, Serialize, Deserialize, Row, Clone)]
     struct MyRow {
-        val:     BFloat16,
+        val: BFloat16,
         val_opt: Option<BFloat16>,
     }
 
@@ -45,7 +45,7 @@ async fn bfloat16() {
     let original_rows = values
         .into_iter()
         .map(|v| MyRow {
-            val:     BFloat16::from_f32(v),
+            val: BFloat16::from_f32(v),
             val_opt: Some(BFloat16::from_f32(v)),
         })
         .collect::<Vec<_>>();
@@ -86,7 +86,10 @@ async fn bfloat16() {
     let null_val = BFloat16::from_f32(42.0);
     let mut insert = client.insert::<MyRow>("test").await.unwrap();
     insert
-        .write(&MyRow { val: null_val, val_opt: None })
+        .write(&MyRow {
+            val: null_val,
+            val_opt: None,
+        })
         .await
         .unwrap();
     insert.end().await.unwrap();

@@ -68,7 +68,9 @@ impl BFloat16 {
     }
 
     pub fn from_f32(val: f32) -> Self {
-        Self { bits: bf16::from_f32(val).to_bits() }
+        Self {
+            bits: bf16::from_f32(val).to_bits(),
+        }
     }
 
     pub fn to_f32(self) -> f32 {
@@ -76,7 +78,9 @@ impl BFloat16 {
     }
 
     pub fn from_f64(val: f64) -> Self {
-        Self { bits: bf16::from_f64(val).to_bits() }
+        Self {
+            bits: bf16::from_f64(val).to_bits(),
+        }
     }
 
     pub fn to_f64(self) -> f64 {
@@ -145,10 +149,8 @@ impl Serialize for BFloat16 {
     where
         S: Serializer,
     {
-        serializer.serialize_newtype_struct(
-            Self::SERDE_NAME,
-            &SerializeBytes2(&self.bits.to_le_bytes()),
-        )
+        serializer
+            .serialize_newtype_struct(Self::SERDE_NAME, &SerializeBytes2(&self.bits.to_le_bytes()))
     }
 }
 
@@ -158,7 +160,9 @@ impl<'de> Deserialize<'de> for BFloat16 {
         D: Deserializer<'de>,
     {
         let bytes = deserializer.deserialize_newtype_struct(Self::SERDE_NAME, VisitBytes2)?;
-        Ok(Self { bits: u16::from_le_bytes(bytes) })
+        Ok(Self {
+            bits: u16::from_le_bytes(bytes),
+        })
     }
 }
 
@@ -182,9 +186,8 @@ impl<'de> serde::de::Visitor<'de> for VisitBytes2 {
     where
         E: serde::de::Error,
     {
-        v.try_into().map_err(|_| {
-            serde::de::Error::custom(format!("expected 2 bytes, got {}", v.len()))
-        })
+        v.try_into()
+            .map_err(|_| serde::de::Error::custom(format!("expected 2 bytes, got {}", v.len())))
     }
 }
 
