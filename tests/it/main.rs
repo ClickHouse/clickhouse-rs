@@ -247,6 +247,7 @@ pub(crate) mod decimals {
 }
 
 mod arrow;
+mod bfloat16;
 mod chrono;
 mod cloud_jwt;
 mod compression;
