@@ -151,7 +151,7 @@ impl BlockReader {
                 let mut total_len = 0;
 
                 for _ in 0..num_rows {
-                    // Note: cumulative length
+                    // Note: cumulative length, last value is total number of elements
                     let length = u64::from_le_bytes(self.read_bytes(8).await?.try_into().unwrap());
 
                     let length = usize::try_from(length).map_err(|_| {
@@ -175,9 +175,9 @@ impl BlockReader {
 
                     return Ok((
                         self.buffer.split().freeze(),
-                        Layout::FixedArray {
-                            type_width,
-                            lengths: lengths.into(),
+                        Layout::Array {
+                            elem_layout: Box::new(Layout::Fixed { type_width }),
+                            cumulative_lengths: lengths.into(),
                         },
                     ));
                 }

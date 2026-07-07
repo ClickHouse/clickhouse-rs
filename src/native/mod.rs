@@ -1,16 +1,16 @@
 use crate::error::Error;
-use crate::native::decode::Decode;
+use crate::native::decode::{Decode, ValueReader};
 use crate::native::string::MaybeUtf8;
 use bytes::Bytes;
 use clickhouse_types::DataTypeNode;
 use clickhouse_types::data_types::{DecimalType, EnumType};
-use std::marker::PhantomData;
 use std::ops::Index;
-use std::slice;
 use std::sync::Arc;
 
+use crate::native::array::{ArrayData, ArrayReader};
 use hashbrown::HashMap;
 
+pub(crate) mod array;
 pub(crate) mod decode;
 pub(crate) mod reader;
 pub(crate) mod string;
@@ -82,13 +82,9 @@ enum Layout {
     Offsets(Box<[usize]>),
     /// Layout determined by `LowCardinality` metadata.
     LowCardinality(Arc<LowCardinality>),
-    FixedArray {
-        type_width: usize,
-        lengths: Box<[usize]>,
-    },
     Array {
-        lengths: Box<[usize]>,
-        elem_layouts: Box<[Layout]>,
+        cumulative_lengths: Box<[usize]>,
+        elem_layout: Box<Layout>,
     },
 }
 
@@ -118,40 +114,21 @@ impl Column {
         }
 
         Ok(ColumnIter {
-            kind: match self.layout {
-                Layout::Fixed { type_width } => IterKind::Fixed(self.data.chunks_exact(type_width)),
-                Layout::Offsets(ref offsets) => IterKind::Offsets(offsets.iter()),
-                Layout::FixedArray {
-                    type_width,
-                    ref lengths,
-                } => IterKind::FixedArray {
-                    lengths: lengths.iter(),
-                    type_width,
-                },
-                Layout::Array { .. } => todo!("implement DynamicArray"),
-                Layout::LowCardinality(_) => todo!("implement LowCardinality"),
-            },
-            nulls: self.null_map.as_ref().map(|nulls| nulls.iter()),
             column: self,
-            ty: PhantomData,
+            iter: ArrayData {
+                elem_type: &self.data_type,
+                layout: &self.layout,
+                data: &self.data,
+                nulls: self.null_map.as_deref(),
+            }
+            .into_reader_unchecked(), // we already checked above with a more specific error
         })
     }
 }
 
-pub struct ColumnIter<'a, T: 'a> {
-    kind: IterKind<'a>,
-    nulls: Option<slice::Iter<'a, u8>>,
+pub struct ColumnIter<'a, T> {
     column: &'a Column,
-    ty: PhantomData<fn() -> T>,
-}
-
-enum IterKind<'a> {
-    Fixed(slice::ChunksExact<'a, u8>),
-    Offsets(slice::Iter<'a, usize>),
-    FixedArray {
-        lengths: slice::Iter<'a, usize>,
-        type_width: usize,
-    },
+    iter: ArrayReader<'a, T>,
 }
 
 impl<'a, T: 'a> Iterator for ColumnIter<'a, T>
@@ -161,45 +138,9 @@ where
     type Item = Result<T, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.kind {
-            IterKind::Fixed(iter) => {
-                let native_bytes = iter.next()?;
-
-                if let Some(nulls) = &mut self.nulls {
-                    // not-null = 0x0
-                    if *nulls.next()? != 0 {
-                        return Some(T::decode_null(&self.column.data_type).map_err(Error::Other));
-                    }
-                }
-
-                Some(T::decode(&self.column.data_type, native_bytes).map_err(Error::Other))
-            }
-            IterKind::Offsets(iter) => {
-                let start = *iter.next()?;
-
-                if let Some(nulls) = &mut self.nulls {
-                    // not-null = 0x0
-                    if *nulls.next()? != 0 {
-                        return Some(T::decode_null(&self.column.data_type).map_err(Error::Other));
-                    }
-                }
-
-                let end = iter
-                    .as_slice()
-                    .first()
-                    .copied()
-                    .unwrap_or(self.column.data.len());
-
-                Some(
-                    T::decode(&self.column.data_type, &self.column.data[start..end])
-                        .map_err(Error::Other),
-                )
-            }
-        }
+        self.iter.next()
     }
 }
-
-pub struct ArrayColumnIter<'i, 'a: 'i, T: 'a> {}
 
 struct LowCardinality {}
 

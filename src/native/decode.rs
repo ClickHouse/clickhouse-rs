@@ -1,20 +1,54 @@
+use crate::native::array::ArrayData;
 use crate::native::reader::parse_varuint;
 use clickhouse_types::DataTypeNode;
 use std::error::Error;
 use std::ops::ControlFlow;
 
+pub struct ValueReader<'a> {
+    pub(super) data_type: &'a DataTypeNode,
+    pub(super) native_bytes: &'a [u8],
+}
+
+impl<'a> ValueReader<'a> {
+    pub fn data_type(&self) -> &DataTypeNode {
+        self.data_type
+    }
+
+    pub fn read_bytes_fixed<const LEN: usize>(&mut self) -> Result<&'a [u8; LEN], ValueReadError> {
+        let (ret, rem) =
+            self.native_bytes
+                .split_first_chunk()
+                .ok_or(ValueReadError::InvalidLength {
+                    expected: LEN,
+                    actual: self.native_bytes.len(),
+                })?;
+
+        self.native_bytes = rem;
+
+        Ok(ret)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ValueReadError {
+    #[error("expected {expected} bytes, got {actual}")]
+    InvalidLength { expected: usize, actual: usize },
+}
+
 pub trait Decode<'a>: Sized {
     fn compatible(data_type: &DataTypeNode) -> bool;
 
-    fn decode(
-        data_type: &DataTypeNode,
-        native_bytes: &'a [u8],
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>>;
+    fn decode(reader: &mut ValueReader<'a>)
+    -> Result<Self, Box<dyn Error + Send + Sync + 'static>>;
 
     fn decode_null(
         data_type: &DataTypeNode,
     ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
         Err(format!("data type {data_type:?} cannot be NULL").into())
+    }
+
+    fn decode_array(data: ArrayData<'a>) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        Err(format!("unexpected data type Array({})", data.elem_type).into())
     }
 }
 
@@ -24,12 +58,9 @@ impl<'a> Decode<'a> for u64 {
     }
 
     fn decode(
-        _data_type: &DataTypeNode,
-        native_bytes: &'a [u8],
+        reader: &mut ValueReader<'a>,
     ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-        Ok(u64::from_le_bytes(native_bytes.try_into().map_err(
-            |_| format!("expected 8 bytes, got {}", native_bytes.len()),
-        )?))
+        Ok(u64::from_le_bytes(*reader.read_bytes_fixed()?))
     }
 }
 
@@ -39,11 +70,9 @@ impl<'a> Decode<'a> for &'a str {
     }
 
     fn decode(
-        data_type: &DataTypeNode,
-        native_bytes: &'a [u8],
+        reader: &mut ValueReader<'a>,
     ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-        let s = <&[u8] as Decode>::decode(data_type, native_bytes)?;
-        Ok(str::from_utf8(s)?)
+        Ok(str::from_utf8(<&[u8] as Decode>::decode(reader)?)?)
     }
 }
 
@@ -53,10 +82,9 @@ impl<'a> Decode<'a> for String {
     }
 
     fn decode(
-        data_type: &DataTypeNode,
-        native_bytes: &'a [u8],
+        reader: &mut ValueReader<'a>,
     ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-        Ok(<&str as Decode>::decode(data_type, native_bytes)?.into())
+        Ok(<&str as Decode>::decode(reader)?.into())
     }
 }
 
@@ -69,19 +97,19 @@ impl<'a> Decode<'a> for &'a [u8] {
     }
 
     fn decode(
-        data_type: &DataTypeNode,
-        mut native_bytes: &'a [u8],
+        reader: &mut ValueReader<'a>,
     ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-        let len = if let DataTypeNode::FixedString(len) = *data_type {
+        let len = if let DataTypeNode::FixedString(len) = *reader.data_type {
             len
         } else {
             // Read `VarUInt` length prefix for `String`
-            let len = match parse_varuint(&mut native_bytes) {
+            let len = match parse_varuint(&mut reader.native_bytes) {
                 ControlFlow::Break(Ok(len)) => len,
                 ControlFlow::Break(Err(e)) => return Err(e.into()),
                 ControlFlow::Continue(_) => {
                     return Err(format!(
-                        "missing terminating byte in VarUInt encoding: {native_bytes:?}"
+                        "missing terminating byte in VarUInt encoding: {:?}",
+                        reader.native_bytes
                     )
                     .into());
                 }
@@ -91,15 +119,16 @@ impl<'a> Decode<'a> for &'a [u8] {
                 .map_err(|_| format!("length prefix of String out of range: {len}"))?
         };
 
-        if len != native_bytes.len() {
+        if len != reader.native_bytes.len() {
             return Err(format!(
-                "length of {data_type} does not match remaining length of buffer: {len} vs {}",
-                native_bytes.len()
+                "length of {:?} does not match remaining length of buffer: {len} vs {}",
+                reader.data_type,
+                reader.native_bytes.len()
             )
             .into());
         }
 
-        Ok(native_bytes)
+        Ok(reader.native_bytes)
     }
 }
 
@@ -113,14 +142,16 @@ impl<'a, T: Decode<'a>> Decode<'a> for Option<T> {
     }
 
     fn decode(
-        data_type: &DataTypeNode,
-        native_bytes: &'a [u8],
+        reader: &mut ValueReader<'a>,
     ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-        let DataTypeNode::Nullable(inner_type) = data_type else {
-            return Err(format!("expected `Nullable(_)`, got {data_type:?}").into());
+        let DataTypeNode::Nullable(inner_type) = reader.data_type else {
+            return Err(format!("expected `Nullable(_)`, got {:?}", reader.data_type).into());
         };
 
-        Ok(Some(T::decode(inner_type, native_bytes)?))
+        Ok(Some(T::decode(&mut ValueReader {
+            data_type: inner_type,
+            native_bytes: reader.native_bytes,
+        })?))
     }
 
     fn decode_null(
@@ -131,20 +162,24 @@ impl<'a, T: Decode<'a>> Decode<'a> for Option<T> {
 }
 
 // FIXME: need to decide if `Vec<u8>` corresponds to `String` or `Array<UInt8>`
-// impl<'a, T: Decode<'a>> Decode<'a> for Vec<T> {
-//     fn compatible(data_type: &DataTypeNode) -> bool {
-//         if let DataTypeNode::Array(elem_type) = data_type {
-//             T::compatible(elem_type)
-//         } else {
-//             false
-//         }
-//     }
-//
-//     fn decode(data_type: &DataTypeNode, native_bytes: &'a [u8]) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-//         let DataTypeNode::Array(elem_type) = data_type else {
-//             return Err(format!("expected array type, got {data_type:?}").into());
-//         };
-//
-//
-//     }
-// }
+impl<'a, T: Decode<'a> + 'a> Decode<'a> for Vec<T> {
+    fn compatible(data_type: &DataTypeNode) -> bool {
+        if let DataTypeNode::Array(elem_type) = data_type {
+            T::compatible(elem_type)
+        } else {
+            false
+        }
+    }
+
+    fn decode(
+        reader: &mut ValueReader<'a>,
+    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        Err(format!("expected array type, got {}", reader.data_type).into())
+    }
+
+    fn decode_array(data: ArrayData<'a>) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        data.into_reader::<T>()?
+            .collect::<Result<Vec<T>, crate::Error>>()
+            .map_err(Into::into)
+    }
+}

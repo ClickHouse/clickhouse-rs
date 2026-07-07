@@ -10,7 +10,9 @@ async fn mixed_types() {
             number,
             leftPad(toString(number), number, '.') AS text,
             number % 2 == 0 ?? number : NULL AS nullable_number,
-            number %2 != 0 ?? text : NULL AS nullable_text
+            number %2 != 0 ?? text : NULL AS nullable_text,
+            arrayMap(x -> toUInt64(x), arrayEnumerate(arrayWithConstant(number, toUInt64(0)))) AS number_array
+            -- arrayMap(x -> rightPad(toString(number), number, '-'), number_array) AS text_array
         FROM system.numbers
         LIMIT 10",
         )
@@ -21,7 +23,7 @@ async fn mixed_types() {
 
     assert_eq!(block.num_rows(), 10);
 
-    assert_eq!(block.columns().len(), 4);
+    assert_eq!(block.columns().len(), 5);
 
     assert_eq!(block[0].name(), "number");
 
@@ -70,5 +72,18 @@ async fn mixed_types() {
         } else {
             assert_eq!(opt_text, None);
         }
+    }
+
+    let mut number_array_iter = block["number_array"].iter::<Vec<u64>>().unwrap();
+
+    for (number_array, row) in number_array_iter.by_ref().zip(0u64..10) {
+        let number_array = number_array.unwrap();
+
+        assert_eq!(number_array.len() as u64, row);
+
+        assert!(
+            number_array.iter().copied().eq(0u64..row),
+            "invalid number_array: {number_array:?}"
+        );
     }
 }
