@@ -1,41 +1,28 @@
 use crate::error::Error;
 use crate::native::string::MaybeUtf8;
-use crate::native::{Block, Column, Layout, fixed_width};
-use crate::response::{Chunk, Chunks};
-use bytes::{Bytes, BytesMut};
+use crate::native::{Block, Column, Layout, LayoutKind, fixed_width};
+use crate::response::Chunks;
+use bytes::{Buf, Bytes, BytesMut};
 use clickhouse_types::DataTypeNode;
 use futures_util::StreamExt;
+use std::cmp;
 use std::ops::ControlFlow;
 
 pub(crate) struct BlockReader {
     chunks: Chunks,
-    buffer: Buffer,
-}
-
-struct Buffer {
-    bytes: BytesMut,
-    marker: usize,
+    last_chunk: Bytes,
 }
 
 impl BlockReader {
     pub(crate) fn new(chunks: Chunks) -> Self {
         BlockReader {
             chunks,
-            buffer: Buffer {
-                bytes: BytesMut::new(),
-                marker: 0,
-            },
+            last_chunk: Bytes::new(),
         }
     }
 
     /// **NOT** cancel-safe. Intended to be wrapped in an async task for cancel-safety.
     pub(crate) async fn read_block(&mut self) -> Result<Option<Block>, Error> {
-        if let Some(chunk) = self.chunks.next().await.transpose()? {
-            self.buffer.push(chunk);
-        } else if self.buffer.bytes.is_empty() {
-            return Ok(None);
-        };
-
         let num_columns = self.read_varuint().await?;
         let num_rows = self.read_varuint().await?;
 
@@ -48,9 +35,6 @@ impl BlockReader {
         if num_columns == 0 {
             return Ok(None);
         }
-
-        // Remove the block header from the buffer
-        self.buffer.split();
 
         let mut columns = Vec::new();
 
@@ -77,115 +61,98 @@ impl BlockReader {
             ))
         })?;
 
-        // Split the column header from the data
-        self.buffer.split();
+        let layout = self.read_type_data(&data_type, num_rows).await?;
 
-        if let DataTypeNode::Nullable(inner) = &data_type {
-            // Read off the null bitmap
-            self.read_bytes(num_rows).await?;
-
-            let null_map = self.buffer.split().freeze();
-
-            let (data, layout) = self.read_column_data(&name, &inner, num_rows).await?;
-
-            Ok(Column {
-                name,
-                data_type,
-                data,
-                layout,
-                null_map: Some(null_map),
-            })
-        } else {
-            let (data, layout) = self.read_column_data(&name, &data_type, num_rows).await?;
-
-            Ok(Column {
-                name,
-                data_type,
-                data,
-                layout,
-                null_map: None,
-            })
-        }
+        Ok(Column {
+            name,
+            data_type,
+            layout,
+            num_rows,
+        })
     }
 
-    async fn read_column_data(
+    async fn read_type_data(
         &mut self,
-        name: &MaybeUtf8,
         data_type: &DataTypeNode,
         num_rows: usize,
-    ) -> Result<(Bytes, Layout), Error> {
+    ) -> Result<Layout, Error> {
+        let (data_type, nulls) = if let DataTypeNode::Nullable(inner) = data_type {
+            // Read off the null bitmap
+            (&**inner, Some(self.read_bytes(num_rows).await?))
+        } else {
+            (data_type, None)
+        };
+
         if let Some(type_width) = fixed_width(data_type) {
-            let total_bytes = type_width
-                .checked_mul(num_rows)
-                .ok_or_else(|| Error::Custom(format!("data size of column {name:?} is too large: {num_rows} rows X {type_width} bytes")))?;
+            let total_bytes = type_width.checked_mul(num_rows).ok_or_else(|| {
+                Error::Custom(format!(
+                    "data size is too large: {num_rows} rows X {type_width} bytes"
+                ))
+            })?;
 
-            self.read_bytes(total_bytes).await?;
-
-            return Ok((self.buffer.split().freeze(), Layout::Fixed { type_width }));
+            return Ok(Layout {
+                kind: LayoutKind::Fixed {
+                    type_width,
+                    data: self.read_bytes(total_bytes).await?,
+                },
+                nulls,
+            });
         }
 
         match data_type {
             DataTypeNode::String => {
-                let mut offsets = Vec::with_capacity(num_rows);
+                // Assume default growth strategy is fine
+                let mut data = BytesMut::new();
+                let mut end_offsets = Vec::with_capacity(num_rows);
 
                 for row in 0..num_rows {
-                    offsets.push(self.buffer.marker);
                     let len = self.read_varuint().await?;
 
                     let len = usize::try_from(len).map_err(|_| {
-                        Error::Custom(format!(
-                            "string length {len} of row {row} of column {name:?} is out of range"
-                        ))
+                        Error::Custom(format!("string #{row} length {len} is out of range"))
                     })?;
 
-                    self.read_bytes(len).await?;
+                    self.read_bytes_into(len, &mut data).await?;
+                    end_offsets.push(data.len());
                 }
 
-                Ok((
-                    self.buffer.split().freeze(),
-                    Layout::Offsets(offsets.into()),
-                ))
+                Ok(Layout {
+                    kind: LayoutKind::Variable {
+                        data: data.freeze(),
+                        end_offsets: end_offsets.into(),
+                    },
+                    nulls,
+                })
             }
             DataTypeNode::Array(elem_type) => {
-                let mut lengths = Vec::with_capacity(num_rows);
-                let mut total_len = 0;
+                let mut end_indices = Vec::with_capacity(num_rows);
 
                 for _ in 0..num_rows {
                     // Note: cumulative length, last value is total number of elements
-                    let length = u64::from_le_bytes(self.read_bytes(8).await?.try_into().unwrap());
+                    let length = u64::from_le_bytes(self.read_bytes_fixed().await?);
 
                     let length = usize::try_from(length).map_err(|_| {
                         Error::Custom(format!("array length out of range: {length}"))
                     })?;
 
-                    lengths.push(length - total_len);
-                    total_len = length;
+                    end_indices.push(length);
                 }
 
-                self.buffer.split();
+                let total_len = end_indices.last().copied().unwrap_or(0);
 
-                if let Some(type_width) = fixed_width(elem_type) {
-                    if let Some(&total_len) = lengths.last() {
-                        let total_bytes = total_len
-                            .checked_mul(type_width)
-                            .ok_or_else(|| Error::Custom(format!("data size of column {name:?} is too large: {num_rows} rows X {type_width} bytes")))?;
+                // Recursive `async fn` currently requires boxing
+                let elem_layout = Box::pin(self.read_type_data(elem_type, total_len)).await?;
 
-                        self.read_bytes(total_bytes).await?;
-                    }
-
-                    return Ok((
-                        self.buffer.split().freeze(),
-                        Layout::Array {
-                            elem_layout: Box::new(Layout::Fixed { type_width }),
-                            cumulative_lengths: lengths.into(),
-                        },
-                    ));
-                }
-
-                todo!("Arrays of variable-length types")
+                Ok(Layout {
+                    kind: LayoutKind::Array {
+                        end_indices: end_indices.into(),
+                        elem_layout: Box::new(elem_layout),
+                    },
+                    nulls,
+                })
             }
             _ => Err(Error::Custom(format!(
-                "data type {data_type:?} of column {name:?} not implemented"
+                "data type {data_type:?} not implemented"
             ))),
         }
     }
@@ -200,99 +167,111 @@ impl BlockReader {
     }
 
     async fn read_varuint(&mut self) -> Result<u64, Error> {
+        let mut parser = ParseVarUInt::default();
+
         loop {
-            match self.buffer.read_varuint() {
-                ControlFlow::Break(res) => return res,
-                ControlFlow::Continue(_) => {
-                    let chunk = self
-                        .chunks
-                        .next()
-                        .await
-                        .transpose()?
-                        .ok_or_else(|| Error::NotEnoughData)?;
-                    self.buffer.push(chunk);
-                }
+            if let ControlFlow::Break(val) = parser.feed(&mut self.last_chunk)? {
+                return Ok(val);
             }
+
+            self.read_chunk().await?;
         }
     }
 
-    async fn read_bytes(&mut self, len: usize) -> Result<&[u8], Error> {
-        while self.buffer.tail().len() < len {
-            let chunk = self
-                .chunks
-                .next()
-                .await
-                .transpose()?
-                .ok_or_else(|| Error::NotEnoughData)?;
+    async fn read_bytes(&mut self, len: usize) -> Result<Bytes, Error> {
+        self.read_chunk().await?;
 
-            self.buffer.push(chunk);
+        if self.last_chunk.len() >= len {
+            return Ok(self.last_chunk.split_to(len));
         }
 
-        self.buffer.advance(len)
+        let mut buf = BytesMut::with_capacity(len);
+        self.read_bytes_into(len, &mut buf).await?;
+
+        Ok(buf.freeze())
+    }
+
+    async fn read_bytes_into(
+        &mut self,
+        mut read_len: usize,
+        buf: &mut BytesMut,
+    ) -> Result<(), Error> {
+        while read_len > 0 {
+            self.read_chunk().await?;
+
+            let data = self
+                .last_chunk
+                .split_to(cmp::min(read_len, self.last_chunk.len()));
+            buf.extend_from_slice(&data);
+            read_len -= data.len();
+        }
+
+        Ok(())
+    }
+
+    async fn read_bytes_fixed<const LEN: usize>(&mut self) -> Result<[u8; LEN], Error> {
+        let mut read_len = 0;
+        let mut buf = [0u8; LEN];
+
+        while read_len < LEN {
+            self.read_chunk().await?;
+
+            let amt = cmp::min(LEN - read_len, self.last_chunk.len());
+            buf[read_len..].copy_from_slice(&self.last_chunk[..amt]);
+            read_len += amt;
+            self.last_chunk.advance(amt);
+        }
+
+        Ok(buf)
+    }
+
+    async fn read_chunk(&mut self) -> Result<(), Error> {
+        if self.last_chunk.is_empty() {
+            self.last_chunk = self.chunks.next().await.ok_or(Error::NotEnoughData)??.data;
+        }
+
+        Ok(())
     }
 }
 
-impl Buffer {
-    fn push(&mut self, chunk: Chunk) {
-        self.bytes.extend_from_slice(&chunk.data);
-    }
-
-    fn split(&mut self) -> BytesMut {
-        let ret = self.bytes.split_to(self.marker);
-        self.marker = 0;
-        ret
-    }
-
-    fn tail(&self) -> &[u8] {
-        &self.bytes[self.marker..]
-    }
-
-    fn advance(&mut self, len: usize) -> Result<&[u8], Error> {
-        let ret = &self.bytes[self.marker..]
-            .get(..len)
-            .ok_or(Error::NotEnoughData)?;
-
-        self.marker += len;
-
-        Ok(ret)
-    }
-
-    fn read_varuint(&mut self) -> ControlFlow<Result<u64, Error>, usize> {
-        let mut tail = self.tail();
-
-        match parse_varuint(&mut tail) {
-            ControlFlow::Break(Ok(res)) => {
-                self.marker = self.bytes.len() - tail.len();
-                ControlFlow::Break(Ok(res))
-            }
-            other => other,
-        }
-    }
+#[derive(Default)]
+pub(super) struct ParseVarUInt {
+    accumulator: u64,
 }
 
-pub(super) fn parse_varuint(buf: &mut &[u8]) -> ControlFlow<Result<u64, Error>, usize> {
-    const MAX_LEN: usize = 10;
-
-    let mut accumulator = 0u64;
-
-    let mut iter = buf.iter();
-
-    for b in iter.by_ref().take(MAX_LEN) {
-        accumulator |= u64::from(b & 0x7F);
-        if *b >= 0x80 {
-            accumulator <<= 7;
-        } else {
-            *buf = iter.as_slice();
-            return ControlFlow::Break(Ok(accumulator));
-        }
+impl ParseVarUInt {
+    pub fn parse_full(buf: impl Buf) -> Result<u64, Error> {
+        Self::default()
+            .feed(buf)?
+            .break_value()
+            .ok_or(Error::NotEnoughData)
     }
 
-    if buf.len() < MAX_LEN {
-        ControlFlow::Continue(MAX_LEN - buf.len())
-    } else {
-        // TODO: better errors
-        ControlFlow::Break(Err(Error::Custom(format!(
-            "terminating byte missing in VarUInt encoding: {buf:?}",
-        ))))
+    pub fn feed(&mut self, mut buf: impl Buf) -> Result<ControlFlow<u64>, Error> {
+        const MAX_LEN: usize = 10;
+
+        for _ in 0..MAX_LEN {
+            let Ok(b) = buf.try_get_u8() else {
+                return Ok(ControlFlow::Continue(()));
+            };
+
+            self.accumulator |= u64::from(b & 0x7F);
+
+            if b >= 0x80 {
+                self.accumulator = self.accumulator.checked_shl(7).ok_or_else(|| {
+                    Error::Custom(format!(
+                        "VarUInt repr overflowed: {:016x} byte: {b:02x}",
+                        self.accumulator
+                    ))
+                })?;
+            } else {
+                return Ok(ControlFlow::Break(self.accumulator));
+            }
+        }
+
+        Err(Error::Custom(format!(
+            "terminating byte missing in VarUInt encoding: {:016x}",
+            self.accumulator,
+        )))
     }
 }

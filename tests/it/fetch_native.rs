@@ -10,9 +10,9 @@ async fn mixed_types() {
             number,
             leftPad(toString(number), number, '.') AS text,
             number % 2 == 0 ?? number : NULL AS nullable_number,
-            number %2 != 0 ?? text : NULL AS nullable_text,
-            arrayMap(x -> toUInt64(x), arrayEnumerate(arrayWithConstant(number, toUInt64(0)))) AS number_array
-            -- arrayMap(x -> rightPad(toString(number), number, '-'), number_array) AS text_array
+            number % 2 != 0 ?? text : NULL AS nullable_text,
+            arrayMap(x -> toUInt64(x), arrayEnumerate(arrayWithConstant(number, toUInt64(0)))) AS number_array,
+            arrayMap(x -> rightPad(toString(x), x, '-'), number_array) AS text_array
         FROM system.numbers
         LIMIT 10",
         )
@@ -23,7 +23,7 @@ async fn mixed_types() {
 
     assert_eq!(block.num_rows(), 10);
 
-    assert_eq!(block.columns().len(), 5);
+    assert_eq!(block.columns().len(), 6);
 
     assert_eq!(block[0].name(), "number");
 
@@ -39,7 +39,12 @@ async fn mixed_types() {
 
     for (text, row) in text_iter.by_ref().zip(0u64..10) {
         let text = text.unwrap();
-        assert_eq!(text.len() as u64, row, "incorrect text: {text:?}");
+
+        assert_eq!(text.len() as u64, row);
+
+        if row > 0 {
+            assert_eq!(text, format!("{row:.>width$}", width = row as usize));
+        }
     }
 
     assert!(text_iter.next().is_none());
@@ -82,8 +87,22 @@ async fn mixed_types() {
         assert_eq!(number_array.len() as u64, row);
 
         assert!(
-            number_array.iter().copied().eq(0u64..row),
-            "invalid number_array: {number_array:?}"
+            number_array.iter().copied().eq(1u64..=row),
+            "invalid number_array for row #{row}: {number_array:?}"
         );
+    }
+
+    assert!(number_array_iter.next().is_none());
+
+    let mut text_array_iter = block["text_array"].iter::<Vec<&str>>().unwrap();
+
+    for (text_array, row) in text_array_iter.by_ref().zip(0u64..10) {
+        let text_array = text_array.unwrap();
+
+        assert_eq!(text_array.len() as u64, row);
+
+        for (text, len) in text_array.iter().zip(1..=row) {
+            assert_eq!(*text, format!("{len:-<width$}", width = len as usize));
+        }
     }
 }

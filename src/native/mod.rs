@@ -70,20 +70,35 @@ impl Index<usize> for Block {
 pub struct Column {
     name: MaybeUtf8,
     data_type: DataTypeNode,
-    data: Bytes,
     layout: Layout,
-    null_map: Option<Bytes>,
+    num_rows: usize,
 }
 
-enum Layout {
+struct Layout {
+    kind: LayoutKind,
+    nulls: Option<Bytes>,
+}
+
+enum LayoutKind {
     /// Fixed layout. Width of each cell depends only on [`DataTypeNode`].
-    Fixed { type_width: usize },
-    /// Offset of each item in the column data.
-    Offsets(Box<[usize]>),
+    Fixed { type_width: usize, data: Bytes },
+    /// Variable-length data (namely strings)
+    Variable {
+        /// Ending offset of each string in `data`.
+        ///
+        /// The offset of the first string is always `0` unless this is empty.
+        end_offsets: Box<[usize]>,
+        // Each `Bytes` instance is 4 `usizes` (32 bytes on 64-bit),
+        // so we save 24 bytes per string by linearizing the string data and storing offsets,
+        // assuming many small strings instead of fewer big ones, which also amortizes allocations
+        data: Bytes,
+    },
     /// Layout determined by `LowCardinality` metadata.
     LowCardinality(Arc<LowCardinality>),
+    /// Array data. Element data governed by `elem_layout`.
     Array {
-        cumulative_lengths: Box<[usize]>,
+        /// Ending index of each array in `elem_layout`.
+        end_indices: Box<[usize]>,
         elem_layout: Box<Layout>,
     },
 }
@@ -118,8 +133,7 @@ impl Column {
             iter: ArrayData {
                 elem_type: &self.data_type,
                 layout: &self.layout,
-                data: &self.data,
-                nulls: self.null_map.as_deref(),
+                indices: 0..self.num_rows,
             }
             .into_reader_unchecked(), // we already checked above with a more specific error
         })

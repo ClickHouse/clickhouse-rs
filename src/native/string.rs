@@ -1,40 +1,61 @@
+use bytes::Bytes;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct MaybeUtf8(Repr);
-
-#[derive(Clone, PartialEq, Eq)]
-enum Repr {
-    Utf8(Arc<str>),
-    NotUtf8(Arc<[u8]>),
+pub struct MaybeUtf8 {
+    bytes: Bytes,
+    // SAFETY: must not change for the lifetime of this object
+    is_utf8: bool,
 }
 
-impl From<&[u8]> for MaybeUtf8 {
-    fn from(value: &[u8]) -> Self {
-        Self(
-            str::from_utf8(value)
-                .map_or_else(|_| Repr::NotUtf8(value.into()), |s| Repr::Utf8(s.into())),
-        )
+impl MaybeUtf8 {
+    pub fn new<T: Into<Bytes>>(bytes: T) -> Self {
+        Self::from(bytes.into())
+    }
+}
+
+impl From<Bytes> for MaybeUtf8 {
+    fn from(bytes: Bytes) -> Self {
+        Self {
+            is_utf8: str::from_utf8(&bytes).is_ok(),
+            bytes,
+        }
+    }
+}
+
+impl From<String> for MaybeUtf8 {
+    fn from(value: String) -> Self {
+        Self {
+            bytes: value.into(),
+            is_utf8: true,
+        }
+    }
+}
+
+impl From<&'static str> for MaybeUtf8 {
+    fn from(value: &'static str) -> Self {
+        Self {
+            bytes: value.into(),
+            is_utf8: true,
+        }
     }
 }
 
 impl MaybeUtf8 {
+    pub fn is_utf8(&self) -> bool {
+        self.is_utf8
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
-        match &self.0 {
-            Repr::Utf8(s) => s.as_bytes(),
-            Repr::NotUtf8(s) => s,
-        }
+        &self.bytes
     }
 
     pub fn try_as_str(&self) -> Option<&str> {
-        // The invariants of the type guarantee that we don't need to re-validate here
-        match &self.0 {
-            Repr::Utf8(s) => Some(s),
-            Repr::NotUtf8(_) => None,
-        }
+        // SAFETY: UTF-8 validity is checked on construction
+        self.is_utf8
+            .then(|| unsafe { str::from_utf8_unchecked(&self.bytes) })
     }
 }
 
@@ -42,9 +63,9 @@ impl Hash for MaybeUtf8 {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // Produce the same hash as `&[u8]` or `&str`;
         // `impl Hash for str` adds a domain-separation postfix so its routine is separate.
-        match &self.0 {
-            Repr::Utf8(s) => s.hash(state),
-            Repr::NotUtf8(s) => s.hash(state),
+        match self.try_as_str() {
+            Some(s) => s.hash(state),
+            None => self.bytes.hash(state),
         }
     }
 }
@@ -88,11 +109,9 @@ impl PartialEq<[u8]> for MaybeUtf8 {
 
 impl Debug for MaybeUtf8 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            Repr::Utf8(s) => Debug::fmt(s, f),
-            Repr::NotUtf8(s) => {
-                write!(f, "\"{}\"", s.escape_ascii())
-            }
+        match self.try_as_str() {
+            Some(s) => Debug::fmt(s, f),
+            None => write!(f, "\"{}\"", self.bytes.escape_ascii()),
         }
     }
 }

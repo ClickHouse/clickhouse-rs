@@ -1,7 +1,8 @@
 use crate::error::Error;
-use crate::native::Layout;
+use crate::native::{Layout, LayoutKind};
 use clickhouse_types::DataTypeNode;
 use std::marker::PhantomData;
+use std::ops::Range;
 use std::slice;
 
 use crate::native::Decode;
@@ -9,7 +10,6 @@ use crate::native::decode::ValueReader;
 
 pub struct ArrayReader<'a, T> {
     elem_type: &'a DataTypeNode,
-    data: &'a [u8],
     kind: IterKind<'a>,
     nulls: Option<slice::Iter<'a, u8>>,
     // covariant over `'a` and `T`
@@ -19,8 +19,7 @@ pub struct ArrayReader<'a, T> {
 pub struct ArrayData<'a> {
     pub(super) elem_type: &'a DataTypeNode,
     pub(super) layout: &'a Layout,
-    pub(super) data: &'a [u8],
-    pub(super) nulls: Option<&'a [u8]>,
+    pub(super) indices: Range<usize>,
 }
 
 impl<'a> ArrayData<'a> {
@@ -44,21 +43,44 @@ impl<'a> ArrayData<'a> {
     {
         ArrayReader {
             elem_type: self.elem_type,
-            data: self.data,
-            kind: match *self.layout {
-                Layout::Fixed { type_width } => IterKind::Fixed(self.data.chunks_exact(type_width)),
-                Layout::Offsets(ref offsets) => IterKind::Offsets(offsets.iter()),
-                Layout::Array {
+            kind: match self.layout.kind {
+                LayoutKind::Fixed {
+                    type_width,
+                    ref data,
+                } => IterKind::Fixed(
+                    data[self.indices.start * type_width..self.indices.end * type_width]
+                        .chunks_exact(type_width),
+                ),
+                LayoutKind::Variable {
+                    end_offsets: ref end_indices,
+                    ref data,
+                } => {
+                    let next_start = end_indices[..self.indices.start]
+                        .last()
+                        .copied()
+                        .unwrap_or(0);
+
+                    IterKind::Variable {
+                        next_start,
+                        end_indices: end_indices[self.indices.clone()].iter(),
+                        data,
+                    }
+                }
+                LayoutKind::Array {
                     ref elem_layout,
-                    cumulative_lengths: ref lengths,
+                    ref end_indices,
                 } => IterKind::Array {
                     next_start: 0,
-                    cumulative_lengths: lengths.iter(),
+                    end_indices: end_indices.iter(),
                     elem_layout,
                 },
-                Layout::LowCardinality(_) => todo!("implement LowCardinality"),
+                LayoutKind::LowCardinality(_) => todo!("implement LowCardinality"),
             },
-            nulls: self.nulls.map(|nulls| nulls.iter()),
+            nulls: self
+                .layout
+                .nulls
+                .as_ref()
+                .map(|nulls| nulls[self.indices].iter()),
             _marker: PhantomData,
         }
     }
@@ -99,29 +121,30 @@ where
                     .map_err(Error::Other),
                 )
             }
-            IterKind::Offsets(offsets) => {
-                let start = *offsets.next()?;
+            IterKind::Variable {
+                next_start,
+                end_indices,
+                data,
+            } => {
+                let end = *end_indices.next()?;
+
+                let start = *next_start;
+                *next_start = end;
 
                 // Need to make sure we advance the main iterator first
                 check_null!();
 
-                let end = offsets
-                    .as_slice()
-                    .first()
-                    .copied()
-                    .unwrap_or(self.data.len());
-
                 Some(
                     T::decode(&mut ValueReader {
                         data_type: self.elem_type,
-                        native_bytes: &self.data[start..end],
+                        native_bytes: &data[start..end],
                     })
                     .map_err(Error::Other),
                 )
             }
             IterKind::Array {
                 next_start,
-                cumulative_lengths,
+                end_indices,
                 elem_layout,
             } => {
                 let DataTypeNode::Array(elem_type) = self.elem_type else {
@@ -131,20 +154,9 @@ where
                     )
                 };
 
-                let array_end = *cumulative_lengths.next()?;
+                let array_end = *end_indices.next()?;
 
-                let nulls = if let Some(nulls) = &mut self.nulls {
-                    let (array_nulls, rem) = nulls
-                        .as_slice()
-                        // FIXME: checked math?
-                        .split_at(array_end - *next_start);
-
-                    *nulls = rem.iter();
-
-                    Some(array_nulls)
-                } else {
-                    None
-                };
+                let indices = *next_start..array_end;
 
                 *next_start = array_end;
 
@@ -152,8 +164,7 @@ where
                     T::decode_array(ArrayData {
                         elem_type,
                         layout: elem_layout,
-                        data: self.data,
-                        nulls,
+                        indices,
                     })
                     .map_err(Error::Other),
                 )
@@ -164,10 +175,14 @@ where
 
 enum IterKind<'a> {
     Fixed(slice::ChunksExact<'a, u8>),
-    Offsets(slice::Iter<'a, usize>),
+    Variable {
+        next_start: usize,
+        end_indices: slice::Iter<'a, usize>,
+        data: &'a [u8],
+    },
     Array {
         next_start: usize,
-        cumulative_lengths: slice::Iter<'a, usize>,
+        end_indices: slice::Iter<'a, usize>,
         elem_layout: &'a Layout,
     },
 }

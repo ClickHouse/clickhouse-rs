@@ -1,8 +1,6 @@
 use crate::native::array::ArrayData;
-use crate::native::reader::parse_varuint;
 use clickhouse_types::DataTypeNode;
 use std::error::Error;
-use std::ops::ControlFlow;
 
 pub struct ValueReader<'a> {
     pub(super) data_type: &'a DataTypeNode,
@@ -99,35 +97,6 @@ impl<'a> Decode<'a> for &'a [u8] {
     fn decode(
         reader: &mut ValueReader<'a>,
     ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-        let len = if let DataTypeNode::FixedString(len) = *reader.data_type {
-            len
-        } else {
-            // Read `VarUInt` length prefix for `String`
-            let len = match parse_varuint(&mut reader.native_bytes) {
-                ControlFlow::Break(Ok(len)) => len,
-                ControlFlow::Break(Err(e)) => return Err(e.into()),
-                ControlFlow::Continue(_) => {
-                    return Err(format!(
-                        "missing terminating byte in VarUInt encoding: {:?}",
-                        reader.native_bytes
-                    )
-                    .into());
-                }
-            };
-
-            usize::try_from(len)
-                .map_err(|_| format!("length prefix of String out of range: {len}"))?
-        };
-
-        if len != reader.native_bytes.len() {
-            return Err(format!(
-                "length of {:?} does not match remaining length of buffer: {len} vs {}",
-                reader.data_type,
-                reader.native_bytes.len()
-            )
-            .into());
-        }
-
         Ok(reader.native_bytes)
     }
 }
