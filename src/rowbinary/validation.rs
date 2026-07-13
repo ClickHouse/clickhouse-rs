@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::types::bf16;
 use crate::types::int256;
 use crate::{Row, row::RowKind, row_metadata::RowMetadata};
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
@@ -639,6 +640,7 @@ fn validate_impl<'serde, 'caller, R: Row>(
         {
             Ok(None)
         }
+        SerdeType::Bytes(bf16::BYTE_LEN) if data_type == &DataTypeNode::BFloat16 => Ok(None),
         SerdeType::Option => match data_type {
             DataTypeNode::Nullable(inner_type) => Ok(Some(InnerDataTypeValidator {
                 root,
