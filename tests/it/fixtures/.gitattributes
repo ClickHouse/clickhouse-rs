@@ -1,0 +1,2 @@
+# ClickHouse rejects TSV with CRLF line endings
+*.tsv text eol=lf
