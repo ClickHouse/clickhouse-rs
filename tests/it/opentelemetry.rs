@@ -1,10 +1,10 @@
 use crate::get_client;
 use opentelemetry::Context;
 use opentelemetry::global::BoxedTracer;
-use opentelemetry::trace::{Status, TraceContextExt};
+use opentelemetry::trace::{Status, TraceContextExt, TracerProvider};
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::trace::{SdkTracerProvider, Span, SpanData, SpanProcessor};
+use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider, Span, SpanData, SpanProcessor};
 use std::cell::Cell;
 use std::sync::Once;
 use std::time::Duration;
@@ -161,7 +161,7 @@ thread_local! {
     static LAST_SPAN_DATA: Cell<Option<SpanData>> = const {  Cell::new(None) };
 }
 
-fn get_tracer() -> BoxedTracer {
+fn get_tracer() -> SdkTracer {
     static ONCE: Once = Once::new();
 
     #[derive(Debug)]
@@ -185,17 +185,14 @@ fn get_tracer() -> BoxedTracer {
     }
 
     ONCE.call_once(|| {
-        // These set global statics so we want to ensure this is done,
+        // This sets a global static so we want to ensure this is done,
         // but it only needs to be done once.
         opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
-
-        let provider = SdkTracerProvider::builder()
-            .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
-            .with_span_processor(LastSpanProcessor)
-            .build();
-
-        opentelemetry::global::set_tracer_provider(provider);
     });
 
-    opentelemetry::global::tracer("clickhouse_test_opentelemetry")
+    SdkTracerProvider::builder()
+        .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
+        .with_span_processor(LastSpanProcessor)
+        .build()
+        .tracer("clickhouse_test_opentelemetry")
 }
