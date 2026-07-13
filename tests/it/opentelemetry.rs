@@ -1,6 +1,5 @@
 use crate::get_client;
 use opentelemetry::Context;
-use opentelemetry::global::BoxedTracer;
 use opentelemetry::trace::{Status, TraceContextExt, TracerProvider};
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
