@@ -2,6 +2,7 @@ use crate::{get_cloud_url, require_env_var};
 use clickhouse::Client;
 
 #[tokio::test]
+#[ignore] // FIXME(abonander,2026-07-13): staging JWT has apparently expired and still no prod JWT
 async fn test_jwt_auth() {
     check_cloud_test_env!();
     let valid_token = require_env_var("CLICKHOUSE_CLOUD_JWT_ACCESS_TOKEN");
