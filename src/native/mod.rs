@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::native::decode::{Decode, ValueReader};
+use crate::native::decode::Decode;
 use crate::native::string::MaybeUtf8;
 use bytes::Bytes;
 use clickhouse_types::DataTypeNode;
@@ -81,7 +81,10 @@ struct Layout {
 
 enum LayoutKind {
     /// Fixed layout. Width of each cell depends only on [`DataTypeNode`].
-    Fixed { type_width: usize, data: Bytes },
+    Fixed {
+        type_width: usize,
+        data: Bytes,
+    },
     /// Variable-length data (namely strings)
     Variable {
         /// Ending offset of each string in `data`.
@@ -100,6 +103,13 @@ enum LayoutKind {
         /// Ending index of each array in `elem_layout`.
         end_indices: Box<[usize]>,
         elem_layout: Box<Layout>,
+    },
+    Tuple {
+        layouts: Box<[Layout]>,
+    },
+    Map {
+        key_val_layouts: Box<[Layout; 2]>,
+        end_indices: Box<[usize]>,
     },
 }
 

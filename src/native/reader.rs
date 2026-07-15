@@ -125,18 +125,7 @@ impl BlockReader {
                 })
             }
             DataTypeNode::Array(elem_type) => {
-                let mut end_indices = Vec::with_capacity(num_rows);
-
-                for _ in 0..num_rows {
-                    // Note: cumulative length, last value is total number of elements
-                    let length = u64::from_le_bytes(self.read_bytes_fixed().await?);
-
-                    let length = usize::try_from(length).map_err(|_| {
-                        Error::Custom(format!("array length out of range: {length}"))
-                    })?;
-
-                    end_indices.push(length);
-                }
+                let end_indices = self.read_array_indices(num_rows).await?;
 
                 let total_len = end_indices.last().copied().unwrap_or(0);
 
@@ -145,8 +134,42 @@ impl BlockReader {
 
                 Ok(Layout {
                     kind: LayoutKind::Array {
-                        end_indices: end_indices.into(),
+                        end_indices,
                         elem_layout: Box::new(elem_layout),
+                    },
+                    nulls,
+                })
+            }
+            DataTypeNode::Tuple(types) => {
+                let mut layouts = Vec::with_capacity(types.len());
+
+                for ty in types {
+                    layouts.push(Box::pin(self.read_type_data(ty, num_rows)).await?);
+                }
+
+                Ok(Layout {
+                    kind: LayoutKind::Tuple {
+                        layouts: layouts.into(),
+                    },
+                    nulls,
+                })
+            }
+            DataTypeNode::Map([key_ty, val_ty]) => {
+                // Maps are just `Array(Tuple(K, V))` but the way this code is structured,
+                // it's easier to create a specialized routine to read them
+                let end_indices = self.read_array_indices(num_rows).await?;
+
+                let total_len = end_indices.last().copied().unwrap_or(0);
+
+                // Keys semantically cannot be `LowCardinality` or `Nullable`
+                // but that doesn't really affect decoding
+                let key_layout = Box::pin(self.read_type_data(key_ty, total_len)).await?;
+                let value_layout = Box::pin(self.read_type_data(val_ty, total_len)).await?;
+
+                Ok(Layout {
+                    kind: LayoutKind::Map {
+                        key_val_layouts: Box::new([key_layout, value_layout]),
+                        end_indices,
                     },
                     nulls,
                 })
@@ -176,6 +199,22 @@ impl BlockReader {
 
             self.read_chunk().await?;
         }
+    }
+
+    async fn read_array_indices(&mut self, num_rows: usize) -> Result<Box<[usize]>, Error> {
+        let mut end_indices = Vec::with_capacity(num_rows);
+
+        for _ in 0..num_rows {
+            // Note: cumulative length, last value is total number of elements
+            let length = u64::from_le_bytes(self.read_bytes_fixed().await?);
+
+            let length = usize::try_from(length)
+                .map_err(|_| Error::Custom(format!("array length out of range: {length}")))?;
+
+            end_indices.push(length);
+        }
+
+        Ok(end_indices.into())
     }
 
     async fn read_bytes(&mut self, len: usize) -> Result<Bytes, Error> {

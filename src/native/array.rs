@@ -22,6 +22,35 @@ pub struct ArrayData<'a> {
     pub(super) indices: Range<usize>,
 }
 
+pub struct TupleIter<'a> {
+    pub(super) types: slice::Iter<'a, DataTypeNode>,
+    pub(super) layouts: slice::Iter<'a, Layout>,
+    pub(super) index: usize,
+}
+
+enum IterKind<'a> {
+    Fixed(slice::ChunksExact<'a, u8>),
+    Variable {
+        next_start: usize,
+        end_indices: slice::Iter<'a, usize>,
+        data: &'a [u8],
+    },
+    Array {
+        next_start: usize,
+        end_indices: slice::Iter<'a, usize>,
+        elem_layout: &'a Layout,
+    },
+    Tuple {
+        layouts: &'a [Layout],
+        elem_indices: Range<usize>,
+    },
+    Map {
+        next_start: usize,
+        end_indices: slice::Iter<'a, usize>,
+        key_val_layouts: &'a [Layout; 2],
+    },
+}
+
 impl<'a> ArrayData<'a> {
     pub fn into_reader<T>(self) -> Result<ArrayReader<'a, T>, Error>
     where
@@ -73,6 +102,18 @@ impl<'a> ArrayData<'a> {
                     next_start: 0,
                     end_indices: end_indices.iter(),
                     elem_layout,
+                },
+                LayoutKind::Tuple { ref layouts } => IterKind::Tuple {
+                    layouts,
+                    elem_indices: self.indices.clone(),
+                },
+                LayoutKind::Map {
+                    ref key_val_layouts,
+                    ref end_indices,
+                } => IterKind::Map {
+                    next_start: 0,
+                    key_val_layouts,
+                    end_indices: end_indices.iter(),
                 },
                 LayoutKind::LowCardinality(_) => todo!("implement LowCardinality"),
             },
@@ -169,20 +210,77 @@ where
                     .map_err(Error::Other),
                 )
             }
+            IterKind::Tuple {
+                layouts,
+                elem_indices,
+            } => {
+                let DataTypeNode::Tuple(types) = self.elem_type else {
+                    unreachable!("BUG: expected tuple type, got {:?}", self.elem_type)
+                };
+
+                let index = elem_indices.next()?;
+
+                // Need to make sure we advance the main iterator first
+                check_null!();
+
+                Some(
+                    T::decode_tuple(TupleIter {
+                        layouts: layouts.iter(),
+                        types: types.iter(),
+                        index,
+                    })
+                    .map_err(Error::Other),
+                )
+            }
+            IterKind::Map {
+                next_start,
+                end_indices,
+                key_val_layouts: [key_layout, val_layout],
+            } => {
+                let DataTypeNode::Map([key_ty, val_ty]) = self.elem_type else {
+                    unreachable!("BUG: expected map type, got {:?}", self.elem_type)
+                };
+
+                let array_end = *end_indices.next()?;
+
+                let indices = *next_start..array_end;
+
+                *next_start = array_end;
+
+                Some(
+                    T::decode_map(
+                        ArrayData {
+                            elem_type: key_ty,
+                            layout: key_layout,
+                            indices: indices.clone(),
+                        },
+                        ArrayData {
+                            elem_type: val_ty,
+                            layout: val_layout,
+                            indices,
+                        },
+                    )
+                    .map_err(Error::Other),
+                )
+            }
         }
     }
 }
 
-enum IterKind<'a> {
-    Fixed(slice::ChunksExact<'a, u8>),
-    Variable {
-        next_start: usize,
-        end_indices: slice::Iter<'a, usize>,
-        data: &'a [u8],
-    },
-    Array {
-        next_start: usize,
-        end_indices: slice::Iter<'a, usize>,
-        elem_layout: &'a Layout,
-    },
+impl<'a> TupleIter<'a> {
+    pub fn decode_next<T: Decode<'a>>(&mut self) -> Result<T, Error> {
+        let (elem_type, layout) = self.types.next().zip(self.layouts.next()).ok_or_else(|| {
+            Error::Custom("attempting to decode tuple with more types than received".into())
+        })?;
+
+        ArrayData {
+            elem_type,
+            layout,
+            // If `self.index + 1` overflows this range will be empty
+            indices: self.index..self.index + 1,
+        }
+        .into_reader::<T>()?
+        .next()
+        .ok_or_else(|| Error::Custom("attempting to decode from an empty array".into()))?
+    }
 }
