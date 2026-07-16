@@ -19,7 +19,9 @@ async fn mixed_types() {
             arrayMap(x -> toUInt64(x), arrayEnumerate(arrayWithConstant(number, toUInt64(0)))) AS number_array,
             arrayMap(x -> rightPad(toString(x), x, '-'), number_array) AS text_array,
             arrayZip(number_array, text_array) AS number_text_tuple_array,
-            mapFromArrays(number_array, text_array) AS number_to_text_map
+            mapFromArrays(number_array, text_array) AS number_to_text_map,
+            toLowCardinality(text) as low_cardinality_text,
+            toLowCardinality(nullable_text) as low_cardinality_nullable
         FROM system.numbers
         LIMIT {limit:UInt64}",
         )
@@ -31,7 +33,7 @@ async fn mixed_types() {
 
     assert_eq!(block.num_rows() as u64, NUM_ROWS);
 
-    assert_eq!(block.columns().len(), 10);
+    assert_eq!(block.columns().len(), 12);
 
     assert_eq!(block[0].name(), "number");
 
@@ -172,4 +174,40 @@ async fn mixed_types() {
     }
 
     assert!(map_iter.next().is_none());
+
+    // Should be identical to `text` column
+    let mut lc_text_iter = block["low_cardinality_text"].iter::<&str>().unwrap();
+
+    for (text, row) in lc_text_iter.by_ref().zip(0u64..NUM_ROWS) {
+        let text = text.unwrap();
+
+        assert_eq!(text.len() as u64, row);
+
+        if row > 0 {
+            assert_eq!(text, format!("{row:.>width$}", width = row as usize));
+        }
+    }
+
+    assert!(lc_text_iter.next().is_none());
+
+    // Should be identical to `nullable_text` column
+    let mut lc_nullable_text_iter = block["low_cardinality_nullable"]
+        .iter::<Option<&str>>()
+        .unwrap();
+
+    for (opt_text, row) in lc_nullable_text_iter.by_ref().zip(0u64..NUM_ROWS) {
+        let opt_text = opt_text.unwrap();
+
+        if row % 2 != 0 {
+            assert_eq!(
+                opt_text.unwrap().len() as u64,
+                row,
+                "incorrect nullable text: {opt_text:?}"
+            );
+        } else {
+            assert_eq!(opt_text, None);
+        }
+    }
+
+    assert!(lc_nullable_text_iter.next().is_none());
 }

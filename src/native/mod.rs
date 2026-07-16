@@ -71,12 +71,13 @@ pub struct Column {
     name: MaybeUtf8,
     data_type: DataTypeNode,
     layout: Layout,
-    num_rows: usize,
 }
 
 struct Layout {
     kind: LayoutKind,
     nulls: Option<Bytes>,
+    // Equivalent to `num_rows` for top-level values, but may be different for nested values
+    num_values: usize,
 }
 
 enum LayoutKind {
@@ -97,7 +98,7 @@ enum LayoutKind {
         data: Bytes,
     },
     /// Layout determined by `LowCardinality` metadata.
-    LowCardinality(Arc<LowCardinality>),
+    LowCardinality(LayoutLowCardinality),
     /// Array data. Element data governed by `elem_layout`.
     Array {
         /// Ending index of each array in `elem_layout`.
@@ -111,6 +112,14 @@ enum LayoutKind {
         key_val_layouts: Box<[Layout; 2]>,
         end_indices: Box<[usize]>,
     },
+}
+
+struct LayoutLowCardinality {
+    keys: Box<[usize]>,
+    global_dict: Option<Arc<Layout>>,
+    local_dict: Option<Box<Layout>>,
+    /// If `true`, `key = 1` should decode as `NULL` instead of the placeholder value given.
+    is_nullable: bool,
 }
 
 impl Column {
@@ -131,7 +140,7 @@ impl Column {
     }
 
     pub fn iter<'a, T: Decode<'a>>(&'a self) -> Result<ColumnIter<'a, T>, Error> {
-        if !T::compatible(&self.data_type) {
+        if !T::compatible(self.data_type.remove_low_cardinality()) {
             return Err(Error::Custom(format!(
                 "incompatible data type {:?} of column {:?}",
                 self.data_type, self.name
@@ -143,7 +152,7 @@ impl Column {
             iter: ArrayData {
                 elem_type: &self.data_type,
                 layout: &self.layout,
-                indices: 0..self.num_rows,
+                indices: 0..self.layout.num_values,
             }
             .into_reader_unchecked(), // we already checked above with a more specific error
         })
@@ -165,8 +174,6 @@ where
         self.iter.next()
     }
 }
-
-struct LowCardinality {}
 
 fn fixed_width(data_type: &DataTypeNode) -> Option<usize> {
     match data_type {

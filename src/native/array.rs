@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::native::{Layout, LayoutKind};
+use crate::native::{Layout, LayoutKind, LayoutLowCardinality};
 use clickhouse_types::DataTypeNode;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -49,6 +49,10 @@ enum IterKind<'a> {
         end_indices: slice::Iter<'a, usize>,
         key_val_layouts: &'a [Layout; 2],
     },
+    LowCardinality {
+        keys: slice::Iter<'a, usize>,
+        lc: &'a LayoutLowCardinality,
+    },
 }
 
 impl<'a> ArrayData<'a> {
@@ -56,7 +60,7 @@ impl<'a> ArrayData<'a> {
     where
         T: Decode<'a>,
     {
-        if !T::compatible(self.elem_type) {
+        if !T::compatible(self.elem_type.remove_low_cardinality()) {
             return Err(Error::Custom(format!(
                 "incompatible data type {}",
                 self.elem_type
@@ -115,7 +119,10 @@ impl<'a> ArrayData<'a> {
                     key_val_layouts,
                     end_indices: end_indices.iter(),
                 },
-                LayoutKind::LowCardinality(_) => todo!("implement LowCardinality"),
+                LayoutKind::LowCardinality(ref lc) => IterKind::LowCardinality {
+                    keys: lc.keys.iter(),
+                    lc,
+                },
             },
             nulls: self
                 .layout
@@ -263,6 +270,29 @@ where
                     .map_err(Error::Other),
                 )
             }
+            IterKind::LowCardinality { keys, lc } => {
+                let DataTypeNode::LowCardinality(inner_type) = self.elem_type else {
+                    unreachable!("BUG: expected map type, got {:?}", self.elem_type)
+                };
+
+                let key = *keys.next()?;
+
+                // Check the null map in case of `Nullable(LowCardinality(...))`
+                check_null!();
+
+                // `key = 0` is the NULL placeholder
+                if lc.is_nullable && key == 0 {
+                    return Some(T::decode_null(self.elem_type).map_err(Error::Other));
+                }
+
+                Some(find_lc_data(lc, inner_type, key).and_then(|data| {
+                    data.into_reader()?.next().ok_or_else(|| {
+                        Error::Custom(format!(
+                            "data for LowCardinality({inner_type}) key not found: {key}"
+                        ))
+                    })?
+                }))
+            }
         }
     }
 }
@@ -283,4 +313,36 @@ impl<'a> TupleIter<'a> {
         .next()
         .ok_or_else(|| Error::Custom("attempting to decode from an empty array".into()))?
     }
+}
+
+fn find_lc_data<'a>(
+    lc: &'a LayoutLowCardinality,
+    inner_type: &'a DataTypeNode,
+    mut key: usize,
+) -> Result<ArrayData<'a>, Error> {
+    if let Some(global_dict) = &lc.global_dict {
+        if key < global_dict.num_values {
+            return Ok(ArrayData {
+                elem_type: inner_type,
+                layout: global_dict,
+                indices: key..key + 1,
+            });
+        }
+
+        key -= global_dict.num_values;
+    }
+
+    if let Some(local_dict) = &lc.local_dict
+        && key < local_dict.num_values
+    {
+        return Ok(ArrayData {
+            elem_type: inner_type,
+            layout: local_dict,
+            indices: key..key + 1,
+        });
+    }
+
+    Err(Error::Custom(format!(
+        "key for LowCardinality({inner_type}) not in range: {key}"
+    )))
 }
