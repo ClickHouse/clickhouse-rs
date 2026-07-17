@@ -73,7 +73,7 @@ impl Hash for MaybeUtf8 {
 /// Compares lexicographically regardless of UTF-8-ness.
 impl PartialOrd for MaybeUtf8 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.as_bytes().cmp(other.as_bytes()))
+        Some(self.cmp(other))
     }
 }
 

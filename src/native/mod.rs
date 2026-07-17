@@ -175,6 +175,12 @@ where
     }
 }
 
+impl<'a, T> ColumnIter<'a, T> {
+    pub fn column(&self) -> &'a Column {
+        self.column
+    }
+}
+
 fn fixed_width(data_type: &DataTypeNode) -> Option<usize> {
     match data_type {
         DataTypeNode::Bool => Some(1),

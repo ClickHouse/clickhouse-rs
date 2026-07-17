@@ -480,14 +480,7 @@ pub(super) struct ParseVarUInt {
 }
 
 impl ParseVarUInt {
-    pub fn parse_full(buf: impl Buf) -> Result<u64, Error> {
-        Self::default()
-            .feed(buf)?
-            .break_value()
-            .ok_or(Error::NotEnoughData)
-    }
-
-    pub fn feed(&mut self, mut buf: impl Buf) -> Result<ControlFlow<u64>, Error> {
+    fn feed(&mut self, mut buf: impl Buf) -> Result<ControlFlow<u64>, Error> {
         const MAX_LEN: usize = 10;
 
         for _ in 0..MAX_LEN {
