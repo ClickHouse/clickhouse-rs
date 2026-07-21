@@ -35,7 +35,7 @@ pub(crate) enum Response {
 }
 
 pub(crate) type ResponseFuture =
-    Pin<Box<dyn Future<Output = Result<(Chunks, Option<Box<QuerySummary>>)>> + Send>>;
+    Pin<Box<dyn Future<Output = Result<(Chunks, Option<Box<QuerySummary>>)>> + Send + Sync>>;
 
 impl Response {
     pub(crate) fn new(response: HyperResponseFuture, compression: Compression) -> Self {

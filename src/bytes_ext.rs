@@ -1,5 +1,4 @@
 use bytes::{Buf, Bytes, BytesMut};
-use std::cell::Cell;
 use std::mem;
 
 #[derive(Default)]
@@ -9,27 +8,27 @@ pub(crate) struct BytesExt {
     // Points to the real start of the remaining slice.
     // `Cell` allows us to mutate this value while keeping references to `bytes`.
     // Also, the dedicated counter is faster than using `Bytes::advance()`.
-    cursor: Cell<usize>,
+    cursor: std::sync::atomic::AtomicUsize,
 }
 
 impl BytesExt {
     /// Returns a remaining slice of bytes.
     #[inline(always)]
     pub(crate) fn slice(&self) -> &[u8] {
-        &self.bytes[self.cursor.get()..]
+        &self.bytes[self.cursor.load(std::sync::atomic::Ordering::Acquire)..]
     }
 
     /// Returns the number of remaining bytes.
     #[inline(always)]
     pub(crate) fn remaining(&self) -> usize {
-        self.bytes.len() - self.cursor.get()
+        self.bytes.len() - self.cursor.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Overrides the number of remaining bytes by moving the cursor.
     /// Note: it's valid to call this method while holding `slice()` reference.
     #[inline(always)]
     pub(crate) fn set_remaining(&self, n: usize) {
-        self.cursor.set(self.bytes.len() - n);
+        self.cursor.store(self.bytes.len() - n, std::sync::atomic::Ordering::Release);
     }
 
     #[inline(always)]
@@ -43,7 +42,7 @@ impl BytesExt {
     pub(crate) fn extend(&mut self, chunk: Bytes) {
         if self.bytes.is_empty() {
             self.bytes = chunk;
-            self.cursor.set(0);
+            self.cursor.store(0, std::sync::atomic::Ordering::Release);
         } else {
             self.extend_slow(chunk);
         }
@@ -53,14 +52,14 @@ impl BytesExt {
     #[inline(never)]
     fn extend_slow(&mut self, chunk: Bytes) {
         let mut remaining = mem::take(&mut self.bytes);
-        remaining.advance(self.cursor.get());
+        remaining.advance(self.cursor.load(std::sync::atomic::Ordering::Acquire));
 
         // Try to reuse the capacity, if possible.
         let mut remaining = BytesMut::from(remaining);
         remaining.extend_from_slice(&chunk);
 
         self.bytes = remaining.freeze();
-        self.cursor.set(0);
+        self.cursor.store(0, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -111,7 +110,7 @@ mod tests_miri {
 
         bytes.advance(1);
         assert_eq!(bytes.remaining(), 0);
-        assert_ne!(bytes.cursor.get(), 0);
+        assert_ne!(bytes.cursor.load(std::sync::atomic::Ordering::Acquire), 0);
 
         // non-zero cursor, but fast path
         bytes.extend(Bytes::from_static(b"l"));
