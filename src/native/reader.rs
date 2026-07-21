@@ -475,8 +475,9 @@ impl ReaderInner {
 }
 
 #[derive(Default)]
-pub(super) struct ParseVarUInt {
+struct ParseVarUInt {
     accumulator: u64,
+    shift: u32,
 }
 
 impl ParseVarUInt {
@@ -488,18 +489,18 @@ impl ParseVarUInt {
                 return Ok(ControlFlow::Continue(()));
             };
 
-            self.accumulator |= u64::from(b & 0x7F);
+            self.accumulator |= (b as u64 & 0x7F).checked_shl(self.shift).ok_or_else(|| {
+                Error::Custom(format!(
+                    "VarUInt repr overflowed: {:016x} byte: {b:02x}",
+                    self.accumulator
+                ))
+            })?;
 
-            if b >= 0x80 {
-                self.accumulator = self.accumulator.checked_shl(7).ok_or_else(|| {
-                    Error::Custom(format!(
-                        "VarUInt repr overflowed: {:016x} byte: {b:02x}",
-                        self.accumulator
-                    ))
-                })?;
-            } else {
+            if b <= 0x7F {
                 return Ok(ControlFlow::Break(self.accumulator));
             }
+
+            self.shift += 7;
         }
 
         Err(Error::Custom(format!(
@@ -534,6 +535,82 @@ impl LcKeyType {
             LcKeyType::UInt16 => 2,
             LcKeyType::UInt32 => 4,
             LcKeyType::UInt64 => 8,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ParseVarUInt;
+    use bytes::Buf;
+    use std::ops::ControlFlow;
+
+    #[test]
+    fn parse_varuint() {
+        let encoded_and_decoded: &[(&[u8], u64)] = &[
+            (&[0u8][..], 0u64),
+            (&[1], 1),
+            (&[127], 127),
+            (&[0x80, 0x01], 1 << 7),
+            (&[0x80, 0x80, 0x01], 1 << 14),
+            (&[0x80, 0x80, 0x80, 0x01], 1 << 21),
+            (&[0x80, 0x80, 0x80, 0x80, 0x01], 1 << 28),
+            (&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x1F], 0xFF_FF_FF_FF_FF),
+        ];
+
+        let pad_len = 16usize;
+
+        for (encoded, decoded) in encoded_and_decoded {
+            // Pad with junk data that must be ignored
+            let padded: Vec<_> = encoded
+                .iter()
+                .copied()
+                .chain((0..).cycle())
+                .take(pad_len)
+                .collect();
+
+            // Test feeding slices in different size chunks
+            for chunk_size in 1..=padded.len() {
+                let mut parser = ParseVarUInt::default();
+
+                let mut slice = &padded[..];
+
+                let mut last_remaining = slice.len();
+
+                loop {
+                    match parser.feed((&mut slice).take(chunk_size)) {
+                        Ok(ControlFlow::Break(res)) => {
+                            assert_eq!(
+                                res, *decoded,
+                                "invalid decoding; chunk_size: {chunk_size}, padded: {padded:?}, remaining: {slice:?}"
+                            );
+                            assert_eq!(
+                                slice.len(),
+                                padded.len() - encoded.len(),
+                                "extra data consumed: {slice:?}"
+                            );
+                            break;
+                        }
+                        Ok(ControlFlow::Continue(())) => {
+                            assert!(
+                                !slice.is_empty(),
+                                "full slice consumed without giving a result"
+                            );
+                            assert_ne!(
+                                slice.len(),
+                                last_remaining,
+                                "parser failed to make progress"
+                            );
+                            last_remaining = slice.len();
+                        }
+                        Err(e) => {
+                            panic!(
+                                "error: {e:?}, chunk_size: {chunk_size}, padded: {padded:?}, remaining: {slice:?}"
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 }
