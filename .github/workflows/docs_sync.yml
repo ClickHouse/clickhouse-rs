@@ -31,9 +31,9 @@ env:
   TARGET_BRANCH: master
   # Path inside TARGET_REPO that mirrors this repo's docs. Wiped and replaced on
   # every sync so deletions and renames propagate.
-  TARGET_DOCS_PATH: docs/integrations/language-clients/rust.mdx
+  TARGET_DOCS_PATH: docs/integrations/language-clients/rust
   # This repo's docs file or folder (the source of truth).
-  SOURCE_DOCS_PATH: docs/index.mdx
+  SOURCE_DOCS_PATH: docs
   # Stable branch on TARGET_REPO, force-pushed each run.
   SYNC_BRANCH: robot/docs-sync-clickhouse-rs
   # Label the sync PR gets on TARGET_REPO.
