@@ -53,6 +53,12 @@ impl BlockReader {
 
     /// **NOT** cancel-safe. Intended to be wrapped in an async task for cancel-safety.
     pub(crate) async fn read_block(&mut self) -> Result<Option<Block>, Error> {
+        if !self.inner.try_read_chunk().await? {
+            // Native format over HTTP doesn't send a zero-row block on an empty resultset,
+            // it just sends nothing at all.
+            return Ok(None);
+        }
+
         let num_columns = self.inner.read_varuint().await?;
         let num_rows = self.inner.read_varuint().await?;
 
@@ -456,11 +462,24 @@ impl ReaderInner {
     }
 
     async fn read_chunk(&mut self) -> Result<(), Error> {
-        if self.last_chunk.is_empty() {
-            self.last_chunk = self.chunks.next().await.ok_or(Error::NotEnoughData)??.data;
+        if !self.try_read_chunk().await? {
+            tracing::trace!("error: not enough data");
+            return Err(Error::NotEnoughData);
         }
 
         Ok(())
+    }
+
+    async fn try_read_chunk(&mut self) -> Result<bool, Error> {
+        if self.last_chunk.is_empty() {
+            let Some(chunk) = self.chunks.next().await else {
+                return Ok(false);
+            };
+
+            self.last_chunk = chunk?.data;
+        }
+
+        Ok(true)
     }
 
     fn consume(&mut self, len: usize) {

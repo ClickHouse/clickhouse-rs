@@ -295,6 +295,17 @@ where
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.kind {
+            IterKind::Fixed(chunks) => chunks.size_hint(),
+            IterKind::Variable { end_indices, .. } => end_indices.size_hint(),
+            IterKind::Array { end_indices, .. } => end_indices.size_hint(),
+            IterKind::Tuple { elem_indices, .. } => elem_indices.size_hint(),
+            IterKind::Map { end_indices, .. } => end_indices.size_hint(),
+            IterKind::LowCardinality { keys, .. } => keys.size_hint(),
+        }
+    }
 }
 
 impl<'a> TupleIter<'a> {

@@ -2,9 +2,33 @@ use crate::get_client;
 use std::collections::HashMap;
 
 #[tokio::test]
-async fn mixed_types() {
-    const NUM_ROWS: u64 = 10;
+async fn mixed_types_empty() {
+    mixed_types(0).await
+}
 
+#[tokio::test]
+async fn mixed_types_10() {
+    mixed_types(10).await
+}
+
+#[tokio::test]
+async fn mixed_types_100() {
+    mixed_types(100).await
+}
+
+#[tokio::test]
+async fn mixed_types_1000() {
+    mixed_types(1000).await
+}
+
+// NOTE: requires >50GiB RAM on the server, likely because all the strings have to live in memory
+#[tokio::test]
+#[ignore]
+async fn mixed_types_10000() {
+    mixed_types(10000).await
+}
+
+async fn mixed_types(num_rows: u64) {
     let client = get_client();
 
     let mut cursor = client
@@ -25,13 +49,19 @@ async fn mixed_types() {
         FROM system.numbers
         LIMIT {limit:UInt64}",
         )
-        .param("limit", NUM_ROWS)
+        .param("limit", num_rows)
         .fetch_native()
         .unwrap();
 
-    let block = cursor.next().await.unwrap().expect("expected one block");
+    let Some(block) = cursor.next().await.unwrap() else {
+        assert_eq!(
+            num_rows, 0,
+            "num_rows is nonzero but cursor returned no blocks"
+        );
+        return;
+    };
 
-    assert_eq!(block.num_rows() as u64, NUM_ROWS);
+    assert_eq!(block.num_rows() as u64, num_rows);
 
     assert_eq!(block.columns().len(), 12);
 
@@ -39,7 +69,12 @@ async fn mixed_types() {
 
     let mut number_iter = block["number"].iter::<u64>().unwrap();
 
-    for (number, row) in number_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        number_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (number, row) in number_iter.by_ref().zip(0u64..num_rows) {
         assert_eq!(number.unwrap(), row);
     }
 
@@ -47,7 +82,12 @@ async fn mixed_types() {
 
     let mut text_iter = block["text"].iter::<&str>().unwrap();
 
-    for (text, row) in text_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        text_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (text, row) in text_iter.by_ref().zip(0u64..num_rows) {
         let text = text.unwrap();
 
         assert_eq!(text.len() as u64, row);
@@ -61,7 +101,12 @@ async fn mixed_types() {
 
     let mut nullable_number_iter = block["nullable_number"].iter::<Option<u64>>().unwrap();
 
-    for (opt_number, row) in nullable_number_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        nullable_number_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (opt_number, row) in nullable_number_iter.by_ref().zip(0u64..num_rows) {
         let opt_number = opt_number.unwrap();
 
         if row % 2 == 0 {
@@ -75,7 +120,12 @@ async fn mixed_types() {
 
     let mut nullable_text_iter = block["nullable_text"].iter::<Option<&str>>().unwrap();
 
-    for (opt_text, row) in nullable_text_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        nullable_text_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (opt_text, row) in nullable_text_iter.by_ref().zip(0u64..num_rows) {
         let opt_text = opt_text.unwrap();
 
         if row % 2 != 0 {
@@ -93,7 +143,12 @@ async fn mixed_types() {
 
     let mut tuple_iter = block["number_text_tuple"].iter::<(u64, &str)>().unwrap();
 
-    for (tuple, row) in tuple_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        tuple_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (tuple, row) in tuple_iter.by_ref().zip(0u64..num_rows) {
         let (number, text) = tuple.unwrap();
 
         assert_eq!(number, row);
@@ -110,7 +165,12 @@ async fn mixed_types() {
         .iter::<(Option<u64>, Option<&str>)>()
         .unwrap();
 
-    for (tuple, row) in nullable_tuple_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        nullable_tuple_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (tuple, row) in nullable_tuple_iter.by_ref().zip(0u64..num_rows) {
         let (opt_number, opt_text) = tuple.unwrap();
 
         if row % 2 == 0 {
@@ -132,7 +192,12 @@ async fn mixed_types() {
 
     let mut number_array_iter = block["number_array"].iter::<Vec<u64>>().unwrap();
 
-    for (number_array, row) in number_array_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        number_array_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (number_array, row) in number_array_iter.by_ref().zip(0u64..num_rows) {
         let number_array = number_array.unwrap();
 
         assert_eq!(number_array.len() as u64, row);
@@ -147,7 +212,12 @@ async fn mixed_types() {
 
     let mut text_array_iter = block["text_array"].iter::<Vec<&str>>().unwrap();
 
-    for (text_array, row) in text_array_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        text_array_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (text_array, row) in text_array_iter.by_ref().zip(0u64..num_rows) {
         let text_array = text_array.unwrap();
 
         assert_eq!(text_array.len() as u64, row);
@@ -163,7 +233,12 @@ async fn mixed_types() {
         .iter::<HashMap<u64, String>>()
         .unwrap();
 
-    for (map, row) in map_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        map_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (map, row) in map_iter.by_ref().zip(0u64..num_rows) {
         let map = map.unwrap();
 
         assert_eq!(map.len() as u64, row);
@@ -178,7 +253,12 @@ async fn mixed_types() {
     // Should be identical to `text` column
     let mut lc_text_iter = block["low_cardinality_text"].iter::<&str>().unwrap();
 
-    for (text, row) in lc_text_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        lc_text_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (text, row) in lc_text_iter.by_ref().zip(0u64..num_rows) {
         let text = text.unwrap();
 
         assert_eq!(text.len() as u64, row);
@@ -195,7 +275,12 @@ async fn mixed_types() {
         .iter::<Option<&str>>()
         .unwrap();
 
-    for (opt_text, row) in lc_nullable_text_iter.by_ref().zip(0u64..NUM_ROWS) {
+    assert_eq!(
+        lc_nullable_text_iter.size_hint(),
+        (num_rows as usize, Some(num_rows as usize))
+    );
+
+    for (opt_text, row) in lc_nullable_text_iter.by_ref().zip(0u64..num_rows) {
         let opt_text = opt_text.unwrap();
 
         if row % 2 != 0 {
