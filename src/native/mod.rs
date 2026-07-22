@@ -216,7 +216,7 @@ fn fixed_width(data_type: &DataTypeNode) -> Option<usize> {
         DataTypeNode::Time64(_) => Some(8),
         DataTypeNode::Interval(_) => Some(8),
         DataTypeNode::IPv4 => Some(4),
-        DataTypeNode::IPv6 => Some(8),
+        DataTypeNode::IPv6 => Some(16),
         // Nullable needs to be handled specially
         DataTypeNode::Nullable(_) => None,
         // Type width determined by metadata that comes before column data.
