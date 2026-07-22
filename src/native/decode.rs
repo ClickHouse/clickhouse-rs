@@ -68,6 +68,56 @@ pub trait Decode<'a>: 'a + Sized {
     }
 }
 
+macro_rules! impl_from_le_bytes {
+    ($($dataty:ident: $ty:ident),* $(,)?) => {
+        $(
+            impl<'a> Decode<'a> for $ty {
+                fn compatible(data_type: &DataTypeNode) -> bool {
+                    matches!(data_type, DataTypeNode::$dataty)
+                }
+
+                fn decode(
+                    reader: &mut ValueReader<'a>,
+                ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+                    Ok($ty::from_le_bytes(*reader.read_bytes_fixed()?))
+                }
+            }
+        )*
+    };
+}
+
+// All scalar primitives are in little-endian
+impl_from_le_bytes!(
+    // 8-bit ints don't have a concept of "endianness" but they still implement `from_bytes_le()`
+    // for the express purpose of being included in macros like this
+    Int8: i8,
+    Int16: i16,
+    Int32: i32,
+    Int64: i64,
+    Int128: i128,
+    UInt8: u8,
+    UInt16: u16,
+    UInt32: u32,
+    UInt64: u64,
+    UInt128: u128,
+    Float32: f32,
+    Float64: f64,
+);
+
+impl Decode<'_> for bool {
+    fn compatible(data_type: &DataTypeNode) -> bool {
+        matches!(data_type, DataTypeNode::Bool)
+    }
+
+    fn decode(
+        reader: &mut ValueReader<'_>,
+    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        // https://clickhouse.com/docs/interfaces/specs/NativeFormat#bool
+        let [b] = reader.read_bytes_fixed()?;
+        Ok(*b != 0)
+    }
+}
+
 impl<'a> Decode<'a> for &'a str {
     fn compatible(data_type: &DataTypeNode) -> bool {
         <&[u8] as Decode>::compatible(data_type)
@@ -209,40 +259,6 @@ macro_rules! tuple_impl {
 }
 
 tuple_impl!(t1: T1, t2: T2, t3: T3);
-
-macro_rules! impl_from_le_bytes {
-    ($($dataty:ident: $ty:ident),* $(,)?) => {
-        $(
-            impl<'a> Decode<'a> for $ty {
-                fn compatible(data_type: &DataTypeNode) -> bool {
-                    matches!(data_type, DataTypeNode::$dataty)
-                }
-
-                fn decode(
-                    reader: &mut ValueReader<'a>,
-                ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-                    Ok($ty::from_le_bytes(*reader.read_bytes_fixed()?))
-                }
-            }
-        )*
-    };
-}
-
-// All scalar primitives are in little-endian
-impl_from_le_bytes!(
-    Int8: i8,
-    Int16: i16,
-    Int32: i32,
-    Int64: i64,
-    Int128: i128,
-    UInt8: u8,
-    UInt16: u16,
-    UInt32: u32,
-    UInt64: u64,
-    UInt128: u128,
-    Float32: f32,
-    Float64: f64,
-);
 
 impl<'a, K, V, S> Decode<'a> for HashMap<K, V, S>
 where
