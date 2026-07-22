@@ -3,6 +3,7 @@ use clickhouse_types::DataTypeNode;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::hash::{BuildHasher, Hash};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub struct ValueReader<'a> {
     pub(super) data_type: &'a DataTypeNode,
@@ -303,5 +304,76 @@ where
             .zip(value_data.into_reader::<V>()?)
             .map(|(k, v)| Ok((k?, v?)))
             .collect::<Result<Self, Box<dyn Error + Send + Sync + 'static>>>()
+    }
+}
+
+impl Decode<'_> for Ipv4Addr {
+    fn compatible(data_type: &DataTypeNode) -> bool {
+        matches!(data_type, DataTypeNode::IPv4)
+    }
+
+    fn decode(
+        reader: &mut ValueReader<'_>,
+    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        // https://clickhouse.com/docs/interfaces/specs/NativeFormat#ipv4-and-ipv6
+        // IPv4 is byte-reversed, so little-endian
+        let bytes_le = u32::from_le_bytes(*reader.read_bytes_fixed()?);
+        Ok(Ipv4Addr::from(bytes_le.to_be()))
+    }
+}
+
+impl Decode<'_> for Ipv6Addr {
+    fn compatible(data_type: &DataTypeNode) -> bool {
+        matches!(data_type, DataTypeNode::IPv6)
+    }
+
+    fn decode(
+        reader: &mut ValueReader<'_>,
+    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        // https://clickhouse.com/docs/interfaces/specs/NativeFormat#ipv4-and-ipv6
+        // IPv6 uses canonical (big-endian) encoding
+        Ok(Ipv6Addr::from(*reader.read_bytes_fixed::<16>()?))
+    }
+}
+
+impl Decode<'_> for IpAddr {
+    fn compatible(data_type: &DataTypeNode) -> bool {
+        matches!(data_type, DataTypeNode::IPv4 | DataTypeNode::IPv6)
+    }
+
+    fn decode(
+        reader: &mut ValueReader<'_>,
+    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        match reader.data_type {
+            DataTypeNode::IPv4 => Ipv4Addr::decode(reader).map(Into::into),
+            DataTypeNode::IPv6 => Ipv6Addr::decode(reader).map(Into::into),
+            other => Err(format!("expected IP address, got {other}").into()),
+        }
+    }
+}
+
+#[cfg(feature = "uuid")]
+mod uuid {
+    use super::{Decode, ValueReader};
+    use clickhouse_types::DataTypeNode;
+    use std::error::Error;
+    use uuid::Uuid;
+
+    impl Decode<'_> for Uuid {
+        fn compatible(data_type: &DataTypeNode) -> bool {
+            matches!(data_type, DataTypeNode::UUID)
+        }
+
+        fn decode(
+            reader: &mut ValueReader<'_>,
+        ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+            // https://clickhouse.com/docs/interfaces/specs/NativeFormat#uuid
+            // Wire bytes 0..7 = canonical bytes 0..7 reversed.
+            // Wire bytes 8..15 = canonical bytes 8..15 reversed.
+            let hi_bytes = u64::from_le_bytes(*reader.read_bytes_fixed()?);
+            let low_bytes = u64::from_le_bytes(*reader.read_bytes_fixed()?);
+
+            Ok(Uuid::from_u64_pair(hi_bytes.to_be(), low_bytes.to_be()))
+        }
     }
 }
