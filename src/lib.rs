@@ -71,7 +71,7 @@ pub struct Client {
     mocked: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ProductInfo {
     name: String,
     version: String,
@@ -106,6 +106,33 @@ impl Default for Authentication {
 impl Default for Client {
     fn default() -> Self {
         Self::with_http_client(http_client::default())
+    }
+}
+
+/// Manual `Debug` implementation to redact sensitive information and omit internal implementation
+/// details from the output.
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // redact auth
+        let authentication_redacted = match &self.authentication {
+            Authentication::Credentials { .. } => "credentials",
+            Authentication::Jwt { .. } => "jwt",
+        };
+        // redact user/pass in Url
+        let origin = url::Url::parse(&self.url)
+            .map(|url| url.origin().ascii_serialization())
+            .unwrap_or_else(|_| "<invalid url>".to_owned());
+        f.debug_struct("Client")
+            .field("url", &origin)
+            .field("database", &self.database)
+            .field("authentication", &authentication_redacted)
+            .field("compression", &self.compression)
+            .field("roles", &self.roles)
+            .field("settings", &self.settings)
+            .field("headers", &self.headers.keys()) // redact values
+            .field("products_info", &self.products_info)
+            .field("validation", &self.validation)
+            .finish_non_exhaustive()
     }
 }
 
@@ -713,7 +740,7 @@ pub mod _priv {
 mod client_tests {
     use crate::_priv::RowKind;
     use crate::row_metadata::{AccessType, RowMetadata};
-    use crate::{Authentication, Client, Row};
+    use crate::{Authentication, Client, Compression, Row};
     use clickhouse_types::{Column, DataTypeNode};
 
     #[test]
@@ -900,6 +927,104 @@ mod client_tests {
         let client_clone = client.clone();
         let client = client.with_setting("async_insert", "1");
         assert_ne!(client.settings, client_clone.settings,);
+    }
+
+    #[test]
+    fn client_debug() {
+        let client = Client::default()
+            .with_url("http://localhost:8123")
+            .with_database("mydb")
+            .with_user("zach")
+            .with_password("verysecretpassword")
+            .with_compression(Compression::None)
+            .with_roles(["reader"])
+            .with_setting("async_insert", "1")
+            .with_header("X-Trace-Id", "abc")
+            .with_product_info("MyApp", "0.0.1")
+            .with_validation(false);
+
+        let dbg = format!("{client:#?}");
+        let expected = "\
+Client {
+    url: \"http://localhost:8123\",
+    database: Some(
+        \"mydb\",
+    ),
+    authentication: \"credentials\",
+    compression: None,
+    roles: {
+        \"reader\",
+    },
+    settings: {
+        \"async_insert\": \"1\",
+    },
+    headers: [
+        \"X-Trace-Id\",
+    ],
+    products_info: [
+        ProductInfo {
+            name: \"MyApp\",
+            version: \"0.0.1\",
+        },
+    ],
+    validation: false,
+    ..
+}";
+        assert_eq!(dbg, expected);
+    }
+
+    #[test]
+    fn client_debug_redaction() {
+        let client = Client::default()
+            .with_url("http://urluser:urlsecret@localhost:8123")
+            .with_database("mydb")
+            .with_user("zach")
+            .with_password("verysecretpassword")
+            .with_header("Authorization", "Bearer super-secret")
+            .with_header("X-Trace-Id", "abc");
+
+        let dbg = format!("{client:?}");
+        assert!(
+            !dbg.contains("verysecretpassword"),
+            "password leaked: {dbg}"
+        );
+        assert!(!dbg.contains("zach"), "user leaked: {dbg}");
+        // credentials embedded in the URL are redacted down to the origin
+        assert!(!dbg.contains("urluser"), "url user leaked: {dbg}");
+        assert!(!dbg.contains("urlsecret"), "url password leaked: {dbg}");
+        assert!(!dbg.contains("super-secret"), "header value leaked: {dbg}");
+        assert!(dbg.contains("\"credentials\""), "missing auth tag: {dbg}");
+        assert!(
+            dbg.contains("http://localhost:8123"),
+            "missing origin: {dbg}"
+        );
+        assert!(dbg.contains("mydb"), "missing database: {dbg}");
+        // header names visible
+        assert!(dbg.contains("Authorization"), "missing header name: {dbg}");
+        assert!(dbg.contains("X-Trace-Id"), "missing header name: {dbg}");
+
+        // JWT: access token must not appear
+        let client = Client::default().with_access_token("eyJhbGciOi.payload.signature");
+        let dbg = format!("{client:?}");
+        assert!(!dbg.contains("eyJhbGciOi"), "access token leaked: {dbg}");
+        assert!(dbg.contains("\"jwt\""), "missing auth tag: {dbg}");
+    }
+
+    #[test]
+    fn client_debug_invalid_url() {
+        // An empty URL (the default) cannot be parsed; `origin` falls back to a
+        // placeholder rather than echoing the raw string.
+        let dbg = format!("{:?}", Client::default());
+        assert!(dbg.contains("url: \"<invalid url>\""), "unexpected: {dbg}");
+
+        // A malformed URL must not be echoed verbatim even on the fallback path,
+        // since it may still contain credentials.
+        let dbg = format!(
+            "{:?}",
+            Client::default().with_url("not a url but has a secret hunter2")
+        );
+        assert!(dbg.contains("url: \"<invalid url>\""), "unexpected: {dbg}");
+        assert!(!dbg.contains("hunter2"), "raw url leaked: {dbg}");
     }
 
     #[test]
