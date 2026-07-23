@@ -34,20 +34,20 @@ async fn mixed_types(num_rows: u64) {
     let mut cursor = client
         .query(
             "SELECT
-            number,
-            leftPad(toString(number), number, '.') AS text,
-            number % 2 == 0 ?? number : NULL AS nullable_number,
-            number % 2 != 0 ?? text : NULL AS nullable_text,
-            tuple(number, text) AS number_text_tuple,
-            tuple(nullable_number, nullable_text) AS nullable_tuple,
-            arrayMap(x -> toUInt64(x), arrayEnumerate(arrayWithConstant(number, toUInt64(0)))) AS number_array,
-            arrayMap(x -> rightPad(toString(x), x, '-'), number_array) AS text_array,
-            arrayZip(number_array, text_array) AS number_text_tuple_array,
-            mapFromArrays(number_array, text_array) AS number_to_text_map,
-            toLowCardinality(text) as low_cardinality_text,
-            toLowCardinality(nullable_text) as low_cardinality_nullable
-        FROM system.numbers
-        LIMIT {limit:UInt64}",
+                number,
+                leftPad(toString(number), number, '.') AS text,
+                number % 2 == 0 ?? number : NULL AS nullable_number,
+                number % 2 != 0 ?? text : NULL AS nullable_text,
+                tuple(number, text) AS number_text_tuple,
+                tuple(nullable_number, nullable_text) AS nullable_tuple,
+                arrayMap(x -> toUInt64(x), arrayEnumerate(arrayWithConstant(number, toUInt64(0)))) AS number_array,
+                arrayMap(x -> rightPad(toString(x), x, '-'), number_array) AS text_array,
+                arrayZip(number_array, text_array) AS number_text_tuple_array,
+                mapFromArrays(number_array, text_array) AS number_to_text_map,
+                toLowCardinality(text) as low_cardinality_text,
+                toLowCardinality(nullable_text) as low_cardinality_nullable
+            FROM system.numbers
+            LIMIT {limit:UInt64}",
         )
         .param("limit", num_rows)
         .fetch_native()
@@ -295,4 +295,43 @@ async fn mixed_types(num_rows: u64) {
     }
 
     assert!(lc_nullable_text_iter.next().is_none());
+}
+
+#[tokio::test]
+async fn empty_arrays() {
+    use std::fmt::Write;
+
+    // test decoding empty arrays of various types
+    let client = get_client();
+
+    let types = [
+        "Int8",
+        "UInt64",
+        "String",
+        "Nullable(Int32)",
+        "Nullable(String)",
+        "LowCardinality(UInt64)",
+        "LowCardinality(String)",
+        "LowCardinality(Nullable(String))",
+        "Tuple(UInt64, String, String)",
+        "Nullable(Tuple(UInt64, String, String))",
+    ];
+
+    let mut query = "SELECT \n".to_string();
+
+    let mut comma = false;
+
+    for ty in types {
+        if comma {
+            writeln!(query, ",").unwrap();
+        }
+
+        write!(query, "defaultValueOfTypeName('Array({ty})')").unwrap();
+
+        comma = true;
+    }
+
+    let mut cursor = client.query(&query).fetch_native().unwrap();
+
+    let block = cursor.next().await.unwrap().expect("expected one block");
 }

@@ -56,6 +56,15 @@ enum IterKind<'a> {
 }
 
 impl<'a> ArrayData<'a> {
+    pub(super) fn at_index(elem_type: &'a DataTypeNode, layout: &'a Layout, index: usize) -> Self {
+        Self {
+            elem_type,
+            layout,
+            // If this overflows it'll just result in an empty range
+            indices: index..index.saturating_add(1),
+        }
+    }
+
     pub fn into_reader<T>(self) -> Result<ArrayReader<'a, T>, Error>
     where
         T: Decode<'a>,
@@ -285,13 +294,17 @@ where
                     return Some(T::decode_null(self.elem_type).map_err(Error::Other));
                 }
 
-                Some(find_lc_data(lc, inner_type, key).and_then(|data| {
-                    data.into_reader()?.next().ok_or_else(|| {
-                        Error::Custom(format!(
-                            "data for LowCardinality({inner_type}) key not found: {key}"
-                        ))
-                    })?
-                }))
+                Some(
+                    ArrayData::at_index(inner_type, &lc.dict, key)
+                        .into_reader::<T>()
+                        .and_then(|mut reader| {
+                            reader.next().ok_or_else(|| {
+                                Error::Custom(format!(
+                                    "data for LowCardinality({inner_type}) key not found: {key}"
+                                ))
+                            })?
+                        }),
+                )
             }
         }
     }
@@ -314,46 +327,9 @@ impl<'a> TupleIter<'a> {
             Error::Custom("attempting to decode tuple with more types than received".into())
         })?;
 
-        ArrayData {
-            elem_type,
-            layout,
-            // If `self.index + 1` overflows this range will be empty
-            indices: self.index..self.index + 1,
-        }
-        .into_reader::<T>()?
-        .next()
-        .ok_or_else(|| Error::Custom("attempting to decode from an empty array".into()))?
+        ArrayData::at_index(elem_type, layout, self.index)
+            .into_reader::<T>()?
+            .next()
+            .ok_or_else(|| Error::Custom("attempting to decode from an empty array".into()))?
     }
-}
-
-fn find_lc_data<'a>(
-    lc: &'a LayoutLowCardinality,
-    inner_type: &'a DataTypeNode,
-    mut key: usize,
-) -> Result<ArrayData<'a>, Error> {
-    if let Some(global_dict) = &lc.global_dict {
-        if key < global_dict.num_values {
-            return Ok(ArrayData {
-                elem_type: inner_type,
-                layout: global_dict,
-                indices: key..key + 1,
-            });
-        }
-
-        key -= global_dict.num_values;
-    }
-
-    if let Some(local_dict) = &lc.local_dict
-        && key < local_dict.num_values
-    {
-        return Ok(ArrayData {
-            elem_type: inner_type,
-            layout: local_dict,
-            indices: key..key + 1,
-        });
-    }
-
-    Err(Error::Custom(format!(
-        "key for LowCardinality({inner_type}) not in range: {key}"
-    )))
 }

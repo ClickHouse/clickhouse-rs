@@ -5,7 +5,6 @@ use bytes::Bytes;
 use clickhouse_types::DataTypeNode;
 use clickhouse_types::data_types::{DecimalType, EnumType};
 use std::ops::Index;
-use std::sync::Arc;
 
 use crate::native::array::{ArrayData, ArrayReader};
 use hashbrown::HashMap;
@@ -116,9 +115,8 @@ enum LayoutKind {
 
 struct LayoutLowCardinality {
     keys: Box<[usize]>,
-    global_dict: Option<Arc<Layout>>,
-    local_dict: Option<Box<Layout>>,
-    /// If `true`, `key = 1` should decode as `NULL` instead of the placeholder value given.
+    dict: Box<Layout>,
+    /// If `true`, `key = 0` should decode as `NULL` instead of the placeholder value given.
     is_nullable: bool,
 }
 
@@ -185,7 +183,7 @@ impl<'a, T> ColumnIter<'a, T> {
     }
 }
 
-fn fixed_width(data_type: &DataTypeNode) -> Option<usize> {
+fn type_fixed_width(data_type: &DataTypeNode) -> Option<usize> {
     match data_type {
         DataTypeNode::Bool => Some(1),
         DataTypeNode::UInt8 => Some(1),
@@ -227,7 +225,7 @@ fn fixed_width(data_type: &DataTypeNode) -> Option<usize> {
         DataTypeNode::LowCardinality(_) => None,
         DataTypeNode::Array(_) => None,
         DataTypeNode::Tuple(types) => types.iter().try_fold(0usize, |total, inner| {
-            total.checked_add(fixed_width(inner)?)
+            total.checked_add(type_fixed_width(inner)?)
         }),
         DataTypeNode::Enum(type_, _) => match type_ {
             EnumType::Enum8 => Some(1),
@@ -235,7 +233,7 @@ fn fixed_width(data_type: &DataTypeNode) -> Option<usize> {
         },
         DataTypeNode::Map(_) => None,
         DataTypeNode::AggregateFunction(_, _) => None,
-        DataTypeNode::SimpleAggregateFunction(_, inner) => fixed_width(inner),
+        DataTypeNode::SimpleAggregateFunction(_, inner) => type_fixed_width(inner),
         DataTypeNode::Variant(_) => None,
         DataTypeNode::Dynamic => None,
         DataTypeNode::JSON => None,

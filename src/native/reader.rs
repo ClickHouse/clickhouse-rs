@@ -1,18 +1,19 @@
 use crate::error::Error;
 use crate::native::string::MaybeUtf8;
-use crate::native::{Block, Column, Layout, LayoutKind, LayoutLowCardinality, fixed_width};
+use crate::native::{Block, Column, Layout, LayoutKind, LayoutLowCardinality, type_fixed_width};
 use crate::response::Chunks;
 use bytes::{Buf, Bytes, BytesMut};
 use clickhouse_types::DataTypeNode;
 use futures_util::StreamExt;
-use hashbrown::{HashMap, hash_map};
 use std::cmp;
+use std::collections::VecDeque;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 
 pub(crate) struct BlockReader {
     inner: ReaderInner,
-    lc_state: LcState,
+    // Since versioned type encoding is split into a "prefix phase" and a "data phase"
+    // we need to read state prefixes separately and remember what we've seen
+    prefix_queue: VecDeque<StatePrefix>,
 }
 
 struct ReaderInner {
@@ -20,13 +21,10 @@ struct ReaderInner {
     last_chunk: Bytes,
 }
 
-/// `LowCardinality` decode state for the current stream.
-struct LcState {
-    by_column: HashMap<MaybeUtf8, ColumnLcState>,
-}
-
-struct ColumnLcState {
-    global_dict: Option<Arc<Layout>>,
+#[derive(Debug)]
+enum StatePrefix {
+    // LowCardinality state prefix is just `version = 1`, no state necessary
+    LowCardinality,
 }
 
 #[repr(u64)]
@@ -45,9 +43,7 @@ impl BlockReader {
                 chunks,
                 last_chunk: Bytes::new(),
             },
-            lc_state: LcState {
-                by_column: HashMap::new(),
-            },
+            prefix_queue: VecDeque::new(),
         }
     }
 
@@ -99,7 +95,13 @@ impl BlockReader {
             ))
         })?;
 
-        let layout = self.read_type_data(&name, &data_type, num_rows).await?;
+        if num_rows != 0 {
+            self.read_state_prefix(&name, &data_type).await?;
+        }
+
+        let layout = self
+            .read_data(&name, &data_type, num_rows, num_rows != 0)
+            .await?;
 
         Ok(Column {
             name,
@@ -108,11 +110,59 @@ impl BlockReader {
         })
     }
 
-    async fn read_type_data(
+    async fn read_state_prefix(
+        &mut self,
+        column_name: &MaybeUtf8,
+        data_type: &DataTypeNode,
+    ) -> Result<(), Error> {
+        match data_type {
+            DataTypeNode::LowCardinality(_) => {
+                let prefix = self.inner.read_int64().await?;
+
+                if prefix != 1 {
+                    // sharedDictionariesWithAdditionalKeys
+                    return Err(Error::Custom(format!(
+                        "unexpected/unsupported serialization version of (sub)type \
+                             {data_type} of column {column_name:?}: \
+                             expected 1, got {prefix}"
+                    )));
+                }
+
+                self.prefix_queue.push_back(StatePrefix::LowCardinality);
+            }
+            // State prefix for composite types needs to be read _before_ the composite type layout
+            DataTypeNode::Array(inner_type) => {
+                Box::pin(self.read_state_prefix(column_name, inner_type)).await?;
+            }
+            DataTypeNode::Tuple(types) => {
+                for ty in types {
+                    Box::pin(self.read_state_prefix(column_name, ty)).await?;
+                }
+            }
+            DataTypeNode::Map([key_ty, val_ty]) => {
+                Box::pin(self.read_state_prefix(column_name, key_ty)).await?;
+                Box::pin(self.read_state_prefix(column_name, val_ty)).await?;
+            }
+            DataTypeNode::JSON
+            | DataTypeNode::JsonWithHint(_)
+            | DataTypeNode::Variant(_)
+            | DataTypeNode::Dynamic => {
+                return Err(Error::Custom(format!(
+                    "unimplemented deserialization of (sub)type {data_type} of column {column_name:?}"
+                )));
+            }
+            _ => (),
+        }
+
+        Ok(())
+    }
+
+    async fn read_data(
         &mut self,
         column_name: &MaybeUtf8,
         data_type: &DataTypeNode,
         num_values: usize,
+        block_nonempty: bool,
     ) -> Result<Layout, Error> {
         let (data_type, nulls) = if let DataTypeNode::Nullable(inner) = data_type {
             // Read off the null bitmap
@@ -121,7 +171,7 @@ impl BlockReader {
             (data_type, None)
         };
 
-        if let Some(type_width) = fixed_width(data_type) {
+        if let Some(type_width) = type_fixed_width(data_type) {
             let total_bytes = type_width.checked_mul(num_values).ok_or_else(|| {
                 Error::Custom(format!(
                     "data size of column {column_name:?} is too large: {num_values} rows X {type_width} bytes"
@@ -171,7 +221,8 @@ impl BlockReader {
 
                 // Recursive `async fn` currently requires boxing
                 let elem_layout =
-                    Box::pin(self.read_type_data(column_name, elem_type, total_len)).await?;
+                    Box::pin(self.read_data(column_name, elem_type, total_len, block_nonempty))
+                        .await?;
 
                 Ok(Layout {
                     kind: LayoutKind::Array {
@@ -186,7 +237,10 @@ impl BlockReader {
                 let mut layouts = Vec::with_capacity(types.len());
 
                 for ty in types {
-                    layouts.push(Box::pin(self.read_type_data(column_name, ty, num_values)).await?);
+                    layouts.push(
+                        Box::pin(self.read_data(column_name, ty, num_values, block_nonempty))
+                            .await?,
+                    );
                 }
 
                 Ok(Layout {
@@ -204,12 +258,12 @@ impl BlockReader {
 
                 let total_len = end_indices.last().copied().unwrap_or(0);
 
-                // Keys semantically cannot be `LowCardinality` or `Nullable`
-                // but that doesn't really affect decoding
                 let key_layout =
-                    Box::pin(self.read_type_data(column_name, key_ty, total_len)).await?;
+                    Box::pin(self.read_data(column_name, key_ty, total_len, block_nonempty))
+                        .await?;
                 let value_layout =
-                    Box::pin(self.read_type_data(column_name, val_ty, total_len)).await?;
+                    Box::pin(self.read_data(column_name, val_ty, total_len, block_nonempty))
+                        .await?;
 
                 Ok(Layout {
                     kind: LayoutKind::Map {
@@ -223,11 +277,11 @@ impl BlockReader {
             DataTypeNode::LowCardinality(inner_type) => {
                 Ok(Layout {
                     kind: LayoutKind::LowCardinality(
-                        self.read_low_cardinality(column_name, inner_type, num_values)
+                        self.read_lc_data(column_name, inner_type, num_values, block_nonempty)
                             .await?,
                     ),
-                    // Can be `Some` if the type is `Nullable(LowCardinality(...))`
-                    // even though `LowCardinality(Nullable(...))` is more efficient
+                    // Server disallows `Nullable(LowCardinality(...))` but we don't gain much
+                    // from asserting that here
                     nulls,
                     num_values,
                 })
@@ -238,57 +292,73 @@ impl BlockReader {
         }
     }
 
-    async fn read_low_cardinality(
+    async fn read_lc_data(
         &mut self,
         column_name: &MaybeUtf8,
         inner_type: &DataTypeNode,
         num_rows: usize,
+        block_nonempty: bool,
     ) -> Result<LayoutLowCardinality, Error> {
         const HAS_ADDITIONAL_KEYS_BIT: u64 = 0x200;
         const NEEDS_UPDATE_DICTIONARY_BIT: u64 = 0x400;
-        const NEED_GLOBAL_DICTIONARY_BIT: u64 = 0x800;
 
-        if num_rows == 0 {
-            todo!("empty result contains no prefix");
-        }
+        // NEED_GLOBAL_DICTIONARY_BIT (0x800) should NEVER be set
+        const VALID_FLAG_BITS: u64 = HAS_ADDITIONAL_KEYS_BIT | NEEDS_UPDATE_DICTIONARY_BIT;
 
-        if let hash_map::EntryRef::Vacant(vacant) = self.lc_state.by_column.entry_ref(column_name) {
-            // We haven't seen the state prefix for this query yet
-            let prefix = self.inner.read_int64().await?;
-
-            if prefix != 1 {
-                // sharedDictionariesWithAdditionalKeys
-                return Err(Error::Custom(format!(
-                    "unexpected/unsupported serialization version of type \
-                             LowCardinality({inner_type}) of column {column_name:?}: \
-                             expected 1, got {prefix}"
-                )));
-            }
-
-            vacant.insert(ColumnLcState { global_dict: None });
-        };
-
-        let metadata = self.inner.read_uint64().await?;
-
-        let key_type = LcKeyType::try_from_metadata(metadata)?;
-
-        let has_additional_keys = metadata & HAS_ADDITIONAL_KEYS_BIT != 0;
-        let needs_update_dictionary = metadata & NEEDS_UPDATE_DICTIONARY_BIT != 0;
-        let need_global_dictionary = metadata & NEED_GLOBAL_DICTIONARY_BIT != 0;
-
-        let dict_len = self.inner.read_uint64().await?;
-        let dict_len = usize::try_from(dict_len)
-            .map_err(|_| Error::Custom(format!("column {column_name:?} type LowCardinality({inner_type}) dictionary size too large: {dict_len}")))?;
-
-        // `LowCardinality(Nullable)` doesn't emit a null map, instead `dict[1]` is the null value
+        // `LowCardinality(Nullable)` doesn't emit a null map, instead `dict[0]` is the null value
         let (non_nullable, is_nullable) = if let DataTypeNode::Nullable(inner) = inner_type {
             (&**inner, true)
         } else {
             (inner_type, false)
         };
 
+        // Array(LowCardinality(...)) still emits a prefix even if the array itself is empty
+        if block_nonempty {
+            // Ensure that we read our version prefix even if it doesn't tell us anything
+            match self.prefix_queue.pop_front() {
+                Some(StatePrefix::LowCardinality) => (),
+                other => {
+                    return Err(Error::Custom(format!(
+                        "error reading column {column_name:?} (sub)type LowCardinality({inner_type}): \
+                     expected state prefix 0x01, got {other:?}"
+                    )));
+                }
+            }
+        }
+
+        if num_rows == 0 {
+            return Ok(LayoutLowCardinality {
+                keys: Box::new([]),
+                dict: Box::new(
+                    // The easiest way to implement this is to delegate back to `read_type_data()`
+                    Box::pin(self.read_data(column_name, non_nullable, num_rows, block_nonempty))
+                        .await?,
+                ),
+                is_nullable,
+            });
+        }
+
+        let metadata = self.inner.read_uint64().await?;
+
+        let key_type = LcKeyType::try_from_metadata(metadata)?;
+
+        let flags = metadata & !LcKeyType::MASK;
+
+        if flags != VALID_FLAG_BITS {
+            return Err(Error::Custom(format!(
+                "column {column_name:?} (sub)type LowCardinality({inner_type}) has \
+                         invalid or unexpected metadata bits (metadata: {metadata:X}); \
+                         expected: {VALID_FLAG_BITS:X}, received: {flags:X}",
+            )));
+        }
+
+        let dict_len = self.inner.read_uint64().await?;
+        let dict_len = usize::try_from(dict_len)
+            .map_err(|_| Error::Custom(format!("column {column_name:?} type LowCardinality({inner_type}) dictionary size too large: {dict_len}")))?;
+
         // called from `self.read_type_data()` so we have to box
-        let dict = Box::pin(self.read_type_data(column_name, non_nullable, dict_len)).await?;
+        let dict =
+            Box::pin(self.read_data(column_name, non_nullable, dict_len, block_nonempty)).await?;
 
         let keys_len = self.inner.read_uint64().await?;
         let keys_len = usize::try_from(keys_len)
@@ -302,33 +372,9 @@ impl BlockReader {
 
         let keys = self.inner.read_lc_keys(key_type, num_rows).await?;
 
-        // Cannot be borrowed across other calls to `self` so we have to do a second lookup;
-        // we could amortize by using `IndexMap` but two lookups per column is unlikely to be an issue
-        let state = self
-            .lc_state
-            .by_column
-            .get_mut(column_name)
-            .unwrap_or_else(|| panic!("BUG: `lc_state` should have been initialized"));
-
-        let (global_dict, local_dict) = if need_global_dictionary {
-            let global_dict = state.global_dict
-                .clone()
-                .ok_or_else(|| Error::Custom(format!("column {column_name:?} type LowCardinality({inner_type}) set NEEDS_GLOBAL_DICTIONARY_BIT for a block but no global dictionary was read")))?;
-
-            (
-                Some(global_dict),
-                has_additional_keys.then(|| Box::new(dict)),
-            )
-        } else if needs_update_dictionary {
-            (Some(state.global_dict.insert(Arc::new(dict)).clone()), None)
-        } else {
-            (None, Some(Box::new(dict)))
-        };
-
         Ok(LayoutLowCardinality {
-            global_dict,
-            local_dict,
             keys,
+            dict: Box::new(dict),
             is_nullable,
         })
     }
