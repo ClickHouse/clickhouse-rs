@@ -36,20 +36,27 @@ enum IterKind<'a> {
         data: &'a [u8],
     },
     Array {
+        // To avoid having to recurse into `DataTypeNode` every time,
+        // we memoize what the element type is
+        elem_type: &'a DataTypeNode,
         next_start: usize,
         end_indices: slice::Iter<'a, usize>,
         elem_layout: &'a Layout,
     },
     Tuple {
+        types: &'a [DataTypeNode],
         layouts: &'a [Layout],
         elem_indices: Range<usize>,
     },
     Map {
+        key_ty: &'a DataTypeNode,
+        val_ty: &'a DataTypeNode,
         next_start: usize,
         end_indices: slice::Iter<'a, usize>,
         key_val_layouts: &'a [Layout; 2],
     },
     LowCardinality {
+        inner_type: &'a DataTypeNode,
         keys: slice::Iter<'a, usize>,
         lc: &'a LayoutLowCardinality,
     },
@@ -83,16 +90,8 @@ impl<'a> ArrayData<'a> {
     where
         T: Decode<'a>,
     {
-        // Lift all "simple" wrappers
-        let elem_type = match self.elem_type {
-            DataTypeNode::Nullable(inner) => inner,
-            DataTypeNode::SimpleAggregateFunction(_, inner) => inner,
-            // LowCardinality has special handling
-            other => other,
-        };
-
         ArrayReader {
-            elem_type,
+            elem_type: self.elem_type,
             kind: match self.layout.kind {
                 LayoutKind::Fixed {
                     type_width,
@@ -120,23 +119,32 @@ impl<'a> ArrayData<'a> {
                     ref elem_layout,
                     ref end_indices,
                 } => IterKind::Array {
+                    elem_type: unwrap_array_type(self.elem_type).expect("BUG"),
                     next_start: 0,
                     end_indices: end_indices.iter(),
                     elem_layout,
                 },
                 LayoutKind::Tuple { ref layouts } => IterKind::Tuple {
+                    types: unwrap_tuple_type(self.elem_type).expect("BUG"),
                     layouts,
                     elem_indices: self.indices.clone(),
                 },
                 LayoutKind::Map {
                     ref key_val_layouts,
                     ref end_indices,
-                } => IterKind::Map {
-                    next_start: 0,
-                    key_val_layouts,
-                    end_indices: end_indices.iter(),
-                },
+                } => {
+                    let [key_ty, val_ty] = unwrap_map_type(self.elem_type).expect("BUG");
+
+                    IterKind::Map {
+                        key_ty,
+                        val_ty,
+                        next_start: 0,
+                        key_val_layouts,
+                        end_indices: end_indices.iter(),
+                    }
+                }
                 LayoutKind::LowCardinality(ref lc) => IterKind::LowCardinality {
+                    inner_type: unwrap_lc_type(self.elem_type).expect("BUG"),
                     keys: lc.keys.iter(),
                     lc,
                 },
@@ -208,17 +216,11 @@ where
                 )
             }
             IterKind::Array {
+                elem_type,
                 next_start,
                 end_indices,
                 elem_layout,
             } => {
-                let DataTypeNode::Array(elem_type) = self.elem_type else {
-                    unreachable!(
-                        "BUG: expected subarray element type, got {:?}",
-                        self.elem_type
-                    )
-                };
-
                 let array_end = *end_indices.next()?;
 
                 let indices = *next_start..array_end;
@@ -235,13 +237,10 @@ where
                 )
             }
             IterKind::Tuple {
+                types,
                 layouts,
                 elem_indices,
             } => {
-                let DataTypeNode::Tuple(types) = self.elem_type else {
-                    unreachable!("BUG: expected tuple type, got {:?}", self.elem_type)
-                };
-
                 let index = elem_indices.next()?;
 
                 // Need to make sure we advance the main iterator first
@@ -257,14 +256,12 @@ where
                 )
             }
             IterKind::Map {
+                key_ty,
+                val_ty,
                 next_start,
                 end_indices,
                 key_val_layouts: [key_layout, val_layout],
             } => {
-                let DataTypeNode::Map([key_ty, val_ty]) = self.elem_type else {
-                    unreachable!("BUG: expected map type, got {:?}", self.elem_type)
-                };
-
                 let array_end = *end_indices.next()?;
 
                 let indices = *next_start..array_end;
@@ -287,14 +284,11 @@ where
                     .map_err(Error::Other),
                 )
             }
-            IterKind::LowCardinality { keys, lc } => {
-                let DataTypeNode::LowCardinality(inner_type) = self.elem_type else {
-                    unreachable!(
-                        "BUG: expected LowCardinality type, got {:?}",
-                        self.elem_type
-                    )
-                };
-
+            IterKind::LowCardinality {
+                inner_type,
+                keys,
+                lc,
+            } => {
                 let key = *keys.next()?;
 
                 // Check the null map in case of `Nullable(LowCardinality(...))`
@@ -342,5 +336,53 @@ impl<'a> TupleIter<'a> {
             .into_reader::<T>()?
             .next()
             .ok_or_else(|| Error::Custom("attempting to decode from an empty array".into()))?
+    }
+}
+
+fn unwrap_array_type(data_type: &DataTypeNode) -> Result<&DataTypeNode, Error> {
+    match data_type {
+        DataTypeNode::Array(elem_type) => Ok(elem_type),
+        DataTypeNode::Nullable(inner) | DataTypeNode::SimpleAggregateFunction(_, inner) => {
+            unwrap_array_type(inner)
+        }
+        _ => Err(Error::Custom(format!(
+            "expected Array type, got {data_type}"
+        ))),
+    }
+}
+
+fn unwrap_tuple_type(data_type: &DataTypeNode) -> Result<&[DataTypeNode], Error> {
+    match data_type {
+        DataTypeNode::Tuple(types) => Ok(types),
+        DataTypeNode::Nullable(inner) | DataTypeNode::SimpleAggregateFunction(_, inner) => {
+            unwrap_tuple_type(inner)
+        }
+        _ => Err(Error::Custom(format!(
+            "expected Tuple type, got {data_type}"
+        ))),
+    }
+}
+
+fn unwrap_map_type(data_type: &DataTypeNode) -> Result<&[Box<DataTypeNode>; 2], Error> {
+    match data_type {
+        DataTypeNode::Map(types) => Ok(types),
+        DataTypeNode::Nullable(inner) | DataTypeNode::SimpleAggregateFunction(_, inner) => {
+            unwrap_map_type(inner)
+        }
+        _ => Err(Error::Custom(format!(
+            "expected Tuple type, got {data_type}"
+        ))),
+    }
+}
+
+fn unwrap_lc_type(data_type: &DataTypeNode) -> Result<&DataTypeNode, Error> {
+    match data_type {
+        DataTypeNode::LowCardinality(elem_type) => Ok(elem_type),
+        DataTypeNode::Nullable(inner) | DataTypeNode::SimpleAggregateFunction(_, inner) => {
+            unwrap_array_type(inner)
+        }
+        _ => Err(Error::Custom(format!(
+            "expected LowCardinality type, got {data_type}"
+        ))),
     }
 }
