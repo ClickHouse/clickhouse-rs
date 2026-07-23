@@ -118,12 +118,19 @@ impl<'a> ArrayData<'a> {
                 LayoutKind::Array {
                     ref elem_layout,
                     ref end_indices,
-                } => IterKind::Array {
-                    elem_type: unwrap_array_type(self.elem_type).expect("BUG"),
-                    next_start: 0,
-                    end_indices: end_indices.iter(),
-                    elem_layout,
-                },
+                } => {
+                    let next_start = end_indices[..self.indices.start]
+                        .last()
+                        .copied()
+                        .unwrap_or(0);
+
+                    IterKind::Array {
+                        elem_type: unwrap_array_type(self.elem_type).expect("BUG"),
+                        next_start,
+                        end_indices: end_indices[self.indices.clone()].iter(),
+                        elem_layout,
+                    }
+                }
                 LayoutKind::Tuple { ref layouts } => IterKind::Tuple {
                     types: unwrap_tuple_type(self.elem_type).expect("BUG"),
                     layouts,
@@ -135,17 +142,22 @@ impl<'a> ArrayData<'a> {
                 } => {
                     let [key_ty, val_ty] = unwrap_map_type(self.elem_type).expect("BUG");
 
+                    let next_start = end_indices[..self.indices.start]
+                        .last()
+                        .copied()
+                        .unwrap_or(0);
+
                     IterKind::Map {
                         key_ty,
                         val_ty,
-                        next_start: 0,
+                        next_start,
                         key_val_layouts,
-                        end_indices: end_indices.iter(),
+                        end_indices: end_indices[self.indices.clone()].iter(),
                     }
                 }
                 LayoutKind::LowCardinality(ref lc) => IterKind::LowCardinality {
                     inner_type: unwrap_lc_type(self.elem_type).expect("BUG"),
-                    keys: lc.keys.iter(),
+                    keys: lc.keys[self.indices.clone()].iter(),
                     lc,
                 },
             },

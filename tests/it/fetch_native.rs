@@ -24,8 +24,8 @@ async fn mixed_types_1000() {
 }
 
 // NOTE: requires >50GiB RAM on the server, likely because all the strings have to live in memory
-#[tokio::test]
 #[ignore]
+#[tokio::test]
 async fn mixed_types_10000() {
     mixed_types(10000).await
 }
@@ -317,6 +317,8 @@ async fn empty_arrays() {
         "LowCardinality(Nullable(String))",
         "Tuple(UInt64, String, String)",
         "Nullable(Tuple(UInt64, String, String))",
+        "Map(UInt64, String)",
+        "Map(LowCardinality(UInt64), String)",
     ];
 
     let mut query = "SELECT \n".to_string();
@@ -359,4 +361,65 @@ async fn empty_arrays() {
     assert_array_empty::<Option<String>>(&block[7]);
     assert_array_empty::<(u64, String, String)>(&block[8]);
     assert_array_empty::<Option<(u64, String, String)>>(&block[9]);
+    assert_array_empty::<HashMap<u64, String>>(&block[10]);
+    assert_array_empty::<HashMap<u64, String>>(&block[11]);
+}
+
+async fn nested_arrays(num_rows: usize) {
+    let client = get_client();
+
+    let mut cursor = client.query(
+        "SELECT
+            arrayMap(x -> arrayEnumerate(arrayWithConstant(x, x)), arrayEnumerate(arrayWithConstant(number, number))) AS nested_number_array,
+            arrayMap(arr -> mapFromArrays(arr, arrayMap(x -> toString(x), arr)), nested_number_array) AS array_of_maps,
+            arrayMap(x -> toLowCardinality(x), arrayEnumerate(arrayWithConstant(number, number))) AS lc_array
+        FROM system.numbers
+        LIMIT {limit:UInt64}"
+    )
+        .param("limit", num_rows)
+        .fetch_native()
+        .unwrap();
+
+    let Some(block) = cursor.next().await.unwrap() else {
+        assert_eq!(
+            num_rows, 0,
+            "num_rows is nonzero but cursor returned no blocks"
+        );
+        return;
+    };
+
+    let mut nested_number_iter = block["nested_number_array"]
+        .iter::<Vec<Vec<u32>>>()
+        .unwrap();
+
+    for (nested_array, row) in nested_number_iter.by_ref().zip(0..num_rows) {
+        let nested_array = nested_array.unwrap();
+
+        assert_eq!(nested_array.len(), row);
+
+        for (array, i) in nested_array.iter().zip(1..=row) {
+            assert_eq!(*array, (1..=i as u32).collect::<Vec<_>>());
+        }
+    }
+}
+
+#[tokio::test]
+async fn nested_arrays_empty() {
+    nested_arrays(0).await;
+}
+
+#[tokio::test]
+async fn nested_arrays_10() {
+    nested_arrays(10).await;
+}
+
+#[tokio::test]
+async fn nested_arrays_100() {
+    nested_arrays(100).await;
+}
+
+#[ignore] // requires a lot of memory
+#[tokio::test]
+async fn nested_arrays_1000() {
+    nested_arrays(1000).await;
 }
