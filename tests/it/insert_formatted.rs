@@ -366,7 +366,7 @@ async fn verify_insert(client: &Client) {
     struct Results {
         min_trip_id: u32,
         max_trip_id: u32,
-        avg_trip_distance: f64,
+        median_trip_distance: f64,
         count: u64,
     }
 
@@ -375,7 +375,7 @@ async fn verify_insert(client: &Client) {
             "SELECT \
                 min(trip_id) min_trip_id, \
                 max(trip_id) max_trip_id, \
-                avg(trip_distance) avg_trip_distance,\
+                median(trip_distance) median_trip_distance,\
                 count(*) count \
             FROM nyc_taxi_trips_small",
         )
@@ -385,6 +385,6 @@ async fn verify_insert(client: &Client) {
 
     assert_eq!(results.min_trip_id, 1199999902);
     assert_eq!(results.max_trip_id, 1200019742);
-    assert_eq!(results.avg_trip_distance, 2.983289997249842);
+    assert_eq!(results.median_trip_distance, 1.7999999523162842);
     assert_eq!(results.count, 1000);
 }
