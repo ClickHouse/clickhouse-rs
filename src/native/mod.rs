@@ -1,13 +1,15 @@
 use crate::error::Error;
-use crate::native::decode::Decode;
 use crate::native::string::MaybeUtf8;
 use bytes::Bytes;
-use clickhouse_types::DataTypeNode;
 use clickhouse_types::data_types::{DecimalType, EnumType};
 use std::ops::Index;
 
-use crate::native::array::{ArrayData, ArrayReader};
 use hashbrown::HashMap;
+
+pub use array::{ArrayData, ArrayReader};
+pub use decode::Decode;
+
+pub use clickhouse_types::DataTypeNode;
 
 pub(crate) mod array;
 pub(crate) mod decode;

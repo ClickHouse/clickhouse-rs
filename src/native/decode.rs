@@ -68,12 +68,27 @@ pub trait Decode<'a>: 'a + Sized {
     }
 }
 
+macro_rules! type_matches {
+    ($data_type:expr, $data_type_pat:pat) => {
+        match &$data_type {
+            $data_type_pat => true,
+            $crate::native::DataTypeNode::LowCardinality(inner) => {
+                matches!(**inner, $data_type_pat)
+            }
+            $crate::native::DataTypeNode::SimpleAggregateFunction(_, inner) => {
+                matches!(**inner, $data_type_pat)
+            }
+            _ => false,
+        }
+    };
+}
+
 macro_rules! impl_from_le_bytes {
     ($($dataty:ident: $ty:ident),* $(,)?) => {
         $(
             impl<'a> Decode<'a> for $ty {
                 fn compatible(data_type: &DataTypeNode) -> bool {
-                    matches!(data_type, DataTypeNode::$dataty)
+                    type_matches!(data_type, DataTypeNode::$dataty)
                 }
 
                 fn decode(
@@ -106,7 +121,7 @@ impl_from_le_bytes!(
 
 impl Decode<'_> for bool {
     fn compatible(data_type: &DataTypeNode) -> bool {
-        matches!(data_type, DataTypeNode::Bool)
+        type_matches!(data_type, DataTypeNode::Bool)
     }
 
     fn decode(
@@ -144,7 +159,7 @@ impl<'a> Decode<'a> for String {
 
 impl<'a> Decode<'a> for &'a [u8] {
     fn compatible(data_type: &DataTypeNode) -> bool {
-        matches!(
+        type_matches!(
             data_type,
             DataTypeNode::String | DataTypeNode::FixedString(_)
         )
@@ -198,7 +213,7 @@ impl<'a, T: Decode<'a>> Decode<'a> for Option<T> {
 impl<'a, T: Decode<'a> + 'a> Decode<'a> for Vec<T> {
     fn compatible(data_type: &DataTypeNode) -> bool {
         if let DataTypeNode::Array(elem_type) = data_type {
-            T::compatible(elem_type)
+            T::compatible(elem_type.remove_low_cardinality())
         } else {
             false
         }
@@ -234,8 +249,8 @@ macro_rules! tuple_impl {
                     return false;
                 };
 
-                <$ty1 as Decode>::compatible($var1)
-                $(&& <$ty as Decode>::compatible($var))*
+                <$ty1 as Decode>::compatible($var1.remove_low_cardinality())
+                $(&& <$ty as Decode>::compatible($var.remove_low_cardinality()))*
 
             }
 
@@ -271,7 +286,8 @@ where
             return false;
         };
 
-        K::compatible(key_ty) && V::compatible(val_ty)
+        K::compatible(key_ty.remove_low_cardinality())
+            && V::compatible(val_ty.remove_low_cardinality())
     }
 
     fn decode(
@@ -302,7 +318,8 @@ where
             return false;
         };
 
-        K::compatible(key_ty) && V::compatible(val_ty)
+        K::compatible(key_ty.remove_low_cardinality())
+            && V::compatible(val_ty.remove_low_cardinality())
     }
 
     fn decode(
@@ -325,7 +342,7 @@ where
 
 impl Decode<'_> for Ipv4Addr {
     fn compatible(data_type: &DataTypeNode) -> bool {
-        matches!(data_type, DataTypeNode::IPv4)
+        type_matches!(data_type, DataTypeNode::IPv4)
     }
 
     fn decode(
@@ -340,7 +357,7 @@ impl Decode<'_> for Ipv4Addr {
 
 impl Decode<'_> for Ipv6Addr {
     fn compatible(data_type: &DataTypeNode) -> bool {
-        matches!(data_type, DataTypeNode::IPv6)
+        type_matches!(data_type, DataTypeNode::IPv6)
     }
 
     fn decode(
@@ -354,7 +371,7 @@ impl Decode<'_> for Ipv6Addr {
 
 impl Decode<'_> for IpAddr {
     fn compatible(data_type: &DataTypeNode) -> bool {
-        matches!(data_type, DataTypeNode::IPv4 | DataTypeNode::IPv6)
+        type_matches!(data_type, DataTypeNode::IPv4 | DataTypeNode::IPv6)
     }
 
     fn decode(
@@ -377,7 +394,7 @@ mod uuid {
 
     impl Decode<'_> for Uuid {
         fn compatible(data_type: &DataTypeNode) -> bool {
-            matches!(data_type, DataTypeNode::UUID)
+            type_matches!(data_type, DataTypeNode::UUID)
         }
 
         fn decode(

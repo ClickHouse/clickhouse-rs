@@ -83,8 +83,16 @@ impl<'a> ArrayData<'a> {
     where
         T: Decode<'a>,
     {
+        // Lift all "simple" wrappers
+        let elem_type = match self.elem_type {
+            DataTypeNode::Nullable(inner) => inner,
+            DataTypeNode::SimpleAggregateFunction(_, inner) => inner,
+            // LowCardinality has special handling
+            other => other,
+        };
+
         ArrayReader {
-            elem_type: self.elem_type,
+            elem_type,
             kind: match self.layout.kind {
                 LayoutKind::Fixed {
                     type_width,
@@ -281,7 +289,10 @@ where
             }
             IterKind::LowCardinality { keys, lc } => {
                 let DataTypeNode::LowCardinality(inner_type) = self.elem_type else {
-                    unreachable!("BUG: expected map type, got {:?}", self.elem_type)
+                    unreachable!(
+                        "BUG: expected LowCardinality type, got {:?}",
+                        self.elem_type
+                    )
                 };
 
                 let key = *keys.next()?;

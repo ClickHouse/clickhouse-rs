@@ -445,6 +445,10 @@ impl ReaderInner {
     }
 
     async fn read_bytes(&mut self, len: usize) -> Result<Bytes, Error> {
+        if len == 0 {
+            return Ok(Bytes::new());
+        }
+
         self.read_chunk().await?;
 
         if self.last_chunk.len() >= len {

@@ -1,5 +1,7 @@
 use crate::get_client;
+use clickhouse::native::{Column, Decode};
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 #[tokio::test]
 async fn mixed_types_empty() {
@@ -334,4 +336,27 @@ async fn empty_arrays() {
     let mut cursor = client.query(&query).fetch_native().unwrap();
 
     let block = cursor.next().await.unwrap().expect("expected one block");
+
+    fn assert_array_empty<'a, T: Decode<'a> + Debug>(col: &'a Column) {
+        let mut iter = col.iter::<Vec<T>>().unwrap();
+
+        let vec = iter.next().expect("expected array").unwrap();
+
+        assert!(vec.is_empty(), "got nonempty array: {vec:?}");
+
+        let next = iter.next();
+
+        assert!(next.is_none(), "unexpected second value: {next:?}");
+    }
+
+    assert_array_empty::<i8>(&block[0]);
+    assert_array_empty::<u64>(&block[1]);
+    assert_array_empty::<String>(&block[2]);
+    assert_array_empty::<Option<i32>>(&block[3]);
+    assert_array_empty::<Option<String>>(&block[4]);
+    assert_array_empty::<u64>(&block[5]);
+    assert_array_empty::<String>(&block[6]);
+    assert_array_empty::<Option<String>>(&block[7]);
+    assert_array_empty::<(u64, String, String)>(&block[8]);
+    assert_array_empty::<Option<(u64, String, String)>>(&block[9]);
 }
