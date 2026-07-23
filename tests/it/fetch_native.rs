@@ -388,11 +388,11 @@ async fn nested_arrays(num_rows: usize) {
         return;
     };
 
-    let mut nested_number_iter = block["nested_number_array"]
+    let mut nested_array_iter = block["nested_number_array"]
         .iter::<Vec<Vec<u32>>>()
         .unwrap();
 
-    for (nested_array, row) in nested_number_iter.by_ref().zip(0..num_rows) {
+    for (nested_array, row) in nested_array_iter.by_ref().zip(0..num_rows) {
         let nested_array = nested_array.unwrap();
 
         assert_eq!(nested_array.len(), row);
@@ -401,6 +401,39 @@ async fn nested_arrays(num_rows: usize) {
             assert_eq!(*array, (1..=i as u32).collect::<Vec<_>>());
         }
     }
+
+    assert!(nested_array_iter.next().is_none());
+
+    let mut nested_map_iter = block["array_of_maps"]
+        .iter::<Vec<HashMap<u32, String>>>()
+        .unwrap();
+
+    for (nested_map, row) in nested_map_iter.by_ref().zip(0..num_rows) {
+        let nested_map = nested_map.unwrap();
+
+        assert_eq!(nested_map.len(), row);
+
+        for (map, i) in nested_map.iter().zip(1..=row) {
+            assert_eq!(
+                *map,
+                (1..=i as u32)
+                    .map(|i| (i, i.to_string()))
+                    .collect::<HashMap<_, _>>()
+            );
+        }
+    }
+
+    assert!(nested_map_iter.next().is_none());
+
+    let mut lc_array_iter = block["lc_array"].iter::<Vec<u32>>().unwrap();
+
+    for (array, row) in lc_array_iter.by_ref().zip(0..num_rows) {
+        let array = array.unwrap();
+
+        assert_eq!(array, (1..=row as u32).collect::<Vec<_>>());
+    }
+
+    assert!(lc_array_iter.next().is_none());
 }
 
 #[tokio::test]
