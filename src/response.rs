@@ -139,10 +139,10 @@ async fn collect_bad_response(
     let raw_bytes = match body.collect().await {
         Ok(collected) => collected.to_bytes(),
         // If we can't collect the body, return standardised reason for the status code.
-        Err(_) => return Error::BadResponse(reason(status, exception_code)),
+        Err(_) => return bad_response_or_typed(reason(status, exception_code)),
     };
     if raw_bytes.is_empty() {
-        return Error::BadResponse(reason(status, exception_code));
+        return bad_response_or_typed(reason(status, exception_code));
     }
 
     // Try to decompress the body, because CH uses compression even for errors.
@@ -160,7 +160,13 @@ async fn collect_bad_response(
         // If we have a unreadable response, return standardised reason for the status code.
         .unwrap_or_else(|_| reason(status, exception_code));
 
-    Error::BadResponse(reason)
+    bad_response_or_typed(reason)
+}
+
+/// Returns [`Error::ServerError`] if `s` parses as a typed CH exception,
+/// otherwise [`Error::BadResponse(s)`].
+fn bad_response_or_typed(s: String) -> Error {
+    parse_server_exception(&s).unwrap_or(Error::BadResponse(s))
 }
 
 async fn collect_bytes(stream: impl Stream<Item = Result<Bytes>>) -> Result<Bytes> {
@@ -359,6 +365,116 @@ fn extract_exception(chunk: &[u8], tag: Option<&[u8]>) -> Option<Error> {
     }
 }
 
+/// Try to parse a ClickHouse server exception string into a typed
+/// `Error::ServerError`. Returns `None` for unrecognised formats so the
+/// caller can fall back to `Error::BadResponse` and preserve the raw text.
+///
+/// Recognised shapes:
+/// - `"Code: NNN. DB::Exception: <message> (NAME) (version <v> (official build))"`
+/// - `"Code: NNN. DB::NetException: <message> (NAME)"`
+/// - `"Code: NNN"` (header-only fast-fail; `name = None`, `message = ""`)
+pub(crate) fn parse_server_exception(s: &str) -> Option<Error> {
+    let s = s.trim();
+    let after_kw = s.strip_prefix("Code: ")?;
+
+    // Numeric code.
+    let digit_count = after_kw.bytes().take_while(u8::is_ascii_digit).count();
+    if digit_count == 0 {
+        return None;
+    }
+    let code: u32 = after_kw[..digit_count].parse().ok()?;
+    let after_code = &after_kw[digit_count..];
+
+    // Header-only "Code: NNN".
+    if after_code.is_empty() {
+        return Some(Error::ServerError {
+            code,
+            name: None,
+            message: String::new(),
+        });
+    }
+
+    // Expect ". DB::<Class>: <message> [(NAME)] [(version ...)]"
+    //
+    // We look for the first ':' after the class name (e.g. "Exception:" or
+    // "NetException:") rather than the first ": " (colon + space). Some
+    // CH versions and some proxies elide the space between the class name
+    // colon and the message. Locking onto ": " causes the parser to walk
+    // past the boundary and lose leading message text on those shapes.
+    // Splitting on the first ':' and `trim_start()`ing handles both forms
+    // identically.
+    let body = after_code
+        .strip_prefix('.')?
+        .trim_start()
+        .strip_prefix("DB::")?;
+    let body = body.find(':').map(|i| body[i + 1..].trim_start())?;
+
+    let (message, name) = strip_trailing_metadata(body);
+    Some(Error::ServerError {
+        code,
+        name,
+        message: message.trim().trim_end_matches('.').trim_end().to_string(),
+    })
+}
+
+/// Walk parenthesised groups from the right of a server-exception body and
+/// peel off `(version ...)` / `(... official build)` metadata, capturing the
+/// first uppercase-only group as the exception NAME.
+fn strip_trailing_metadata(body: &str) -> (&str, Option<String>) {
+    let mut s = body.trim_end();
+    let mut name: Option<String> = None;
+
+    while s.ends_with(')') {
+        // Find the matching '(' for the trailing ')' by counting nesting.
+        let bytes = s.as_bytes();
+        let mut depth: i32 = 0;
+        let mut open_idx: Option<usize> = None;
+        for i in (0..bytes.len()).rev() {
+            match bytes[i] {
+                b')' => depth += 1,
+                b'(' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        open_idx = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(open) = open_idx else {
+            return (s.trim_end(), name);
+        };
+        let inner = &s[open + 1..s.len() - 1];
+
+        // CH exception NAME tags are SCREAMING_SNAKE_CASE: ASCII uppercase
+        // letters and underscores, optionally with digits. A pure-digit
+        // group like "(1)" or "(123)" is NOT a name — it's user data
+        // (e.g. "Too many parts (300)") that happens to share the
+        // `(...)` shape. Require at least one uppercase letter or
+        // underscore so user data cannot be misread as the NAME tag.
+        let is_name = !inner.is_empty()
+            && inner
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+            && inner
+                .chars()
+                .any(|c| c.is_ascii_uppercase() || c == '_');
+        let is_version = inner.starts_with("version ") || inner.contains("official build");
+
+        if name.is_none() && is_name {
+            name = Some(inner.to_string());
+            s = s[..open].trim_end();
+        } else if is_version {
+            s = s[..open].trim_end();
+        } else {
+            // Unrecognised parenthesised group — assume it's part of the message.
+            return (s.trim_end(), name);
+        }
+    }
+    (s.trim_end(), name)
+}
+
 // Format:
 // ```
 //   <data>Code: <code>. DB::Exception: <desc> (version <version> (official build))\n
@@ -373,7 +489,7 @@ fn extract_exception_old(chunk: &[u8]) -> Option<Error> {
     }
 
     let exception = String::from_utf8_lossy(&chunk[index..chunk.len() - 1]);
-    Some(Error::BadResponse(exception.into()))
+    Some(parse_server_exception(&exception).unwrap_or_else(|| Error::BadResponse(exception.into())))
 }
 
 // https://github.com/ClickHouse/ClickHouse/blob/4eaa92852bac117e95f28abe61237b0257d939d6/src/Server/HTTP/WriteBufferFromHTTPServerResponse.cpp#L347-L357
@@ -413,9 +529,9 @@ fn extract_exception_new(chunk: &[u8], tag: &[u8]) -> Option<Error> {
     };
 
     // We shouldn't discard the exception message if it fails to validate as UTF-8
-    Some(Error::BadResponse(
-        String::from_utf8_lossy(msg).trim().into(),
-    ))
+    let text = String::from_utf8_lossy(msg);
+    let trimmed = text.trim();
+    Some(parse_server_exception(trimmed).unwrap_or_else(|| Error::BadResponse(trimmed.to_string())))
 }
 
 // FIXME: this can be replaced with `usize::from_ascii()` when stable
@@ -438,15 +554,36 @@ fn parse_msg_len(len_bytes: &[u8]) -> Result<usize, Error> {
 
 #[test]
 fn it_extracts_exception_old() {
-    let errors = [
-        "Code: 159. DB::Exception: Timeout exceeded: elapsed 1.2 seconds, maximum: 0.1. (TIMEOUT_EXCEEDED) (version 24.10.1.2812 (official build))",
-        "Code: 210. DB::NetException: I/O error: Broken pipe, while writing to socket (127.0.0.1:9000 -> 127.0.0.1:54646). (NETWORK_ERROR) (version 23.8.8.20 (official build))",
+    let cases = [
+        (
+            "Code: 159. DB::Exception: Timeout exceeded: elapsed 1.2 seconds, maximum: 0.1. (TIMEOUT_EXCEEDED) (version 24.10.1.2812 (official build))",
+            159u32,
+            Some("TIMEOUT_EXCEEDED"),
+            "Timeout exceeded: elapsed 1.2 seconds, maximum: 0.1",
+        ),
+        (
+            "Code: 210. DB::NetException: I/O error: Broken pipe, while writing to socket (127.0.0.1:9000 -> 127.0.0.1:54646). (NETWORK_ERROR) (version 23.8.8.20 (official build))",
+            210,
+            Some("NETWORK_ERROR"),
+            "I/O error: Broken pipe, while writing to socket (127.0.0.1:9000 -> 127.0.0.1:54646)",
+        ),
     ];
 
-    for error in errors {
-        let chunk = format!("{error}\n");
+    for (raw, expected_code, expected_name, expected_msg) in cases {
+        let chunk = format!("{raw}\n");
         let err = extract_exception(chunk.as_bytes(), None).expect("failed to extract exception");
-        assert_eq!(err.to_string(), format!("bad response: {error}"));
+        match err {
+            Error::ServerError {
+                code,
+                name,
+                message,
+            } => {
+                assert_eq!(code, expected_code, "raw: {raw}");
+                assert_eq!(name.as_deref(), expected_name, "raw: {raw}");
+                assert_eq!(message, expected_msg, "raw: {raw}");
+            }
+            other => panic!("expected ServerError, got: {other:?} (raw: {raw})"),
+        }
     }
 }
 
@@ -454,8 +591,238 @@ fn it_extracts_exception_old() {
 fn it_extracts_exception_new() {
     let tag = b"rnywyenlaeqynhmu";
     let chunk = b"\r\n__exception__\r\nrnywyenlaeqynhmu\r\nCode: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))\n142 rnywyenlaeqynhmu\r\n__exception__\r\n";
-    let error = "Code: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))";
 
     let err = extract_exception(chunk, Some(tag)).expect("failed to extract exception");
-    assert_eq!(err.to_string(), format!("bad response: {error}"));
+    match err {
+        Error::ServerError {
+            code,
+            name,
+            message,
+        } => {
+            assert_eq!(code, 159);
+            assert_eq!(name.as_deref(), Some("TIMEOUT_EXCEEDED"));
+            assert_eq!(
+                message,
+                "Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms"
+            );
+        }
+        other => panic!("expected ServerError, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_server_exception_handles_header_only_form() {
+    // X-ClickHouse-Exception-Code only — no body decoded.
+    match parse_server_exception("Code: 252") {
+        Some(Error::ServerError {
+            code,
+            name,
+            message,
+        }) => {
+            assert_eq!(code, 252);
+            assert_eq!(name, None);
+            assert_eq!(message, "");
+        }
+        other => panic!("expected ServerError, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_server_exception_handles_too_many_parts() {
+    // The motivating ClickFlow case (`is_too_many_parts` substring matcher).
+    let raw = "Code: 252. DB::Exception: Too many parts (300). \
+               (TOO_MANY_PARTS) (version 24.1.1.234 (official build))";
+    match parse_server_exception(raw) {
+        Some(Error::ServerError {
+            code,
+            name,
+            message,
+        }) => {
+            assert_eq!(code, 252);
+            assert_eq!(name.as_deref(), Some("TOO_MANY_PARTS"));
+            assert_eq!(message, "Too many parts (300)");
+        }
+        other => panic!("expected ServerError, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_server_exception_returns_none_for_non_clickhouse_responses() {
+    // Proxy / load-balancer error pages should fall back to BadResponse.
+    assert!(parse_server_exception("502 Bad Gateway").is_none());
+    assert!(parse_server_exception("<html>nginx error</html>").is_none());
+    assert!(parse_server_exception("Code: NaN. malformed").is_none());
+}
+
+#[test]
+fn parse_server_exception_no_name_tag() {
+    // Some CH versions / proxies trim the (NAME) tag.
+    let raw = "Code: 47. DB::Exception: Unknown identifier: foo.";
+    match parse_server_exception(raw) {
+        Some(Error::ServerError {
+            code,
+            name,
+            message,
+        }) => {
+            assert_eq!(code, 47);
+            assert_eq!(name, None);
+            assert_eq!(message, "Unknown identifier: foo");
+        }
+        other => panic!("expected ServerError, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_server_exception_compressed_body_falls_back() {
+    // Edge: compressed (zstd / lz4) error body — bytes-as-utf8 is gibberish
+    // that does NOT start with "Code: ". Caller must fall back to
+    // Error::BadResponse with the raw text rather than producing a typed
+    // variant from garbage. We assert at the parser level that gibberish
+    // returns None; the wire-path callers (collect_bad_response,
+    // extract_exception_old, extract_exception_new) all use
+    // `.unwrap_or(Error::BadResponse(...))`, so None → BadResponse.
+    // zstd frame magic + a few following bytes; convert via utf8_lossy
+    // because raw \x in str literals must be ASCII.
+    let zstd_bytes = b"\x28\xb5\x2f\xfd\x00\x58\x99\x07\x00";
+    let zstd_magic_prefix = String::from_utf8_lossy(zstd_bytes);
+    assert!(parse_server_exception(&zstd_magic_prefix).is_none());
+    // lz4 frame magic likewise.
+    let lz4_bytes = b"\x04\x22\x4d\x18\x40\x40\xc0";
+    let lz4_magic_prefix = String::from_utf8_lossy(lz4_bytes);
+    assert!(parse_server_exception(&lz4_magic_prefix).is_none());
+}
+
+#[test]
+fn parse_server_exception_tolerates_missing_space_after_inner_colon() {
+    // Edge: some CH versions (and certain proxies' re-formatted bodies)
+    // emit "DB::Exception:<message>" with no space after the inner colon.
+    // The parser splits on the first ':' after the class prefix and
+    // `trim_start`s the remainder, so both `Exception: msg` and
+    // `Exception:msg` produce identical typed output: same code, same
+    // (NAME) tag, full message preserved.
+    let raw_no_space = "Code: 159. DB::Exception:Timeout exceeded: elapsed 100ms, maximum: 50ms (TIMEOUT_EXCEEDED)";
+    let raw_with_space = "Code: 159. DB::Exception: Timeout exceeded: elapsed 100ms, maximum: 50ms (TIMEOUT_EXCEEDED)";
+
+    fn unpack(e: Error) -> (u32, Option<String>, String) {
+        match e {
+            Error::ServerError {
+                code,
+                name,
+                message,
+            } => (code, name, message),
+            other => panic!("expected ServerError, got: {other:?}"),
+        }
+    }
+
+    let no_space = unpack(parse_server_exception(raw_no_space).expect("no-space form must parse"));
+    let with_space = unpack(
+        parse_server_exception(raw_with_space).expect("canonical form must parse"),
+    );
+    assert_eq!(
+        no_space, with_space,
+        "no-space and canonical forms must produce identical (code, name, message)",
+    );
+
+    let (code, name, message) = no_space;
+    assert_eq!(code, 159);
+    assert_eq!(name.as_deref(), Some("TIMEOUT_EXCEEDED"));
+    assert!(
+        message.starts_with("Timeout exceeded"),
+        "leading message text must not be truncated; got {message:?}",
+    );
+    assert!(
+        message.contains("maximum: 50ms"),
+        "trailing colon-space inside the message must not be re-truncated; got {message:?}",
+    );
+}
+
+#[test]
+fn parse_server_exception_does_not_strip_user_data_parens() {
+    // Edge: user-supplied data containing parentheses should NOT be
+    // stripped as the (NAME) tag. The name-detection rule is
+    // "ASCII uppercase + digits + underscore, with at least one
+    // uppercase letter or underscore"; pure-digit groups, mixed-case
+    // content, and arbitrary text inside the trailing paren group must
+    // all stay in the message.
+
+    // Pure-digit trailing paren — must NOT be misread as NAME.
+    let raw_digit_only = "Code: 252. DB::Exception: Too many parts (300).";
+    match parse_server_exception(raw_digit_only) {
+        Some(Error::ServerError {
+            code,
+            name,
+            message,
+        }) => {
+            assert_eq!(code, 252);
+            assert_eq!(
+                name, None,
+                "pure-digit paren group must not be stripped as NAME; got name={name:?}",
+            );
+            assert!(
+                message.contains("(300)"),
+                "user-data paren must remain in message; got {message:?}",
+            );
+        }
+        other => panic!("expected ServerError, got: {other:?}"),
+    }
+
+    let raw = "Code: 36. DB::Exception: Failed to parse path '/etc/data/file (1).csv'. (BAD_ARGUMENTS) (version 25.1.1.111 (official build))";
+    match parse_server_exception(raw) {
+        Some(Error::ServerError {
+            code,
+            name,
+            message,
+        }) => {
+            assert_eq!(code, 36);
+            assert_eq!(name.as_deref(), Some("BAD_ARGUMENTS"));
+            assert!(
+                message.contains("(1).csv"),
+                "user-data parens must remain in message; got {message:?}",
+            );
+            // Ensure we did NOT accidentally strip "(1)" as a name tag —
+            // that group is digits-only and not uppercase, so it must be
+            // left alone.
+            assert!(
+                !message.ends_with(".csv'."),
+                "trailing period of message should be trimmed by parser; got {message:?}",
+            );
+        }
+        other => panic!("expected ServerError, got: {other:?}"),
+    }
+
+    // Variant: NAME-shaped tag mixed with arbitrary message-side parens.
+    let raw_mixed = "Code: 36. DB::Exception: Bad path '/srv/x (y).csv' (mode: O_RDWR). (BAD_ARGUMENTS)";
+    match parse_server_exception(raw_mixed) {
+        Some(Error::ServerError {
+            code,
+            name,
+            message,
+        }) => {
+            assert_eq!(code, 36);
+            assert_eq!(name.as_deref(), Some("BAD_ARGUMENTS"));
+            assert!(message.contains("(y).csv"), "got {message:?}");
+            assert!(message.contains("(mode: O_RDWR)"), "got {message:?}");
+        }
+        other => panic!("expected ServerError, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_server_exception_header_code_with_proxy_body_falls_back() {
+    // Edge: the header-only fast-fail path can collide with a proxy that
+    // also emits text alongside the X-ClickHouse-Exception-Code header.
+    // If the post-code text doesn't match ". DB::<Class>: ...", we must
+    // return None so the caller emits BadResponse with the full raw body
+    // — preserving the proxy's text for the operator.
+    let raw_with_proxy_tail = "Code: 252 [nginx upstream timeout]";
+    assert!(parse_server_exception(raw_with_proxy_tail).is_none());
+
+    let raw_with_html = "Code: 502\n<html><body>Bad Gateway</body></html>";
+    assert!(parse_server_exception(raw_with_html).is_none());
+
+    // Sanity: bare "Code: 252" still produces the typed header-only form.
+    assert!(matches!(
+        parse_server_exception("Code: 252"),
+        Some(Error::ServerError { code: 252, name: None, .. })
+    ));
 }

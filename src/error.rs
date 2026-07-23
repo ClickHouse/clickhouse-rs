@@ -39,6 +39,42 @@ pub enum Error {
     Custom(String),
     #[error("bad response: {0}")]
     BadResponse(String),
+    /// A typed ClickHouse server exception, parsed from the server's response.
+    ///
+    /// Constructed when the response body or `X-ClickHouse-Exception-Code`
+    /// header carries a recognisable `Code: <num>. DB::<Class>: <message>
+    /// (NAME) (version ...)` payload. Falls back to [`Error::BadResponse`]
+    /// for responses that cannot be parsed (proxy errors, non-ClickHouse
+    /// HTTP responses, malformed payloads).
+    ///
+    /// Use this variant for code/name-aware control flow:
+    ///
+    /// ```ignore
+    /// match err {
+    ///     Error::ServerError { code: 252, .. } => alert_on_too_many_parts(),
+    ///     Error::ServerError { code, .. } if (43..=53).contains(&code) =>
+    ///         report_caller_error(),
+    ///     _ => report_internal_error(err),
+    /// }
+    /// ```
+    #[error("server error: Code: {code}{}: {message}", name.as_deref().map(|n| format!(" ({n})")).unwrap_or_default())]
+    ServerError {
+        /// Numeric ClickHouse exception code (e.g. `252` for `TOO_MANY_PARTS`).
+        ///
+        /// The full table of codes lives in
+        /// [src/Common/ErrorCodes.cpp](https://github.com/ClickHouse/ClickHouse/blob/master/src/Common/ErrorCodes.cpp)
+        /// in the ClickHouse server tree.
+        code: u32,
+        /// Human-readable exception name (e.g. `"TOO_MANY_PARTS"`), extracted
+        /// from the trailing parenthesised tag in the server message.
+        ///
+        /// `None` when the response is the bare `Code: NNN` form (e.g. a
+        /// header-only fast-fail) or when the trailing tag is absent.
+        name: Option<String>,
+        /// The exception message — the text between `DB::<Class>:` and the
+        /// trailing `(NAME) (version ...)` metadata, trimmed.
+        message: String,
+    },
     #[error("timeout expired")]
     TimedOut,
     #[error("error while parsing columns header from the response: {0}")]
@@ -130,6 +166,7 @@ impl Error {
             Error::VariantDiscriminatorIsOutOfBound(_) => "VariantDiscriminatorIsOutOfBound",
             Error::Custom(_) => "Custom",
             Error::BadResponse(_) => "BadResponse",
+            Error::ServerError { .. } => "ServerError",
             Error::TimedOut => "TimedOut",
             Error::InvalidColumnsHeader(_) => "InvalidColumnsHeader",
             Error::SchemaMismatch(_) => "SchemaMismatch",
