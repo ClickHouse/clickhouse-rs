@@ -83,7 +83,7 @@ impl BlockReader {
         let name = self.inner.read_string().await?;
         let data_type = self.inner.read_string().await?;
 
-        let data_type = data_type.try_as_str().ok_or_else(|| {
+        let data_type = data_type.as_str().ok_or_else(|| {
             Error::Custom(format!(
                 "invalid data type {data_type:?} of column {name:?}"
             ))

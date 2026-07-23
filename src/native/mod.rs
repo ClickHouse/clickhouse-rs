@@ -131,7 +131,7 @@ impl Column {
     /// Use [`Self::name_bytes()`] if panicking is unacceptable.
     pub fn name(&self) -> &str {
         self.name
-            .try_as_str()
+            .as_str()
             .unwrap_or_else(|| panic!("column name {:?} is not valid UTF-8", self.name))
     }
 
