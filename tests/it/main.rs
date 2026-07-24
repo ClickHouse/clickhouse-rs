@@ -264,6 +264,7 @@ mod int128;
 mod int256;
 mod ip;
 mod mock;
+mod native_types;
 mod nested;
 #[cfg(feature = "opentelemetry")]
 mod opentelemetry;
