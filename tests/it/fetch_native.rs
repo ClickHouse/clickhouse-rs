@@ -1,6 +1,6 @@
 use crate::get_client;
 use clickhouse::native::{Column, Decode};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 
 #[tokio::test]
@@ -405,7 +405,8 @@ async fn nested_arrays(num_rows: usize) {
     assert!(nested_array_iter.next().is_none());
 
     let mut nested_map_iter = block["array_of_maps"]
-        .iter::<Vec<HashMap<u32, String>>>()
+        // Doubles as coverage for `impl Decode for BTreeMap`
+        .iter::<Vec<BTreeMap<u32, String>>>()
         .unwrap();
 
     for (nested_map, row) in nested_map_iter.by_ref().zip(0..num_rows) {
@@ -418,7 +419,7 @@ async fn nested_arrays(num_rows: usize) {
                 *map,
                 (1..=i as u32)
                     .map(|i| (i, i.to_string()))
-                    .collect::<HashMap<_, _>>()
+                    .collect::<BTreeMap<_, _>>()
             );
         }
     }
