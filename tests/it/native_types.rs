@@ -145,3 +145,16 @@ test_type!(
         "'2606:4700:3108::ac42:28f9'" == "2606:4700:3108::ac42:28f9".parse::<Ipv6Addr>().unwrap(),
     }
 );
+
+#[cfg(feature = "uuid")]
+mod uuid {
+    use uuid::Uuid;
+
+    test_type!(
+        test_uuid(Uuid, "UUID") {
+            "'00000000-0000-0000-0000-000000000000'" == Uuid::from_bytes([0u8; 16]),
+            "'61f0c404-5cb3-11e7-907b-a6006ad3dba0'" == "61f0c404-5cb3-11e7-907b-a6006ad3dba0".parse::<Uuid>().unwrap(),
+            "'67e55044-10b1-426f-9247-bb680e5fe0c8'" == "67e55044-10b1-426f-9247-bb680e5fe0c8".parse::<Uuid>().unwrap(),
+        }
+    );
+}

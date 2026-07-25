@@ -411,7 +411,7 @@ mod uuid {
             let hi_bytes = u64::from_le_bytes(*reader.read_bytes_fixed()?);
             let low_bytes = u64::from_le_bytes(*reader.read_bytes_fixed()?);
 
-            Ok(Uuid::from_u64_pair(hi_bytes.to_be(), low_bytes.to_be()))
+            Ok(Uuid::from_u64_pair(hi_bytes, low_bytes))
         }
     }
 }
