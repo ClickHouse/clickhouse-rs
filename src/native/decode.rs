@@ -355,7 +355,8 @@ impl Decode<'_> for Ipv4Addr {
         // https://clickhouse.com/docs/interfaces/specs/NativeFormat#ipv4-and-ipv6
         // IPv4 is byte-reversed, so little-endian
         let bytes_le = u32::from_le_bytes(*reader.read_bytes_fixed()?);
-        Ok(Ipv4Addr::from(bytes_le.to_be()))
+        // Performs the byte-swap internally
+        Ok(Ipv4Addr::from_bits(bytes_le))
     }
 }
 

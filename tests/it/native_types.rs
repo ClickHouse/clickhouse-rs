@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
 macro_rules! test_type {
     (
         $(#[$attr:meta])*
@@ -101,5 +103,45 @@ test_type!(
         "1.0" == 1.0, "3.14" == 3.14,
         "1.7976931348623157e+308" == f64::MAX, "inf" == f64::INFINITY,
         // "nan" == f32::NAN, (NaN is never equal to NaN)
+    }
+);
+
+test_type!(
+    test_ipv4(Ipv4Addr, "IPv4") {
+        "'0.0.0.0'" == Ipv4Addr::UNSPECIFIED,
+        "'1.1.1.1'" == Ipv4Addr::new(1, 1, 1, 1),
+        "'127.0.0.1'" == Ipv4Addr::LOCALHOST,
+        "'192.168.2.1'" == Ipv4Addr::new(192, 168, 2, 1),
+        "'255.255.255.0'" == Ipv4Addr::new(255, 255, 255, 0),
+        "'255.255.255.255'" == Ipv4Addr::BROADCAST,
+    }
+);
+
+test_type!(
+    test_ipaddr_from_v4(IpAddr, "IPv4") {
+        "'0.0.0.0'" == Ipv4Addr::UNSPECIFIED,
+        "'1.1.1.1'" == Ipv4Addr::new(1, 1, 1, 1),
+        "'127.0.0.1'" == Ipv4Addr::LOCALHOST,
+        "'192.168.2.1'" == Ipv4Addr::new(192, 168, 2, 1),
+        "'255.255.255.0'" == Ipv4Addr::new(255, 255, 255, 0),
+        "'255.255.255.255'" == Ipv4Addr::BROADCAST,
+    }
+);
+
+test_type!(
+    test_ipv6(Ipv6Addr, "IPv6") {
+        "'::1'" == Ipv6Addr::LOCALHOST,
+        // IPv6 addresses for ClickHouse.com
+        "'2606:4700:3108::ac42:2b07'" == "2606:4700:3108::ac42:2b07".parse::<Ipv6Addr>().unwrap(),
+        "'2606:4700:3108::ac42:28f9'" == "2606:4700:3108::ac42:28f9".parse::<Ipv6Addr>().unwrap(),
+    }
+);
+
+test_type!(
+    test_ipaddr_from_v6(IpAddr, "IPv6") {
+        "'::1'" == Ipv6Addr::LOCALHOST,
+        // IPv6 addresses for ClickHouse.com
+        "'2606:4700:3108::ac42:2b07'" == "2606:4700:3108::ac42:2b07".parse::<Ipv6Addr>().unwrap(),
+        "'2606:4700:3108::ac42:28f9'" == "2606:4700:3108::ac42:28f9".parse::<Ipv6Addr>().unwrap(),
     }
 );
