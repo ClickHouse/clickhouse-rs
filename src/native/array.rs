@@ -77,7 +77,7 @@ impl<'a> ArrayData<'a> {
         T: Decode<'a>,
     {
         if !T::compatible(self.elem_type.remove_low_cardinality()) {
-            return Err(Error::Custom(format!(
+            return Err(Error::SchemaMismatch(format!(
                 "incompatible data type {}",
                 self.elem_type
             )));
@@ -316,9 +316,12 @@ where
                         .into_reader::<T>()
                         .and_then(|mut reader| {
                             reader.next().ok_or_else(|| {
-                                Error::Custom(format!(
-                                    "data for LowCardinality({inner_type}) key not found: {key}"
-                                ))
+                                Error::DataFormat(
+                                    format!(
+                                        "data for LowCardinality({inner_type}) key not found: {key}"
+                                    )
+                                    .into(),
+                                )
                             })?
                         }),
                 )
@@ -341,13 +344,15 @@ where
 impl<'a> TupleIter<'a> {
     pub fn decode_next<T: Decode<'a>>(&mut self) -> Result<T, Error> {
         let (elem_type, layout) = self.types.next().zip(self.layouts.next()).ok_or_else(|| {
-            Error::Custom("attempting to decode tuple with more types than received".into())
+            Error::SchemaMismatch("attempting to decode tuple with more types than received".into())
         })?;
 
         ArrayData::at_index(elem_type, layout, self.index)
             .into_reader::<T>()?
             .next()
-            .ok_or_else(|| Error::Custom("attempting to decode from an empty array".into()))?
+            .ok_or_else(|| {
+                Error::SchemaMismatch("attempting to decode from an empty array".into())
+            })?
     }
 }
 
@@ -357,7 +362,7 @@ fn unwrap_array_type(data_type: &DataTypeNode) -> Result<&DataTypeNode, Error> {
         DataTypeNode::Nullable(inner) | DataTypeNode::SimpleAggregateFunction(_, inner) => {
             unwrap_array_type(inner)
         }
-        _ => Err(Error::Custom(format!(
+        _ => Err(Error::SchemaMismatch(format!(
             "expected Array type, got {data_type}"
         ))),
     }
@@ -369,7 +374,7 @@ fn unwrap_tuple_type(data_type: &DataTypeNode) -> Result<&[DataTypeNode], Error>
         DataTypeNode::Nullable(inner) | DataTypeNode::SimpleAggregateFunction(_, inner) => {
             unwrap_tuple_type(inner)
         }
-        _ => Err(Error::Custom(format!(
+        _ => Err(Error::SchemaMismatch(format!(
             "expected Tuple type, got {data_type}"
         ))),
     }
@@ -381,7 +386,7 @@ fn unwrap_map_type(data_type: &DataTypeNode) -> Result<&[Box<DataTypeNode>; 2], 
         DataTypeNode::Nullable(inner) | DataTypeNode::SimpleAggregateFunction(_, inner) => {
             unwrap_map_type(inner)
         }
-        _ => Err(Error::Custom(format!(
+        _ => Err(Error::SchemaMismatch(format!(
             "expected Tuple type, got {data_type}"
         ))),
     }
@@ -393,7 +398,7 @@ fn unwrap_lc_type(data_type: &DataTypeNode) -> Result<&DataTypeNode, Error> {
         DataTypeNode::Nullable(inner) | DataTypeNode::SimpleAggregateFunction(_, inner) => {
             unwrap_array_type(inner)
         }
-        _ => Err(Error::Custom(format!(
+        _ => Err(Error::SchemaMismatch(format!(
             "expected LowCardinality type, got {data_type}"
         ))),
     }

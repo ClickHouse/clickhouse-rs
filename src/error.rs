@@ -1,5 +1,7 @@
 //! Contains [`Error`] and corresponding [`Result`].
 
+use crate::native;
+use crate::native::BlockReadError;
 use serde::{de, ser};
 use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
 
@@ -21,6 +23,8 @@ pub enum Error {
     Compression(#[source] BoxedError),
     #[error("decompression error: {0}")]
     Decompression(#[source] BoxedError),
+    #[error("data format error: {0}")]
+    DataFormat(#[source] BoxedError),
     #[error("no rows returned by a query that expected to return at least one row")]
     RowNotFound,
     #[error("sequences must have a known size ahead of time")]
@@ -112,6 +116,12 @@ impl From<io::Error> for Error {
     }
 }
 
+impl From<BlockReadError> for Error {
+    fn from(error: BlockReadError) -> Self {
+        Self::DataFormat(Box::new(error))
+    }
+}
+
 impl Error {
     /// https://opentelemetry.io/docs/specs/semconv/registry/attributes/error/#error-type
     #[cfg(feature = "opentelemetry")]
@@ -121,6 +131,7 @@ impl Error {
             Error::Network(_) => "Network",
             Error::Compression(_) => "Compression",
             Error::Decompression(_) => "Decompression",
+            Error::DataFormat(_) => "DataFormat",
             Error::RowNotFound => "RowNotFound",
             Error::SequenceMustHaveLength => "SequenceMustHaveLength",
             Error::DeserializeAnyNotSupported => "DeserializeAnyNotSupported",

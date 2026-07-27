@@ -7,6 +7,7 @@ use clickhouse_types::DataTypeNode;
 use futures_util::StreamExt;
 use std::cmp;
 use std::collections::VecDeque;
+use std::fmt::{Display, Formatter};
 use std::ops::ControlFlow;
 
 pub(crate) struct BlockReader {
@@ -14,6 +15,17 @@ pub(crate) struct BlockReader {
     // Since versioned type encoding is split into a "prefix phase" and a "data phase"
     // we need to read state prefixes separately and remember what we've seen
     prefix_queue: VecDeque<StatePrefix>,
+}
+
+/// Captures errors that may occur while decoding a [Native Format] block.
+///
+/// [Native Format]: https://clickhouse.com/docs/reference/interfaces/specs/NativeFormat
+#[derive(Debug)]
+pub struct BlockReadError {
+    message: String,
+    column_name: Option<MaybeUtf8>,
+    column_type: Option<DataTypeNode>,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 }
 
 struct ReaderInner {
@@ -35,6 +47,23 @@ enum LcKeyType {
     UInt32,
     UInt64,
 }
+
+macro_rules! read_error {
+    ($($format_args:tt)*) => {
+        BlockReadError {
+            message: format!($($format_args)*),
+            column_name: None,
+            column_type: None,
+            source: None,
+        }
+    }
+}
+
+/// Maximum number of values allowed in any one column.
+///
+/// This is a hardcoded limit, not expected to be reached by any practical application,
+/// meant to guard against allocating based on malicious or malformed data.
+const SAFE_ALLOCATION_LIMIT: usize = 1 << 32;
 
 impl BlockReader {
     pub(crate) fn new(chunks: Chunks) -> Self {
@@ -58,11 +87,15 @@ impl BlockReader {
         let num_columns = self.inner.read_varuint().await?;
         let num_rows = self.inner.read_varuint().await?;
 
-        let num_rows = usize::try_from(num_rows).map_err(|_| {
-            Error::Custom(format!(
-                "number of rows in block is out of range: {num_rows}"
-            ))
-        })?;
+        let num_rows = usize::try_from(num_rows)
+            .map_err(|_| read_error!("number of rows in block is out of range: {num_rows}"))?;
+
+        if num_rows > SAFE_ALLOCATION_LIMIT {
+            return Err(read_error!(
+                "number of rows in block exceeds safe limit: {num_rows} vs {SAFE_ALLOCATION_LIMIT}"
+            )
+            .into());
+        }
 
         if num_columns == 0 {
             return Ok(None);
@@ -84,24 +117,26 @@ impl BlockReader {
         let data_type = self.inner.read_string().await?;
 
         let data_type = data_type.as_str().ok_or_else(|| {
-            Error::Custom(format!(
-                "invalid data type {data_type:?} of column {name:?}"
-            ))
+            read_error!("invalid data type {data_type:?}").with_column(&name, None)
         })?;
 
         let data_type = DataTypeNode::new(data_type).map_err(|e| {
-            Error::Custom(format!(
-                "invalid data type {data_type:?} of column {name:?}: {e}"
-            ))
+            read_error!("error parsing data type {data_type:?}")
+                .with_column(&name, None)
+                .with_source(e)
         })?;
 
         if num_rows != 0 {
-            self.read_state_prefix(&name, &data_type).await?;
+            self.read_state_prefix(&name, &data_type)
+                .await
+                // so every error message doesn't have to manually mention the column name/type
+                .err_with_column(&name, Some(&data_type))?;
         }
 
         let layout = self
             .read_data(&name, &data_type, num_rows, num_rows != 0)
-            .await?;
+            .await
+            .err_with_column(&name, Some(&data_type))?;
 
         Ok(Column {
             name,
@@ -121,11 +156,11 @@ impl BlockReader {
 
                 if prefix != 1 {
                     // sharedDictionariesWithAdditionalKeys
-                    return Err(Error::Custom(format!(
-                        "unexpected/unsupported serialization version of (sub)type \
-                             {data_type} of column {column_name:?}: \
-                             expected 1, got {prefix}"
-                    )));
+                    return Err(read_error!(
+                        "unexpected/unsupported serialization version of LowCardinality: \
+                         expected 1, got {prefix}"
+                    )
+                    .into());
                 }
 
                 self.prefix_queue.push_back(StatePrefix::LowCardinality);
@@ -147,9 +182,9 @@ impl BlockReader {
             | DataTypeNode::JsonWithHint(_)
             | DataTypeNode::Variant(_)
             | DataTypeNode::Dynamic => {
-                return Err(Error::Custom(format!(
-                    "unimplemented deserialization of (sub)type {data_type} of column {column_name:?}"
-                )));
+                return Err(
+                    read_error!("unimplemented deserialization of (sub)type {data_type}").into(),
+                );
             }
             _ => (),
         }
@@ -164,6 +199,15 @@ impl BlockReader {
         num_values: usize,
         block_nonempty: bool,
     ) -> Result<Layout, Error> {
+        if num_values > SAFE_ALLOCATION_LIMIT {
+            // Ideally one of the other checks will give the user a more specific error message.
+            return Err(read_error!(
+                "number of values exceeds safe allocation limit: \
+                 {num_values} vs {SAFE_ALLOCATION_LIMIT}"
+            )
+            .into());
+        }
+
         let (data_type, nulls) = if let DataTypeNode::Nullable(inner) = data_type {
             // Read off the null bitmap
             (&**inner, Some(self.inner.read_bytes(num_values).await?))
@@ -173,9 +217,7 @@ impl BlockReader {
 
         if let Some(type_width) = type_fixed_width(data_type) {
             let total_bytes = type_width.checked_mul(num_values).ok_or_else(|| {
-                Error::Custom(format!(
-                    "data size of column {column_name:?} is too large: {num_values} rows X {type_width} bytes"
-                ))
+                read_error!("data size is too large: {num_values} rows X {type_width} bytes")
             })?;
 
             return Ok(Layout {
@@ -197,9 +239,8 @@ impl BlockReader {
                 for row in 0..num_values {
                     let len = self.inner.read_varuint().await?;
 
-                    let len = usize::try_from(len).map_err(|_| {
-                        Error::Custom(format!("string #{row} length {len} is out of range"))
-                    })?;
+                    let len = usize::try_from(len)
+                        .map_err(|_| read_error!("string #{row} length {len} is out of range"))?;
 
                     self.inner.read_bytes_into(len, &mut data).await?;
                     end_offsets.push(data.len());
@@ -218,6 +259,14 @@ impl BlockReader {
                 let end_indices = self.inner.read_array_indices(num_values).await?;
 
                 let total_len = end_indices.last().copied().unwrap_or(0);
+
+                if total_len > SAFE_ALLOCATION_LIMIT {
+                    return Err(read_error!(
+                        "total length of arrays in column exceeds safe limit: \
+                         {total_len} vs {SAFE_ALLOCATION_LIMIT}"
+                    )
+                    .into());
+                }
 
                 // Recursive `async fn` currently requires boxing
                 let elem_layout =
@@ -258,6 +307,14 @@ impl BlockReader {
 
                 let total_len = end_indices.last().copied().unwrap_or(0);
 
+                if total_len > SAFE_ALLOCATION_LIMIT {
+                    return Err(read_error!(
+                        "total number of map entries exceeds safe limit: \
+                         {total_len} vs {SAFE_ALLOCATION_LIMIT}"
+                    )
+                    .into());
+                }
+
                 let key_layout =
                     Box::pin(self.read_data(column_name, key_ty, total_len, block_nonempty))
                         .await?;
@@ -286,9 +343,7 @@ impl BlockReader {
                     num_values,
                 })
             }
-            _ => Err(Error::Custom(format!(
-                "data type {data_type:?} not implemented"
-            ))),
+            _ => Err(read_error!("data type {data_type:?} not implemented").into()),
         }
     }
 
@@ -318,10 +373,11 @@ impl BlockReader {
             match self.prefix_queue.pop_front() {
                 Some(StatePrefix::LowCardinality) => (),
                 other => {
-                    return Err(Error::Custom(format!(
-                        "error reading column {column_name:?} (sub)type LowCardinality({inner_type}): \
-                     expected state prefix 0x01, got {other:?}"
-                    )));
+                    return Err(read_error!(
+                        "error reading (sub)type LowCardinality({inner_type}): \
+                         expected state prefix 0x01, got {other:?}"
+                    )
+                    .into());
                 }
             }
         }
@@ -345,29 +401,37 @@ impl BlockReader {
         let flags = metadata & !LcKeyType::MASK;
 
         if flags != VALID_FLAG_BITS {
-            return Err(Error::Custom(format!(
-                "column {column_name:?} (sub)type LowCardinality({inner_type}) has \
-                         invalid or unexpected metadata bits (metadata: {metadata:X}); \
-                         expected: {VALID_FLAG_BITS:X}, received: {flags:X}",
-            )));
+            return Err(read_error!(
+                "(sub)type LowCardinality({inner_type}) has \
+                 invalid or unexpected metadata bits (metadata: {metadata:X}); \
+                 expected: {VALID_FLAG_BITS:X}, received: {flags:X}",
+            )
+            .into());
         }
 
         let dict_len = self.inner.read_uint64().await?;
-        let dict_len = usize::try_from(dict_len)
-            .map_err(|_| Error::Custom(format!("column {column_name:?} type LowCardinality({inner_type}) dictionary size too large: {dict_len}")))?;
+        let dict_len = usize::try_from(dict_len).map_err(|_| {
+            read_error!("LowCardinality({inner_type}) dictionary size too large: {dict_len}")
+        })?;
 
         // called from `self.read_type_data()` so we have to box
-        let dict =
-            Box::pin(self.read_data(column_name, non_nullable, dict_len, block_nonempty)).await?;
+        let dict = Box::pin(self.read_data(column_name, non_nullable, dict_len, block_nonempty))
+            .await
+            .map_err(|e| {
+                read_error!("error reading LowCardinality({inner_type}) dictionary").with_source(e)
+            })?;
 
         let keys_len = self.inner.read_uint64().await?;
-        let keys_len = usize::try_from(keys_len)
-            .map_err(|_| Error::Custom(format!("column {column_name:?} type LowCardinality({inner_type}) keys count too large: {keys_len}")))?;
+        let keys_len = usize::try_from(keys_len).map_err(|_| {
+            read_error!("LowCardinality({inner_type}) keys count too large: {keys_len}")
+        })?;
 
         if keys_len != num_rows {
-            return Err(Error::Custom(format!(
-                "column {column_name:?} type LowCardinality({inner_type}) keys count does not match number of rows in block: {keys_len} vs {num_rows}; this likely means a bug or corrupted data"
-            )));
+            return Err(read_error!(
+                "LowCardinality({inner_type}) keys count does not match number of rows in block: \
+                 {keys_len} vs {num_rows}; this likely means a bug or corrupted data"
+            )
+            .into());
         }
 
         let keys = self.inner.read_lc_keys(key_type, num_rows).await?;
@@ -384,8 +448,15 @@ impl ReaderInner {
     async fn read_string(&mut self) -> Result<MaybeUtf8, Error> {
         let len = self.read_varuint().await?;
 
-        let len = usize::try_from(len)
-            .map_err(|_| Error::Custom(format!("string length too large: {len}")))?;
+        let len =
+            usize::try_from(len).map_err(|_| read_error!("string length too large: {len}"))?;
+
+        if len > SAFE_ALLOCATION_LIMIT {
+            return Err(read_error!(
+                "string size exceeds safe allocation limit: {len} vs {SAFE_ALLOCATION_LIMIT}"
+            )
+            .into());
+        }
 
         Ok(self.read_bytes(len).await?.into())
     }
@@ -410,7 +481,7 @@ impl ReaderInner {
             let length = self.read_uint64().await?;
 
             let length = usize::try_from(length)
-                .map_err(|_| Error::Custom(format!("array length out of range: {length}")))?;
+                .map_err(|_| read_error!("array length out of range: {length}"))?;
 
             end_indices.push(length);
         }
@@ -433,9 +504,10 @@ impl ReaderInner {
             let key = u64::from_le_bytes(buf);
 
             let key = usize::try_from(key).map_err(|_| {
-                Error::Custom(format!(
-                    "LowCardinality dictionary key out of range at index {i}: {key}"
-                ))
+                Error::DataFormat(
+                    format!("LowCardinality dictionary key out of range at index {i}: {key}")
+                        .into(),
+                )
             })?;
 
             keys.push(key);
@@ -462,6 +534,15 @@ impl ReaderInner {
     }
 
     async fn read_bytes_into(&mut self, mut amt: usize, buf: &mut BytesMut) -> Result<(), Error> {
+        let expected_len = buf.len().saturating_add(amt);
+
+        if expected_len > SAFE_ALLOCATION_LIMIT {
+            return Err(read_error!(
+                "safe allocation limit exceeded: {expected_len} vs {SAFE_ALLOCATION_LIMIT}"
+            )
+            .into());
+        }
+
         while amt > 0 {
             self.read_chunk().await?;
 
@@ -559,10 +640,10 @@ impl ParseVarUInt {
             };
 
             self.accumulator |= (b as u64 & 0x7F).checked_shl(self.shift).ok_or_else(|| {
-                Error::Custom(format!(
+                read_error!(
                     "VarUInt repr overflowed: {:016x} byte: {b:02x}",
                     self.accumulator
-                ))
+                )
             })?;
 
             if b <= 0x7F {
@@ -572,10 +653,11 @@ impl ParseVarUInt {
             self.shift += 7;
         }
 
-        Err(Error::Custom(format!(
+        Err(read_error!(
             "terminating byte missing in VarUInt encoding: {:016x}",
             self.accumulator,
-        )))
+        )
+        .into())
     }
 }
 
@@ -591,9 +673,7 @@ impl LcKeyType {
             2 => Self::UInt32,
             3 => Self::UInt64,
             unknown => {
-                return Err(Error::Custom(format!(
-                    "unknown LowCardinality key type: {unknown}"
-                )));
+                return Err(read_error!("unknown LowCardinality key type: {unknown}").into());
             }
         })
     }
@@ -605,6 +685,99 @@ impl LcKeyType {
             LcKeyType::UInt32 => 4,
             LcKeyType::UInt64 => 8,
         }
+    }
+}
+
+impl Display for BlockReadError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "error reading native block")?;
+
+        match (&self.column_name, &self.column_type) {
+            (Some(col_name), Some(col_type)) => {
+                write!(f, " at column `{col_name} {col_type}`")?;
+            }
+            (Some(col_name), None) => {
+                write!(f, " at column `{col_name}`")?;
+            }
+            _ => (),
+        }
+
+        write!(f, ": {}", self.message)
+    }
+}
+
+impl std::error::Error for BlockReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        // `self.source.as_deref()` on its own doesn't trigger the correct coercion
+        Some(self.source.as_deref()?)
+    }
+}
+
+impl BlockReadError {
+    fn with_column(mut self, name: &MaybeUtf8, ty: Option<&DataTypeNode>) -> Self {
+        self.set_column(name, ty);
+        self
+    }
+
+    fn set_column(&mut self, name: &MaybeUtf8, ty: Option<&DataTypeNode>) {
+        self.column_name = Some(name.clone());
+        self.column_type = ty.cloned();
+    }
+
+    fn with_source(
+        mut self,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    ) -> Self {
+        self.source = Some(source.into());
+        self
+    }
+
+    /// Get the name of the column that was being read when the error occurred.
+    ///
+    /// Returns `None` if a column was not being read yet, or if the column name is not UTF-8.
+    ///
+    /// See [`Self::column_name_bytes()`] if handling column names that may not be UTF-8.
+    pub fn column_name(&self) -> Option<&str> {
+        self.column_name.as_ref().and_then(MaybeUtf8::as_str)
+    }
+
+    /// Get the name of the column that was being read when the error occurred.
+    ///
+    /// Returns `None` if a column was not being read yet.
+    pub fn column_name_bytes(&self) -> Option<&[u8]> {
+        self.column_name.as_ref().map(MaybeUtf8::as_bytes)
+    }
+}
+
+trait ResultExt {
+    fn err_with_column(self, name: &MaybeUtf8, data_type: Option<&DataTypeNode>) -> Self;
+}
+
+impl<T> ResultExt for Result<T, crate::Error> {
+    fn err_with_column(self, name: &MaybeUtf8, data_type: Option<&DataTypeNode>) -> Self {
+        let Err(e) = self else {
+            return self;
+        };
+
+        let Error::DataFormat(e) = e else {
+            return Err(e);
+        };
+
+        Err(Error::DataFormat(
+            e.downcast::<BlockReadError>().map_or_else(
+                |e| e,
+                |mut e| {
+                    e.set_column(name, data_type);
+                    e
+                },
+            ),
+        ))
+    }
+}
+
+impl<T> ResultExt for Result<T, BlockReadError> {
+    fn err_with_column(self, name: &MaybeUtf8, data_type: Option<&DataTypeNode>) -> Self {
+        self.map_err(|e| e.with_column(name, data_type))
     }
 }
 

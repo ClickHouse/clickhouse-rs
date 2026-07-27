@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use std::cmp::Ordering;
 use std::convert::Infallible;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
@@ -154,6 +154,25 @@ impl Debug for MaybeUtf8 {
     }
 }
 
+impl Display for MaybeUtf8 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.as_str() {
+            Some(s) => Display::fmt(s, f),
+            None => {
+                for chunk in self.bytes.utf8_chunks() {
+                    write!(f, "{}", chunk.valid())?;
+
+                    for b in chunk.invalid() {
+                        write!(f, "{}", b.escape_ascii())?;
+                    }
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
 impl hashbrown::Equivalent<MaybeUtf8> for str {
     fn equivalent(&self, key: &MaybeUtf8) -> bool {
         key == self
@@ -180,6 +199,7 @@ mod tests {
         assert_eq!(val1, val1);
 
         assert_eq!(format!("{val1:?}"), debug);
+        assert_eq!(val1.to_string(), s);
 
         let val2 = MaybeUtf8::from(s.to_string());
 
@@ -192,6 +212,7 @@ mod tests {
         assert_eq!(val2, val2);
 
         assert_eq!(format!("{val2:?}"), debug);
+        assert_eq!(val2.to_string(), s);
 
         let val3 = MaybeUtf8::from_string(s);
         assert!(val3.is_utf8());
@@ -204,6 +225,7 @@ mod tests {
         assert_eq!(val3, val3);
 
         assert_eq!(format!("{val3:?}"), debug);
+        assert_eq!(val3.to_string(), s);
 
         let Ok(val4) = s.parse::<MaybeUtf8>();
 
@@ -218,6 +240,7 @@ mod tests {
         assert_eq!(val4, val4);
 
         assert_eq!(format!("{val4:?}"), debug);
+        assert_eq!(val4.to_string(), s);
     }
 
     #[test]
@@ -236,6 +259,7 @@ mod tests {
         assert_eq!(val1, val1);
 
         assert_eq!(format!("{val1:?}"), debug);
+        assert_eq!(val1.to_string(), bytes.escape_ascii().to_string());
 
         let val2 = MaybeUtf8::from(bytes.to_vec());
 

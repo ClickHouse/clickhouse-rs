@@ -8,6 +8,7 @@ use hashbrown::HashMap;
 
 pub use array::{ArrayData, ArrayReader};
 pub use decode::Decode;
+pub use reader::BlockReadError;
 
 pub use clickhouse_types::DataTypeNode;
 
@@ -141,7 +142,7 @@ impl Column {
 
     pub fn iter<'a, T: Decode<'a>>(&'a self) -> Result<ColumnIter<'a, T>, Error> {
         if !T::compatible(self.data_type.remove_low_cardinality()) {
-            return Err(Error::Custom(format!(
+            return Err(Error::SchemaMismatch(format!(
                 "incompatible data type {:?} of column {:?}",
                 self.data_type, self.name
             )));
