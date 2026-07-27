@@ -7,19 +7,23 @@ use std::ops::Index;
 use hashbrown::HashMap;
 
 pub use array::{ArrayData, ArrayReader};
-pub use decode::Decode;
+pub use builder::{BlockBuilder, BlockBuilderError, ColumnBuilder};
+pub use decode::{Decode, ValueReadError, ValueReader};
+pub use encode::{Encode, ValueWriter};
 pub use reader::BlockReadError;
 
 pub use clickhouse_types::DataTypeNode;
 
 pub(crate) mod array;
+pub(crate) mod builder;
 pub(crate) mod decode;
+pub(crate) mod encode;
 pub(crate) mod reader;
 pub(crate) mod string;
 
 pub struct Block {
     column_names: HashMap<MaybeUtf8, usize>,
-    columns: Vec<Column>,
+    columns: Box<[Column]>,
     num_rows: usize,
 }
 
@@ -31,7 +35,7 @@ impl Block {
                 .enumerate()
                 .map(|(i, column)| (column.name.clone(), i))
                 .collect(),
-            columns,
+            columns: columns.into(),
             num_rows,
         }
     }

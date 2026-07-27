@@ -1,7 +1,7 @@
+use crate::error::BoxedError;
 use crate::native::array::{ArrayData, TupleIter};
 use clickhouse_types::DataTypeNode;
 use std::collections::{BTreeMap, HashMap};
-use std::error::Error;
 use std::hash::{BuildHasher, Hash};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -39,27 +39,21 @@ pub enum ValueReadError {
 pub trait Decode<'a>: 'a + Sized {
     fn compatible(data_type: &DataTypeNode) -> bool;
 
-    fn decode(reader: &mut ValueReader<'a>)
-    -> Result<Self, Box<dyn Error + Send + Sync + 'static>>;
+    fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError>;
 
-    fn decode_null(
-        data_type: &DataTypeNode,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode_null(data_type: &DataTypeNode) -> Result<Self, BoxedError> {
         Err(format!("data type {data_type:?} cannot be NULL").into())
     }
 
-    fn decode_array(data: ArrayData<'a>) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode_array(data: ArrayData<'a>) -> Result<Self, BoxedError> {
         Err(format!("unexpected data type Array({})", data.elem_type).into())
     }
 
-    fn decode_tuple(data: TupleIter<'a>) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode_tuple(data: TupleIter<'a>) -> Result<Self, BoxedError> {
         Err(format!("unexpected data type Tuple({:?})", data.types.as_slice()).into())
     }
 
-    fn decode_map(
-        key_data: ArrayData<'a>,
-        value_data: ArrayData<'a>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode_map(key_data: ArrayData<'a>, value_data: ArrayData<'a>) -> Result<Self, BoxedError> {
         Err(format!(
             "unexpected data type Map({}, {})",
             key_data.elem_type, value_data.elem_type
@@ -93,7 +87,7 @@ macro_rules! impl_from_le_bytes {
 
                 fn decode(
                     reader: &mut ValueReader<'a>,
-                ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+                ) -> Result<Self, BoxedError> {
                     Ok($ty::from_le_bytes(*reader.read_bytes_fixed()?))
                 }
             }
@@ -124,9 +118,7 @@ impl Decode<'_> for bool {
         type_matches!(data_type, DataTypeNode::Bool)
     }
 
-    fn decode(
-        reader: &mut ValueReader<'_>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'_>) -> Result<Self, BoxedError> {
         // https://clickhouse.com/docs/interfaces/specs/NativeFormat#bool
         let [b] = reader.read_bytes_fixed()?;
         Ok(*b != 0)
@@ -138,9 +130,7 @@ impl<'a> Decode<'a> for &'a str {
         <&[u8] as Decode>::compatible(data_type)
     }
 
-    fn decode(
-        reader: &mut ValueReader<'a>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
         Ok(str::from_utf8(<&[u8] as Decode>::decode(reader)?)?)
     }
 }
@@ -150,9 +140,7 @@ impl<'a> Decode<'a> for String {
         <&str as Decode>::compatible(data_type)
     }
 
-    fn decode(
-        reader: &mut ValueReader<'a>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
         Ok(<&str as Decode>::decode(reader)?.into())
     }
 }
@@ -165,9 +153,7 @@ impl<'a> Decode<'a> for &'a [u8] {
         )
     }
 
-    fn decode(
-        reader: &mut ValueReader<'a>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
         Ok(reader.native_bytes)
     }
 }
@@ -181,9 +167,7 @@ impl<'a, T: Decode<'a>> Decode<'a> for Option<T> {
         }
     }
 
-    fn decode(
-        reader: &mut ValueReader<'a>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
         let DataTypeNode::Nullable(inner_type) = reader.data_type else {
             return Err(format!("expected `Nullable(_)`, got {:?}", reader.data_type).into());
         };
@@ -194,17 +178,15 @@ impl<'a, T: Decode<'a>> Decode<'a> for Option<T> {
         })?))
     }
 
-    fn decode_null(
-        _data_type: &DataTypeNode,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode_null(_data_type: &DataTypeNode) -> Result<Self, BoxedError> {
         Ok(None)
     }
 
-    fn decode_array(data: ArrayData<'a>) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode_array(data: ArrayData<'a>) -> Result<Self, BoxedError> {
         T::decode_array(data).map(Some)
     }
 
-    fn decode_tuple(data: TupleIter<'a>) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode_tuple(data: TupleIter<'a>) -> Result<Self, BoxedError> {
         T::decode_tuple(data).map(Some)
     }
 }
@@ -219,13 +201,11 @@ impl<'a, T: Decode<'a> + 'a> Decode<'a> for Vec<T> {
         }
     }
 
-    fn decode(
-        reader: &mut ValueReader<'a>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
         Err(format!("expected array type, got {}", reader.data_type).into())
     }
 
-    fn decode_array(data: ArrayData<'a>) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode_array(data: ArrayData<'a>) -> Result<Self, BoxedError> {
         data.into_reader::<T>()?
             .collect::<Result<Vec<T>, crate::Error>>()
             .map_err(Into::into)
@@ -256,11 +236,11 @@ macro_rules! tuple_impl {
 
             fn decode(
                 reader: &mut ValueReader<'a>,
-            ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+            ) -> Result<Self, BoxedError> {
                 Err(format!("expected array type, got {}", reader.data_type).into())
             }
 
-            fn decode_tuple(mut data: TupleIter<'a>) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+            fn decode_tuple(mut data: TupleIter<'a>) -> Result<Self, BoxedError> {
                 Ok((
                     data.decode_next::<$ty1>()?,
                     $(data.decode_next::<$ty>()?),*
@@ -294,21 +274,16 @@ where
             && V::compatible(val_ty.remove_low_cardinality())
     }
 
-    fn decode(
-        reader: &mut ValueReader<'a>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
         Err(format!("expected map, got {}", reader.data_type).into())
     }
 
-    fn decode_map(
-        key_data: ArrayData<'a>,
-        value_data: ArrayData<'a>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode_map(key_data: ArrayData<'a>, value_data: ArrayData<'a>) -> Result<Self, BoxedError> {
         key_data
             .into_reader::<K>()?
             .zip(value_data.into_reader::<V>()?)
             .map(|(k, v)| Ok((k?, v?)))
-            .collect::<Result<Self, Box<dyn Error + Send + Sync + 'static>>>()
+            .collect::<Result<Self, BoxedError>>()
     }
 }
 
@@ -326,21 +301,16 @@ where
             && V::compatible(val_ty.remove_low_cardinality())
     }
 
-    fn decode(
-        reader: &mut ValueReader<'a>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
         Err(format!("expected map, got {}", reader.data_type).into())
     }
 
-    fn decode_map(
-        key_data: ArrayData<'a>,
-        value_data: ArrayData<'a>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode_map(key_data: ArrayData<'a>, value_data: ArrayData<'a>) -> Result<Self, BoxedError> {
         key_data
             .into_reader::<K>()?
             .zip(value_data.into_reader::<V>()?)
             .map(|(k, v)| Ok((k?, v?)))
-            .collect::<Result<Self, Box<dyn Error + Send + Sync + 'static>>>()
+            .collect::<Result<Self, BoxedError>>()
     }
 }
 
@@ -349,9 +319,7 @@ impl Decode<'_> for Ipv4Addr {
         type_matches!(data_type, DataTypeNode::IPv4)
     }
 
-    fn decode(
-        reader: &mut ValueReader<'_>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'_>) -> Result<Self, BoxedError> {
         // https://clickhouse.com/docs/interfaces/specs/NativeFormat#ipv4-and-ipv6
         // IPv4 is byte-reversed, so little-endian
         let bytes_le = u32::from_le_bytes(*reader.read_bytes_fixed()?);
@@ -365,9 +333,7 @@ impl Decode<'_> for Ipv6Addr {
         type_matches!(data_type, DataTypeNode::IPv6)
     }
 
-    fn decode(
-        reader: &mut ValueReader<'_>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'_>) -> Result<Self, BoxedError> {
         // https://clickhouse.com/docs/interfaces/specs/NativeFormat#ipv4-and-ipv6
         // IPv6 uses canonical (big-endian) encoding
         Ok(Ipv6Addr::from(*reader.read_bytes_fixed::<16>()?))
@@ -379,9 +345,7 @@ impl Decode<'_> for IpAddr {
         type_matches!(data_type, DataTypeNode::IPv4 | DataTypeNode::IPv6)
     }
 
-    fn decode(
-        reader: &mut ValueReader<'_>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    fn decode(reader: &mut ValueReader<'_>) -> Result<Self, BoxedError> {
         match reader.data_type {
             DataTypeNode::IPv4 => Ipv4Addr::decode(reader).map(Into::into),
             DataTypeNode::IPv6 => Ipv6Addr::decode(reader).map(Into::into),
@@ -393,8 +357,8 @@ impl Decode<'_> for IpAddr {
 #[cfg(feature = "uuid")]
 mod uuid {
     use super::{Decode, ValueReader};
+    use crate::error::BoxedError;
     use clickhouse_types::DataTypeNode;
-    use std::error::Error;
     use uuid::Uuid;
 
     impl Decode<'_> for Uuid {
@@ -402,9 +366,7 @@ mod uuid {
             type_matches!(data_type, DataTypeNode::UUID)
         }
 
-        fn decode(
-            reader: &mut ValueReader<'_>,
-        ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        fn decode(reader: &mut ValueReader<'_>) -> Result<Self, BoxedError> {
             // https://clickhouse.com/docs/interfaces/specs/NativeFormat#uuid
             // Wire bytes 0..7 = canonical bytes 0..7 reversed.
             // Wire bytes 8..15 = canonical bytes 8..15 reversed.
