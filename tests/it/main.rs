@@ -254,6 +254,7 @@ mod compression;
 mod cursor_error;
 mod cursor_stats;
 mod fetch_bytes;
+mod fetch_native;
 mod https_errors;
 mod insert;
 mod insert_formatted;
@@ -263,6 +264,7 @@ mod int128;
 mod int256;
 mod ip;
 mod mock;
+mod native_types;
 mod nested;
 #[cfg(feature = "opentelemetry")]
 mod opentelemetry;

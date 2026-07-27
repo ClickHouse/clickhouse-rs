@@ -5,7 +5,7 @@ use tracing::Instrument;
 use url::Url;
 
 use crate::{
-    Client,
+    Client, Compression,
     error::{Error, Result},
     formats,
     headers::with_request_headers,
@@ -15,7 +15,7 @@ use crate::{
     sql::{Bind, SqlBuilder, ser},
 };
 
-pub use crate::cursors::{BytesCursor, RowCursor};
+pub use crate::cursors::{BytesCursor, NativeCursor, RowCursor};
 use crate::headers::with_authentication;
 use crate::settings;
 
@@ -170,6 +170,17 @@ impl Query {
 
         let response = self.do_execute(Some(format))?;
         Ok(BytesCursor::new(response, span.exit()))
+    }
+
+    pub fn fetch_native(mut self) -> Result<NativeCursor> {
+        let span = self.make_span(Some("Native")).entered();
+
+        // FIXME: use HTTP body compression instead of block-level compression
+        self.client = self.client.with_compression(Compression::None);
+
+        let response = self.do_execute(Some("Native"))?;
+
+        Ok(NativeCursor::new(response, span.exit()))
     }
 
     pub(crate) fn make_span(&self, response_format: Option<&str>) -> tracing::Span {
