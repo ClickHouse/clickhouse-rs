@@ -1,6 +1,5 @@
 //! Contains [`Error`] and corresponding [`Result`].
 
-use crate::native;
 use crate::native::BlockReadError;
 use serde::{de, ser};
 use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
