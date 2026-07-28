@@ -8,7 +8,7 @@ fn get_user_agent(products_info: &[ProductInfo]) -> String {
     // See https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates
     let pkg_ver = option_env!("CARGO_PKG_VERSION").unwrap_or("unknown");
     let rust_ver = option_env!("CARGO_PKG_RUST_VERSION").unwrap_or("unknown");
-    let default_agent = format!("clickhouse-rs/{pkg_ver} (lv:rust/{rust_ver}, os:{OS})");
+    let default_agent = format!("clickhouse-rs/{pkg_ver} (lv:rust/{rust_ver}; os:{OS})");
     if products_info.is_empty() {
         default_agent
     } else {

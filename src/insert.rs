@@ -230,7 +230,7 @@ impl<T> Insert<T> {
     pub async fn end(mut self) -> Result<()> {
         // `InsertFormatted::end()` will add `sent_bytes` and `encoded_bytes` to the span.
         tracing::record_all!(
-            self.insert.span(),
+            self.insert._priv_span(),
             clickhouse.request.sent_rows = self.sent_rows.0,
         );
 

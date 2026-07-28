@@ -252,6 +252,18 @@ impl InsertFormatted {
         self
     }
 
+    /// Similar to [`Client::with_product_info()`], but for this `INSERT` statement only.
+    pub fn with_product_info(
+        mut self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        self.state
+            .expect_client_mut()
+            .add_product_info(product_name.into(), product_version.into());
+        self
+    }
+
     pub(crate) fn set_timeouts(
         &mut self,
         send_timeout: Option<Duration>,
@@ -516,7 +528,7 @@ pub struct BufInsertFormatted {
     insert: InsertFormatted,
     buffer: BytesMut,
     /// Nominal capacity, stored separately because [`Self::write_buffered()`] can grow the buffer.
-    capacity: usize,
+    nominal_capacity: usize,
 }
 
 impl BufInsertFormatted {
@@ -524,7 +536,7 @@ impl BufInsertFormatted {
         Self {
             insert,
             buffer: BytesMut::with_capacity(capacity),
-            capacity,
+            nominal_capacity: capacity,
         }
     }
 
@@ -546,6 +558,15 @@ impl BufInsertFormatted {
         self.buffer.capacity()
     }
 
+    /// Return the set capacity of the buffer.
+    ///
+    /// The current capacity may be larger than this if a call to [`Self::write_buffered()`]
+    /// caused the buffer to expand.
+    #[inline(always)]
+    pub fn nominal_capacity(&self) -> usize {
+        self.nominal_capacity
+    }
+
     #[inline(always)]
     pub(crate) fn buffer_mut(&mut self) -> &mut BytesMut {
         &mut self.buffer
@@ -563,7 +584,8 @@ impl BufInsertFormatted {
         self.insert.set_timeouts(send_timeout, end_timeout);
     }
 
-    pub(crate) fn span(&self) -> &tracing::Span {
+    #[doc(hidden)]
+    pub fn _priv_span(&self) -> &tracing::Span {
         self.insert.span()
     }
 
@@ -599,20 +621,20 @@ impl BufInsertFormatted {
 
         // Capacity calculations change a little bit from those in, e.g., `tokio::io::BufWriter`
         // since we always need to copy into the buffer to send chunks on the connection.
-        if self.buffer.len() >= self.capacity {
+        if self.buffer.len() >= self.nominal_capacity {
             ready!(self.poll_flush_inner(cx))?;
             debug_assert!(self.buffer.is_empty());
         }
 
         // Eliminates the need for a special check in `write_all()`;
         // we need to copy to *some* buffer anyway because of how this type works.
-        if self.capacity == 0 {
+        if self.nominal_capacity == 0 {
             self.buffer.extend_from_slice(data);
             return Poll::Ready(Ok(data.len()));
         }
 
         // Guaranteed to be >= 1 by the above checks.
-        let remaining_capacity = self.capacity - self.buffer.len();
+        let remaining_capacity = self.nominal_capacity - self.buffer.len();
 
         let write_len = cmp::min(remaining_capacity, data.len());
 

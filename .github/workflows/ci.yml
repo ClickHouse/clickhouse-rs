@@ -16,6 +16,9 @@ env:
   RUST_BACKTRACE: 1
   # note: MSRV now tracked in `rust-toolchain.toml`
 
+permissions:
+  contents: read
+
 jobs:
   # Clippy ensures successful compilation as well,
   # so we do not need a separate build check

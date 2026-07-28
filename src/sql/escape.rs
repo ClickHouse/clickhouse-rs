@@ -10,7 +10,7 @@ pub(crate) fn string(src: &str, dst: &mut impl fmt::Write) -> fmt::Result {
 }
 
 // See https://clickhouse.tech/docs/en/sql-reference/syntax/#syntax-identifiers
-pub(crate) fn identifier(src: &str, dst: &mut impl fmt::Write) -> fmt::Result {
+pub fn identifier(src: &str, dst: &mut impl fmt::Write) -> fmt::Result {
     dst.write_char('`')?;
     escape(src, dst)?;
     dst.write_char('`')

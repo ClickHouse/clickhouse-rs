@@ -69,6 +69,19 @@ impl BytesCursor {
             .await
     }
 
+    /// Poll for the next chunk of bytes.
+    #[inline(always)]
+    pub fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<Bytes>>> {
+        assert!(
+            self.bytes.is_empty(),
+            "mixing `BytesCursor::poll_next()` and `AsyncRead` API methods is not allowed"
+        );
+
+        let _guard = self.span.enter();
+
+        self.raw.poll_next(cx)
+    }
+
     /// Collects the whole response into a single [`Bytes`].
     ///
     /// # Cancel safety
@@ -146,6 +159,12 @@ impl BytesCursor {
     #[inline]
     pub fn summary(&self) -> Option<&QuerySummary> {
         self.raw.summary()
+    }
+
+    #[inline]
+    #[doc(hidden)]
+    pub fn _priv_span(&self) -> &tracing::Span {
+        &self.span
     }
 }
 

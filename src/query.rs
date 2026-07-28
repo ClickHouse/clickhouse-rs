@@ -5,7 +5,7 @@ use tracing::Instrument;
 use url::Url;
 
 use crate::{
-    Client,
+    Client, Compression,
     error::{Error, Result},
     formats,
     headers::with_request_headers,
@@ -15,7 +15,7 @@ use crate::{
     sql::{Bind, SqlBuilder, ser},
 };
 
-pub use crate::cursors::{BytesCursor, RowCursor};
+pub use crate::cursors::{BytesCursor, NativeCursor, RowCursor};
 use crate::headers::with_authentication;
 use crate::settings;
 
@@ -172,6 +172,17 @@ impl Query {
         Ok(BytesCursor::new(response, span.exit()))
     }
 
+    pub fn fetch_native(mut self) -> Result<NativeCursor> {
+        let span = self.make_span(Some("Native")).entered();
+
+        // FIXME: use HTTP body compression instead of block-level compression
+        self.client = self.client.with_compression(Compression::None);
+
+        let response = self.do_execute(Some("Native"))?;
+
+        Ok(NativeCursor::new(response, span.exit()))
+    }
+
     pub(crate) fn make_span(&self, response_format: Option<&str>) -> tracing::Span {
         // https://opentelemetry.io/docs/specs/semconv/db/sql/
         // TODO: write our own Semantic Conventions for ClickHouse
@@ -299,6 +310,19 @@ impl Query {
     pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.client.set_setting(name, value);
         self
+    }
+
+    // Used in `clickhouse-ext-arrow` to track Arrow adoption.
+    /// Similar to [`Client::with_product_info()`], but for this query only.
+    pub fn with_product_info(
+        self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: self.client.with_product_info(product_name, product_version),
+            ..self
+        }
     }
 
     /// Specify server side parameter for query.
