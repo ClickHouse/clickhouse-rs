@@ -299,6 +299,48 @@ impl LayoutBuilder {
         }
     }
 
+    /// Truncate to the given number of values.
+    ///
+    /// For arrays and maps, this truncates to the length of the array at `num_values`.
+    pub(super) fn truncate(&mut self, num_values: usize) {
+        match &mut self.kind {
+            LayoutBuilderKind::Fixed { type_width, data } => {
+                data.truncate(type_width.saturating_mul(num_values));
+            }
+            LayoutBuilderKind::Variable { end_offsets, data } => {
+                end_offsets.truncate(num_values);
+
+                let last_offset = end_offsets.last().copied().unwrap_or(0);
+                data.truncate(last_offset);
+            }
+            LayoutBuilderKind::Array {
+                end_indices,
+                elem_layout,
+            } => {
+                end_indices.truncate(num_values);
+
+                let last_index = end_indices.last().copied().unwrap_or(0);
+                elem_layout.truncate(last_index);
+            }
+            LayoutBuilderKind::Tuple { layouts } => {
+                for layout in layouts {
+                    layout.truncate(num_values);
+                }
+            }
+            LayoutBuilderKind::Map {
+                key_val_layouts,
+                end_indices,
+            } => {
+                end_indices.truncate(num_values);
+
+                let last_index = end_indices.last().copied().unwrap_or(0);
+
+                key_val_layouts[0].truncate(last_index);
+                key_val_layouts[1].truncate(last_index);
+            }
+        }
+    }
+
     fn validate_nulls(&self, data_type: &DataTypeNode) -> Result<(), String> {
         match (&self.nulls, data_type) {
             (Some(nulls), DataTypeNode::Nullable(_)) => {

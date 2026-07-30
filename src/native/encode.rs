@@ -2,8 +2,8 @@ use crate::error::BoxedError;
 use crate::native::builder::{LayoutBuilder, LayoutBuilderKind};
 use bytes::{BufMut, BytesMut};
 use clickhouse_types::DataTypeNode;
+use std::cmp;
 use std::marker::PhantomData;
-use std::ops::Range;
 
 pub trait Encode {
     fn produces() -> DataTypeNode;
@@ -145,7 +145,7 @@ impl<'a> ValueWriter<'a> {
         };
 
         Ok(TupleWriter {
-            indices: 0..layouts.len(),
+            index: 0,
             elem_layouts: layouts,
             elem_types: types,
             finished: false,
@@ -169,29 +169,56 @@ pub struct ArrayWriter<'a, T> {
     _marker: PhantomData<fn(T)>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum ArrayWriteError {
+    #[error(
+        "value type is not compatible with expected type {expected_type} at array index {index}"
+    )]
+    IncompatibleType {
+        index: usize,
+        expected_type: DataTypeNode,
+    },
+
+    #[error("error writing value at array index {index}")]
+    ValueWriteError {
+        index: usize,
+        #[source]
+        error: BoxedError,
+    },
+}
+
 impl<T> ArrayWriter<'_, T> {
-    pub fn write(&mut self, value: T) -> Result<&mut Self, BoxedError>
+    pub fn write(&mut self, value: T) -> Result<&mut Self, ArrayWriteError>
     where
         T: Encode,
     {
         if !value.compatible(self.elem_type) {
-            return Err(format!(
-                "value type is not compatible with array element type {}",
-                self.elem_type
-            )
-            .into());
+            return Err(ArrayWriteError::IncompatibleType {
+                index: self.written_len(),
+                expected_type: self.elem_type.clone(),
+            });
         }
 
-        value.encode(&mut ValueWriter {
-            data_type: self.elem_type,
-            layout: &mut self.elem_layout,
-        })?;
+        value
+            .encode(&mut ValueWriter {
+                data_type: self.elem_type,
+                layout: self.elem_layout,
+            })
+            .map_err(|error| ArrayWriteError::ValueWriteError {
+                index: self.written_len(),
+                error,
+            })?;
 
         Ok(self)
     }
 
     pub fn finish(mut self) {
         self.finish_mut()
+    }
+
+    fn written_len(&self) -> usize {
+        let last_array_end = self.end_indices.last().copied().unwrap_or(0);
+        self.elem_layout.num_values().saturating_sub(last_array_end)
     }
 
     fn finish_mut(&mut self) {
@@ -215,45 +242,103 @@ impl<T> Drop for ArrayWriter<'_, T> {
     }
 }
 
+#[must_use = "rolls back the written tuple elements on-drop if `.finish()` is not called"]
 pub struct TupleWriter<'a> {
-    indices: Range<usize>,
+    index: usize,
     elem_layouts: &'a mut [LayoutBuilder],
     elem_types: &'a [DataTypeNode],
     finished: bool,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum TupleWriteError {
+    #[error("attempting to write to a full tuple")]
+    TupleFull,
+
+    #[error(
+        "value type is not compatible with expected type {expected_type} at tuple index {index}"
+    )]
+    IncompatibleType {
+        index: usize,
+        expected_type: DataTypeNode,
+    },
+
+    #[error("error writing value at tuple index {index}")]
+    ValueWriteError {
+        index: usize,
+        #[source]
+        error: BoxedError,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("tuple not fully written; expected {expected_len} values, got {written_len}")]
+pub struct IncompleteTupleError {
+    expected_len: usize,
+    written_len: usize,
+}
+
 impl TupleWriter<'_> {
-    pub fn write<T>(&mut self, value: T) -> Result<&mut Self, BoxedError>
+    pub fn write<T>(&mut self, value: T) -> Result<&mut Self, TupleWriteError>
     where
         T: Encode,
     {
-        let index = self
-            .indices
-            .next()
-            .ok_or("attempting to write to a full tuple")?;
-
-        let data_type = &self.elem_types[index];
+        let data_type = self
+            .elem_types
+            .get(self.index)
+            .ok_or(TupleWriteError::TupleFull)?;
 
         if !value.compatible(data_type) {
-            return Err(format!(
-                "value type is not compatible with tuple expected type {data_type}"
-            )
-            .into());
+            return Err(TupleWriteError::IncompatibleType {
+                index: self.index,
+                expected_type: data_type.clone(),
+            });
         }
 
-        value.encode(&mut ValueWriter {
-            layout: &mut self.elem_layouts[index],
-            data_type,
-        })?;
+        value
+            .encode(&mut ValueWriter {
+                layout: &mut self.elem_layouts[self.index],
+                data_type,
+            })
+            .map_err(|error| TupleWriteError::ValueWriteError {
+                index: self.index,
+                error,
+            })?;
+
+        // Overflow here is likely to be a bug since
+        // `self.elem_types` would have to be `usize::MAX` long
+        self.index = self.index.checked_add(1).expect("tuple index overflowed");
 
         Ok(self)
     }
 
-    pub fn finish(mut self) -> Result<(), &'static str> {
-        self.finish_mut()
+    pub fn finish(mut self) -> Result<(), IncompleteTupleError> {
+        if self.index < self.elem_types.len() {
+            return Err(IncompleteTupleError {
+                expected_len: self.elem_types.len(),
+                written_len: self.index,
+            });
+        }
+
+        self.finished = true;
+
+        Ok(())
     }
 
-    fn finish_mut(&mut self) -> Result<(), &'static str> {}
+    fn abort_mut(&mut self) {
+        let written_len = cmp::min(self.index, self.elem_layouts.len());
+
+        for layout in &mut self.elem_layouts[..written_len] {
+            let len = layout.num_values();
+            layout.truncate(len.saturating_sub(1));
+        }
+    }
+}
+
+impl Drop for TupleWriter<'_> {
+    fn drop(&mut self) {
+        self.abort_mut();
+    }
 }
 
 impl<T> Encode for Option<T>
@@ -399,7 +484,17 @@ macro_rules! tuple_impl {
             }
 
             fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
+                let mut writer = writer.write_tuple()?;
 
+                let ($var1, $($var),*) = self;
+
+                writer.write($var1)?;
+                $(
+                    writer.write($var)?;
+                )*
+
+                writer.finish()?;
+                Ok(())
             }
         }
 
