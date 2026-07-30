@@ -285,13 +285,13 @@ impl LayoutBuilder {
         }
     }
 
-    fn num_values(&self) -> usize {
+    pub(super) fn num_values(&self) -> usize {
         match &self.kind {
             LayoutBuilderKind::Fixed { type_width, data } => data.len() / type_width,
             LayoutBuilderKind::Variable { end_offsets, .. } => end_offsets.len(),
             LayoutBuilderKind::Array { end_indices, .. } => end_indices.len(),
             LayoutBuilderKind::Tuple { layouts, .. } => {
-                layouts.get(0).map_or(0, |layout| layout.num_values())
+                layouts.first().map_or(0, |layout| layout.num_values())
             }
             LayoutBuilderKind::Map {
                 key_val_layouts, ..
