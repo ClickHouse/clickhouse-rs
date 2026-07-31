@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::native::string::MaybeUtf8;
+use crate::native::varuint::ParseVarUInt;
 use crate::native::{Block, Column, Layout, LayoutKind, LayoutLowCardinality, type_fixed_width};
 use crate::response::Chunks;
 use bytes::{Buf, Bytes, BytesMut};
@@ -465,7 +466,10 @@ impl ReaderInner {
         let mut parser = ParseVarUInt::default();
 
         loop {
-            if let ControlFlow::Break(val) = parser.feed(&mut self.last_chunk)? {
+            if let ControlFlow::Break(val) = parser
+                .feed(&mut self.last_chunk)
+                .map_err(|e| read_error!("error parsing VarUInt").with_source(e))?
+            {
                 return Ok(val);
             }
 
@@ -624,43 +628,6 @@ impl ReaderInner {
     }
 }
 
-#[derive(Default)]
-struct ParseVarUInt {
-    accumulator: u64,
-    shift: u32,
-}
-
-impl ParseVarUInt {
-    fn feed(&mut self, mut buf: impl Buf) -> Result<ControlFlow<u64>, Error> {
-        const MAX_LEN: usize = 10;
-
-        for _ in 0..MAX_LEN {
-            let Ok(b) = buf.try_get_u8() else {
-                return Ok(ControlFlow::Continue(()));
-            };
-
-            self.accumulator |= (b as u64 & 0x7F).checked_shl(self.shift).ok_or_else(|| {
-                read_error!(
-                    "VarUInt repr overflowed: {:016x} byte: {b:02x}",
-                    self.accumulator
-                )
-            })?;
-
-            if b <= 0x7F {
-                return Ok(ControlFlow::Break(self.accumulator));
-            }
-
-            self.shift += 7;
-        }
-
-        Err(read_error!(
-            "terminating byte missing in VarUInt encoding: {:016x}",
-            self.accumulator,
-        )
-        .into())
-    }
-}
-
 impl LcKeyType {
     const MASK: u64 = 0xFF; // Low 8 bits
 
@@ -778,81 +745,5 @@ impl<T> ResultExt for Result<T, crate::Error> {
 impl<T> ResultExt for Result<T, BlockReadError> {
     fn err_with_column(self, name: &MaybeUtf8, data_type: Option<&DataTypeNode>) -> Self {
         self.map_err(|e| e.with_column(name, data_type))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ParseVarUInt;
-    use bytes::Buf;
-    use std::ops::ControlFlow;
-
-    #[test]
-    fn parse_varuint() {
-        let encoded_and_decoded: &[(&[u8], u64)] = &[
-            (&[0u8][..], 0u64),
-            (&[1], 1),
-            (&[127], 127),
-            (&[0x80, 0x01], 1 << 7),
-            (&[0x80, 0x80, 0x01], 1 << 14),
-            (&[0x80, 0x80, 0x80, 0x01], 1 << 21),
-            (&[0x80, 0x80, 0x80, 0x80, 0x01], 1 << 28),
-            (&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x1F], 0xFF_FF_FF_FF_FF),
-        ];
-
-        let pad_len = 16usize;
-
-        for (encoded, decoded) in encoded_and_decoded {
-            // Pad with junk data that must be ignored
-            let padded: Vec<_> = encoded
-                .iter()
-                .copied()
-                .chain((0..).cycle())
-                .take(pad_len)
-                .collect();
-
-            // Test feeding slices in different size chunks
-            for chunk_size in 1..=padded.len() {
-                let mut parser = ParseVarUInt::default();
-
-                let mut slice = &padded[..];
-
-                let mut last_remaining = slice.len();
-
-                loop {
-                    match parser.feed((&mut slice).take(chunk_size)) {
-                        Ok(ControlFlow::Break(res)) => {
-                            assert_eq!(
-                                res, *decoded,
-                                "invalid decoding; chunk_size: {chunk_size}, padded: {padded:?}, remaining: {slice:?}"
-                            );
-                            assert_eq!(
-                                slice.len(),
-                                padded.len() - encoded.len(),
-                                "extra data consumed: {slice:?}"
-                            );
-                            break;
-                        }
-                        Ok(ControlFlow::Continue(())) => {
-                            assert!(
-                                !slice.is_empty(),
-                                "full slice consumed without giving a result"
-                            );
-                            assert_ne!(
-                                slice.len(),
-                                last_remaining,
-                                "parser failed to make progress"
-                            );
-                            last_remaining = slice.len();
-                        }
-                        Err(e) => {
-                            panic!(
-                                "error: {e:?}, chunk_size: {chunk_size}, padded: {padded:?}, remaining: {slice:?}"
-                            );
-                        }
-                    }
-                }
-            }
-        }
     }
 }

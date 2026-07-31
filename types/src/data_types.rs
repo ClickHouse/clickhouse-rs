@@ -1,4 +1,5 @@
 use crate::error::TypesError;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
@@ -195,6 +196,55 @@ impl DataTypeNode {
             DataTypeNode::SimpleAggregateFunction(_, inner) => inner,
             _ => self,
         }
+    }
+
+    /// If `self` has a static string representation (e.g. `"UInt8"`), return it.
+    ///
+    /// Returns `None` for polymorphic types (e.g. `Array(T)` or `Decimal(P, S)`).
+    pub fn as_str(&self) -> Option<&'static str> {
+        use DataTypeNode::*;
+
+        Some(match self {
+            UInt8 => "UInt8",
+            UInt16 => "UInt16",
+            UInt32 => "UInt32",
+            UInt64 => "UInt64",
+            UInt128 => "UInt128",
+            UInt256 => "UInt256",
+            Int8 => "Int8",
+            Int16 => "Int16",
+            Int32 => "Int32",
+            Int64 => "Int64",
+            Int128 => "Int128",
+            Int256 => "Int256",
+            Float32 => "Float32",
+            Float64 => "Float64",
+            BFloat16 => "BFloat16",
+            String => "String",
+            UUID => "UUID",
+            Date => "Date",
+            Date32 => "Date32",
+            DateTime(None) => "DateTime",
+            Time => "Time",
+            IPv4 => "IPv4",
+            IPv6 => "IPv6",
+            Bool => "Bool",
+            JSON => "JSON",
+            Dynamic => "Dynamic",
+            Point => "Point",
+            Ring => "Ring",
+            LineString => "LineString",
+            MultiLineString => "MultiLineString",
+            Polygon => "Polygon",
+            MultiPolygon => "MultiPolygon",
+            _ => return None,
+        })
+    }
+
+    /// Return the string representation for this type, without allocating if possible.
+    pub fn to_str(&self) -> Cow<'static, str> {
+        self.as_str()
+            .map_or_else(|| self.to_string().into(), Cow::Borrowed)
     }
 }
 

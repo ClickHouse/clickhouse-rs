@@ -20,6 +20,10 @@ impl MaybeUtf8 {
     pub fn from_string(string: impl Into<String>) -> Self {
         Self::from(string.into())
     }
+
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
 }
 
 impl From<&'static [u8]> for MaybeUtf8 {
