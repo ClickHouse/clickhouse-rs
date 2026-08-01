@@ -21,7 +21,7 @@ pub(crate) mod encode;
 pub(crate) mod reader;
 pub(crate) mod string;
 mod varuint;
-mod writer;
+pub(crate) mod writer;
 
 pub struct Block {
     column_names: HashMap<MaybeUtf8, usize>,

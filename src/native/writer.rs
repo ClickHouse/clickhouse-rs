@@ -34,13 +34,29 @@ impl BlockWriter {
 
         // We deliberately don't send the block header right away
         // since the first column header can share the same buffer.
-        if !guard.buf.is_empty() {
-            guard.insert.send(guard.buf.split().freeze()).await?;
-        }
+        //
+        // If `write_column()` wrote any data, this should be a no-op.
+        guard.flush().await?;
 
         guard.finished = true;
 
         Ok(())
+    }
+
+    pub async fn end(mut self) -> Result<(), Error> {
+        let mut guard = WriteGuard {
+            insert: &mut self.insert,
+            buf: &mut self.buf,
+            finished: false,
+        };
+
+        guard.flush().await?;
+
+        guard.finished = true;
+
+        drop(guard);
+
+        self.insert.end().await
     }
 }
 
@@ -62,14 +78,12 @@ impl WriteGuard<'_> {
         varuint::write(&mut self.buf, data_type_str.len());
         self.buf.extend_from_slice(data_type_str.as_bytes());
 
-        self.insert.send(self.buf.split().freeze()).await?;
-
         self.write_layout(&column.layout).await
     }
 
     async fn write_layout(&mut self, layout: &Layout) -> Result<(), Error> {
         if let Some(nulls) = &layout.nulls {
-            self.insert.send(nulls.clone()).await?;
+            self.send(nulls.clone()).await?;
         }
 
         match &layout.kind {
@@ -120,11 +134,17 @@ impl WriteGuard<'_> {
     }
 
     async fn send(&mut self, data: Bytes) -> Result<(), Error> {
+        self.flush().await?;
+
+        self.insert.send(data).await
+    }
+
+    async fn flush(&mut self) -> Result<(), Error> {
         if !self.buf.is_empty() {
             self.insert.send(self.buf.split().freeze()).await?;
         }
 
-        self.insert.send(data).await
+        Ok(())
     }
 }
 

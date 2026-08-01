@@ -21,6 +21,7 @@ use tokio::sync::RwLock;
 pub mod error;
 pub mod insert;
 pub mod insert_formatted;
+pub mod insert_native;
 #[cfg(feature = "inserter")]
 pub mod inserter;
 pub mod native;
@@ -541,6 +542,14 @@ impl Client {
     ) -> insert_formatted::InsertFormatted {
         // TODO: extract collection name from query
         insert_formatted::InsertFormatted::new(self, sql.into(), None)
+    }
+
+    pub fn insert_native(&self, table_name: &str) -> insert_native::InsertNative {
+        insert_native::InsertNative::new(self, table_name, true)
+    }
+
+    pub fn insert_native_unescaped(&self, raw_table_name: &str) -> insert_native::InsertNative {
+        insert_native::InsertNative::new(self, raw_table_name, false)
     }
 
     /// Starts a new SELECT/DDL query.
