@@ -633,9 +633,9 @@ fn parse_decimal(input: &str) -> Result<DataTypeNode, TypesError> {
             })?;
         let precision = parsed[0];
         let scale = parsed[1];
-        if scale < 1 || precision < 1 {
+        if precision == 0 {
             return Err(TypesError::TypeParsingError(format!(
-                "Invalid Decimal format, expected Decimal(P, S) with P > 0 and S > 0, got {input}"
+                "Invalid Decimal format, expected Decimal(P, S) with P > 0, got {input}"
             )));
         }
         if precision < scale {
@@ -1215,6 +1215,10 @@ mod tests {
         assert_eq!(
             DataTypeNode::new("Decimal(42, 8)").unwrap(),
             DataTypeNode::Decimal(42, 8, DecimalType::Decimal256)
+        );
+        assert_eq!(
+            DataTypeNode::new("Decimal(25, 0)").unwrap(),
+            DataTypeNode::Decimal(25, 0, DecimalType::Decimal128)
         );
         assert!(DataTypeNode::new("Decimal").is_err());
         assert!(DataTypeNode::new("Decimal(").is_err());

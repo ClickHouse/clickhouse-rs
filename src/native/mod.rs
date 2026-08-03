@@ -233,9 +233,8 @@ fn type_fixed_width(data_type: &DataTypeNode) -> Option<usize> {
         // Type width determined by metadata that comes before column data.
         DataTypeNode::LowCardinality(_) => None,
         DataTypeNode::Array(_) => None,
-        DataTypeNode::Tuple(types) => types.iter().try_fold(0usize, |total, inner| {
-            total.checked_add(type_fixed_width(inner)?)
-        }),
+        // Tuples are serialized column-by-column and need a structural layout.
+        DataTypeNode::Tuple(_) => None,
         DataTypeNode::Enum(type_, _) => match type_ {
             EnumType::Enum8 => Some(1),
             EnumType::Enum16 => Some(2),
