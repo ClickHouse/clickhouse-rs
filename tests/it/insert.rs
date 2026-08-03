@@ -1,4 +1,7 @@
-use crate::{SimpleRow, create_simple_table, fetch_rows, flush_query_log, get_client};
+use crate::{
+    SimpleRow, create_simple_table, fetch_rows, flush_query_log, get_client,
+    get_client_with_session,
+};
 use clickhouse::insert::Insert;
 use clickhouse::{Row, sql::Identifier};
 use rand::distr::{Alphanumeric, SampleString};
@@ -617,10 +620,7 @@ async fn insert_into_temp_table() {
         baz: Option<String>,
     }
 
-    let client = get_client().with_setting(
-        "session_id",
-        Alphanumeric.sample_string(&mut rand::rng(), 16),
-    );
+    let client = get_client_with_session();
 
     client
         .query("CREATE TEMPORARY TABLE foo(bar Int32, baz Nullable(String))")

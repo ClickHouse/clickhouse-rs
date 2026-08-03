@@ -26,6 +26,7 @@
 //!   clean up outdated databases based on its creation time.
 
 use clickhouse::{Client, Row, RowOwned, RowRead, RowWrite, sql::Identifier};
+use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
@@ -136,6 +137,13 @@ pub(crate) fn get_client() -> Client {
             .with_user("default")
             .with_password(require_env_var("CLICKHOUSE_CLOUD_PASSWORD")),
     }
+}
+
+pub(crate) fn get_client_with_session() -> Client {
+    get_client().with_setting(
+        "session_id",
+        Alphanumeric.sample_string(&mut rand::rng(), 16),
+    )
 }
 
 pub(crate) fn require_env_var(name: &str) -> String {

@@ -1,11 +1,12 @@
+use crate::error::BoxedError;
 use crate::native::string::MaybeUtf8;
-use crate::native::{Block, Column, Layout, LayoutKind, type_fixed_width};
+use crate::native::{Block, Column, Encode, Layout, LayoutKind, type_fixed_width};
 use bytes::BytesMut;
 use clickhouse_types::DataTypeNode;
 use hashbrown::{HashMap, hash_map};
 use std::collections::VecDeque;
-use std::mem;
 use std::ops::{Index, IndexMut};
+use std::{iter, mem};
 
 #[derive(Default)]
 pub struct BlockBuilder {
@@ -50,6 +51,13 @@ impl BlockBuilder {
         Self::default()
     }
 
+    pub fn upsert_column<T: Encode>(
+        &mut self,
+        name: impl Into<String>,
+    ) -> Result<&mut ColumnBuilder, Box<BlockBuilderError>> {
+        self.upsert_column_with(name, T::produces())
+    }
+
     /// Add an empty column to the block, or get a reference to an existing one.
     ///
     /// The given data type will have any `LowCardinality(_)` or `SimpleAggregateFunction(...)`
@@ -58,7 +66,7 @@ impl BlockBuilder {
     /// # Errors
     /// * If a column with the same name already exists, but with a different type.
     /// * If the given type is not currently supported by the implementation.
-    pub fn add_column(
+    pub fn upsert_column_with(
         &mut self,
         name: impl Into<String>,
         data_type: DataTypeNode,
@@ -210,6 +218,20 @@ impl ColumnBuilder {
     pub fn num_values(&self) -> usize {
         self.layout.num_values()
     }
+
+    pub fn add<T>(&mut self, value: T) -> Result<&mut Self, BoxedError>
+    where
+        T: Encode,
+    {
+        self.add_all(iter::once(value))
+    }
+
+    pub fn add_all<I>(&mut self, values: I) -> Result<&mut Self, BoxedError>
+    where
+        I: IntoIterator,
+        I::Item: Encode,
+    {
+    }
 }
 
 // These types may be identical to `Layout` but they need to use growable containers.
@@ -296,6 +318,21 @@ impl LayoutBuilder {
             LayoutBuilderKind::Map {
                 key_val_layouts, ..
             } => key_val_layouts[0].num_values(),
+        }
+    }
+
+    pub(super) fn reserve(&mut self, additional: usize) {
+        match &mut self.kind {
+            LayoutBuilderKind::Fixed { type_width, data } => {
+                data.reserve(type_width.saturating_mul(additional));
+            }
+            LayoutBuilderKind::Variable { end_offsets, .. } => {
+                end_offsets.reserve(additional);
+                // Don't reserve in `data` because we don't know the total additional size
+            }
+            LayoutBuilderKind::Array { .. } => {}
+            LayoutBuilderKind::Tuple { .. } => {}
+            LayoutBuilderKind::Map { .. } => {}
         }
     }
 
