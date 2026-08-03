@@ -4,6 +4,7 @@ use bytes::{BufMut, BytesMut};
 use clickhouse_types::DataTypeNode;
 use std::cmp;
 use std::marker::PhantomData;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 pub trait Encode {
     fn produces() -> DataTypeNode;
@@ -44,8 +45,8 @@ fn default_compatible(produced_type: &DataTypeNode, column_type: &DataTypeNode) 
 }
 
 pub struct ValueWriter<'a> {
-    data_type: &'a DataTypeNode,
-    layout: &'a mut LayoutBuilder,
+    pub(super) data_type: &'a DataTypeNode,
+    pub(super) layout: &'a mut LayoutBuilder,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -416,6 +417,17 @@ impl_to_le_bytes!(
     Float64: f64,
 );
 
+impl Encode for bool {
+    fn produces() -> DataTypeNode {
+        DataTypeNode::Bool
+    }
+
+    fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
+        writer.write_fixed(&[*self as u8])?;
+        Ok(())
+    }
+}
+
 impl Encode for str {
     fn produces() -> DataTypeNode {
         DataTypeNode::String
@@ -507,3 +519,54 @@ tuple_impl!(
     t1: T1, t2: T2, t3: T3, t4: T4, t5: T5, t6: T6, t7: T7, t8: T8, t9: T9,
     t10: T10, t11: T11, t12: T12, t13: T13, t14: T14, t15: T15, t16: T16
 );
+
+impl Encode for Ipv4Addr {
+    fn produces() -> DataTypeNode {
+        DataTypeNode::IPv4
+    }
+
+    fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
+        writer.write_fixed(&self.to_bits().to_le_bytes())?;
+        Ok(())
+    }
+}
+
+impl Encode for Ipv6Addr {
+    fn produces() -> DataTypeNode {
+        DataTypeNode::IPv6
+    }
+
+    fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
+        writer.write_fixed(&self.octets())?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "uuid")]
+mod uuid {
+    use crate::error::BoxedError;
+    use crate::native::{Encode, ValueWriter};
+    use clickhouse_types::DataTypeNode;
+    use uuid::Uuid;
+
+    impl Encode for Uuid {
+        fn produces() -> DataTypeNode {
+            DataTypeNode::UUID
+        }
+
+        fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
+            // https://clickhouse.com/docs/interfaces/specs/NativeFormat#uuid
+            // Wire bytes 0..7 = canonical bytes 0..7 reversed.
+            // Wire bytes 8..15 = canonical bytes 8..15 reversed.
+            let (lo_bytes, hi_bytes) = self.as_u64_pair();
+
+            let mut bytes = [0u8; 16];
+            bytes[..8].copy_from_slice(&lo_bytes.to_le_bytes());
+            bytes[8..].copy_from_slice(&hi_bytes.to_le_bytes());
+
+            writer.write_fixed(&bytes)?;
+
+            Ok(())
+        }
+    }
+}

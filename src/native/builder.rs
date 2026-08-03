@@ -1,12 +1,12 @@
 use crate::error::BoxedError;
 use crate::native::string::MaybeUtf8;
-use crate::native::{Block, Column, Encode, Layout, LayoutKind, type_fixed_width};
+use crate::native::{Block, Column, Encode, Layout, LayoutKind, ValueWriter, type_fixed_width};
 use bytes::BytesMut;
 use clickhouse_types::DataTypeNode;
 use hashbrown::{HashMap, hash_map};
 use std::collections::VecDeque;
+use std::mem;
 use std::ops::{Index, IndexMut};
-use std::{iter, mem};
 
 #[derive(Default)]
 pub struct BlockBuilder {
@@ -219,19 +219,56 @@ impl ColumnBuilder {
         self.layout.num_values()
     }
 
-    pub fn add<T>(&mut self, value: T) -> Result<&mut Self, BoxedError>
+    pub fn add<T>(&mut self, value: T) -> Result<&mut Self, ColumnBuilderError>
     where
         T: Encode,
     {
-        self.add_all(iter::once(value))
+        if !value.compatible(&self.data_type) {
+            return Err(ColumnBuilderError::IncompatibleType {
+                name: self.name.to_string(),
+                data_type: self.data_type.clone(),
+            });
+        }
+
+        value
+            .encode(&mut ValueWriter {
+                data_type: &self.data_type,
+                layout: &mut self.layout,
+            })
+            .map_err(ColumnBuilderError::Encode)?;
+
+        Ok(self)
     }
 
-    pub fn add_all<I>(&mut self, values: I) -> Result<&mut Self, BoxedError>
+    pub fn add_all<I>(&mut self, values: I) -> Result<&mut Self, ColumnBuilderError>
     where
         I: IntoIterator,
         I::Item: Encode,
     {
+        let mut values = values.into_iter();
+
+        while let Some(value) = values.next() {
+            // Catches an infinite-length iterator that returns `usize::MAX` for its size hint
+            // This is comparable to the default behavor of `impl Extend<T> for Vec<T>`
+            let (lower_bound, _) = values.size_hint();
+            self.layout.reserve(lower_bound.saturating_add(1));
+
+            self.add(value)?;
+        }
+
+        Ok(self)
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ColumnBuilderError {
+    #[error("incompatible value type for column `{name} {data_type}")]
+    IncompatibleType {
+        name: String,
+        data_type: DataTypeNode,
+    },
+    #[error("error encoding value")]
+    Encode(#[source] BoxedError),
 }
 
 // These types may be identical to `Layout` but they need to use growable containers.

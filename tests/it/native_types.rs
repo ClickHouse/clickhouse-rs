@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 macro_rules! test_type {
     (
@@ -10,39 +10,116 @@ macro_rules! test_type {
         $(#[$attr])*
         #[tokio::test]
         async fn $fn_name() {
-            let client = $crate::get_client();
+            use clickhouse::native::BlockBuilder;
+
+            let db_name = test_database_name!();
+
+            let client = $crate::_priv::prepare_database(&db_name).await;
+
+            client
+                .query(&format!(
+                    "CREATE TABLE {db_name}.sql_values ENGINE = Memory AS {}",
+                    // In case any values contain `{}`
+                    concat!("SELECT * FROM Values(" $(, "'c1 ", $sqlty, "', ")? $(, $sql, )","* ")")
+                ))
+                .execute()
+                .await
+                .expect("error creating value source table");
+
+            client
+                .query(&format!(
+                    "CREATE TABLE {db_name}.insert_values ENGINE = Memory AS \
+                     {db_name}.sql_values",
+                ))
+                .execute()
+                .await
+                .expect("error creating insert table");
+
+            let mut insert_block = BlockBuilder::new();
+
+            let column = insert_block.upsert_column::<$ty>("c1").expect("error from upsert_column");
+
+            $(
+                column.add::<$ty>($rust).expect(concat!("error writing expression `", stringify!($rust), "`"));
+            )*
+
+            let insert_block = insert_block.build().expect("error from insert_block.build()");
+
+            let mut insert = client.insert_native("insert_values");
+
+            insert.write(&insert_block).await.expect("error from insert.write()");
+
+            insert.end().await.expect("error from insert.end()");
 
             let mut cursor = client
-                .query(concat!(
-                    "SELECT c1 FROM Values ("
-                    $(,"'c1 ", $sqlty, "', ")?
-                    $(, $sql, )","*
-                    ")"
-                ))
+                .query(
+                    "SELECT \
+                     sql_values.c1 AS sql_value, insert_values.c1 AS insert_value, \
+                     toBool(sql_value == insert_value) AS values_equal \
+                     FROM sql_values PASTE JOIN insert_values",
+                )
                 .fetch_native()
-                .expect("error from `.fetch_native()`");
+                .expect("error from fetch_native");
 
-            let block = cursor.next().await
+            let block = cursor
+                .next()
+                .await
                 .expect("error from `cursor.next()`")
                 .expect("expected block, got none");
 
-            let mut iter = block["c1"]
+            let mut sql_iter = block["sql_value"]
                 .iter::<$ty>()
-                .expect("error from `.iter()`");
+                .expect("error from `block[\"sql_value\"].iter()`");
 
             $(
-                let expected = $rust;
+                let expected: $ty = $rust;
 
-                let val = iter
+                let val = sql_iter
                     .next()
-                    .expect("expected another value, got none")
+                    .expect("expected another value from `sql_iter`")
                     .unwrap_or_else(|e| panic!("error decoding SQL `{}` as Rust value `{expected:?}`: {e:?}", $sql));
 
-                assert_eq!(val, expected);
+                assert_eq!(val, expected, "SQL value does not equal Rust value");
             )*
 
-            if let Some(next) = iter.next() {
-                panic!("unexpected value: {next:?}");
+            if let Some(next) = sql_iter.next() {
+                panic!("`unexpected value from `sql_iter.next(): {next:?}`");
+            }
+
+            let mut insert_iter = block["insert_value"]
+                .iter::<$ty>()
+                .expect("error from `block[\"insert_value\"].iter()`");
+
+            $(
+                let expected: $ty = $rust;
+
+                let val = insert_iter
+                    .next()
+                    .expect("expected another value from `insert_iter`")
+                    .unwrap_or_else(|e| panic!("error round-tripping Rust value `{expected:?}`: {e:?}"));
+
+                assert_eq!(val, expected, "Rust value did not round-trip correctly");
+            )*
+
+            if let Some(next) = sql_iter.next() {
+                panic!("unexpected value from `insert_iter.next()`: {next:?}");
+            }
+
+            let mut equals_iter = block["values_equal"]
+                .iter::<bool>()
+                .expect("error from `block[\"values_equal\"].iter()`");
+
+            $(
+                let equals = equals_iter
+                    .next()
+                    .expect("expected another value from `equals_iter`")
+                    .expect("error decoding value from `equals_iter`");
+
+                assert!(equals, "values not equal in SQL: {:?} vs `{}`", $sql, stringify!($rust));
+            )*
+
+            if let Some(next) = equals_iter.next() {
+                panic!("`unexpected value from `equals_iter.next(): {next:?}`");
             }
         }
     };
@@ -118,27 +195,7 @@ test_type!(
 );
 
 test_type!(
-    test_ipaddr_from_v4(IpAddr, "IPv4") {
-        "'0.0.0.0'" == Ipv4Addr::UNSPECIFIED,
-        "'1.1.1.1'" == Ipv4Addr::new(1, 1, 1, 1),
-        "'127.0.0.1'" == Ipv4Addr::LOCALHOST,
-        "'192.168.2.1'" == Ipv4Addr::new(192, 168, 2, 1),
-        "'255.255.255.0'" == Ipv4Addr::new(255, 255, 255, 0),
-        "'255.255.255.255'" == Ipv4Addr::BROADCAST,
-    }
-);
-
-test_type!(
     test_ipv6(Ipv6Addr, "IPv6") {
-        "'::1'" == Ipv6Addr::LOCALHOST,
-        // IPv6 addresses for ClickHouse.com
-        "'2606:4700:3108::ac42:2b07'" == "2606:4700:3108::ac42:2b07".parse::<Ipv6Addr>().unwrap(),
-        "'2606:4700:3108::ac42:28f9'" == "2606:4700:3108::ac42:28f9".parse::<Ipv6Addr>().unwrap(),
-    }
-);
-
-test_type!(
-    test_ipaddr_from_v6(IpAddr, "IPv6") {
         "'::1'" == Ipv6Addr::LOCALHOST,
         // IPv6 addresses for ClickHouse.com
         "'2606:4700:3108::ac42:2b07'" == "2606:4700:3108::ac42:2b07".parse::<Ipv6Addr>().unwrap(),
