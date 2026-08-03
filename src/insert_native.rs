@@ -1,6 +1,6 @@
 use crate::native::Block;
 use crate::native::writer::BlockWriter;
-use crate::{Client, insert_formatted, sql};
+use crate::{Client, Compression, insert_formatted, sql};
 
 pub struct InsertNative {
     writer: BlockWriter,
@@ -20,7 +20,8 @@ impl InsertNative {
 
         Self {
             writer: BlockWriter::new(insert_formatted::InsertFormatted::new(
-                client,
+                // FIXME: use HTTP body compression instead of block-level compression
+                &client.clone().with_compression(Compression::None),
                 sql,
                 Some(table_name),
             )),
