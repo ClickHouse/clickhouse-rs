@@ -155,7 +155,9 @@ async fn server_side_param() {
 #[tokio::test]
 async fn post_query_params_large_array() {
     let client = prepare_database!();
-    let values = (0..128)
+    // Keep the serialized form field within ClickHouse's default 128 KiB
+    // `http_max_field_value_size`.
+    let values = (0..120)
         .map(|index| format!("{index:03}-{}", "x".repeat(1024)))
         .collect::<Vec<_>>();
 
@@ -166,7 +168,7 @@ async fn post_query_params_large_array() {
         .await
         .expect("failed to execute query with a large parameter");
 
-    assert_eq!(length, 128);
+    assert_eq!(length, 120);
 }
 
 // See #19.

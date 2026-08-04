@@ -34,6 +34,7 @@ jobs:
 
       - run: cargo clippy
       - run: cargo clippy --all-targets --no-default-features
+      - run: cargo clippy --lib --no-default-features --features uuid
       - run: cargo clippy --all-targets --all-features
 
       # TLS
