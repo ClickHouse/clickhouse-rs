@@ -102,6 +102,8 @@ impl<'a> ValueWriter<'a> {
     }
 
     pub fn write_null(&mut self) -> Result<(), ValueWriteError> {
+        self.layout.push_placeholder();
+
         let nulls = self
             .layout
             .nulls
@@ -507,6 +509,26 @@ macro_rules! tuple_impl {
 
                 writer.finish()?;
                 Ok(())
+            }
+
+            fn compatible(&self, column_type: &DataTypeNode) -> bool {
+                let DataTypeNode::Tuple(types) = column_type else {
+                    return false;
+                };
+
+                #[allow(unused_mut)]
+                let mut i = 0;
+
+                let ($var1, $($var),*) = self;
+
+                if !$var1.compatible(&types[i]) { return false; }
+
+                $(
+                    i += 1;
+                    if !$var.compatible(&types[i]) { return false; }
+                )*
+
+                true
             }
         }
 

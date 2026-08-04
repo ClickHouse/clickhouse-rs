@@ -31,6 +31,7 @@ async fn mixed_types(num_rows: u64) {
                 text String,
                 nullable_number Nullable(UInt64),
                 nullable_text Nullable(String),
+                number_tuple Tuple(UInt32, Int64),
                 number_text_tuple Tuple(Int64, String),
                 nullable_tuple Tuple(Nullable(Int64), Nullable(String))
             )",
@@ -46,7 +47,7 @@ async fn mixed_types(num_rows: u64) {
                 return "".to_string();
             }
 
-            format!("{i:0.i$}")
+            format!("{i:.i$}")
         })
         .collect::<Vec<_>>();
 
@@ -82,6 +83,12 @@ async fn mixed_types(num_rows: u64) {
         .unwrap();
 
     builder
+        .upsert_column::<(i32, i64)>("number_tuple")
+        .unwrap()
+        .add_all(numbers.iter().map(|&i| (i, i as i64)))
+        .unwrap();
+
+    builder
         .upsert_column::<(i64, String)>("number_text_tuple")
         .unwrap()
         .add_all(
@@ -90,6 +97,17 @@ async fn mixed_types(num_rows: u64) {
                 .zip(&texts)
                 .map(|(&number, text)| (number as i64, text)),
         )
+        .unwrap();
+
+    builder
+        .upsert_column::<(Option<i64>, Option<String>)>("nullable_tuple")
+        .unwrap()
+        .add_all(numbers.iter().zip(&texts).map(|(&number, text)| {
+            (
+                (number % 2 == 0).then_some(number as i64),
+                (number % 2 != 0).then_some(text),
+            )
+        }))
         .unwrap();
 
     let block_in = builder.build().unwrap();
@@ -102,11 +120,14 @@ async fn mixed_types(num_rows: u64) {
 
     let mut cursor = client.query("SELECT * FROM foo").fetch_native().unwrap();
 
-    let block_out = cursor.next().await.unwrap().expect("expected block");
+    let Some(block_out) = cursor.next().await.unwrap() else {
+        assert_eq!(num_rows, 0, "expected block, got none");
+        return;
+    };
 
     let mut number_iter = block_out["number"].iter::<i32>().unwrap();
 
-    for (res, expected) in number_iter.by_ref().zip(numbers) {
+    for (res, &expected) in number_iter.by_ref().zip(&numbers) {
         let actual = res.unwrap();
         assert_eq!(actual, expected);
     }
@@ -117,12 +138,79 @@ async fn mixed_types(num_rows: u64) {
 
     let mut text_iter = block_out["text"].iter::<String>().unwrap();
 
-    for (res, expected) in text_iter.by_ref().zip(texts) {
+    for (res, expected) in text_iter.by_ref().zip(&texts) {
         let actual = res.unwrap();
-        assert_eq!(actual, expected);
+        assert_eq!(actual, *expected);
     }
 
     if let Some(res) = text_iter.next() {
+        panic!("unexpected value {res:?}");
+    }
+
+    let mut nullable_text_iter = block_out["nullable_text"].iter::<Option<String>>().unwrap();
+
+    for (i, (res, expected)) in nullable_text_iter.by_ref().zip(&texts).enumerate() {
+        let actual = res.unwrap();
+
+        if !i.is_multiple_of(2) {
+            assert_eq!(actual.as_ref(), Some(expected));
+        } else {
+            assert_eq!(actual, None);
+        }
+    }
+
+    if let Some(res) = nullable_text_iter.next() {
+        panic!("unexpected value {res:?}");
+    }
+
+    let mut number_tuple_iter = block_out["number_tuple"].iter::<(i32, i64)>().unwrap();
+
+    for (res, &expected) in number_tuple_iter.by_ref().zip(&numbers) {
+        let (actual_int32, actual_int64) = res.unwrap();
+        assert_eq!(actual_int32, expected);
+        assert_eq!(actual_int64, expected as i64);
+    }
+
+    if let Some(res) = number_tuple_iter.next() {
+        panic!("unexpected value {res:?}");
+    }
+
+    let mut number_text_tuple_iter = block_out["number_text_tuple"]
+        .iter::<(i64, String)>()
+        .unwrap();
+
+    for ((res, &expected_number), expected_text) in
+        number_text_tuple_iter.by_ref().zip(&numbers).zip(&texts)
+    {
+        let (actual_number, actual_text) = res.unwrap();
+        assert_eq!(actual_number, expected_number as i64);
+        assert_eq!(actual_text, *expected_text);
+    }
+
+    if let Some(res) = number_text_tuple_iter.next() {
+        panic!("unexpected value {res:?}");
+    }
+
+    let mut nullable_tuple_iter = block_out["nullable_tuple"]
+        .iter::<(Option<i64>, Option<String>)>()
+        .unwrap();
+
+    for ((res, &expected_number), expected_text) in
+        nullable_tuple_iter.by_ref().zip(&numbers).zip(&texts)
+    {
+        let (actual_number, actual_text) = res.unwrap();
+
+        assert_eq!(
+            actual_number,
+            (expected_number % 2 == 0).then_some(expected_number as i64)
+        );
+        assert_eq!(
+            actual_text.as_ref(),
+            (expected_number % 2 != 0).then_some(expected_text)
+        );
+    }
+
+    if let Some(res) = nullable_tuple_iter.next() {
         panic!("unexpected value {res:?}");
     }
 }

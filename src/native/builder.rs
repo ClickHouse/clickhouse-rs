@@ -1,7 +1,7 @@
 use crate::error::BoxedError;
 use crate::native::string::MaybeUtf8;
 use crate::native::{Block, Column, Encode, Layout, LayoutKind, ValueWriter, type_fixed_width};
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use clickhouse_types::DataTypeNode;
 use hashbrown::{HashMap, hash_map};
 use std::collections::VecDeque;
@@ -25,7 +25,7 @@ pub enum BlockBuilderError {
         existing_type: DataTypeNode,
         new_type: DataTypeNode,
     },
-    #[error("unsupported data type of column `{name} {data_type}`")]
+    #[error("unsupported type or subtype of column `{name}`:  `{data_type}`")]
     UnsupportedType {
         name: String,
         data_type: DataTypeNode,
@@ -337,6 +337,15 @@ impl LayoutBuilder {
                     data: Default::default(),
                 },
             }),
+            DataTypeNode::Tuple(types) => Ok(Self {
+                nulls,
+                kind: LayoutBuilderKind::Tuple {
+                    layouts: types
+                        .iter()
+                        .map(|ty| LayoutBuilder::new(column_name, ty))
+                        .collect::<Result<_, _>>()?,
+                },
+            }),
             _ => Err(BlockBuilderError::UnsupportedType {
                 name: column_name.to_string(),
                 data_type: data_type.clone(),
@@ -370,6 +379,32 @@ impl LayoutBuilder {
             LayoutBuilderKind::Array { .. } => {}
             LayoutBuilderKind::Tuple { .. } => {}
             LayoutBuilderKind::Map { .. } => {}
+        }
+    }
+
+    /// Push a valid placeholder value
+    pub(super) fn push_placeholder(&mut self) {
+        match &mut self.kind {
+            LayoutBuilderKind::Fixed { type_width, data } => {
+                data.put_bytes(0, *type_width);
+            }
+            LayoutBuilderKind::Variable { end_offsets, data } => {
+                end_offsets.push(data.len());
+            }
+            LayoutBuilderKind::Array { end_indices, .. } => {
+                let end_index = end_indices.last().copied().unwrap_or(0);
+                end_indices.push(end_index);
+            }
+            // This is only needed for `Nullable(Tuple(...))` which is currently experimental
+            LayoutBuilderKind::Tuple { layouts } => {
+                for layout in layouts {
+                    layout.push_placeholder();
+                }
+            }
+            LayoutBuilderKind::Map { end_indices, .. } => {
+                let end_index = end_indices.last().copied().unwrap_or(0);
+                end_indices.push(end_index);
+            }
         }
     }
 
