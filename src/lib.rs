@@ -386,6 +386,8 @@ impl Client {
 
     /// Used to specify a header that will be passed to all queries.
     ///
+    /// Headers required to frame a request body may be controlled by the client.
+    ///
     /// # Example
     /// ```
     /// # use clickhouse::Client;
