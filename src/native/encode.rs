@@ -50,6 +50,7 @@ pub struct ValueWriter<'a> {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ValueWriteError {
     #[error("attempting to use incorrect writer method for this type")]
     IncorrectMethod,
@@ -102,8 +103,6 @@ impl<'a> ValueWriter<'a> {
     }
 
     pub fn write_null(&mut self) -> Result<(), ValueWriteError> {
-        self.layout.push_placeholder();
-
         let nulls = self
             .layout
             .nulls
@@ -111,6 +110,8 @@ impl<'a> ValueWriter<'a> {
             .ok_or(ValueWriteError::UnexpectedNull)?;
 
         nulls.put_u8(1);
+
+        self.layout.push_placeholder();
 
         Ok(())
     }
@@ -329,6 +330,10 @@ impl TupleWriter<'_> {
     }
 
     fn abort_mut(&mut self) {
+        if self.finished {
+            return;
+        }
+
         let written_len = cmp::min(self.index, self.elem_layouts.len());
 
         for layout in &mut self.elem_layouts[..written_len] {
@@ -360,10 +365,16 @@ where
     }
 
     fn compatible(&self, column_type: &DataTypeNode) -> bool {
-        if let Some(inner) = self {
-            inner.compatible(column_type)
+        let non_nullable = if let DataTypeNode::Nullable(inner) = column_type {
+            inner
         } else {
-            default_compatible(&T::produces(), column_type)
+            column_type
+        };
+
+        if let Some(inner) = self {
+            inner.compatible(non_nullable)
+        } else {
+            default_compatible(&T::produces(), non_nullable)
         }
     }
 }
@@ -483,6 +494,19 @@ where
         writer.finish();
 
         Ok(())
+    }
+}
+
+impl<T> Encode for Vec<T>
+where
+    T: Encode,
+{
+    fn produces() -> DataTypeNode {
+        <[T]>::produces()
+    }
+
+    fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
+        self.as_slice().encode(writer)
     }
 }
 

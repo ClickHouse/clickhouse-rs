@@ -4,7 +4,6 @@ use crate::{
 };
 use clickhouse::insert::Insert;
 use clickhouse::{Row, sql::Identifier};
-use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::panic::AssertUnwindSafe;

@@ -31,12 +31,15 @@ pub enum BlockBuilderError {
         data_type: DataTypeNode,
     },
     #[error(
-        "block contains columns of mismatched lengths; longest column: `{column_name} {column_type}` with {len} values"
+        "block contains columns of mismatched lengths; \
+         longest column: `{longest_column}` (len: {longest_len}), \
+         shortest column: `{shortest_column}` (len: {shortest_len})"
     )]
     MismatchedLengths {
-        column_name: String,
-        column_type: DataTypeNode,
-        len: usize,
+        longest_column: String,
+        longest_len: usize,
+        shortest_column: String,
+        shortest_len: usize,
     },
     #[error("column `{column_name} {column_type}` contains invalid data: {message}")]
     ColumnDataInvalid {
@@ -123,22 +126,31 @@ impl BlockBuilder {
         let mut num_rows = 0;
 
         // Check that all the columns have the same length
-        if let Some((mut largest_col, columns)) = self.columns.split_first() {
+        if let Some((mut longest_col, columns)) = self.columns.split_first() {
             let mut len_mismatch = false;
-            num_rows = largest_col.num_values();
+
+            let mut shortest_col = longest_col;
+
+            num_rows = longest_col.num_values();
 
             for col in columns {
-                if largest_col.num_values() < col.num_values() {
-                    largest_col = col;
-                    len_mismatch = true
+                if col.num_values() > longest_col.num_values() {
+                    longest_col = col;
+                    len_mismatch = true;
+                }
+
+                if col.num_values() < shortest_col.num_values() {
+                    shortest_col = col;
+                    len_mismatch = true;
                 }
             }
 
             if len_mismatch {
                 return Err(BlockBuilderError::MismatchedLengths {
-                    column_name: largest_col.name.to_string(),
-                    column_type: largest_col.data_type.clone(),
-                    len: largest_col.num_values(),
+                    longest_column: longest_col.name.to_string(),
+                    longest_len: longest_col.num_values(),
+                    shortest_column: shortest_col.name.to_string(),
+                    shortest_len: shortest_col.num_values(),
                 }
                 .into());
             }
@@ -261,6 +273,7 @@ impl ColumnBuilder {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ColumnBuilderError {
     #[error("incompatible value type for column `{name} {data_type}")]
     IncompatibleType {
@@ -312,7 +325,10 @@ pub(super) enum LayoutBuilderKind {
 }
 
 impl LayoutBuilder {
-    fn new(column_name: &MaybeUtf8, data_type: &DataTypeNode) -> Result<Self, BlockBuilderError> {
+    fn new(
+        column_name: &MaybeUtf8,
+        data_type: &DataTypeNode,
+    ) -> Result<Self, Box<BlockBuilderError>> {
         let (non_nullable, nulls) = if let DataTypeNode::Nullable(inner) = data_type {
             (&**inner, Some(BytesMut::new()))
         } else {
@@ -346,10 +362,17 @@ impl LayoutBuilder {
                         .collect::<Result<_, _>>()?,
                 },
             }),
-            _ => Err(BlockBuilderError::UnsupportedType {
+            DataTypeNode::Array(elem_type) => Ok(Self {
+                nulls,
+                kind: LayoutBuilderKind::Array {
+                    end_indices: vec![],
+                    elem_layout: Box::new(LayoutBuilder::new(column_name, elem_type)?),
+                },
+            }),
+            _ => Err(Box::new(BlockBuilderError::UnsupportedType {
                 name: column_name.to_string(),
                 data_type: data_type.clone(),
-            }),
+            })),
         }
     }
 

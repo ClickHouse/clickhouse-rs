@@ -1,22 +1,22 @@
 use crate::error::Error;
 use crate::insert_formatted::InsertFormatted;
 use crate::native::{Block, Column, Layout, LayoutKind, varuint};
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
-pub struct BlockWriter {
+pub(crate) struct BlockWriter {
     insert: InsertFormatted,
     buf: BytesMut,
 }
 
 impl BlockWriter {
-    pub fn new(insert: InsertFormatted) -> Self {
+    pub(crate) fn new(insert: InsertFormatted) -> Self {
         Self {
             insert,
             buf: BytesMut::with_capacity(8192),
         }
     }
 
-    pub async fn write(&mut self, block: &Block) -> Result<(), Error> {
+    pub(crate) async fn write(&mut self, block: &Block) -> Result<(), Error> {
         // If canceled while writing a block, we have no way to recover.
         // We have to abort the request instead.
         let mut guard = WriteGuard {
@@ -43,7 +43,7 @@ impl BlockWriter {
         Ok(())
     }
 
-    pub async fn end(mut self) -> Result<(), Error> {
+    pub(crate) async fn end(mut self) -> Result<(), Error> {
         let mut guard = WriteGuard {
             insert: &mut self.insert,
             buf: &mut self.buf,
@@ -83,19 +83,28 @@ impl WriteGuard<'_> {
 
     async fn write_layout(&mut self, layout: &Layout) -> Result<(), Error> {
         if let Some(nulls) = &layout.nulls {
-            self.send(nulls.clone()).await?;
+            self.send(nulls).await?;
         }
 
         match &layout.kind {
             LayoutKind::Fixed { data, .. } => {
-                self.send(data.clone()).await?;
+                self.send(data).await?;
             }
             LayoutKind::Variable { end_offsets, data } => {
-                for offset in end_offsets {
-                    varuint::write(&mut self.buf, *offset);
-                }
+                let mut start_offset = 0;
 
-                self.send(data.clone()).await?;
+                // Convert from offsets *back* to lengths and subslices
+                for &end_offset in end_offsets {
+                    let len = end_offset
+                        .checked_sub(start_offset)
+                        .ok_or_else(|| Error::Other(format!("BUG: string length underflow in encoding block: {end_offset} - {start_offset}").into()))?;
+
+                    varuint::write(&mut self.buf, len);
+
+                    self.send(&data.slice(start_offset..end_offset)).await?;
+
+                    start_offset = end_offset;
+                }
             }
             LayoutKind::LowCardinality(_) => {
                 return Err(Error::Other(
@@ -107,7 +116,9 @@ impl WriteGuard<'_> {
                 elem_layout,
             } => {
                 for index in end_indices {
-                    varuint::write(&mut self.buf, *index);
+                    self.buf.put_u64_le(u64::try_from(*index).map_err(|_| {
+                        Error::Other(format!("array end index out of range: {index}").into())
+                    })?);
                 }
 
                 Box::pin(self.write_layout(elem_layout)).await?;
@@ -122,7 +133,9 @@ impl WriteGuard<'_> {
                 end_indices,
             } => {
                 for index in end_indices {
-                    varuint::write(&mut self.buf, *index);
+                    self.buf.put_u64_le(u64::try_from(*index).map_err(|_| {
+                        Error::Other(format!("map end index out of range: {index}").into())
+                    })?);
                 }
 
                 Box::pin(self.write_layout(&key_val_layouts[0])).await?;
@@ -133,10 +146,18 @@ impl WriteGuard<'_> {
         Ok(())
     }
 
-    async fn send(&mut self, data: Bytes) -> Result<(), Error> {
-        self.flush().await?;
+    async fn send(&mut self, data: &Bytes) -> Result<(), Error> {
+        /// If a data buffer is smaller than this threshold, copy it to `self.buf` instead.
+        const COPY_THRESHOLD: usize = 128;
 
-        self.insert.send(data).await
+        if data.len() < COPY_THRESHOLD {
+            self.buf.extend_from_slice(data);
+            Ok(())
+        } else {
+            self.flush().await?;
+
+            self.insert.send(data.clone()).await
+        }
     }
 
     async fn flush(&mut self) -> Result<(), Error> {

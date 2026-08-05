@@ -3,7 +3,7 @@ use std::ops::ControlFlow;
 
 /// Write a `usize` as a native `VarUInt`
 #[allow(clippy::cast_possible_truncation)] // truncation is intentional here
-pub fn write(mut buf: impl BufMut, mut uint: usize) {
+pub(super) fn write(mut buf: impl BufMut, mut uint: usize) {
     while uint > 0x7F {
         let b = (uint as u8) | 0x80;
         buf.put_u8(b);
@@ -14,13 +14,13 @@ pub fn write(mut buf: impl BufMut, mut uint: usize) {
 }
 
 #[derive(Default)]
-pub struct ParseVarUInt {
+pub(super) struct ParseVarUInt {
     accumulator: u64,
     shift: u32,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ParseVarUIntError {
+pub(super) enum ParseVarUIntError {
     #[error("VarUInt repr overflowed: {accumulator:#x} byte: {byte:#02x}")]
     Overflow { accumulator: u64, byte: u8 },
     #[error("terminating byte missing in VarUInt encoding: {accumulator:#x}")]
@@ -28,7 +28,10 @@ pub enum ParseVarUIntError {
 }
 
 impl ParseVarUInt {
-    pub fn feed(&mut self, mut buf: impl Buf) -> Result<ControlFlow<u64>, ParseVarUIntError> {
+    pub(super) fn feed(
+        &mut self,
+        mut buf: impl Buf,
+    ) -> Result<ControlFlow<u64>, ParseVarUIntError> {
         const MAX_LEN: usize = 10;
 
         for _ in 0..MAX_LEN {

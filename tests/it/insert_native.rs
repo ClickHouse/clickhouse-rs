@@ -6,6 +6,11 @@ async fn mixed_types_empty() {
 }
 
 #[tokio::test]
+async fn mixed_types_1() {
+    mixed_types(1).await
+}
+
+#[tokio::test]
 async fn mixed_types_10() {
     mixed_types(10).await
 }
@@ -25,15 +30,18 @@ async fn mixed_types(num_rows: u64) {
 
     client
         .query(
-            "\
-            CREATE TEMPORARY TABLE foo(
+            "CREATE TEMPORARY TABLE foo(
                 number Int32,
                 text String,
                 nullable_number Nullable(UInt64),
                 nullable_text Nullable(String),
                 number_tuple Tuple(UInt32, Int64),
                 number_text_tuple Tuple(Int64, String),
-                nullable_tuple Tuple(Nullable(Int64), Nullable(String))
+                nullable_tuple Tuple(Nullable(Int64), Nullable(String)),
+                low_cardinality_text LowCardinality(String),
+                number_array Array(Int32),
+                text_array Array(String),
+                nullable_text_array Array(Nullable(String))
             )",
         )
         .execute()
@@ -47,7 +55,27 @@ async fn mixed_types(num_rows: u64) {
                 return "".to_string();
             }
 
-            format!("{i:.i$}")
+            // Left-pad with dots to `i` width
+            format!("{i:.<i$}")
+        })
+        .collect::<Vec<_>>();
+
+    let number_arrays = (0..(num_rows as usize))
+        .map(|len| (0..len as i32).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+
+    let text_arrays = (0..(num_rows as usize))
+        .map(|len| {
+            (0..len)
+                .map(|i| {
+                    if i == 0 {
+                        return "".to_string();
+                    }
+
+                    // Right-pad with asterisks to `i` width
+                    format!("{i:*>i$}")
+                })
+                .collect::<Vec<String>>()
         })
         .collect::<Vec<_>>();
 
@@ -110,6 +138,37 @@ async fn mixed_types(num_rows: u64) {
         }))
         .unwrap();
 
+    // Verifying the assumption that `LowCardinality` can accept a regular data stream
+    builder
+        .upsert_column::<String>("low_cardinality_text")
+        .unwrap()
+        .add_all(&texts)
+        .unwrap();
+
+    builder
+        .upsert_column::<Vec<i32>>("number_array")
+        .unwrap()
+        .add_all(&number_arrays)
+        .unwrap();
+
+    builder
+        .upsert_column::<Vec<String>>("text_array")
+        .unwrap()
+        .add_all(&text_arrays)
+        .unwrap();
+
+    builder
+        .upsert_column::<Vec<Option<String>>>("nullable_text_array")
+        .unwrap()
+        .add_all(text_arrays.iter().map(|array| {
+            array
+                .iter()
+                .enumerate()
+                .map(|(i, text)| i.is_multiple_of(2).then_some(text))
+                .collect::<Vec<_>>()
+        }))
+        .unwrap();
+
     let block_in = builder.build().unwrap();
 
     let mut insert = client.insert_native("foo");
@@ -118,6 +177,8 @@ async fn mixed_types(num_rows: u64) {
 
     insert.end().await.unwrap();
 
+    // This is going to be similar to the `fetch_native` test,
+    // but we need to make sure the data actually got inserted correctly.
     let mut cursor = client.query("SELECT * FROM foo").fetch_native().unwrap();
 
     let Some(block_out) = cursor.next().await.unwrap() else {
@@ -163,11 +224,11 @@ async fn mixed_types(num_rows: u64) {
         panic!("unexpected value {res:?}");
     }
 
-    let mut number_tuple_iter = block_out["number_tuple"].iter::<(i32, i64)>().unwrap();
+    let mut number_tuple_iter = block_out["number_tuple"].iter::<(u32, i64)>().unwrap();
 
     for (res, &expected) in number_tuple_iter.by_ref().zip(&numbers) {
-        let (actual_int32, actual_int64) = res.unwrap();
-        assert_eq!(actual_int32, expected);
+        let (actual_uint32, actual_int64) = res.unwrap();
+        assert_eq!(actual_uint32, expected as u32);
         assert_eq!(actual_int64, expected as i64);
     }
 
@@ -211,6 +272,55 @@ async fn mixed_types(num_rows: u64) {
     }
 
     if let Some(res) = nullable_tuple_iter.next() {
+        panic!("unexpected value {res:?}");
+    }
+
+    let mut lc_text_iter = block_out["low_cardinality_text"].iter::<String>().unwrap();
+
+    for (res, expected) in lc_text_iter.by_ref().zip(&texts) {
+        let actual = res.unwrap();
+        assert_eq!(actual, *expected);
+    }
+
+    if let Some(res) = lc_text_iter.next() {
+        panic!("unexpected value {res:?}");
+    }
+
+    let mut number_array_iter = block_out["number_array"].iter::<Vec<i32>>().unwrap();
+
+    for (res, expected) in number_array_iter.by_ref().zip(&number_arrays) {
+        let actual = res.unwrap();
+        assert_eq!(actual, *expected);
+    }
+
+    if let Some(res) = number_array_iter.next() {
+        panic!("unexpected value {res:?}");
+    }
+
+    let mut text_array_iter = block_out["text_array"].iter::<Vec<String>>().unwrap();
+
+    for (res, expected) in text_array_iter.by_ref().zip(&text_arrays) {
+        let actual = res.unwrap();
+        assert_eq!(actual, *expected);
+    }
+
+    if let Some(res) = text_array_iter.next() {
+        panic!("unexpected value {res:?}");
+    }
+
+    let mut nullable_text_array_iter = block_out["nullable_text_array"]
+        .iter::<Vec<Option<String>>>()
+        .unwrap();
+
+    for (res, expected) in nullable_text_array_iter.by_ref().zip(&text_arrays) {
+        let actual = res.unwrap();
+
+        for (i, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+            assert_eq!(actual.as_ref(), i.is_multiple_of(2).then_some(expected));
+        }
+    }
+
+    if let Some(res) = nullable_text_array_iter.next() {
         panic!("unexpected value {res:?}");
     }
 }
