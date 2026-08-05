@@ -7,17 +7,15 @@ use std::ops::Index;
 use hashbrown::HashMap;
 
 pub use array::{ArrayData, ArrayReader};
-pub use builder::{BlockBuilder, BlockBuilderError, ColumnBuilder};
-pub use decode::{Decode, ValueReadError, ValueReader};
-pub use encode::{Encode, ValueWriter};
 pub use reader::BlockReadError;
 
+use crate::native::decode::Decode;
 pub use clickhouse_types::DataTypeNode;
 
 pub(crate) mod array;
-pub(crate) mod builder;
-pub(crate) mod decode;
-pub(crate) mod encode;
+pub mod builder;
+pub mod decode;
+pub mod encode;
 pub(crate) mod reader;
 pub(crate) mod string;
 mod varuint;

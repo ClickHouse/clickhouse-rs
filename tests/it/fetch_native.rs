@@ -1,5 +1,5 @@
 use crate::get_client;
-use clickhouse::native::{Column, Decode};
+use clickhouse::native::{Column, decode::Decode};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 

@@ -1,6 +1,7 @@
 use crate::error::BoxedError;
+use crate::native::encode::{Encode, ValueWriter};
 use crate::native::string::MaybeUtf8;
-use crate::native::{Block, Column, Encode, Layout, LayoutKind, ValueWriter, type_fixed_width};
+use crate::native::{Block, Column, Layout, LayoutKind, type_fixed_width};
 use bytes::{BufMut, BytesMut};
 use clickhouse_types::DataTypeNode;
 use hashbrown::{HashMap, hash_map};

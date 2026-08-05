@@ -1,5 +1,5 @@
 use crate::get_client_with_session;
-use clickhouse::native::BlockBuilder;
+use clickhouse::native::builder::BlockBuilder;
 #[tokio::test]
 async fn mixed_types_empty() {
     mixed_types(0).await

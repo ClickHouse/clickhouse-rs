@@ -174,6 +174,7 @@ pub struct ArrayWriter<'a, T> {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ArrayWriteError {
     #[error(
         "value type is not compatible with expected type {expected_type} at array index {index}"
@@ -255,6 +256,7 @@ pub struct TupleWriter<'a> {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum TupleWriteError {
     #[error("attempting to write to a full tuple")]
     TupleFull,
@@ -590,8 +592,8 @@ impl Encode for Ipv6Addr {
 
 #[cfg(feature = "uuid")]
 mod uuid {
+    use super::{Encode, ValueWriter};
     use crate::error::BoxedError;
-    use crate::native::{Encode, ValueWriter};
     use clickhouse_types::DataTypeNode;
     use uuid::Uuid;
 

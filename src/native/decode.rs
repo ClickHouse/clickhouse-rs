@@ -31,6 +31,7 @@ impl<'a> ValueReader<'a> {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ValueReadError {
     #[error("expected {expected} bytes, got {actual}")]
     InvalidLength { expected: usize, actual: usize },

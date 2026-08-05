@@ -10,7 +10,7 @@ macro_rules! test_type {
         $(#[$attr])*
         #[tokio::test]
         async fn $fn_name() {
-            use clickhouse::native::BlockBuilder;
+            use clickhouse::native::builder::BlockBuilder;
 
             let db_name = test_database_name!();
 
