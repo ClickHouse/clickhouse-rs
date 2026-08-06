@@ -1,5 +1,6 @@
 use crate::get_client_with_session;
 use clickhouse::native::builder::BlockBuilder;
+use std::collections::HashMap;
 #[tokio::test]
 async fn mixed_types_empty() {
     mixed_types(0).await
@@ -41,7 +42,8 @@ async fn mixed_types(num_rows: u64) {
                 low_cardinality_text LowCardinality(String),
                 number_array Array(Int32),
                 text_array Array(String),
-                nullable_text_array Array(Nullable(String))
+                nullable_text_array Array(Nullable(String)),
+                number_text_map Map(Int32, String),
             )",
         )
         .execute()
@@ -76,6 +78,16 @@ async fn mixed_types(num_rows: u64) {
                     format!("{i:*>i$}")
                 })
                 .collect::<Vec<String>>()
+        })
+        .collect::<Vec<_>>();
+
+    let maps = (0..(num_rows as usize))
+        .map(|len| {
+            numbers[..len]
+                .iter()
+                .zip(&texts)
+                .map(|(&n, t)| (n, t.clone()))
+                .collect::<HashMap<_, _>>()
         })
         .collect::<Vec<_>>();
 
@@ -167,6 +179,12 @@ async fn mixed_types(num_rows: u64) {
                 .map(|(i, text)| i.is_multiple_of(2).then_some(text))
                 .collect::<Vec<_>>()
         }))
+        .unwrap();
+
+    builder
+        .upsert_column::<HashMap<i32, String>>("number_text_map")
+        .unwrap()
+        .add_all(&maps)
         .unwrap();
 
     let block_in = builder.build().unwrap();
@@ -321,6 +339,20 @@ async fn mixed_types(num_rows: u64) {
     }
 
     if let Some(res) = nullable_text_array_iter.next() {
+        panic!("unexpected value {res:?}");
+    }
+
+    let mut map_iter = block_out["number_text_map"]
+        .iter::<HashMap<i32, String>>()
+        .unwrap();
+
+    for (res, expected) in map_iter.by_ref().zip(&maps) {
+        let actual = res.unwrap();
+
+        assert_eq!(actual, *expected);
+    }
+
+    if let Some(res) = map_iter.next() {
         panic!("unexpected value {res:?}");
     }
 }

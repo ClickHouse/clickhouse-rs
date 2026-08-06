@@ -18,6 +18,8 @@ macro_rules! test_type {
 
             client
                 .query(&format!(
+                    // Temporary tables apparently can't be the source of `CREATE TABLE .. AS ..`,
+                    // you get a confusing "unknown table" error
                     "CREATE TABLE {db_name}.sql_values ENGINE = Memory AS {}",
                     // In case any values contain `{}`
                     concat!("SELECT * FROM Values(" $(, "'c1 ", $sqlty, "', ")? $(, $sql, )","* ")")

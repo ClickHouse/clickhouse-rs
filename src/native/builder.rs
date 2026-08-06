@@ -370,6 +370,16 @@ impl LayoutBuilder {
                     elem_layout: Box::new(LayoutBuilder::new(column_name, elem_type)?),
                 },
             }),
+            DataTypeNode::Map(key_val_types) => Ok(Self {
+                nulls,
+                kind: LayoutBuilderKind::Map {
+                    key_val_layouts: Box::new([
+                        LayoutBuilder::new(column_name, &key_val_types[0])?,
+                        LayoutBuilder::new(column_name, &key_val_types[1])?,
+                    ]),
+                    end_indices: vec![],
+                },
+            }),
             _ => Err(Box::new(BlockBuilderError::UnsupportedType {
                 name: column_name.to_string(),
                 data_type: data_type.clone(),
@@ -385,9 +395,7 @@ impl LayoutBuilder {
             LayoutBuilderKind::Tuple { layouts, .. } => {
                 layouts.first().map_or(0, |layout| layout.num_values())
             }
-            LayoutBuilderKind::Map {
-                key_val_layouts, ..
-            } => key_val_layouts[0].num_values(),
+            LayoutBuilderKind::Map { end_indices, .. } => end_indices.len(),
         }
     }
 

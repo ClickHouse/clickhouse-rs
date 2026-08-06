@@ -3,6 +3,7 @@ use crate::native::builder::{LayoutBuilder, LayoutBuilderKind};
 use bytes::{BufMut, BytesMut};
 use clickhouse_types::DataTypeNode;
 use std::cmp;
+use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -153,6 +154,32 @@ impl<'a> ValueWriter<'a> {
             elem_layouts: layouts,
             elem_types: types,
             finished: false,
+        })
+    }
+
+    pub fn write_map<K, V>(&mut self) -> Result<MapWriter<'_, K, V>, ValueWriteError> {
+        let LayoutBuilderKind::Map {
+            key_val_layouts,
+            end_indices,
+        } = &mut self.layout.kind
+        else {
+            return Err(ValueWriteError::IncorrectMethod);
+        };
+
+        let DataTypeNode::Map([key_ty, val_ty]) = &self.data_type else {
+            return Err(ValueWriteError::IncorrectMethod);
+        };
+
+        let [key_layout, val_layout] = &mut **key_val_layouts;
+
+        Ok(MapWriter {
+            key_ty,
+            val_ty,
+            key_layout,
+            val_layout,
+            end_indices,
+            finished: false,
+            _marker: PhantomData,
         })
     }
 
@@ -349,6 +376,101 @@ impl Drop for TupleWriter<'_> {
     fn drop(&mut self) {
         self.abort_mut();
     }
+}
+
+#[must_use = "rolls back the written map elements on-drop if `.finish()` is not called"]
+pub struct MapWriter<'a, K, V> {
+    key_ty: &'a DataTypeNode,
+    val_ty: &'a DataTypeNode,
+    key_layout: &'a mut LayoutBuilder,
+    val_layout: &'a mut LayoutBuilder,
+    end_indices: &'a mut Vec<usize>,
+    finished: bool,
+    _marker: PhantomData<fn(K, V)>,
+}
+
+impl<K, V> MapWriter<'_, K, V>
+where
+    K: Encode,
+    V: Encode,
+{
+    pub fn write(&mut self, key: K, value: V) -> Result<&mut Self, MapWriteError> {
+        if !key.compatible(self.key_ty) {
+            return Err(MapWriteError::IncompatibleType {
+                index: self.key_layout.num_values(),
+                expected_type: self.key_ty.clone(),
+            });
+        }
+
+        if !value.compatible(self.val_ty) {
+            return Err(MapWriteError::IncompatibleType {
+                index: self.val_layout.num_values(),
+                expected_type: self.val_ty.clone(),
+            });
+        }
+
+        key.encode(&mut ValueWriter {
+            layout: self.key_layout,
+            data_type: self.key_ty,
+        })
+        .map_err(|error| MapWriteError::ValueWriteError {
+            error,
+            index: self.key_layout.num_values(),
+        })?;
+
+        value
+            .encode(&mut ValueWriter {
+                layout: self.val_layout,
+                data_type: self.val_ty,
+            })
+            .map_err(|error| MapWriteError::ValueWriteError {
+                error,
+                index: self.val_layout.num_values(),
+            })?;
+
+        Ok(self)
+    }
+
+    pub fn finish(mut self) {
+        if self.finished {
+            return;
+        }
+
+        let end_index = self.key_layout.num_values();
+        self.end_indices.push(end_index);
+
+        self.finished = true;
+    }
+}
+
+impl<K, V> Drop for MapWriter<'_, K, V> {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+
+        let truncate_len = self.end_indices.last().copied().unwrap_or(0);
+
+        self.key_layout.truncate(truncate_len);
+        self.val_layout.truncate(truncate_len);
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum MapWriteError {
+    #[error("type is not compatible with expected type {expected_type} at entry index {index}")]
+    IncompatibleType {
+        index: usize,
+        expected_type: DataTypeNode,
+    },
+
+    #[error("error writing value at entry index {index}")]
+    ValueWriteError {
+        index: usize,
+        #[source]
+        error: BoxedError,
+    },
 }
 
 impl<T> Encode for Option<T>
@@ -587,6 +709,66 @@ impl Encode for Ipv6Addr {
     fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
         writer.write_fixed(&self.octets())?;
         Ok(())
+    }
+}
+
+impl<K, V, H> Encode for HashMap<K, V, H>
+where
+    K: Encode,
+    V: Encode,
+{
+    fn produces() -> DataTypeNode {
+        DataTypeNode::Map([Box::new(K::produces()), Box::new(V::produces())])
+    }
+
+    fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
+        let mut writer = writer.write_map()?;
+
+        for (k, v) in self {
+            writer.write(k, v)?;
+        }
+
+        writer.finish();
+
+        Ok(())
+    }
+
+    fn compatible(&self, column_type: &DataTypeNode) -> bool {
+        let DataTypeNode::Map([key_ty, val_ty]) = column_type else {
+            return false;
+        };
+
+        default_compatible(&K::produces(), key_ty) && default_compatible(&V::produces(), val_ty)
+    }
+}
+
+impl<K, V> Encode for BTreeMap<K, V>
+where
+    K: Encode,
+    V: Encode,
+{
+    fn produces() -> DataTypeNode {
+        DataTypeNode::Map([Box::new(K::produces()), Box::new(V::produces())])
+    }
+
+    fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
+        let mut writer = writer.write_map()?;
+
+        for (k, v) in self {
+            writer.write(k, v)?;
+        }
+
+        writer.finish();
+
+        Ok(())
+    }
+
+    fn compatible(&self, column_type: &DataTypeNode) -> bool {
+        let DataTypeNode::Map([key_ty, val_ty]) = column_type else {
+            return false;
+        };
+
+        default_compatible(&K::produces(), key_ty) && default_compatible(&V::produces(), val_ty)
     }
 }
 
