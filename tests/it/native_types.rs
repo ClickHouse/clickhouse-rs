@@ -39,10 +39,10 @@ macro_rules! test_type {
 
             let mut insert_block = BlockBuilder::new();
 
-            let column = insert_block.upsert_column::<$ty>("c1").expect("error from upsert_column");
+            let mut column = insert_block.upsert_column::<$ty>("c1").expect("error from upsert_column");
 
             $(
-                column.add::<$ty>($rust).expect(concat!("error writing expression `", stringify!($rust), "`"));
+                column.add($rust).expect(concat!("error writing expression `", stringify!($rust), "`"));
             )*
 
             let insert_block = insert_block.build().expect("error from insert_block.build()");

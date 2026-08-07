@@ -12,7 +12,7 @@ pub trait Encode {
 
     fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError>;
 
-    fn compatible(&self, column_type: &DataTypeNode) -> bool {
+    fn compatible(column_type: &DataTypeNode) -> bool {
         let produced_type = Self::produces();
 
         default_compatible(&produced_type, column_type)
@@ -20,27 +20,48 @@ pub trait Encode {
 }
 
 fn default_compatible(produced_type: &DataTypeNode, column_type: &DataTypeNode) -> bool {
-    if produced_type == column_type {
+    recursive_compatible(column_type, |column_type| {
+        if produced_type == column_type {
+            return true;
+        }
+
+        match (produced_type, column_type) {
+            // SimpleAggregateFunction has the same wire image as the underlying type
+            // and the server should implicitly expand LowCardinality
+            (
+                DataTypeNode::LowCardinality(left) | DataTypeNode::SimpleAggregateFunction(_, left),
+                right,
+            ) => default_compatible(left, right),
+            // Not-null value can be written to nullable column but not vice versa
+            (DataTypeNode::Nullable(left), DataTypeNode::Nullable(right)) => {
+                default_compatible(left, right)
+            }
+            (
+                left,
+                DataTypeNode::LowCardinality(right)
+                | DataTypeNode::SimpleAggregateFunction(_, right)
+                | DataTypeNode::Nullable(right),
+            ) => default_compatible(left, right),
+            _ => false,
+        }
+    })
+}
+
+fn recursive_compatible<F: Fn(&DataTypeNode) -> bool>(
+    column_type: &DataTypeNode,
+    compatible: F,
+) -> bool {
+    if compatible(column_type) {
         return true;
     }
 
-    match (produced_type, column_type) {
+    match column_type {
         // SimpleAggregateFunction has the same wire image as the underlying type
         // and the server should implicitly expand LowCardinality
-        (
-            DataTypeNode::LowCardinality(left) | DataTypeNode::SimpleAggregateFunction(_, left),
-            right,
-        ) => default_compatible(left, right),
         // Not-null value can be written to nullable column but not vice versa
-        (DataTypeNode::Nullable(left), DataTypeNode::Nullable(right)) => {
-            default_compatible(left, right)
-        }
-        (
-            left,
-            DataTypeNode::LowCardinality(right)
-            | DataTypeNode::SimpleAggregateFunction(_, right)
-            | DataTypeNode::Nullable(right),
-        ) => default_compatible(left, right),
+        DataTypeNode::LowCardinality(inner)
+        | DataTypeNode::SimpleAggregateFunction(_, inner)
+        | DataTypeNode::Nullable(inner) => recursive_compatible(inner, compatible),
         _ => false,
     }
 }
@@ -117,17 +138,29 @@ impl<'a> ValueWriter<'a> {
         Ok(())
     }
 
-    pub fn write_array<T>(&mut self) -> Result<ArrayWriter<'_, T>, ValueWriteError> {
+    pub fn write_array<T>(&mut self) -> Result<ArrayWriter<'_, T>, ArrayWriteError>
+    where
+        T: Encode,
+    {
+        let DataTypeNode::Array(elem_type) = &self.data_type else {
+            return Err(ArrayWriteError::NotAnArray {
+                data_type: self.data_type.clone(),
+            });
+        };
+
+        if !T::compatible(elem_type) {
+            return Err(ArrayWriteError::IncompatibleType {
+                expected_type: (**elem_type).clone(),
+            });
+        }
+
         let LayoutBuilderKind::Array {
             end_indices,
             elem_layout,
         } = &mut self.layout.kind
         else {
-            return Err(ValueWriteError::IncorrectMethod);
-        };
-
-        let DataTypeNode::Array(elem_type) = &self.data_type else {
-            return Err(ValueWriteError::IncorrectMethod);
+            // Technically a bug if we reach this point
+            unreachable!("BUG: expected LayoutBuilderKind::Array")
         };
 
         Ok(ArrayWriter {
@@ -203,13 +236,11 @@ pub struct ArrayWriter<'a, T> {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ArrayWriteError {
-    #[error(
-        "value type is not compatible with expected type {expected_type} at array index {index}"
-    )]
-    IncompatibleType {
-        index: usize,
-        expected_type: DataTypeNode,
-    },
+    #[error("attempted to write an array to a non-array column: {data_type}")]
+    NotAnArray { data_type: DataTypeNode },
+
+    #[error("value type is not compatible with expected type {expected_type}")]
+    IncompatibleType { expected_type: DataTypeNode },
 
     #[error("error writing value at array index {index}")]
     ValueWriteError {
@@ -224,13 +255,6 @@ impl<T> ArrayWriter<'_, T> {
     where
         T: Encode,
     {
-        if !value.compatible(self.elem_type) {
-            return Err(ArrayWriteError::IncompatibleType {
-                index: self.written_len(),
-                expected_type: self.elem_type.clone(),
-            });
-        }
-
         value
             .encode(&mut ValueWriter {
                 data_type: self.elem_type,
@@ -321,7 +345,7 @@ impl TupleWriter<'_> {
             .get(self.index)
             .ok_or(TupleWriteError::TupleFull)?;
 
-        if !value.compatible(data_type) {
+        if !T::compatible(data_type) {
             return Err(TupleWriteError::IncompatibleType {
                 index: self.index,
                 expected_type: data_type.clone(),
@@ -395,20 +419,6 @@ where
     V: Encode,
 {
     pub fn write(&mut self, key: K, value: V) -> Result<&mut Self, MapWriteError> {
-        if !key.compatible(self.key_ty) {
-            return Err(MapWriteError::IncompatibleType {
-                index: self.key_layout.num_values(),
-                expected_type: self.key_ty.clone(),
-            });
-        }
-
-        if !value.compatible(self.val_ty) {
-            return Err(MapWriteError::IncompatibleType {
-                index: self.val_layout.num_values(),
-                expected_type: self.val_ty.clone(),
-            });
-        }
-
         key.encode(&mut ValueWriter {
             layout: self.key_layout,
             data_type: self.key_ty,
@@ -488,18 +498,9 @@ where
         }
     }
 
-    fn compatible(&self, column_type: &DataTypeNode) -> bool {
-        let non_nullable = if let DataTypeNode::Nullable(inner) = column_type {
-            inner
-        } else {
-            column_type
-        };
-
-        if let Some(inner) = self {
-            inner.compatible(non_nullable)
-        } else {
-            default_compatible(&T::produces(), non_nullable)
-        }
+    fn compatible(column_type: &DataTypeNode) -> bool {
+        // Make sure we forward to `T::compatible()`
+        recursive_compatible(column_type, T::compatible)
     }
 }
 
@@ -515,8 +516,8 @@ where
         (**self).encode(writer)
     }
 
-    fn compatible(&self, column_type: &DataTypeNode) -> bool {
-        (**self).compatible(column_type)
+    fn compatible(column_type: &DataTypeNode) -> bool {
+        T::compatible(column_type)
     }
 }
 
@@ -571,7 +572,16 @@ impl Encode for str {
     }
 
     fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
-        if let DataTypeNode::FixedString(_) = writer.data_type {
+        if let DataTypeNode::FixedString(fixed_len) = writer.data_type {
+            if self.len() != *fixed_len {
+                // Give a more informative error
+                return Err(format!(
+                    "attempting to write a string of length {} to FixedString({fixed_len})",
+                    self.len()
+                )
+                .into());
+            }
+
             writer.write_fixed(self.as_bytes())?;
         } else {
             writer.write_string(self.as_bytes())?;
@@ -580,23 +590,27 @@ impl Encode for str {
         Ok(())
     }
 
-    fn compatible(&self, column_type: &DataTypeNode) -> bool {
-        default_compatible(&DataTypeNode::String, column_type)
-            || default_compatible(&DataTypeNode::FixedString(self.len()), column_type)
+    fn compatible(column_type: &DataTypeNode) -> bool {
+        recursive_compatible(column_type, |column_type| {
+            matches!(
+                column_type,
+                DataTypeNode::String | DataTypeNode::FixedString(_)
+            )
+        })
     }
 }
 
 impl Encode for String {
     fn produces() -> DataTypeNode {
-        <str>::produces()
+        str::produces()
     }
 
     fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
         self.as_str().encode(writer)
     }
 
-    fn compatible(&self, column_type: &DataTypeNode) -> bool {
-        self.as_str().compatible(column_type)
+    fn compatible(column_type: &DataTypeNode) -> bool {
+        str::compatible(column_type)
     }
 }
 
@@ -619,6 +633,13 @@ where
 
         Ok(())
     }
+
+    fn compatible(column_type: &DataTypeNode) -> bool {
+        recursive_compatible(column_type, |column_type| match column_type {
+            DataTypeNode::Array(elem_type) => T::compatible(elem_type),
+            _ => false,
+        })
+    }
 }
 
 impl<T> Encode for Vec<T>
@@ -631,6 +652,10 @@ where
 
     fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
         self.as_slice().encode(writer)
+    }
+
+    fn compatible(column_type: &DataTypeNode) -> bool {
+        <[T]>::compatible(column_type)
     }
 }
 
@@ -659,24 +684,19 @@ macro_rules! tuple_impl {
                 Ok(())
             }
 
-            fn compatible(&self, column_type: &DataTypeNode) -> bool {
-                let DataTypeNode::Tuple(types) = column_type else {
-                    return false;
-                };
+            fn compatible(column_type: &DataTypeNode) -> bool {
+                recursive_compatible(column_type, |column_type| {
+                    let DataTypeNode::Tuple(types) = column_type else {
+                        return false;
+                    };
 
-                #[allow(unused_mut)]
-                let mut i = 0;
+                    let [$var1, $($var),*] = &types[..] else {
+                        return false;
+                    };
 
-                let ($var1, $($var),*) = self;
-
-                if !$var1.compatible(&types[i]) { return false; }
-
-                $(
-                    i += 1;
-                    if !$var.compatible(&types[i]) { return false; }
-                )*
-
-                true
+                    $ty1::compatible($var1)
+                        $(&& $ty::compatible($var))*
+                })
             }
         }
 
@@ -733,12 +753,14 @@ where
         Ok(())
     }
 
-    fn compatible(&self, column_type: &DataTypeNode) -> bool {
-        let DataTypeNode::Map([key_ty, val_ty]) = column_type else {
-            return false;
-        };
+    fn compatible(column_type: &DataTypeNode) -> bool {
+        recursive_compatible(column_type, |column_type| {
+            let DataTypeNode::Map([key_ty, val_ty]) = column_type else {
+                return false;
+            };
 
-        default_compatible(&K::produces(), key_ty) && default_compatible(&V::produces(), val_ty)
+            K::compatible(key_ty) && V::compatible(val_ty)
+        })
     }
 }
 
@@ -763,12 +785,14 @@ where
         Ok(())
     }
 
-    fn compatible(&self, column_type: &DataTypeNode) -> bool {
-        let DataTypeNode::Map([key_ty, val_ty]) = column_type else {
-            return false;
-        };
+    fn compatible(column_type: &DataTypeNode) -> bool {
+        recursive_compatible(column_type, |column_type| {
+            let DataTypeNode::Map([key_ty, val_ty]) = column_type else {
+                return false;
+            };
 
-        default_compatible(&K::produces(), key_ty) && default_compatible(&V::produces(), val_ty)
+            K::compatible(key_ty) && V::compatible(val_ty)
+        })
     }
 }
 

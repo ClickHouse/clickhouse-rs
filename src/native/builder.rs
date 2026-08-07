@@ -1,18 +1,20 @@
 use crate::error::BoxedError;
 use crate::native::encode::{Encode, ValueWriter};
 use crate::native::string::MaybeUtf8;
+use crate::native::utils::{DebugFixedData, DebugNullMap, DebugVariableData};
 use crate::native::{Block, Column, Layout, LayoutKind, type_fixed_width};
 use bytes::{BufMut, BytesMut};
 use clickhouse_types::DataTypeNode;
 use hashbrown::{HashMap, hash_map};
 use std::collections::VecDeque;
+use std::fmt::{Debug, Formatter};
+use std::marker::PhantomData;
 use std::mem;
-use std::ops::{Index, IndexMut};
 
 #[derive(Default)]
 pub struct BlockBuilder {
     column_names: HashMap<MaybeUtf8, usize>,
-    columns: Vec<ColumnBuilder>,
+    columns: Vec<ColumnBuilderRaw>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -58,8 +60,12 @@ impl BlockBuilder {
     pub fn upsert_column<T: Encode>(
         &mut self,
         name: impl Into<String>,
-    ) -> Result<&mut ColumnBuilder, Box<BlockBuilderError>> {
+    ) -> Result<ColumnBuilder<'_, T>, Box<BlockBuilderError>> {
         self.upsert_column_with(name, T::produces())
+            .map(|inner| ColumnBuilder {
+                inner,
+                _marker: PhantomData,
+            })
     }
 
     /// Add an empty column to the block, or get a reference to an existing one.
@@ -74,7 +80,7 @@ impl BlockBuilder {
         &mut self,
         name: impl Into<String>,
         data_type: DataTypeNode,
-    ) -> Result<&mut ColumnBuilder, Box<BlockBuilderError>> {
+    ) -> Result<&mut ColumnBuilderRaw, Box<BlockBuilderError>> {
         let data_type = erase_wrappers(data_type);
 
         match self.column_names.entry(MaybeUtf8::from_string(name)) {
@@ -93,7 +99,7 @@ impl BlockBuilder {
                 Ok(col)
             }
             hash_map::Entry::Vacant(vacant) => {
-                let col = ColumnBuilder {
+                let col = ColumnBuilderRaw {
                     layout: LayoutBuilder::new(vacant.key(), &data_type)?,
                     data_type,
                     name: vacant.key().clone(),
@@ -107,19 +113,19 @@ impl BlockBuilder {
         }
     }
 
-    pub fn columns(&self) -> &[ColumnBuilder] {
+    pub fn columns(&self) -> &[ColumnBuilderRaw] {
         &self.columns
     }
 
-    pub fn columns_mut(&mut self) -> &mut [ColumnBuilder] {
+    pub fn columns_mut(&mut self) -> &mut [ColumnBuilderRaw] {
         &mut self.columns
     }
 
-    pub fn column(&self, name: &str) -> Option<&ColumnBuilder> {
+    pub fn column(&self, name: &str) -> Option<&ColumnBuilderRaw> {
         Some(&self.columns[*self.column_names.get(name)?])
     }
 
-    pub fn column_mut(&mut self, name: &str) -> Option<&mut ColumnBuilder> {
+    pub fn column_mut(&mut self, name: &str) -> Option<&mut ColumnBuilderRaw> {
         Some(&mut self.columns[*self.column_names.get(name)?])
     }
 
@@ -186,74 +192,59 @@ impl BlockBuilder {
     }
 }
 
-impl Index<&str> for BlockBuilder {
-    type Output = ColumnBuilder;
+pub struct ColumnBuilder<'a, T> {
+    inner: &'a mut ColumnBuilderRaw,
+    _marker: PhantomData<fn(T)>,
+}
 
-    fn index(&self, name: &str) -> &Self::Output {
-        self.column(name)
-            .unwrap_or_else(|| panic!("column {name:?} does not exist"))
+impl<T> ColumnBuilder<'_, T>
+where
+    T: Encode,
+{
+    pub fn num_values(&self) -> usize {
+        self.inner.layout.num_values()
+    }
+
+    pub fn add(&mut self, value: T) -> Result<&mut Self, BoxedError> {
+        // Compatibility checked when this was created
+        self.inner.add_unchecked(value)?;
+        Ok(self)
+    }
+
+    pub fn add_all<I>(&mut self, values: I) -> Result<&mut Self, BoxedError>
+    where
+        I: IntoIterator,
+        I::Item: Encode,
+    {
+        self.inner.add_all_unchecked(values)?;
+        Ok(self)
     }
 }
 
-impl IndexMut<&str> for BlockBuilder {
-    fn index_mut(&mut self, name: &str) -> &mut Self::Output {
-        self.column_mut(name)
-            .unwrap_or_else(|| panic!("column {name:?} does not exist"))
-    }
-}
-
-impl Index<usize> for BlockBuilder {
-    type Output = ColumnBuilder;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        self.columns
-            .get(index)
-            .unwrap_or_else(|| panic!("column index {index} out of bounds: {}", self.columns.len()))
-    }
-}
-
-impl IndexMut<usize> for BlockBuilder {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        let len = self.columns.len();
-        self.columns
-            .get_mut(index)
-            .unwrap_or_else(|| panic!("column index {index} out of bounds: {len}"))
-    }
-}
-
-pub struct ColumnBuilder {
+pub struct ColumnBuilderRaw {
     name: MaybeUtf8,
     data_type: DataTypeNode,
     layout: LayoutBuilder,
 }
 
-impl ColumnBuilder {
+impl ColumnBuilderRaw {
     pub fn num_values(&self) -> usize {
         self.layout.num_values()
     }
 
-    pub fn add<T>(&mut self, value: T) -> Result<&mut Self, ColumnBuilderError>
+    fn add_unchecked<T>(&mut self, value: T) -> Result<&mut Self, BoxedError>
     where
         T: Encode,
     {
-        if !value.compatible(&self.data_type) {
-            return Err(ColumnBuilderError::IncompatibleType {
-                name: self.name.to_string(),
-                data_type: self.data_type.clone(),
-            });
-        }
-
-        value
-            .encode(&mut ValueWriter {
-                data_type: &self.data_type,
-                layout: &mut self.layout,
-            })
-            .map_err(ColumnBuilderError::Encode)?;
+        value.encode(&mut ValueWriter {
+            data_type: &self.data_type,
+            layout: &mut self.layout,
+        })?;
 
         Ok(self)
     }
 
-    pub fn add_all<I>(&mut self, values: I) -> Result<&mut Self, ColumnBuilderError>
+    fn add_all_unchecked<I>(&mut self, values: I) -> Result<&mut Self, BoxedError>
     where
         I: IntoIterator,
         I::Item: Encode,
@@ -262,14 +253,45 @@ impl ColumnBuilder {
 
         while let Some(value) = values.next() {
             // Catches an infinite-length iterator that returns `usize::MAX` for its size hint
-            // This is comparable to the default behavor of `impl Extend<T> for Vec<T>`
+            // This is comparable to the default behavior of `impl Extend<T> for Vec<T>`
             let (lower_bound, _) = values.size_hint();
             self.layout.reserve(lower_bound.saturating_add(1));
 
-            self.add(value)?;
+            self.add_unchecked(value)?;
         }
 
         Ok(self)
+    }
+
+    pub fn add<T>(&mut self, value: T) -> Result<&mut Self, ColumnBuilderError>
+    where
+        T: Encode,
+    {
+        if !T::compatible(&self.data_type) {
+            return Err(ColumnBuilderError::IncompatibleType {
+                name: self.name.to_string(),
+                data_type: self.data_type.clone(),
+            });
+        }
+
+        self.add_unchecked(value)
+            .map_err(ColumnBuilderError::Encode)
+    }
+
+    pub fn add_all<I>(&mut self, values: I) -> Result<&mut Self, ColumnBuilderError>
+    where
+        I: IntoIterator,
+        I::Item: Encode,
+    {
+        if !<I::Item>::compatible(&self.data_type) {
+            return Err(ColumnBuilderError::IncompatibleType {
+                name: self.name.to_string(),
+                data_type: self.data_type.clone(),
+            });
+        }
+
+        self.add_all_unchecked(values)
+            .map_err(ColumnBuilderError::Encode)
     }
 }
 
@@ -542,6 +564,63 @@ impl LayoutBuilder {
                     end_indices: end_indices.into(),
                 },
             },
+        }
+    }
+}
+impl Debug for LayoutBuilder {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayoutBuilder")
+            .field("kind", &self.kind)
+            .field("nulls", &self.nulls.as_deref().map(DebugNullMap))
+            .finish_non_exhaustive()
+    }
+}
+
+impl Debug for LayoutBuilderKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        use LayoutBuilderKind::*;
+
+        match self {
+            Fixed { type_width, data } => f
+                .debug_struct("Fixed")
+                .field(
+                    "data",
+                    &DebugFixedData {
+                        type_width: *type_width,
+                        data,
+                    },
+                )
+                .finish(),
+            Variable { end_offsets, data } => f
+                .debug_struct("Variable")
+                .field("data", &DebugVariableData { end_offsets, data })
+                .finish(),
+            Array {
+                elem_layout,
+                end_indices,
+            } => f
+                .debug_struct("Array")
+                .field("elem_layout", elem_layout)
+                .field("end_indices", end_indices)
+                .finish(),
+            Tuple { layouts } => {
+                let mut tuple = f.debug_tuple("Tuple");
+
+                for layout in layouts {
+                    tuple.field(layout);
+                }
+
+                tuple.finish()
+            }
+            Map {
+                key_val_layouts,
+                end_indices,
+            } => f
+                .debug_struct("Map")
+                .field("keys", &key_val_layouts[0])
+                .field("values", &key_val_layouts[1])
+                .field("end_indices", end_indices)
+                .finish(),
         }
     }
 }
