@@ -253,6 +253,7 @@ mod cloud_jwt;
 mod compression;
 mod cursor_error;
 mod cursor_stats;
+mod database;
 mod fetch_bytes;
 mod fetch_native;
 mod https_errors;

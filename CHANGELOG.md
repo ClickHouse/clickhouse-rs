@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+* `Client::with_url()` now recognizes the `database` query parameter of the URL. Added `Client::database()` to read back the configured default database. ([#448])
+
+[#448]: https://github.com/ClickHouse/clickhouse-rs/issues/448
+
 ## [0.15.1] - 2026-06-01
 
 ### Added
