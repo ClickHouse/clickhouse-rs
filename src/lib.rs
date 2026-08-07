@@ -167,6 +167,11 @@ impl Client {
 
     /// Specifies ClickHouse's url. Should point to HTTP endpoint.
     ///
+    /// A default database may be set with the `database` query parameter,
+    /// e.g. `http://localhost:8123?database=test`. This is equivalent to calling
+    /// [`Client::with_database`]: whichever of the two is configured last wins,
+    /// and a URL without the parameter leaves the configured database unchanged.
+    ///
     /// Automatically [clears the metadata cache][Self::clear_cached_metadata]
     /// for this instance only.
     ///
@@ -184,6 +189,10 @@ impl Client {
         if let Some(url) = test::Mock::mocked_url_to_real(&self.url) {
             self.url = url;
             self.mocked = true;
+        }
+
+        if let Some(database) = extract_url_database(&self.url) {
+            self.database = Some(database);
         }
 
         // Assume our cached metadata is invalid.
@@ -209,6 +218,12 @@ impl Client {
         self.insert_metadata_cache = Default::default();
 
         self
+    }
+
+    /// Returns the default database, if set with [`Client::with_database`]
+    /// or the `database` query parameter of the URL (see [`Client::with_url`]).
+    pub fn database(&self) -> Option<&str> {
+        self.database.as_deref()
     }
 
     /// Specifies a user.
@@ -696,6 +711,17 @@ impl Client {
     }
 }
 
+/// Extracts the last non-empty `database` query parameter from the URL, if any.
+/// Invalid URLs are ignored here; the error surfaces at request time.
+fn extract_url_database(url: &str) -> Option<String> {
+    let url = url::Url::parse(url).ok()?;
+
+    url.query_pairs()
+        .filter(|(key, value)| key == settings::DATABASE && !value.is_empty())
+        .map(|(_, value)| value.into_owned())
+        .last()
+}
+
 mod formats {
     pub(crate) const ROW_BINARY: &str = "RowBinary";
     pub(crate) const ROW_BINARY_WITH_NAMES_AND_TYPES: &str = "RowBinaryWithNamesAndTypes";
@@ -929,6 +955,50 @@ mod client_tests {
         let client_clone = client.clone();
         let client = client.with_setting("async_insert", "1");
         assert_ne!(client.settings, client_clone.settings,);
+    }
+
+    #[test]
+    fn it_recognizes_url_database_param() {
+        fn database_of(url: &str) -> Option<String> {
+            Client::default().with_url(url).database().map(Into::into)
+        }
+
+        assert_eq!(Client::default().database(), None);
+        assert_eq!(database_of("http://localhost:8123"), None);
+        assert_eq!(
+            database_of("http://localhost:8123?database=foo"),
+            Some("foo".into())
+        );
+        // Percent-encoded values are decoded
+        assert_eq!(
+            database_of("http://localhost:8123?database=weird%20db"),
+            Some("weird db".into())
+        );
+        // Other parameters don't interfere; the last non-empty occurrence wins
+        assert_eq!(
+            database_of("http://localhost:8123?compress=1&database=foo&database=bar"),
+            Some("bar".into())
+        );
+        // Empty values and invalid URLs are ignored
+        assert_eq!(database_of("http://localhost:8123?database="), None);
+        assert_eq!(database_of("not a url"), None);
+
+        // The last configured database wins, whether from the URL or `with_database()`
+        let client = Client::default()
+            .with_url("http://localhost:8123?database=from_url")
+            .with_database("explicit");
+        assert_eq!(client.database(), Some("explicit"));
+
+        let client = Client::default()
+            .with_database("explicit")
+            .with_url("http://localhost:8123?database=from_url");
+        assert_eq!(client.database(), Some("from_url"));
+
+        // A URL without the parameter leaves the configured database unchanged
+        let client = Client::default()
+            .with_database("explicit")
+            .with_url("http://localhost:8123");
+        assert_eq!(client.database(), Some("explicit"));
     }
 
     #[test]
