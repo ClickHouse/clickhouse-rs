@@ -143,7 +143,7 @@ async fn server_side_param() {
     assert_eq!(result, bytes);
 
     let result = client
-        .query("SELECT getSetting('max_block_size') WHERE {value: UInt8} = 1")
+        .query("SELECT toUInt64(getSetting('max_block_size')) WHERE {value: UInt8} = 1")
         .with_setting("max_block_size", "123")
         .param("value", 1)
         .fetch_one::<u64>()
