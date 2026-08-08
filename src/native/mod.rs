@@ -18,6 +18,7 @@ pub mod decode;
 pub mod encode;
 pub(crate) mod reader;
 pub(crate) mod string;
+mod utils;
 mod varuint;
 pub(crate) mod writer;
 
