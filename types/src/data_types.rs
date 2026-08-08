@@ -711,16 +711,30 @@ fn parse_map(input: &str) -> Result<DataTypeNode, TypesError> {
 }
 
 fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
-    let columns = remove_json_header(input)?.split(',').collect::<Vec<_>>();
+    let hints = remove_json_header(input)?;
+
+    let mut columns = Vec::new();
+    let mut last_element_index = 0;
+    for i in unquoted_positions(hints, b',') {
+        columns.push(&hints[last_element_index..i]);
+        last_element_index = i + 1;
+    }
+    columns.push(&hints[last_element_index..]);
 
     let inner_types = columns
         .into_iter()
         .map(|column| column.trim())
-        .filter(|column| !column.contains('=') && !column.starts_with("SKIP"))
+        .filter(|column| {
+            unquoted_positions(column, b'=').next().is_none() && !column.starts_with("SKIP")
+        })
         .map(|column| {
-            let map = column.split(' ').collect::<Vec<_>>();
-            let key_type = map[0].to_string();
-            let value_type = DataTypeNode::new(map[1])?;
+            let separator_index = unquoted_positions(column, b' ').next().ok_or_else(|| {
+                TypesError::TypeParsingError(format!(
+                    "Invalid JSON type hint, expected `path Type`, got {column} in {input}"
+                ))
+            })?;
+            let key_type = column[..separator_index].to_string();
+            let value_type = DataTypeNode::new(column[separator_index + 1..].trim_start())?;
 
             Ok((key_type, Box::new(value_type)))
         })
@@ -731,6 +745,32 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
     }
 
     Ok(DataTypeNode::JsonWithHint(inner_types))
+}
+
+/// Yields the indices of every `separator` byte in `input` that is not inside a
+/// back-quoted identifier. A JSON path name is back-quoted by the server when it
+/// contains a character that requires quoting, so both the separator between the
+/// hints and the one between a path and its type have to skip such spans:
+/// ```text
+///  let input = "`a,b` Int64, `c d` String"; // two hints, not four
+/// ```
+/// A back-quote escaped with a backslash does not end the identifier.
+fn unquoted_positions(input: &str, separator: u8) -> impl Iterator<Item = usize> + '_ {
+    let mut quote_open = false;
+    let mut char_escaped = false;
+
+    input.bytes().enumerate().filter_map(move |(i, byte)| {
+        if char_escaped {
+            char_escaped = false;
+        } else if byte == b'\\' {
+            char_escaped = true;
+        } else if byte == b'`' {
+            quote_open = !quote_open;
+        } else if byte == separator && !quote_open {
+            return Some(i);
+        }
+        None
+    })
 }
 
 fn remove_json_header(input: &str) -> Result<&str, TypesError> {
@@ -1476,6 +1516,51 @@ mod tests {
         assert!(DataTypeNode::new("Map(Int32, V)").is_err());
         assert!(DataTypeNode::new("Map(K, Int32)").is_err());
         assert!(DataTypeNode::new("Map(String, Int32").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_json_with_quoted_paths() {
+        // ClickHouse back-quotes a JSON path when its name contains a character
+        // that requires quoting, such as a space or a comma
+        assert_eq!(
+            DataTypeNode::new("JSON(`a b` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![("`a b`".to_string(), Box::new(DataTypeNode::Int64))])
+        );
+        assert_eq!(
+            DataTypeNode::new("JSON(`a,b` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![("`a,b`".to_string(), Box::new(DataTypeNode::Int64))])
+        );
+        // an escaped back-quote does not end the quoted path
+        assert_eq!(
+            DataTypeNode::new("JSON(`a\\`,b` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![(
+                "`a\\`,b`".to_string(),
+                Box::new(DataTypeNode::Int64)
+            )])
+        );
+        assert_eq!(
+            DataTypeNode::new("JSON(`a,b` Int64, `c d` String, e UInt8)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                ("`a,b`".to_string(), Box::new(DataTypeNode::Int64)),
+                ("`c d`".to_string(), Box::new(DataTypeNode::String)),
+                ("e".to_string(), Box::new(DataTypeNode::UInt8)),
+            ])
+        );
+        // settings are still skipped, and a quoted path is not mistaken for one
+        assert_eq!(
+            DataTypeNode::new("JSON(max_dynamic_types=8, SKIP a, `b=c` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![("`b=c`".to_string(), Box::new(DataTypeNode::Int64))])
+        );
+        // a hint without a type is an error instead of a panic
+        assert!(DataTypeNode::new("JSON(`a,b`)").is_err());
+        // the parsed type is sent back to the server as is, so quoting must survive
+        for input in [
+            "JSON(`a b` Int64)",
+            "JSON(`a,b` Int64)",
+            "JSON(`a,b` Int64, `c d` String, e UInt8)",
+        ] {
+            assert_eq!(DataTypeNode::new(input).unwrap().to_string(), input);
+        }
     }
 
     #[test]
