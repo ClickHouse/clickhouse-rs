@@ -507,14 +507,20 @@ impl LayoutBuilder {
     fn validate(&self, data_type: &DataTypeNode) -> Result<(), String> {
         self.validate_nulls(data_type)?;
 
+        let non_nullable = if let DataTypeNode::Nullable(inner) = data_type {
+            inner
+        } else {
+            data_type
+        };
+
         match &self.kind {
             LayoutBuilderKind::Fixed { type_width, data } => {
-                let expected_width = type_fixed_width(data_type)
-                    .ok_or_else(|| format!("data type {data_type} is not fixed-width but we encoded {} bytes of {type_width}-byte values", data.len()))?;
+                let expected_width = type_fixed_width(non_nullable)
+                    .ok_or_else(|| format!("data type {non_nullable} is not fixed-width but we encoded {} bytes of {type_width}-byte values", data.len()))?;
 
                 if expected_width != *type_width {
                     return Err(format!(
-                        "data type {data_type} has a fixed width of {expected_width} but we encoded {} bytes of {type_width}-byte values",
+                        "data type {non_nullable} has a fixed width of {expected_width} but we encoded {} bytes of {type_width}-byte values",
                         data.len()
                     ));
                 }
@@ -544,8 +550,8 @@ impl LayoutBuilder {
                 end_indices,
                 elem_layout,
             } => {
-                let DataTypeNode::Array(elem_type) = data_type else {
-                    return Err(format!("expected type Array(_), got {data_type}"));
+                let DataTypeNode::Array(elem_type) = non_nullable else {
+                    return Err(format!("expected type Array(_), got {non_nullable}"));
                 };
 
                 let num_elements = elem_layout.num_values();
@@ -570,8 +576,8 @@ impl LayoutBuilder {
                 elem_layout.validate(elem_type)
             }
             LayoutBuilderKind::Tuple { layouts } => {
-                let DataTypeNode::Tuple(types) = data_type else {
-                    return Err(format!("expected type Tuple(...), got {data_type}"));
+                let DataTypeNode::Tuple(types) = non_nullable else {
+                    return Err(format!("expected type Tuple(...), got {non_nullable}"));
                 };
 
                 let expected_len = layouts.first().map_or(0, LayoutBuilder::num_values);
@@ -595,8 +601,8 @@ impl LayoutBuilder {
                 key_val_layouts,
                 end_indices,
             } => {
-                let DataTypeNode::Map([key_ty, val_ty]) = data_type else {
-                    return Err(format!("expected type Map(...), got {data_type}"));
+                let DataTypeNode::Map([key_ty, val_ty]) = non_nullable else {
+                    return Err(format!("expected type Map(...), got {non_nullable}"));
                 };
 
                 let keys_len = key_val_layouts[0].num_values();
