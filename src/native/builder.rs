@@ -57,6 +57,14 @@ impl BlockBuilder {
         Self::default()
     }
 
+    /// Add an empty column to the block, or get a reference to an existing one.
+    ///
+    /// The given data type will have any `LowCardinality(_)` or `SimpleAggregateFunction(...)`
+    /// wrappers erased for ease of implementation.
+    ///
+    /// # Errors
+    /// * If a column with the same name already exists, but with a different type.
+    /// * If the given type is not currently supported by the implementation.
     pub fn upsert_column<T: Encode>(
         &mut self,
         name: impl Into<String>,
@@ -68,15 +76,7 @@ impl BlockBuilder {
             })
     }
 
-    /// Add an empty column to the block, or get a reference to an existing one.
-    ///
-    /// The given data type will have any `LowCardinality(_)` or `SimpleAggregateFunction(...)`
-    /// wrappers erased for ease of implementation.
-    ///
-    /// # Errors
-    /// * If a column with the same name already exists, but with a different type.
-    /// * If the given type is not currently supported by the implementation.
-    pub fn upsert_column_with(
+    fn upsert_column_with(
         &mut self,
         name: impl Into<String>,
         data_type: DataTypeNode,
@@ -111,22 +111,6 @@ impl BlockBuilder {
                 Ok(self.columns.last_mut().unwrap())
             }
         }
-    }
-
-    pub fn columns(&self) -> &[ColumnBuilderRaw] {
-        &self.columns
-    }
-
-    pub fn columns_mut(&mut self) -> &mut [ColumnBuilderRaw] {
-        &mut self.columns
-    }
-
-    pub fn column(&self, name: &str) -> Option<&ColumnBuilderRaw> {
-        Some(&self.columns[*self.column_names.get(name)?])
-    }
-
-    pub fn column_mut(&mut self, name: &str) -> Option<&mut ColumnBuilderRaw> {
-        Some(&mut self.columns[*self.column_names.get(name)?])
     }
 
     pub fn build(&mut self) -> Result<Block, Box<BlockBuilderError>> {
@@ -192,6 +176,15 @@ impl BlockBuilder {
     }
 }
 
+impl Debug for BlockBuilder {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockBuilder")
+            // Ignore `column_names`, implementation detail
+            .field("columns", &self.columns)
+            .finish()
+    }
+}
+
 pub struct ColumnBuilder<'a, T> {
     inner: &'a mut ColumnBuilderRaw,
     _marker: PhantomData<fn(T)>,
@@ -213,22 +206,28 @@ where
 
     pub fn add_all<I>(&mut self, values: I) -> Result<&mut Self, BoxedError>
     where
-        I: IntoIterator,
-        I::Item: Encode,
+        I: IntoIterator<Item = T>,
     {
         self.inner.add_all_unchecked(values)?;
         Ok(self)
     }
 }
 
-pub struct ColumnBuilderRaw {
+impl<T> Debug for ColumnBuilder<'_, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+
+#[derive(Debug)] // Derived impl works for us here
+struct ColumnBuilderRaw {
     name: MaybeUtf8,
     data_type: DataTypeNode,
     layout: LayoutBuilder,
 }
 
 impl ColumnBuilderRaw {
-    pub fn num_values(&self) -> usize {
+    fn num_values(&self) -> usize {
         self.layout.num_values()
     }
 
@@ -261,37 +260,6 @@ impl ColumnBuilderRaw {
         }
 
         Ok(self)
-    }
-
-    pub fn add<T>(&mut self, value: T) -> Result<&mut Self, ColumnBuilderError>
-    where
-        T: Encode,
-    {
-        if !T::compatible(&self.data_type) {
-            return Err(ColumnBuilderError::IncompatibleType {
-                name: self.name.to_string(),
-                data_type: self.data_type.clone(),
-            });
-        }
-
-        self.add_unchecked(value)
-            .map_err(ColumnBuilderError::Encode)
-    }
-
-    pub fn add_all<I>(&mut self, values: I) -> Result<&mut Self, ColumnBuilderError>
-    where
-        I: IntoIterator,
-        I::Item: Encode,
-    {
-        if !<I::Item>::compatible(&self.data_type) {
-            return Err(ColumnBuilderError::IncompatibleType {
-                name: self.name.to_string(),
-                data_type: self.data_type.clone(),
-            });
-        }
-
-        self.add_all_unchecked(values)
-            .map_err(ColumnBuilderError::Encode)
     }
 }
 
@@ -707,7 +675,7 @@ impl Debug for LayoutBuilder {
         f.debug_struct("LayoutBuilder")
             .field("kind", &self.kind)
             .field("nulls", &self.nulls.as_deref().map(DebugNullMap))
-            .finish_non_exhaustive()
+            .finish()
     }
 }
 
