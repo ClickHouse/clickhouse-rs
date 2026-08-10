@@ -72,7 +72,7 @@ impl Debug for DebugVariableData<'_> {
     }
 }
 
-pub fn type_fixed_width(data_type: &DataTypeNode) -> Option<usize> {
+pub(super) fn type_fixed_width(data_type: &DataTypeNode) -> Option<usize> {
     match data_type {
         DataTypeNode::Bool => Some(1),
         DataTypeNode::UInt8 => Some(1),

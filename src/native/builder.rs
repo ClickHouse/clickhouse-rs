@@ -558,6 +558,15 @@ impl LayoutBuilder {
                     }
                 }
 
+                let last_index = end_indices.last().copied().unwrap_or(0);
+
+                if last_index != num_elements {
+                    // Most likely cause of this error is a leaked `ArrayWriter`
+                    return Err(format!(
+                        "last array index ({last_index}) out of sync with total elements: {num_elements}"
+                    ));
+                }
+
                 elem_layout.validate(elem_type)
             }
             LayoutBuilderKind::Tuple { layouts } => {
@@ -573,8 +582,9 @@ impl LayoutBuilder {
                     let actual_len = layout.num_values();
 
                     if layout.num_values() != expected_len {
+                        // Most likely cause of this error is a leaked `TupleWriter`
                         return Err(format!(
-                            "tuple index {i} (type {ty}) out of sync: {actual_len} vs {expected_len}"
+                            "tuple index {i} (type {ty}) total elements out of sync: {actual_len} vs {expected_len}"
                         ));
                     }
                 }
@@ -604,6 +614,15 @@ impl LayoutBuilder {
                             "map {i} end index ({end_index}) out of bounds: {keys_len}"
                         ));
                     }
+                }
+
+                let last_index = end_indices.last().copied().unwrap_or(0);
+
+                if last_index != keys_len {
+                    // Most likely cause of this error is a leaked `MapWriter`
+                    return Err(format!(
+                        "last map index ({last_index}) out of sync with total elements: {keys_len}"
+                    ));
                 }
 
                 key_val_layouts[0].validate(key_ty)?;
