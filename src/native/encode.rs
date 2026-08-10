@@ -223,7 +223,7 @@ impl<'a> ValueWriter<'a> {
     }
 }
 
-#[must_use = "an empty array is written on-drop if `.finish()` is not called"]
+#[must_use = "rolls back the written tuple elements on-drop if `.finish()` is not called"]
 pub struct ArrayWriter<'a, T> {
     elem_type: &'a DataTypeNode,
     elem_layout: &'a mut LayoutBuilder,
@@ -294,7 +294,12 @@ impl<T> ArrayWriter<'_, T> {
 
 impl<T> Drop for ArrayWriter<'_, T> {
     fn drop(&mut self) {
-        self.finish_mut();
+        if self.finished {
+            return;
+        }
+
+        let last_array_end = self.end_indices.last().copied().unwrap_or(0);
+        self.elem_layout.truncate(last_array_end);
     }
 }
 
