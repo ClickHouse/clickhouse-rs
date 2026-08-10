@@ -22,6 +22,9 @@ mod utils;
 mod varuint;
 pub(crate) mod writer;
 
+#[cfg(test)]
+mod tests;
+
 pub struct Block {
     column_names: HashMap<MaybeUtf8, usize>,
     columns: Box<[Column]>,
