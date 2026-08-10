@@ -94,25 +94,25 @@ async fn mixed_types(num_rows: u64) {
     let mut builder = BlockBuilder::new();
 
     builder
-        .upsert_column::<i32>("number")
+        .upsert_column("number")
         .unwrap()
         .add_all(&numbers)
         .unwrap();
 
     builder
-        .upsert_column::<String>("text")
+        .upsert_column("text")
         .unwrap()
         .add_all(&texts)
         .unwrap();
 
     builder
-        .upsert_column::<Option<i32>>("nullable_number")
+        .upsert_column("nullable_number")
         .unwrap()
         .add_all(numbers.iter().map(|&i| (i % 2 == 0).then_some(i)))
         .unwrap();
 
     builder
-        .upsert_column::<Option<String>>("nullable_text")
+        .upsert_column("nullable_text")
         .unwrap()
         .add_all(
             numbers
@@ -129,7 +129,7 @@ async fn mixed_types(num_rows: u64) {
         .unwrap();
 
     builder
-        .upsert_column::<(i64, String)>("number_text_tuple")
+        .upsert_column("number_text_tuple")
         .unwrap()
         .add_all(
             numbers
@@ -140,7 +140,7 @@ async fn mixed_types(num_rows: u64) {
         .unwrap();
 
     builder
-        .upsert_column::<(Option<i64>, Option<String>)>("nullable_tuple")
+        .upsert_column("nullable_tuple")
         .unwrap()
         .add_all(numbers.iter().zip(&texts).map(|(&number, text)| {
             (
@@ -152,25 +152,25 @@ async fn mixed_types(num_rows: u64) {
 
     // Verifying the assumption that `LowCardinality` can accept a regular data stream
     builder
-        .upsert_column::<String>("low_cardinality_text")
+        .upsert_column("low_cardinality_text")
         .unwrap()
         .add_all(&texts)
         .unwrap();
 
     builder
-        .upsert_column::<Vec<i32>>("number_array")
+        .upsert_column("number_array")
         .unwrap()
         .add_all(&number_arrays)
         .unwrap();
 
     builder
-        .upsert_column::<Vec<String>>("text_array")
+        .upsert_column("text_array")
         .unwrap()
         .add_all(&text_arrays)
         .unwrap();
 
     builder
-        .upsert_column::<Vec<Option<String>>>("nullable_text_array")
+        .upsert_column("nullable_text_array")
         .unwrap()
         .add_all(text_arrays.iter().map(|array| {
             array
@@ -182,7 +182,7 @@ async fn mixed_types(num_rows: u64) {
         .unwrap();
 
     builder
-        .upsert_column::<HashMap<i32, String>>("number_text_map")
+        .upsert_column("number_text_map")
         .unwrap()
         .add_all(&maps)
         .unwrap();
