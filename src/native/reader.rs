@@ -1,7 +1,8 @@
 use crate::error::Error;
 use crate::native::string::MaybeUtf8;
+use crate::native::utils::type_fixed_width;
 use crate::native::varuint::ParseVarUInt;
-use crate::native::{Block, Column, Layout, LayoutKind, LayoutLowCardinality, type_fixed_width};
+use crate::native::{Block, Column, Layout, LayoutKind, LayoutLowCardinality};
 use crate::response::Chunks;
 use bytes::{Buf, Bytes, BytesMut};
 use clickhouse_types::DataTypeNode;

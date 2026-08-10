@@ -1,8 +1,8 @@
 use crate::error::BoxedError;
 use crate::native::encode::{Encode, ValueWriter};
 use crate::native::string::MaybeUtf8;
-use crate::native::utils::{DebugFixedData, DebugNullMap, DebugVariableData};
-use crate::native::{Block, Column, Layout, LayoutKind, type_fixed_width};
+use crate::native::utils::{DebugFixedData, DebugNullMap, DebugVariableData, type_fixed_width};
+use crate::native::{Block, Column, Layout, LayoutKind};
 use bytes::{BufMut, BytesMut};
 use clickhouse_types::DataTypeNode;
 use hashbrown::{HashMap, hash_map};
@@ -165,13 +165,13 @@ impl BlockBuilder {
 
         // Note: try to perform as much validation as possible before consuming `self`
         for col in &self.columns {
-            col.layout
-                .validate_nulls(&col.data_type)
-                .map_err(|message| BlockBuilderError::ColumnDataInvalid {
+            col.layout.validate(&col.data_type).map_err(|message| {
+                BlockBuilderError::ColumnDataInvalid {
                     column_name: col.name.to_string(),
                     column_type: col.data_type.clone(),
                     message,
-                })?;
+                }
+            })?;
         }
 
         let columns = self
@@ -500,6 +500,116 @@ impl LayoutBuilder {
 
                 key_val_layouts[0].truncate(last_index);
                 key_val_layouts[1].truncate(last_index);
+            }
+        }
+    }
+
+    fn validate(&self, data_type: &DataTypeNode) -> Result<(), String> {
+        self.validate_nulls(data_type)?;
+
+        match &self.kind {
+            LayoutBuilderKind::Fixed { type_width, data } => {
+                let expected_width = type_fixed_width(data_type)
+                    .ok_or_else(|| format!("data type {data_type} is not fixed-width but we encoded {} bytes of {type_width}-byte values", data.len()))?;
+
+                if expected_width != *type_width {
+                    return Err(format!(
+                        "data type {data_type} has a fixed width of {expected_width} but we encoded {} bytes of {type_width}-byte values",
+                        data.len()
+                    ));
+                }
+
+                if !data.len().is_multiple_of(*type_width) {
+                    return Err(format!(
+                        "data length ({}) is not a multiple of type_width ({type_width})",
+                        data.len()
+                    ));
+                }
+
+                Ok(())
+            }
+            LayoutBuilderKind::Variable { end_offsets, data } => {
+                for (i, &end_offset) in end_offsets.iter().enumerate() {
+                    if end_offset > data.len() {
+                        return Err(format!(
+                            "string {i} end offset {end_offset} is out of bounds: {}",
+                            data.len()
+                        ));
+                    }
+                }
+
+                Ok(())
+            }
+            LayoutBuilderKind::Array {
+                end_indices,
+                elem_layout,
+            } => {
+                let DataTypeNode::Array(elem_type) = data_type else {
+                    return Err(format!("expected type Array(_), got {data_type}"));
+                };
+
+                let num_elements = elem_layout.num_values();
+
+                for (i, &end_index) in end_indices.iter().enumerate() {
+                    if end_index > num_elements {
+                        return Err(format!(
+                            "array {i} end index ({end_index}) out of bounds: {num_elements}"
+                        ));
+                    }
+                }
+
+                elem_layout.validate(elem_type)
+            }
+            LayoutBuilderKind::Tuple { layouts } => {
+                let DataTypeNode::Tuple(types) = data_type else {
+                    return Err(format!("expected type Tuple(...), got {data_type}"));
+                };
+
+                let expected_len = layouts.first().map_or(0, LayoutBuilder::num_values);
+
+                for (i, (ty, layout)) in types.iter().zip(layouts).enumerate() {
+                    layout.validate(ty)?;
+
+                    let actual_len = layout.num_values();
+
+                    if layout.num_values() != expected_len {
+                        return Err(format!(
+                            "tuple index {i} (type {ty}) out of sync: {actual_len} vs {expected_len}"
+                        ));
+                    }
+                }
+
+                Ok(())
+            }
+            LayoutBuilderKind::Map {
+                key_val_layouts,
+                end_indices,
+            } => {
+                let DataTypeNode::Map([key_ty, val_ty]) = data_type else {
+                    return Err(format!("expected type Map(...), got {data_type}"));
+                };
+
+                let keys_len = key_val_layouts[0].num_values();
+                let values_len = key_val_layouts[1].num_values();
+
+                if keys_len != values_len {
+                    return Err(format!(
+                        "number of keys and values is out of sync: {keys_len} vs {values_len}"
+                    ));
+                }
+
+                for (i, &end_index) in end_indices.iter().enumerate() {
+                    if end_index > keys_len {
+                        return Err(format!(
+                            "map {i} end index ({end_index}) out of bounds: {keys_len}"
+                        ));
+                    }
+                }
+
+                key_val_layouts[0].validate(key_ty)?;
+                key_val_layouts[1].validate(val_ty)?;
+
+                Ok(())
             }
         }
     }
