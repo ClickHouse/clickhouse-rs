@@ -2,6 +2,7 @@ use crate::native::Block;
 use crate::native::writer::BlockWriter;
 use crate::{Client, Compression, insert_formatted, sql};
 
+#[must_use]
 pub struct InsertNative {
     writer: BlockWriter,
 }

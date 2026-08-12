@@ -1,5 +1,6 @@
 use crate::error::BoxedError;
 use crate::native::builder::{LayoutBuilder, LayoutBuilderKind};
+use crate::native::utils::DebugNullMap;
 use bytes::{BufMut, BytesMut};
 use clickhouse_types::DataTypeNode;
 use std::cmp;
@@ -142,6 +143,8 @@ impl<'a> ValueWriter<'a> {
     where
         T: Encode,
     {
+        // Note: `Nullable(Array(...))` is not allowed by ClickHouse:
+        // https://clickhouse.com/docs/reference/data-types/nullable
         let DataTypeNode::Array(elem_type) = &self.data_type else {
             return Err(ArrayWriteError::NotAnArray {
                 data_type: self.data_type.clone(),
@@ -163,45 +166,94 @@ impl<'a> ValueWriter<'a> {
             unreachable!("BUG: expected LayoutBuilderKind::Array")
         };
 
+        if let Some(nulls) = &self.layout.nulls {
+            unreachable!(
+                "BUG: `Nullable(Array(...))` is not allowed, but a null bitmap exists: {:?}",
+                DebugNullMap(nulls)
+            );
+        }
+
         Ok(ArrayWriter {
             elem_type,
             elem_layout,
             end_indices,
-            outer_nulls: self.layout.nulls.as_mut(),
             finished: false,
             _marker: PhantomData,
         })
     }
 
-    pub fn write_tuple(&mut self) -> Result<TupleWriter<'_>, ValueWriteError> {
-        let LayoutBuilderKind::Tuple { layouts } = &mut self.layout.kind else {
-            return Err(ValueWriteError::IncorrectMethod);
+    pub fn write_tuple(&mut self) -> Result<TupleWriter<'_>, TupleWriteError> {
+        let types = match &self.data_type {
+            DataTypeNode::Tuple(types) => types,
+            // Note: `Nullable(Tuple(...))` is an experimental feature
+            DataTypeNode::Nullable(inner) => {
+                let DataTypeNode::Tuple(types) = &**inner else {
+                    return Err(TupleWriteError::NotATuple {
+                        data_type: self.data_type.clone(),
+                    });
+                };
+
+                types
+            }
+            _ => {
+                return Err(TupleWriteError::NotATuple {
+                    data_type: self.data_type.clone(),
+                });
+            }
         };
 
-        let DataTypeNode::Tuple(types) = &self.data_type else {
-            return Err(ValueWriteError::IncorrectMethod);
+        let LayoutBuilderKind::Tuple { layouts } = &mut self.layout.kind else {
+            unreachable!("BUG: expected LayoutBuilderKind::Tuple")
         };
 
         Ok(TupleWriter {
             index: 0,
             elem_layouts: layouts,
             elem_types: types,
+            outer_nulls: self.layout.nulls.as_mut(),
             finished: false,
         })
     }
 
-    pub fn write_map<K, V>(&mut self) -> Result<MapWriter<'_, K, V>, ValueWriteError> {
+    pub fn write_map<K, V>(&mut self) -> Result<MapWriter<'_, K, V>, MapWriteError>
+    where
+        K: Encode,
+        V: Encode,
+    {
+        // Note: `Nullable(Map(...))` is not allowed by ClickHouse:
+        // https://clickhouse.com/docs/reference/data-types/nullable
+        let DataTypeNode::Map([key_ty, val_ty]) = &self.data_type else {
+            return Err(MapWriteError::NotAMap {
+                data_type: self.data_type.clone(),
+            });
+        };
+
+        if !K::compatible(key_ty) {
+            return Err(MapWriteError::IncompatibleKeyType {
+                expected_type: (**key_ty).clone(),
+            });
+        }
+
+        if !V::compatible(val_ty) {
+            return Err(MapWriteError::IncompatibleValueType {
+                expected_type: (**val_ty).clone(),
+            });
+        }
+
         let LayoutBuilderKind::Map {
             key_val_layouts,
             end_indices,
         } = &mut self.layout.kind
         else {
-            return Err(ValueWriteError::IncorrectMethod);
+            unreachable!("BUG: expected LayoutBuilderKind::Map")
         };
 
-        let DataTypeNode::Map([key_ty, val_ty]) = &self.data_type else {
-            return Err(ValueWriteError::IncorrectMethod);
-        };
+        if let Some(nulls) = &self.layout.nulls {
+            unreachable!(
+                "BUG: `Nullable(Map(...))` is not allowed, but a null bitmap exists: {:?}",
+                DebugNullMap(nulls)
+            );
+        }
 
         let [key_layout, val_layout] = &mut **key_val_layouts;
 
@@ -223,12 +275,11 @@ impl<'a> ValueWriter<'a> {
     }
 }
 
-#[must_use = "rolls back the written tuple elements on-drop if `.finish()` is not called"]
+#[must_use = "rolls back the written array elements on-drop if `.finish()` is not called"]
 pub struct ArrayWriter<'a, T> {
     elem_type: &'a DataTypeNode,
     elem_layout: &'a mut LayoutBuilder,
     end_indices: &'a mut Vec<usize>,
-    outer_nulls: Option<&'a mut BytesMut>,
     finished: bool,
     _marker: PhantomData<fn(T)>,
 }
@@ -283,11 +334,6 @@ impl<T> ArrayWriter<'_, T> {
         }
 
         self.end_indices.push(self.elem_layout.num_values());
-
-        if let Some(nulls) = &mut self.outer_nulls {
-            nulls.put_u8(0);
-        }
-
         self.finished = true;
     }
 }
@@ -298,6 +344,7 @@ impl<T> Drop for ArrayWriter<'_, T> {
             return;
         }
 
+        // Roll back the written elements
         let last_array_end = self.end_indices.last().copied().unwrap_or(0);
         self.elem_layout.truncate(last_array_end);
     }
@@ -308,13 +355,17 @@ pub struct TupleWriter<'a> {
     index: usize,
     elem_layouts: &'a mut [LayoutBuilder],
     elem_types: &'a [DataTypeNode],
+    outer_nulls: Option<&'a mut BytesMut>,
     finished: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum TupleWriteError {
-    #[error("attempting to write to a full tuple")]
+    #[error("attempted to write a tuple to a non-tuple column: {data_type}")]
+    NotATuple { data_type: DataTypeNode },
+
+    #[error("attempted to write to a full tuple")]
     TupleFull,
 
     #[error(
@@ -380,6 +431,10 @@ impl TupleWriter<'_> {
                 expected_len: self.elem_types.len(),
                 written_len: self.index,
             });
+        }
+
+        if let Some(nulls) = &mut self.outer_nulls {
+            nulls.put_u8(0);
         }
 
         self.finished = true;
@@ -474,11 +529,14 @@ impl<K, V> Drop for MapWriter<'_, K, V> {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum MapWriteError {
-    #[error("type is not compatible with expected type {expected_type} at entry index {index}")]
-    IncompatibleType {
-        index: usize,
-        expected_type: DataTypeNode,
-    },
+    #[error("attempted to write a map to a non-map column: {data_type}")]
+    NotAMap { data_type: DataTypeNode },
+
+    #[error("map key type is not compatible with expected type {expected_type}")]
+    IncompatibleKeyType { expected_type: DataTypeNode },
+
+    #[error("map value type is not compatible with expected type {expected_type}")]
+    IncompatibleValueType { expected_type: DataTypeNode },
 
     #[error("error writing value at entry index {index}")]
     ValueWriteError {
@@ -504,8 +562,14 @@ where
     }
 
     fn compatible(column_type: &DataTypeNode) -> bool {
-        // Make sure we forward to `T::compatible()`
-        recursive_compatible(column_type, T::compatible)
+        recursive_compatible(column_type, |column_type| {
+            // Require the column type to be nullable
+            let DataTypeNode::Nullable(inner) = column_type else {
+                return false;
+            };
+
+            T::compatible(inner)
+        })
     }
 }
 

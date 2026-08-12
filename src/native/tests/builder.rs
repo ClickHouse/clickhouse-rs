@@ -130,3 +130,47 @@ fn debug() {
 
     insta::assert_debug_snapshot!(builder);
 }
+
+#[test]
+fn errors_on_forbidden_types() {
+    let mut builder = BlockBuilder::new();
+
+    // https://clickhouse.com/docs/reference/data-types/nullable
+    let Err(e) = builder.upsert_column::<Option<Vec<i32>>>("foo") else {
+        panic!("expected error");
+    };
+
+    let BlockBuilderError::UnsupportedType {
+        column_name,
+        data_type,
+    } = *e
+    else {
+        panic!("unexpected error kind: {e:?}")
+    };
+
+    assert_eq!(column_name, "foo");
+    assert_eq!(
+        data_type,
+        DataTypeNode::Nullable(DataTypeNode::Array(DataTypeNode::Int32.into()).into())
+    );
+
+    let Err(e) = builder.upsert_column::<Option<BTreeMap<i32, String>>>("foo") else {
+        panic!("expected error");
+    };
+
+    let BlockBuilderError::UnsupportedType {
+        column_name,
+        data_type,
+    } = *e
+    else {
+        panic!("unexpected error kind: {e:?}")
+    };
+
+    assert_eq!(column_name, "foo");
+    assert_eq!(
+        data_type,
+        DataTypeNode::Nullable(
+            DataTypeNode::Map([DataTypeNode::Int32.into(), DataTypeNode::String.into(),]).into()
+        )
+    );
+}

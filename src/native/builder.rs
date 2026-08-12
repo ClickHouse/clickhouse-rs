@@ -28,9 +28,9 @@ pub enum BlockBuilderError {
         existing_type: DataTypeNode,
         new_type: DataTypeNode,
     },
-    #[error("unsupported type or subtype of column `{name}`:  `{data_type}`")]
+    #[error("unsupported type or subtype of column `{column_name}`:  `{data_type}`")]
     UnsupportedType {
-        name: String,
+        column_name: String,
         data_type: DataTypeNode,
     },
     #[error(
@@ -321,6 +321,13 @@ impl LayoutBuilder {
         data_type: &DataTypeNode,
     ) -> Result<Self, Box<BlockBuilderError>> {
         let (non_nullable, nulls) = if let DataTypeNode::Nullable(inner) = data_type {
+            if is_forbidden_nullable(inner) {
+                return Err(Box::new(BlockBuilderError::UnsupportedType {
+                    column_name: column_name.to_string(),
+                    data_type: data_type.clone(),
+                }));
+            }
+
             (&**inner, Some(BytesMut::new()))
         } else {
             (data_type, None)
@@ -371,7 +378,7 @@ impl LayoutBuilder {
                 },
             }),
             _ => Err(Box::new(BlockBuilderError::UnsupportedType {
-                name: column_name.to_string(),
+                column_name: column_name.to_string(),
                 data_type: data_type.clone(),
             })),
         }
@@ -765,4 +772,9 @@ fn erase_wrappers(data_type: DataTypeNode) -> DataTypeNode {
         }
         other => other,
     }
+}
+
+fn is_forbidden_nullable(data_type: &DataTypeNode) -> bool {
+    // https://clickhouse.com/docs/reference/data-types/nullable
+    matches!(data_type, DataTypeNode::Array(_) | DataTypeNode::Map(_))
 }

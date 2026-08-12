@@ -27,7 +27,9 @@ async fn mixed_types_1000() {
 }
 
 async fn mixed_types(num_rows: u64) {
-    let client = get_client_with_session();
+    let client = get_client_with_session()
+        // Note: only in ClickHouse 26.6
+        .with_setting("enable_nullable_tuple_type", "1");
 
     client
         .query(
@@ -39,6 +41,7 @@ async fn mixed_types(num_rows: u64) {
                 number_tuple Tuple(UInt32, Int64),
                 number_text_tuple Tuple(Int64, String),
                 nullable_tuple Tuple(Nullable(Int64), Nullable(String)),
+                tuple_nullable Nullable(Tuple(Int32, String)),
                 low_cardinality_text LowCardinality(String),
                 number_array Array(Int32),
                 text_array Array(String),
@@ -150,6 +153,18 @@ async fn mixed_types(num_rows: u64) {
         }))
         .unwrap();
 
+    // Note: `Nullable(Tuple(...))` is experimental
+    builder
+        .upsert_column("tuple_nullable")
+        .unwrap()
+        .add_all(
+            numbers
+                .iter()
+                .zip(&texts)
+                .map(|(&number, text)| (number % 2 == 0).then_some((number, text))),
+        )
+        .unwrap();
+
     // Verifying the assumption that `LowCardinality` can accept a regular data stream
     builder
         .upsert_column("low_cardinality_text")
@@ -176,7 +191,7 @@ async fn mixed_types(num_rows: u64) {
             array
                 .iter()
                 .enumerate()
-                .map(|(i, text)| i.is_multiple_of(2).then_some(text))
+                .map(|(i, text)| (i % 2 == 0).then_some(text))
                 .collect::<Vec<_>>()
         }))
         .unwrap();
@@ -231,11 +246,7 @@ async fn mixed_types(num_rows: u64) {
     for (i, (res, expected)) in nullable_text_iter.by_ref().zip(&texts).enumerate() {
         let actual = res.unwrap();
 
-        if !i.is_multiple_of(2) {
-            assert_eq!(actual.as_ref(), Some(expected));
-        } else {
-            assert_eq!(actual, None);
-        }
+        assert_eq!(actual.as_ref(), (i % 2 != 0).then_some(expected));
     }
 
     if let Some(res) = nullable_text_iter.next() {
@@ -293,6 +304,29 @@ async fn mixed_types(num_rows: u64) {
         panic!("unexpected value {res:?}");
     }
 
+    let mut tuple_nullable_iter = block_out["tuple_nullable"]
+        .iter::<Option<(i32, String)>>()
+        .unwrap();
+
+    for ((res, &expected_number), expected_text) in
+        tuple_nullable_iter.by_ref().zip(&numbers).zip(&texts)
+    {
+        let actual = res.unwrap();
+
+        if expected_number % 2 == 0 {
+            let (actual_number, actual_text) = actual.unwrap();
+
+            assert_eq!(actual_number, expected_number);
+            assert_eq!(actual_text, *expected_text);
+        } else {
+            assert_eq!(actual, None);
+        }
+    }
+
+    if let Some(res) = tuple_nullable_iter.next() {
+        panic!("unexpected value {res:?}");
+    }
+
     let mut lc_text_iter = block_out["low_cardinality_text"].iter::<String>().unwrap();
 
     for (res, expected) in lc_text_iter.by_ref().zip(&texts) {
@@ -334,7 +368,7 @@ async fn mixed_types(num_rows: u64) {
         let actual = res.unwrap();
 
         for (i, (actual, expected)) in actual.iter().zip(expected).enumerate() {
-            assert_eq!(actual.as_ref(), i.is_multiple_of(2).then_some(expected));
+            assert_eq!(actual.as_ref(), (i % 2 == 0).then_some(expected));
         }
     }
 

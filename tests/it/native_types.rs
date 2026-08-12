@@ -103,7 +103,7 @@ macro_rules! test_type {
                 assert_eq!(val, expected, "Rust value did not round-trip correctly");
             )*
 
-            if let Some(next) = sql_iter.next() {
+            if let Some(next) = insert_iter.next() {
                 panic!("unexpected value from `insert_iter.next()`: {next:?}");
             }
 
