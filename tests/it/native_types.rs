@@ -139,6 +139,12 @@ test_type!(test_uint64(u64) {
     "0" == 0, "1" == 1, "255" == 255, "16384" == 16384, "65535" == 65535,
     "0xFFFF_FFFF" == 0xFFFF_FFFF, "0xFFFF_FFFF_FFFF_FFFF" == 0xFFFF_FFFF_FFFF_FFFF
 });
+test_type!(test_uint128(u128) {
+    "0" == 0, "1" == 1, "255" == 255, "16384" == 16384, "65535" == 65535,
+    "0xFFFF_FFFF" == 0xFFFF_FFFF, "0xFFFF_FFFF_FFFF_FFFF" == 0xFFFF_FFFF_FFFF_FFFF,
+    // Explicit conversion required or else the literal is parsed as `Float64`
+    "340282366920938463463374607431768211455::UInt128" == 0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
+});
 
 // Explicit typing is required, otherwise the unsigned values cause an implicit widening
 // to the next larger signed type:
@@ -160,6 +166,15 @@ test_type!(test_int64(i64, "Int64") {
     "-32768" == -32768, "-128" == -128, "-1" == -1,
     "0" == 0, "1" == 1, "255" == 255, "16384" == 16384, "65535" == 65535,
     "0xFFFF_FFFF" == 0xFFFF_FFFF, "0x7FFF_FFFF_FFFF_FFFF" == 0x7FFF_FFFF_FFFF_FFFF
+});
+test_type!(test_int128(i128, "Int128") {
+    // Explicit cast required or else the literal is parsed as `Float64`
+    "-170141183460469231731687303715884105728::Int128" == -0x8000_0000_0000_0000_0000_0000_0000_0000,
+    "-0x8000_0000_0000_0000" == -0x8000_0000_0000_0000, "-0x8000_0000" == -0x8000_0000,
+    "-32768" == -32768, "-128" == -128, "-1" == -1,
+    "0" == 0, "1" == 1, "255" == 255, "16384" == 16384, "65535" == 65535,
+    "0xFFFF_FFFF" == 0xFFFF_FFFF, "0x7FFF_FFFF_FFFF_FFFF" == 0x7FFF_FFFF_FFFF_FFFF,
+    "170141183460469231731687303715884105727::Int128" == 0x7FFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
 });
 
 test_type!(
