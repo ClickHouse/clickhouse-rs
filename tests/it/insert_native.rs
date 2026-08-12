@@ -219,6 +219,9 @@ async fn mixed_types(num_rows: u64) {
         return;
     };
 
+    assert_eq!(block_out.num_rows(), block_in.num_rows());
+    assert_eq!(block_out.columns().len(), block_in.columns().len());
+
     let mut number_iter = block_out["number"].iter::<i32>().unwrap();
 
     for (res, &expected) in number_iter.by_ref().zip(&numbers) {
