@@ -40,11 +40,11 @@ impl ParseVarUInt {
                 return Ok(ControlFlow::Continue(()));
             };
 
+            // The tenth byte may only have one bit
             // `.checked_shl()` doesn't check for overflow, just that the shift is in-bounds
             // This could be replaced by `.shl_exact()` when stable:
             // https://doc.rust-lang.org/stable/std/primitive.u64.html#method.shl_exact
             if self.shift >= 63 && b > 1 {
-                // The tenth byte may only have one bit
                 return Err(VarUIntOverflowError {
                     accumulator: self.accumulator,
                     byte: b,
