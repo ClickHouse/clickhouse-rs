@@ -17,6 +17,10 @@ impl BlockWriter {
     }
 
     pub(crate) async fn write(&mut self, block: &Block) -> Result<(), Error> {
+        if block.num_rows() == 0 {
+            return Err(Error::Other("attempting to write an empty block".into()));
+        }
+
         // If canceled while writing a block, we have no way to recover.
         // We have to abort the request instead.
         let mut guard = WriteGuard {

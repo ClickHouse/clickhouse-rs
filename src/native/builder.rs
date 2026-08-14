@@ -50,6 +50,8 @@ pub enum BlockBuilderError {
         column_type: DataTypeNode,
         message: String,
     },
+    #[error("cannot build an empty block")]
+    BlockEmpty,
 }
 
 impl BlockBuilder {
@@ -145,6 +147,10 @@ impl BlockBuilder {
                 }
                 .into());
             }
+        }
+
+        if num_rows == 0 {
+            return Err(BlockBuilderError::BlockEmpty.into());
         }
 
         // Note: try to perform as much validation as possible before consuming `self`

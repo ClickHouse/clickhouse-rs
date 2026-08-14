@@ -174,3 +174,29 @@ fn errors_on_forbidden_types() {
         )
     );
 }
+
+#[test]
+fn errors_on_empty_block() {
+    let mut builder = BlockBuilder::new();
+
+    let Err(e) = builder.build() else {
+        panic!("expected error");
+    };
+
+    assert!(
+        matches!(*e, BlockBuilderError::BlockEmpty),
+        "unexpected error kind: {e:?}"
+    );
+
+    builder.upsert_column::<i32>("foo").unwrap();
+    builder.upsert_column::<String>("bar").unwrap();
+
+    let Err(e) = builder.build() else {
+        panic!("expected error");
+    };
+
+    assert!(
+        matches!(*e, BlockBuilderError::BlockEmpty),
+        "unexpected error kind: {e:?}"
+    );
+}
