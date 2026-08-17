@@ -269,18 +269,6 @@ impl ColumnBuilderRaw {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum ColumnBuilderError {
-    #[error("incompatible value type for column `{name} {data_type}")]
-    IncompatibleType {
-        name: String,
-        data_type: DataTypeNode,
-    },
-    #[error("error encoding value")]
-    Encode(#[source] BoxedError),
-}
-
 // These types may be identical to `Layout` but they need to use growable containers.
 // `LowCardinality` is also deliberately omitted in the initial implementation
 // since the server can do the transformation automatically.
