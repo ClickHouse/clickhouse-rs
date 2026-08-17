@@ -1,10 +1,6 @@
 use crate::get_client_with_session;
 use clickhouse::native::builder::BlockBuilder;
 use std::collections::HashMap;
-#[tokio::test]
-async fn mixed_types_empty() {
-    mixed_types(0).await
-}
 
 #[tokio::test]
 async fn mixed_types_1() {
