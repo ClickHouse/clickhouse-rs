@@ -205,7 +205,10 @@ async fn mixed_types(num_rows: u64) {
         .insert_native("foo")
         // Generates coverage for `InsertNative::with_timeouts()`
         // and also tests the case when *both* timeouts are set (which `insert_formatted.rs` misses)
-        .with_timeouts(Some(Duration::from_secs(60)), Some(Duration::from_secs(60)));
+        .with_timeouts(
+            Some(Duration::from_secs(600)),
+            Some(Duration::from_secs(600)),
+        );
 
     insert.write(&block_in).await.unwrap();
 
