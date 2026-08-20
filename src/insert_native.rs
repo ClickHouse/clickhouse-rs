@@ -1,6 +1,8 @@
+use crate::insert_formatted::InsertFormatted;
 use crate::native::Block;
 use crate::native::writer::BlockWriter;
 use crate::{Client, Compression, insert_formatted, sql};
+use std::time::Duration;
 
 #[must_use]
 pub struct InsertNative {
@@ -27,6 +29,87 @@ impl InsertNative {
                 Some(table_name),
             )),
         }
+    }
+
+    /// Sets timeouts for different operations.
+    ///
+    /// `send_timeout` restricts time on sending a data chunk to a socket.
+    /// `None` disables the timeout, it's a default.
+    /// It's roughly equivalent to `tokio::time::timeout(insert.write(...))`.
+    ///
+    /// `end_timeout` restricts time on waiting for a response from the CH
+    /// server. Thus, it includes all work needed to handle `INSERT` by the
+    /// CH server, e.g. handling all materialized views and so on.
+    /// `None` disables the timeout, it's a default.
+    /// It's roughly equivalent to `tokio::time::timeout(insert.end(...))`.
+    ///
+    /// These timeouts are much more performant (~x10) than wrapping `write()`
+    /// and `end()` calls into `tokio::time::timeout()`.
+    pub fn with_timeouts(
+        mut self,
+        send_timeout: Option<Duration>,
+        end_timeout: Option<Duration>,
+    ) -> Self {
+        self.writer
+            .insert_mut()
+            .set_timeouts(send_timeout, end_timeout);
+        self
+    }
+
+    /// Configure the [roles] to use when executing `INSERT` statements.
+    ///
+    /// Overrides any roles previously set by this method, [`InsertFormatted::with_setting`],
+    /// [`Client::with_roles`] or [`Client::with_setting`].
+    ///
+    /// An empty iterator may be passed to clear the set roles.
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    ///
+    /// # Panics
+    /// If called after the request is started, i.e., after [`InsertNative::write`].
+    pub fn with_roles(mut self, roles: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.writer.expect_client_mut().set_roles(roles);
+        self
+    }
+
+    /// Clear any explicit [roles] previously set on this `Insert` or inherited from [`Client`].
+    ///
+    /// Overrides any roles previously set by [`InsertFormatted::with_roles`], [`InsertFormatted::with_setting`],
+    /// [`Client::with_roles`] or [`Client::with_setting`].
+    ///
+    /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
+    ///
+    /// # Panics
+    /// If called after the request is started, i.e., after [`InsertNative::write`].
+    pub fn with_default_roles(mut self) -> Self {
+        self.writer.expect_client_mut().clear_roles();
+        self
+    }
+
+    /// Similar to [`Client::with_setting`], but for this particular INSERT
+    /// statement only.
+    ///
+    /// # Panics
+    /// If called after the request is started, i.e., after [`InsertNative::write`].
+    #[track_caller]
+    pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.writer.expect_client_mut().set_setting(name, value);
+        self
+    }
+
+    /// Similar to [`Client::with_product_info()`], but for this `INSERT` statement only.
+    ///
+    /// # Panics
+    /// If called after the request is started, i.e., after [`InsertNative::write`].
+    pub fn with_product_info(
+        mut self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        self.writer
+            .expect_client_mut()
+            .add_product_info(product_name.into(), product_version.into());
+        self
     }
 
     /// Send a block of data.

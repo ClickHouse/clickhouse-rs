@@ -1,3 +1,4 @@
+use crate::Client;
 use crate::error::Error;
 use crate::insert_formatted::InsertFormatted;
 use crate::native::{Block, Column, Layout, LayoutKind, varuint};
@@ -17,6 +18,14 @@ impl BlockWriter {
             buf: BytesMut::with_capacity(8192),
             sent_rows: Saturating(0),
         }
+    }
+
+    pub(crate) fn insert_mut(&mut self) -> &mut InsertFormatted {
+        &mut self.insert
+    }
+
+    pub(crate) fn expect_client_mut(&mut self) -> &mut Client {
+        self.insert.expect_client_mut()
     }
 
     pub(crate) async fn write(&mut self, block: &Block) -> Result<(), Error> {

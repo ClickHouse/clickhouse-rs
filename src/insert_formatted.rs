@@ -253,6 +253,9 @@ impl InsertFormatted {
     }
 
     /// Similar to [`Client::with_product_info()`], but for this `INSERT` statement only.
+    ///
+    /// # Panics
+    /// If called after the request is started, e.g., after [`InsertFormatted::send`].
     pub fn with_product_info(
         mut self,
         product_name: impl Into<String>,
@@ -262,6 +265,10 @@ impl InsertFormatted {
             .expect_client_mut()
             .add_product_info(product_name.into(), product_version.into());
         self
+    }
+
+    pub(crate) fn expect_client_mut(&mut self) -> &mut Client {
+        self.state.expect_client_mut()
     }
 
     pub(crate) fn set_timeouts(
