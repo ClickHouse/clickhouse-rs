@@ -2,10 +2,12 @@ use crate::error::Error;
 use crate::insert_formatted::InsertFormatted;
 use crate::native::{Block, Column, Layout, LayoutKind, varuint};
 use bytes::{BufMut, Bytes, BytesMut};
+use std::num::Saturating;
 
 pub(crate) struct BlockWriter {
     insert: InsertFormatted,
     buf: BytesMut,
+    sent_rows: Saturating<usize>,
 }
 
 impl BlockWriter {
@@ -13,6 +15,7 @@ impl BlockWriter {
         Self {
             insert,
             buf: BytesMut::with_capacity(8192),
+            sent_rows: Saturating(0),
         }
     }
 
@@ -44,6 +47,8 @@ impl BlockWriter {
 
         guard.finished = true;
 
+        self.sent_rows += block.num_rows;
+
         Ok(())
     }
 
@@ -59,6 +64,11 @@ impl BlockWriter {
         guard.finished = true;
 
         drop(guard);
+
+        tracing::record_all!(
+            self.insert.span(),
+            clickhouse.request.sent_rows = self.sent_rows.0,
+        );
 
         self.insert.end().await
     }
