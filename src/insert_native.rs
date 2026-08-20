@@ -1,7 +1,7 @@
 use crate::insert_formatted::InsertFormatted;
 use crate::native::Block;
 use crate::native::writer::BlockWriter;
-use crate::{Client, Compression, insert_formatted, sql};
+use crate::{Client, Compression, sql};
 use std::time::Duration;
 
 #[must_use]
@@ -22,7 +22,7 @@ impl InsertNative {
         sql.push_str(" FORMAT Native");
 
         Self {
-            writer: BlockWriter::new(insert_formatted::InsertFormatted::new(
+            writer: BlockWriter::new(InsertFormatted::new(
                 // FIXME: use HTTP body compression instead of block-level compression
                 &client.clone().with_compression(Compression::None),
                 sql,
