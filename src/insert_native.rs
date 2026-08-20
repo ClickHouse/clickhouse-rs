@@ -129,3 +129,82 @@ impl InsertNative {
         self.writer.end().await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{Client, ProductInfo};
+
+    // These various setters are already covered functionally in `tests/it/insert_formatted.rs`;
+    // we just need to check that they're forwarded correctly for `InsertNative`.
+    #[test]
+    fn test_with_roles() {
+        let client = Client::default();
+
+        let insert = client.insert_native("foo");
+
+        assert!(insert.writer.expect_client().roles.is_empty());
+
+        let insert = insert.with_roles(["bar", "baz"]);
+
+        let roles = &insert.writer.expect_client().roles;
+
+        assert_eq!(roles.len(), 2, "unexpected roles: {roles:?}");
+        assert!(roles.contains("bar"), "missing role `bar`: {roles:?}");
+        assert!(roles.contains("baz"), "missing role `baz`: {roles:?}");
+
+        let insert = insert.with_default_roles();
+
+        assert!(insert.writer.expect_client().roles.is_empty());
+    }
+
+    #[test]
+    fn test_with_setting() {
+        let client = Client::default();
+
+        let insert = client.insert_native("foo");
+
+        let settings = &insert.writer.expect_client().settings;
+        assert!(settings.is_empty(), "unexpected settings: {settings:?}");
+
+        let insert = insert.with_setting("foo", "bar").with_setting("bar", "baz");
+
+        let settings = &insert.writer.expect_client().settings;
+
+        assert_eq!(settings.len(), 2, "unexpected settings: {settings:?}");
+        assert_eq!(settings.get("foo"), Some(&"bar".to_string()));
+        assert_eq!(settings.get("bar"), Some(&"baz".to_string()));
+    }
+
+    #[test]
+    fn test_with_product_info() {
+        let client = Client::default();
+
+        let insert = client.insert_native("foo");
+
+        let product_info = &insert.writer.expect_client().products_info;
+        assert!(
+            product_info.is_empty(),
+            "unexpected product_info: {product_info:?}"
+        );
+
+        let insert = insert
+            .with_product_info("foo", "1.0.0")
+            .with_product_info("bar", "0.1.0-alpha.1");
+
+        let product_info = &insert.writer.expect_client().products_info;
+
+        assert_eq!(
+            *product_info,
+            [
+                ProductInfo {
+                    name: "foo".to_string(),
+                    version: "1.0.0".to_string(),
+                },
+                ProductInfo {
+                    name: "bar".to_string(),
+                    version: "0.1.0-alpha.1".to_string()
+                }
+            ]
+        );
+    }
+}

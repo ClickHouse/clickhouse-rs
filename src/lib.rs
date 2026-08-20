@@ -75,6 +75,7 @@ pub struct Client {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 struct ProductInfo {
     name: String,
     version: String,

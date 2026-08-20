@@ -24,6 +24,11 @@ impl BlockWriter {
         &mut self.insert
     }
 
+    #[cfg_attr(not(test), expect(unused))]
+    pub(crate) fn expect_client(&self) -> &Client {
+        self.insert.expect_client()
+    }
+
     pub(crate) fn expect_client_mut(&mut self) -> &mut Client {
         self.insert.expect_client_mut()
     }

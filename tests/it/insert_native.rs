@@ -1,6 +1,7 @@
 use crate::get_client_with_session;
 use clickhouse::native::builder::BlockBuilder;
 use std::collections::HashMap;
+use std::time::Duration;
 
 #[tokio::test]
 async fn mixed_types_1() {
@@ -200,7 +201,11 @@ async fn mixed_types(num_rows: u64) {
 
     let block_in = builder.build().unwrap();
 
-    let mut insert = client.insert_native("foo");
+    let mut insert = client
+        .insert_native("foo")
+        // Generates coverage for `InsertNative::with_timeouts()`
+        // and also tests the case when *both* timeouts are set (which `insert_formatted.rs` misses)
+        .with_timeouts(Some(Duration::from_secs(30)), Some(Duration::from_secs(30)));
 
     insert.write(&block_in).await.unwrap();
 

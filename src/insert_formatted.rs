@@ -48,7 +48,7 @@ pub struct InsertFormatted {
     end_timeout: Option<Timeout>,
     // Use boxed `Sleep` to reuse a timer entry, it improves performance.
     // Also, `tokio::time::timeout()` significantly increases a future's size.
-    sleep: Pin<Box<Sleep>>,
+    sleep: Option<Pin<Box<Sleep>>>,
     span: tracing::Span,
 }
 
@@ -99,6 +99,14 @@ impl InsertState {
             InsertState::NotStarted { client, sql } => Some((client, sql)),
             _ => None,
         }
+    }
+
+    fn expect_client(&self) -> &Client {
+        let Self::NotStarted { client, .. } = self else {
+            panic!("cannot access client settings while an insert is in-progress")
+        };
+
+        client
     }
 
     #[inline]
@@ -172,7 +180,7 @@ impl InsertFormatted {
             compression: client.compression,
             send_timeout: None,
             end_timeout: None,
-            sleep: Box::pin(tokio::time::sleep(Duration::new(0, 0))),
+            sleep: None,
         }
     }
 
@@ -265,6 +273,10 @@ impl InsertFormatted {
             .expect_client_mut()
             .add_product_info(product_name.into(), product_version.into());
         self
+    }
+
+    pub(crate) fn expect_client(&self) -> &Client {
+        self.state.expect_client()
     }
 
     pub(crate) fn expect_client_mut(&mut self) -> &mut Client {
@@ -370,7 +382,7 @@ impl InsertFormatted {
             Poll::Pending => {
                 ready!(Timeout::poll_opt(
                     self.send_timeout.as_mut(),
-                    self.sleep.as_mut(),
+                    &mut self.sleep,
                     cx
                 ));
                 self.abort();
@@ -430,7 +442,7 @@ impl InsertFormatted {
         let Poll::Ready(res) = Pin::new(&mut *handle).poll(cx) else {
             ready!(Timeout::poll_opt(
                 self.end_timeout.as_mut(),
-                self.sleep.as_mut(),
+                &mut self.sleep,
                 cx
             ));
 
@@ -754,7 +766,11 @@ impl Timeout {
 
     /// Returns `Poll::Pending` if `None`.
     #[inline(always)]
-    fn poll_opt(this: Option<&mut Self>, sleep: Pin<&mut Sleep>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll_opt(
+        this: Option<&mut Self>,
+        sleep: &mut Option<Pin<Box<Sleep>>>,
+        cx: &mut Context<'_>,
+    ) -> Poll<()> {
         if let Some(this) = this {
             this.poll(sleep, cx)
         } else {
@@ -763,10 +779,26 @@ impl Timeout {
     }
 
     #[inline]
-    fn poll(&mut self, mut sleep: Pin<&mut Sleep>, cx: &mut Context<'_>) -> Poll<()> {
-        if !self.is_set
-            && let Some(deadline) = Instant::now().checked_add(self.duration)
-        {
+    fn poll(&mut self, sleep: &mut Option<Pin<Box<Sleep>>>, cx: &mut Context<'_>) -> Poll<()> {
+        // Lazily initialize `sleep()` to avoid paying for the allocation if we're not gonna use it.
+        // Also avoids the need for a Tokio runtime if just testing setters,
+        // e.g. in `insert_native::tests`.
+        let sleep = sleep.get_or_insert_with(|| {
+            let sleep = Box::pin(tokio::time::sleep(self.duration));
+            self.is_set = true;
+            sleep
+        });
+
+        if !self.is_set {
+            let now = Instant::now();
+
+            let deadline = now
+                .checked_add(self.duration)
+                // What `tokio::time::sleep()` does if the duration overflows `Instant`
+                // https://github.com/tokio-rs/tokio/blob/ea91b33ca57ff0581b38e735cc108f831bccbdaa/tokio/src/time/sleep.rs#L126-L129
+                // https://github.com/tokio-rs/tokio/blob/ea91b33ca57ff0581b38e735cc108f831bccbdaa/tokio/src/time/instant.rs#L57-L63
+                .unwrap_or_else(|| now + Duration::from_secs(86400 * 365 * 30));
+
             sleep.as_mut().reset(deadline);
             self.is_set = true;
         }
