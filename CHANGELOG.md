@@ -11,8 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 * `Client::with_url()` now recognizes the `database` query parameter of the URL. Added `Client::database()` to read back the configured default database. ([#448])
+* Added `Client::query_raw()`, which sends the SQL to the server verbatim, without parsing
+  client-side bind parameters: `?` is not treated as a placeholder, `??` is not unescaped,
+  and `?fields` is not substituted. Server-side parameters via `Query::param()` still work.
+  ([adbc_clickhouse#53])
 
 [#448]: https://github.com/ClickHouse/clickhouse-rs/issues/448
+[adbc_clickhouse#53]: https://github.com/ClickHouse/adbc_clickhouse/issues/53
 
 ## [0.15.1] - 2026-06-01
 
