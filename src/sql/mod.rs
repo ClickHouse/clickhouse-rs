@@ -14,6 +14,7 @@ pub(crate) mod ser;
 #[derive(Debug, Clone)]
 pub(crate) enum SqlBuilder {
     InProgress(Vec<Part>),
+    Raw(String),
     Failed(String),
 }
 
@@ -37,6 +38,7 @@ impl fmt::Display for SqlBuilder {
                     }
                 }
             }
+            SqlBuilder::Raw(query) => f.write_str(query)?,
             SqlBuilder::Failed(err) => f.write_str(err)?,
         }
         Ok(())
@@ -44,6 +46,12 @@ impl fmt::Display for SqlBuilder {
 }
 
 impl SqlBuilder {
+    /// Creates a builder that keeps the query as-is, without parsing `?`
+    /// as bind placeholders. `??` and `?fields` are also left verbatim.
+    pub(crate) fn raw(query: &str) -> Self {
+        SqlBuilder::Raw(query.to_string())
+    }
+
     pub(crate) fn new(template: &str) -> Self {
         let mut parts = Vec::new();
         let mut rest = template;
@@ -73,8 +81,16 @@ impl SqlBuilder {
     }
 
     pub(crate) fn bind_arg(&mut self, value: impl Bind) {
-        let Self::InProgress(parts) = self else {
-            return;
+        let parts = match self {
+            Self::InProgress(parts) => parts,
+            Self::Raw(_) => {
+                return self.error(
+                    "bind() is not supported for raw queries, \
+                     use server-side parameters via param() \
+                     or client-side binding via query() instead",
+                );
+            }
+            _ => return,
         };
 
         if let Some(part) = parts.iter_mut().find(|p| matches!(p, Part::Arg)) {
@@ -127,6 +143,7 @@ impl SqlBuilder {
 
                 Ok(sql)
             }
+            Self::Raw(query) => Ok(query),
             Self::Failed(err) => Err(Error::InvalidParams(err.into())),
         }
     }
@@ -247,6 +264,33 @@ mod tests {
         let mut sql = SqlBuilder::new("SELECT 1 FROM test WHERE a = ?");
         sql.bind_arg(Some(1u32));
         assert_eq!(sql.finish().unwrap(), r"SELECT 1 FROM test WHERE a = 1");
+    }
+
+    #[test]
+    fn raw_keeps_query_verbatim() {
+        const QUERY: &str = "SELECT ?fields FROM test WHERE a = '?' AND b = '??'";
+
+        let sql = SqlBuilder::raw(QUERY);
+        assert_eq!(sql.to_string(), QUERY);
+        assert_eq!(sql.finish().unwrap(), QUERY);
+    }
+
+    #[test]
+    fn raw_rejects_bind() {
+        let mut sql = SqlBuilder::raw("SELECT 1 FROM test WHERE a = ?");
+        sql.bind_arg(42);
+        let err = sql.finish().unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("bind() is not supported for raw queries")
+        );
+    }
+
+    #[test]
+    fn raw_ignores_bind_fields() {
+        let mut sql = SqlBuilder::raw("SELECT a, b FROM test");
+        sql.bind_fields::<Row>();
+        assert_eq!(sql.finish().unwrap(), "SELECT a, b FROM test");
     }
 
     #[test]

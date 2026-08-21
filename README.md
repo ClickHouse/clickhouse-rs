@@ -122,6 +122,7 @@ async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
 * Placeholder `?` is replaced with values in following `bind()` calls.
 * Convenient `fetch_one::<Row>()` and `fetch_all::<Row>()` can be used to get a first row or all rows correspondingly.
 * `sql::Identifier` can be used to bind table names.
+* Use `client.query_raw(..)` to send SQL to the server as-is, without any placeholder parsing: `?` is not treated as a placeholder, `??` is not unescaped, and `?fields` is not substituted. To parameterize such queries, use server-side parameters (`{name: type}`) via `.param(..)`.
 
 Note that cursors can return an error even after producing some rows. To avoid this, use `client.with_setting("wait_end_of_query", "1")` in order to enable buffering on the server-side. [More details](https://clickhouse.com/docs/en/interfaces/http/#response-buffering). The `buffer_size` setting can be useful too.
 

@@ -563,6 +563,40 @@ impl Client {
         query::Query::new(self, query)
     }
 
+    /// Starts a new SELECT/DDL query, sending the provided SQL to the server
+    /// verbatim, without parsing client-side bind parameters.
+    ///
+    /// Unlike [`Client::query()`]:
+    /// * `?` is not treated as a bind placeholder and is sent as-is,
+    ///   so [`Query::bind()`] must not be used with such queries;
+    ///   any call to it will result in an [`error::Error::InvalidParams`]
+    ///   during query execution (`execute()`, `fetch()`, etc.).
+    /// * `??` is not unescaped to `?`.
+    /// * `?fields` is not substituted with the [`Row`] column names.
+    ///
+    /// To parameterize a raw query, use server-side parameters instead:
+    /// reference them as `{name: type}` in the SQL and supply values
+    /// via [`Query::param()`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # async fn example() -> clickhouse::error::Result<()> {
+    /// let value: String = clickhouse::Client::default()
+    ///     .query_raw("SELECT concat('foo?', {suffix: String})")
+    ///     .param("suffix", "bar")
+    ///     .fetch_one()
+    ///     .await?;
+    /// assert_eq!(value, "foo?bar");
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// [`Query::bind()`]: query::Query::bind
+    /// [`Query::param()`]: query::Query::param
+    pub fn query_raw(&self, query: &str) -> query::Query {
+        query::Query::raw(self, query)
+    }
+
     /// Enables or disables [`Row`] data types validation against the database schema
     /// at the cost of performance. Validation is enabled by default, and in this mode,
     /// the client will use `RowBinaryWithNamesAndTypes` format.

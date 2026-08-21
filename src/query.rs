@@ -34,6 +34,13 @@ impl Query {
         }
     }
 
+    pub(crate) fn raw(client: &Client, query: &str) -> Self {
+        Self {
+            client: client.clone(),
+            sql: SqlBuilder::raw(query),
+        }
+    }
+
     /// Display SQL query as string.
     pub fn sql_display(&self) -> &impl Display {
         &self.sql
