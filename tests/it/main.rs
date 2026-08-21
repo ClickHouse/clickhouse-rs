@@ -270,6 +270,7 @@ mod nested;
 #[cfg(feature = "opentelemetry")]
 mod opentelemetry;
 mod query;
+mod query_raw;
 mod query_readonly;
 mod query_summary;
 mod query_syntax;

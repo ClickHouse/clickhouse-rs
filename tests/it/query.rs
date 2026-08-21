@@ -284,57 +284,6 @@ async fn prints_query() {
     );
 }
 
-// See https://github.com/ClickHouse/adbc_clickhouse/issues/53.
-#[tokio::test]
-async fn raw_query() {
-    let client = prepare_database!();
-
-    #[derive(Debug, Row, Deserialize)]
-    struct MyRow {
-        s: String,
-        n: u8,
-    }
-
-    // `?` is not treated as a bind placeholder.
-    let row = client
-        .query_raw("SELECT 'a?b' AS s, 1 AS n")
-        .fetch_one::<MyRow>()
-        .await
-        .unwrap();
-    assert_eq!(row.s, "a?b");
-    assert_eq!(row.n, 1);
-
-    // `??` is not unescaped to `?`.
-    let value = client
-        .query_raw("SELECT 'a??b'")
-        .fetch_one::<String>()
-        .await
-        .unwrap();
-    assert_eq!(value, "a??b");
-
-    // `bind()` is rejected in raw mode.
-    let err = client
-        .query_raw("SELECT ?")
-        .bind(42)
-        .execute()
-        .await
-        .unwrap_err();
-    assert!(matches!(err, Error::InvalidParams(_)));
-}
-
-#[tokio::test]
-async fn raw_query_with_server_side_param() {
-    let client = prepare_database!();
-
-    let value = client
-        .query_raw("SELECT concat('foo?', {suffix: String}) AS result")
-        .param("suffix", "bar")
-        .fetch_one::<String>()
-        .await
-        .unwrap();
-    assert_eq!(value, "foo?bar");
-}
-
 #[tokio::test]
 async fn query_with_role() {
     let db_name = test_database_name!();
