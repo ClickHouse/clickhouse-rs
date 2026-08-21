@@ -1,5 +1,5 @@
 use crate::get_client;
-use clickhouse::native::{Column, Decode};
+use clickhouse::native::{Column, decode::Decode};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 
@@ -21,41 +21,6 @@ async fn mixed_types_100() {
 #[tokio::test]
 async fn mixed_types_1000() {
     mixed_types(1000).await
-}
-
-#[tokio::test]
-async fn fixed_width_tuples() {
-    let client = get_client();
-
-    let mut cursor = client
-        .query(
-            "SELECT
-                tuple(toUInt64(number), toUInt32(number + 1)) AS fixed_tuple,
-                arrayMap(
-                    x -> tuple(toUInt64(x), toUInt32(x + 1)),
-                    range(number)
-                ) AS fixed_tuple_array
-            FROM system.numbers
-            LIMIT 3",
-        )
-        .fetch_native()
-        .unwrap();
-
-    let block = cursor.next().await.unwrap().expect("expected one block");
-
-    let tuples = block["fixed_tuple"]
-        .iter::<(u64, u32)>()
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(tuples, [(0, 1), (1, 2), (2, 3)]);
-
-    let tuple_arrays = block["fixed_tuple_array"]
-        .iter::<Vec<(u64, u32)>>()
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(tuple_arrays, [vec![], vec![(0, 1)], vec![(0, 1), (1, 2)]]);
 }
 
 // NOTE: requires >50GiB RAM on the server, likely because all the strings have to live in memory
@@ -491,4 +456,39 @@ async fn nested_arrays_100() {
 #[tokio::test]
 async fn nested_arrays_1000() {
     nested_arrays(1000).await;
+}
+
+#[tokio::test]
+async fn fixed_width_tuples() {
+    let client = get_client();
+
+    let mut cursor = client
+        .query(
+            "SELECT
+                tuple(toUInt64(number), toUInt32(number + 1)) AS fixed_tuple,
+                arrayMap(
+                    x -> tuple(toUInt64(x), toUInt32(x + 1)),
+                    range(number)
+                ) AS fixed_tuple_array
+            FROM system.numbers
+            LIMIT 3",
+        )
+        .fetch_native()
+        .unwrap();
+
+    let block = cursor.next().await.unwrap().expect("expected one block");
+
+    let tuples = block["fixed_tuple"]
+        .iter::<(u64, u32)>()
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(tuples, [(0, 1), (1, 2), (2, 3)]);
+
+    let tuple_arrays = block["fixed_tuple_array"]
+        .iter::<Vec<(u64, u32)>>()
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(tuple_arrays, [vec![], vec![(0, 1)], vec![(0, 1), (1, 2)]]);
 }

@@ -196,6 +196,8 @@ arrow = "58.2.0"
 # Required by `record_batch!()`
 arrow-schema = "58.2.0"
 
+insta = "1.48.0"
+
 # Only used in testing and examples if the `opentelemetry` feature is enabled,
 # but dev-dependencies cannot be optional.
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }

@@ -1,25 +1,32 @@
 use crate::error::Error;
 use crate::native::string::MaybeUtf8;
 use bytes::Bytes;
-use clickhouse_types::data_types::{DecimalType, EnumType};
 use std::ops::Index;
 
 use hashbrown::HashMap;
 
 pub use array::{ArrayData, ArrayReader};
-pub use decode::Decode;
 pub use reader::BlockReadError;
 
+use crate::native::decode::Decode;
 pub use clickhouse_types::DataTypeNode;
 
 pub(crate) mod array;
-pub(crate) mod decode;
+pub mod builder;
+pub mod decode;
+pub mod encode;
 pub(crate) mod reader;
 pub(crate) mod string;
+mod utils;
+mod varuint;
+pub(crate) mod writer;
+
+#[cfg(test)]
+mod tests;
 
 pub struct Block {
     column_names: HashMap<MaybeUtf8, usize>,
-    columns: Vec<Column>,
+    columns: Box<[Column]>,
     num_rows: usize,
 }
 
@@ -31,7 +38,7 @@ impl Block {
                 .enumerate()
                 .map(|(i, column)| (column.name.clone(), i))
                 .collect(),
-            columns,
+            columns: columns.into(),
             num_rows,
         }
     }
@@ -183,69 +190,5 @@ where
 impl<'a, T> ColumnIter<'a, T> {
     pub fn column(&self) -> &'a Column {
         self.column
-    }
-}
-
-fn type_fixed_width(data_type: &DataTypeNode) -> Option<usize> {
-    match data_type {
-        DataTypeNode::Bool => Some(1),
-        DataTypeNode::UInt8 => Some(1),
-        DataTypeNode::UInt16 => Some(2),
-        DataTypeNode::UInt32 => Some(4),
-        DataTypeNode::UInt64 => Some(8),
-        DataTypeNode::UInt128 => Some(16),
-        DataTypeNode::UInt256 => Some(32),
-        DataTypeNode::Int8 => Some(1),
-        DataTypeNode::Int16 => Some(2),
-        DataTypeNode::Int32 => Some(4),
-        DataTypeNode::Int64 => Some(8),
-        DataTypeNode::Int128 => Some(16),
-        DataTypeNode::Int256 => Some(32),
-        DataTypeNode::Float32 => Some(4),
-        DataTypeNode::Float64 => Some(8),
-        DataTypeNode::BFloat16 => Some(2),
-        DataTypeNode::Decimal(_, _, type_) => match type_ {
-            DecimalType::Decimal32 => Some(4),
-            DecimalType::Decimal64 => Some(8),
-            DecimalType::Decimal128 => Some(16),
-            DecimalType::Decimal256 => Some(32),
-        },
-        DataTypeNode::String => None,
-        DataTypeNode::FixedString(len) => Some(*len),
-        DataTypeNode::UUID => Some(16),
-        DataTypeNode::Date => Some(2),
-        DataTypeNode::Date32 => Some(4),
-        DataTypeNode::DateTime(_) => Some(4),
-        DataTypeNode::DateTime64(_, _) => Some(8),
-        DataTypeNode::Time => Some(4),
-        DataTypeNode::Time64(_) => Some(8),
-        DataTypeNode::Interval(_) => Some(8),
-        DataTypeNode::IPv4 => Some(4),
-        DataTypeNode::IPv6 => Some(16),
-        // Nullable needs to be handled specially
-        DataTypeNode::Nullable(_) => None,
-        // Type width determined by metadata that comes before column data.
-        DataTypeNode::LowCardinality(_) => None,
-        DataTypeNode::Array(_) => None,
-        // Tuples are serialized column-by-column and need a structural layout.
-        DataTypeNode::Tuple(_) => None,
-        DataTypeNode::Enum(type_, _) => match type_ {
-            EnumType::Enum8 => Some(1),
-            EnumType::Enum16 => Some(2),
-        },
-        DataTypeNode::Map(_) => None,
-        DataTypeNode::AggregateFunction(_, _) => None,
-        DataTypeNode::SimpleAggregateFunction(_, inner) => type_fixed_width(inner),
-        DataTypeNode::Variant(_) => None,
-        DataTypeNode::Dynamic => None,
-        DataTypeNode::JSON => None,
-        DataTypeNode::JsonWithHint(_) => None,
-        DataTypeNode::Point => Some(16), // Tuple(Float64, Float64)
-        DataTypeNode::Ring => None,
-        DataTypeNode::LineString => None,
-        DataTypeNode::MultiLineString => None,
-        DataTypeNode::Polygon => None,
-        DataTypeNode::MultiPolygon => None,
-        _ => None,
     }
 }

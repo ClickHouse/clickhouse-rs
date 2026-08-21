@@ -7,7 +7,7 @@ use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
 /// A result with a specified [`Error`] type.
 pub type Result<T, E = Error> = result::Result<T, E>;
 
-type BoxedError = Box<dyn StdError + Send + Sync>;
+pub(crate) type BoxedError = Box<dyn StdError + Send + Sync>;
 
 /// Represents all possible errors.
 #[derive(Debug, thiserror::Error)]
