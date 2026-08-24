@@ -774,6 +774,7 @@ mod formats {
 mod settings {
     pub(crate) const DATABASE: &str = "database";
     pub(crate) const DEFAULT_FORMAT: &str = "default_format";
+    pub(crate) const CLIENT_PROTOCOL_VERSION: &str = "client_protocol_version";
     pub(crate) const COMPRESS: &str = "compress";
     pub(crate) const DECOMPRESS: &str = "decompress";
     #[cfg(feature = "zstd")]

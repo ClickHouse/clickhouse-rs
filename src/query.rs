@@ -183,6 +183,10 @@ impl Query {
         let span = self.make_span(Some("Native")).entered();
 
         // FIXME: use HTTP body compression instead of block-level compression
+        let _ = self
+            .client
+            .settings
+            .remove(settings::CLIENT_PROTOCOL_VERSION);
         self.client = self.client.with_compression(Compression::None);
 
         let response = self.do_execute(Some("Native"))?;

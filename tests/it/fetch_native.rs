@@ -4,6 +4,28 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 
 #[tokio::test]
+async fn fetch_native_overrides_client_protocol_version() {
+    let client = get_client().with_setting("client_protocol_version", "1");
+
+    let mut cursor = client
+        .query("SELECT toUInt64(42) AS value")
+        .fetch_native()
+        .unwrap();
+
+    let block = cursor.next().await.unwrap().unwrap();
+    assert_eq!(
+        block["value"]
+            .iter::<u64>()
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap(),
+        42
+    );
+    assert!(cursor.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn mixed_types_empty() {
     mixed_types(0).await
 }
