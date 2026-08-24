@@ -672,7 +672,9 @@ async fn insert_unescaped() {
     let client = crate::_priv::prepare_database(&db_name).await;
 
     client
-        .query("CREATE TABLE foo(bar Int32, baz Nullable(String))")
+        .query(
+            "CREATE TABLE foo(bar Int32, baz Nullable(String)) ENGINE = MergeTree PRIMARY KEY(bar)",
+        )
         .execute()
         .await
         .unwrap();
@@ -724,7 +726,7 @@ async fn insert_unvalidated() {
     let client = prepare_database!().with_validation(false);
 
     client
-        .query("CREATE TABLE foo(bar Int32, baz String)")
+        .query("CREATE TABLE foo(bar Int32, baz String) ENGINE = MergeTree PRIMARY KEY(bar)")
         .execute()
         .await
         .unwrap();
