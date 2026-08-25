@@ -316,7 +316,7 @@ impl Display for DataTypeNode {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "'{name}' = {index}")?;
+                    write!(f, "'{}' = {index}", escape_enum_name(name))?;
                 }
                 write!(f, ")")
             }
@@ -947,6 +947,43 @@ fn parse_enum_index(input_bytes: &[u8], input: &str) -> Result<i16, TypesError> 
         })
 }
 
+fn escape_enum_name(name: &str) -> String {
+    let mut escaped = String::with_capacity(name.len());
+    for character in name.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '\'' => escaped.push_str("\\'"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn unescape_enum_name(input: &[u8], source: &str) -> Result<String, TypesError> {
+    let mut name = Vec::with_capacity(input.len());
+    let mut char_escaped = false;
+
+    for &byte in input {
+        if char_escaped {
+            if byte != b'\\' && byte != b'\'' {
+                name.push(b'\\');
+            }
+            name.push(byte);
+            char_escaped = false;
+        } else if byte == b'\\' {
+            char_escaped = true;
+        } else {
+            name.push(byte);
+        }
+    }
+
+    String::from_utf8(name).map_err(|_| {
+        TypesError::TypeParsingError(format!(
+            "Invalid UTF-8 sequence in input for the enum name: {source}"
+        ))
+    })
+}
+
 fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError> {
     let mut names: Vec<String> = Vec::new();
     let mut indices: Vec<i16> = Vec::new();
@@ -965,12 +1002,7 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
             } else if input_bytes[i] == b'\'' {
                 // non-escaped closing tick - push the name
                 let name_bytes = &input_bytes[start_index..i];
-                let name = String::from_utf8(name_bytes.to_vec()).map_err(|_| {
-                    TypesError::TypeParsingError(format!(
-                        "Invalid UTF-8 sequence in input for the enum name: {}",
-                        &input[start_index..i]
-                    ))
-                })?;
+                let name = unescape_enum_name(name_bytes, &input[start_index..i])?;
                 names.push(name);
 
                 // Skip ` = ` and the first digit, as it will always have at least one
@@ -1710,10 +1742,9 @@ mod tests {
                 HashMap::from([(1, "A".to_string()), (2, "B".to_string())])
             )
         );
-        assert_eq!(
-            DataTypeNode::new(ENUM_WITH_ESCAPING_STR).unwrap(),
-            enum_with_escaping()
-        );
+        let parsed = DataTypeNode::new(ENUM_WITH_ESCAPING_STR).unwrap();
+        assert_eq!(parsed, enum_with_escaping());
+        assert_eq!(parsed.to_string(), ENUM_WITH_ESCAPING_STR);
         assert_eq!(
             DataTypeNode::new("Enum8('foo' = 0, '' = 42)").unwrap(),
             DataTypeNode::Enum(
@@ -2076,17 +2107,17 @@ mod tests {
         assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
-    const ENUM_WITH_ESCAPING_STR: &str =
-        "Enum8('f\\'' = 1, 'x =' = 2, 'b\\'\\'' = 3, '\\'c=4=' = 42, '4' = 100)";
+    const ENUM_WITH_ESCAPING_STR: &str = "Enum8('f\\'' = 1, 'x =' = 2, 'b\\'\\'' = 3, '\\'c=4=' = 42, 'path\\\\name' = 43, '4' = 100)";
 
     fn enum_with_escaping() -> DataTypeNode {
         DataTypeNode::Enum(
             EnumType::Enum8,
             HashMap::from([
-                (1, "f\\'".to_string()),
+                (1, "f'".to_string()),
                 (2, "x =".to_string()),
-                (3, "b\\'\\'".to_string()),
-                (42, "\\'c=4=".to_string()),
+                (3, "b''".to_string()),
+                (42, "'c=4=".to_string()),
+                (43, "path\\name".to_string()),
                 (100, "4".to_string()),
             ]),
         )
