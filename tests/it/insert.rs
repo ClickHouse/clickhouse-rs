@@ -208,6 +208,68 @@ async fn insert_with_json_hint() {
 }
 
 #[tokio::test]
+async fn insert_with_json_hint_and_quoted_paths() {
+    #[derive(Serialize, Deserialize, Row, PartialEq)]
+    struct JSONTestRow {
+        i: u8,
+        jv: String,
+    }
+
+    let table_name = "rust_json_quoted_paths_test";
+
+    let client = prepare_database!()
+        .with_setting("input_format_binary_read_json_as_string", "1")
+        .with_setting("output_format_binary_write_json_as_string", "1");
+
+    // the server back-quotes these paths in the column type it reports,
+    // i.e. JSON(`foo bar` String, `baz,qux` Int64)
+    client
+        .query(
+            r#"
+                CREATE TABLE ? (
+                    i UInt8,
+                    jv JSON(
+                        `foo bar` String,
+                        `baz,qux` Int64
+                    )
+                )
+                ENGINE = MergeTree
+                ORDER BY i
+            "#,
+        )
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+
+    let row = JSONTestRow {
+        i: 1,
+        jv: r#"{
+            "foo bar": "hello",
+            "baz,qux": 123
+        }"#
+        .to_string(),
+    };
+
+    let mut insert = client.insert::<JSONTestRow>(table_name).await.unwrap();
+
+    insert.write(&row).await.unwrap();
+
+    insert.end().await.unwrap();
+
+    let rows = fetch_rows::<JSONTestRow>(&client, table_name).await;
+
+    assert!(rows.len() == 1);
+
+    assert_eq!(
+        serde_json::from_str::<Value>(&rows[0].jv).unwrap(),
+        serde_json::from_str::<Value>(&row.jv).unwrap()
+    );
+
+    assert_eq!(rows[0].i, row.i)
+}
+
+#[tokio::test]
 async fn rename_insert() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
     #[serde(rename_all = "camelCase")]
