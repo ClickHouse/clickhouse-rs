@@ -1,3 +1,5 @@
+//! Types and impls for decoding Native format.
+
 use crate::error::BoxedError;
 use crate::native::array::{ArrayData, TupleIter};
 use clickhouse_types::DataTypeNode;
@@ -15,6 +17,14 @@ impl<'a> ValueReader<'a> {
     /// The data type of this value.
     pub fn data_type(&self) -> &DataTypeNode {
         self.data_type
+    }
+
+    /// The byte slice underlying this cursor.
+    ///
+    /// Some bytes may have been consumed from the view if [`Self::read_bytes_fixed()`]
+    /// was previously called.
+    pub fn native_bytes(&self) -> &'a [u8] {
+        self.native_bytes
     }
 
     /// Read a fixed number of bytes from this cursor.
@@ -392,6 +402,10 @@ impl Decode<'_> for Ipv6Addr {
     }
 }
 
+/// Accepts either a `IPv4` or `IPv6` type.
+///
+/// # Note: No `Encode` Impl
+/// ClickHouse does not have a polymorphic IP address type, so this cannot be infallibly encoded.
 impl Decode<'_> for IpAddr {
     fn compatible(data_type: &DataTypeNode) -> bool {
         type_matches!(data_type, DataTypeNode::IPv4 | DataTypeNode::IPv6)

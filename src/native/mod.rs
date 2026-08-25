@@ -1,3 +1,4 @@
+#![doc=include_str!("mod.md")]
 #![warn(missing_docs)]
 
 use crate::error::Error;

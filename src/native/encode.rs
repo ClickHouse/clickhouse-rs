@@ -1,3 +1,5 @@
+//! Types and impls for encoding Native format.
+
 use crate::error::BoxedError;
 use crate::native::builder::{LayoutBuilder, LayoutBuilderKind};
 use crate::native::utils::DebugNullMap;
@@ -371,11 +373,17 @@ pub enum ArrayWriteError {
 
     /// Returned by [`ValueWriter::write_array()`] if the array element type is not compatible.
     #[error("value type is not compatible with expected type {expected_type}")]
-    IncompatibleType { expected_type: DataTypeNode },
+    IncompatibleType {
+        /// The actual column type.
+        expected_type: DataTypeNode,
+    },
 
+    /// Returned by [`ArrayWriter::write()`] if [`Encode::encode()`] returns an error.
     #[error("error writing value at array index {index}")]
     ValueWriteError {
+        /// The index that was being written.
         index: usize,
+        /// The error from [`Encode::encode()`].
         #[source]
         error: BoxedError,
     },
