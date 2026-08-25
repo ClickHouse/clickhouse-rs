@@ -8,11 +8,27 @@ use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
+/// Encode a Rust type to its equivalent in ClickHouse's [Native format].
+///
+/// [Native format]: https://clickhouse.com/docs/reference/formats/Native
 pub trait Encode {
+    /// The ClickHouse data type this type will encode to.
     fn produces() -> DataTypeNode;
 
+    /// Encode a value.
+    ///
+    /// Any error may be returned. The exact error type should not be considered stable.
     fn encode(&self, writer: &mut ValueWriter<'_>) -> Result<(), BoxedError>;
 
+    /// Returns `true` if a column of the given data type can accept this type.
+    ///
+    /// The default implementation allows a Rust type producing a ClickHouse type `T`
+    /// to encode to:
+    ///
+    /// * `T`
+    /// * `Nullable(T)`
+    /// * `LowCardinality(T)`
+    /// * `SimpleAggregateFunction(_, T)`
     fn compatible(column_type: &DataTypeNode) -> bool {
         let produced_type = Self::produces();
 
@@ -67,29 +83,47 @@ fn recursive_compatible<F: Fn(&DataTypeNode) -> bool>(
     }
 }
 
+/// Writes an individual value to a column.
 pub struct ValueWriter<'a> {
     pub(super) data_type: &'a DataTypeNode,
     pub(super) layout: &'a mut LayoutBuilder,
 }
 
+/// Error returned by methods of [`ValueWriter`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ValueWriteError {
+    /// The wrong method was called for the column type, e.g. [`ValueWriter::write_array()`]
+    /// was called for a column of type `UInt32`.
     #[error("attempting to use incorrect writer method for this type")]
     IncorrectMethod,
 
+    /// Attempted to write a null value (`Option::None`) to a column that is not `Nullable(_)`.
     #[error("column does not allow nullable values here")]
     UnexpectedNull,
 
+    /// Attempted to write a number of bytes to a fixed-width type of a different size.
     #[error("expected {expected} bytes, got {actual}")]
-    InvalidLength { expected: usize, actual: usize },
+    InvalidLength {
+        /// The size of the fixed-width type.
+        expected: usize,
+        /// The number of bytes that were written.
+        actual: usize,
+    },
 }
 
 impl<'a> ValueWriter<'a> {
+    /// The data type of the target column.
     pub fn column_type(&self) -> &'a DataTypeNode {
         self.data_type
     }
 
+    /// Write a value to a fixed-width column.
+    ///
+    /// # Errors
+    /// * [`ValueWriteError::IncorrectMethod`] if the data type is not fixed-width.
+    /// * [`ValueWriteError::InvalidLength`] if the data type is a different width
+    ///   than the number of bytes written.
     pub fn write_fixed(&mut self, bytes: &[u8]) -> Result<(), ValueWriteError> {
         let LayoutBuilderKind::Fixed {
             type_width,
@@ -112,6 +146,13 @@ impl<'a> ValueWriter<'a> {
         Ok(())
     }
 
+    /// Write a string value to the column.
+    ///
+    /// ClickHouse strings are not required to be UTF-8, so this method accepts arbitrary bytes.
+    ///
+    /// # Note
+    /// Types writing to a `FixedString` column should check the declared length through
+    /// [`Self::column_type()`] and call [`Self::write_fixed()`] instead.
     pub fn write_string(&mut self, string_bytes: &[u8]) -> Result<(), ValueWriteError> {
         let LayoutBuilderKind::Variable { end_offsets, data } = &mut self.layout.kind else {
             return Err(ValueWriteError::IncorrectMethod);
@@ -125,6 +166,10 @@ impl<'a> ValueWriter<'a> {
         Ok(())
     }
 
+    /// Write a null value to the column.
+    ///
+    /// # Errors
+    /// * [`ValueWriteError::UnexpectedNull`] if the column type is not `Nullable(_)`.
     pub fn write_null(&mut self) -> Result<(), ValueWriteError> {
         let nulls = self
             .layout
@@ -139,6 +184,14 @@ impl<'a> ValueWriter<'a> {
         Ok(())
     }
 
+    /// Begin writing an array to the column.
+    ///
+    /// See [`ArrayWriter`] for details.
+    ///
+    /// # Errors
+    /// * [`ArrayWriteError::NotAnArray`] if the column type is not `Array(_)`.
+    /// * [`ArrayWriteError::IncompatibleType`] if `T` is not compatible with the column type,
+    ///   as determined by [`Encode::compatible()`].
     pub fn write_array<T>(&mut self) -> Result<ArrayWriter<'_, T>, ArrayWriteError>
     where
         T: Encode,
@@ -151,7 +204,7 @@ impl<'a> ValueWriter<'a> {
             });
         };
 
-        if !T::compatible(elem_type) {
+        if !T::compatible(elem_type.remove_compatible_wrappers()) {
             return Err(ArrayWriteError::IncompatibleType {
                 expected_type: (**elem_type).clone(),
             });
@@ -182,6 +235,13 @@ impl<'a> ValueWriter<'a> {
         })
     }
 
+    /// Begin writing a tuple to the column.
+    ///
+    /// See [`TupleWriter`] for details.
+    ///
+    /// # Errors
+    /// * [`TupleWriteError::NotATuple`] if the column type is not `Tuple(...)`
+    ///   or `Nullable(Tuple(...))` (experimental type).
     pub fn write_tuple(&mut self) -> Result<TupleWriter<'_>, TupleWriteError> {
         let types = match &self.data_type {
             DataTypeNode::Tuple(types) => types,
@@ -215,6 +275,16 @@ impl<'a> ValueWriter<'a> {
         })
     }
 
+    /// Begin writing a map to the column.
+    ///
+    /// See [`MapWriter`] for details.
+    ///
+    /// # Errors
+    /// * [`MapWriteError::NotAMap`] if the column type is not `Map(...)`.
+    /// * [`MapWriteError::IncompatibleKeyType`] if `K` is not compatible with the map's key type,
+    ///   according to [`Encode::compatible()`].
+    /// * [`MapWriteError::IncompatibleValueType`] if `V` is not compatible with the map's value type,
+    ///   according to [`Encode::compatible()`].
     pub fn write_map<K, V>(&mut self) -> Result<MapWriter<'_, K, V>, MapWriteError>
     where
         K: Encode,
@@ -275,6 +345,10 @@ impl<'a> ValueWriter<'a> {
     }
 }
 
+/// Writes an individual array to a column.
+///
+/// # Note: Rolls Back on Drop
+/// [`ArrayWriter::finish()`] must be called to commit the array's contents to the column.
 #[must_use = "rolls back the written array elements on-drop if `.finish()` is not called"]
 pub struct ArrayWriter<'a, T> {
     elem_type: &'a DataTypeNode,
@@ -284,12 +358,18 @@ pub struct ArrayWriter<'a, T> {
     _marker: PhantomData<fn(T)>,
 }
 
+/// Errors returned by [`ValueWriter::write_array()`] and [`ArrayWriter`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ArrayWriteError {
+    /// Returned by [`ValueWriter::write_array()`] if the column is not an array.
     #[error("attempted to write an array to a non-array column: {data_type}")]
-    NotAnArray { data_type: DataTypeNode },
+    NotAnArray {
+        /// The actual column type.
+        data_type: DataTypeNode,
+    },
 
+    /// Returned by [`ValueWriter::write_array()`] if the array element type is not compatible.
     #[error("value type is not compatible with expected type {expected_type}")]
     IncompatibleType { expected_type: DataTypeNode },
 

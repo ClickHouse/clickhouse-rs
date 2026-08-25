@@ -125,6 +125,7 @@ impl InsertNative {
         self.writer.write(block).await
     }
 
+    /// Finish the current `INSERT` request.
     pub async fn end(self) -> crate::Result<()> {
         self.writer.end().await
     }

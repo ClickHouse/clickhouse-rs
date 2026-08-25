@@ -198,6 +198,23 @@ impl DataTypeNode {
         }
     }
 
+    /// Remove wrapper types that are semantically identical from a data consumer's perspective.
+    ///
+    /// N.B. `Nullable` is not a valid lift here as nullable column data is not compatible with
+    /// a non-nullable Rust type and vice versa
+    /// (e.g. `Nullable(UInt64)` is not strictly compatible with `u64`).
+    ///
+    /// Current types covered:
+    /// * `LowCardinality`
+    /// * `SimpleAggregateFunction`
+    pub fn remove_compatible_wrappers(&self) -> &DataTypeNode {
+        match self {
+            DataTypeNode::LowCardinality(inner)
+            | DataTypeNode::SimpleAggregateFunction(_, inner) => inner,
+            _ => self,
+        }
+    }
+
     /// If `self` has a static string representation (e.g. `"UInt8"`), return it.
     ///
     /// Returns `None` for polymorphic types (e.g. `Array(T)` or `Decimal(P, S)`).
