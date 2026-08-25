@@ -951,6 +951,12 @@ fn escape_enum_name(name: &str) -> String {
     let mut escaped = String::with_capacity(name.len());
     for character in name.chars() {
         match character {
+            '\0' => escaped.push_str("\\0"),
+            '\x08' => escaped.push_str("\\b"),
+            '\x0c' => escaped.push_str("\\f"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
             '\\' => escaped.push_str("\\\\"),
             '\'' => escaped.push_str("\\'"),
             _ => escaped.push(character),
@@ -965,10 +971,20 @@ fn unescape_enum_name(input: &[u8], source: &str) -> Result<String, TypesError> 
 
     for &byte in input {
         if char_escaped {
-            if byte != b'\\' && byte != b'\'' {
-                name.push(b'\\');
+            match byte {
+                b'0' => name.push(b'\0'),
+                b'b' => name.push(0x08),
+                b'f' => name.push(0x0c),
+                b'n' => name.push(b'\n'),
+                b'r' => name.push(b'\r'),
+                b't' => name.push(b'\t'),
+                b'\\' => name.push(b'\\'),
+                b'\'' => name.push(b'\''),
+                _ => {
+                    name.push(b'\\');
+                    name.push(byte);
+                }
             }
-            name.push(byte);
             char_escaped = false;
         } else if byte == b'\\' {
             char_escaped = true;
@@ -1746,6 +1762,13 @@ mod tests {
         assert_eq!(parsed, enum_with_escaping());
         assert_eq!(parsed.to_string(), ENUM_WITH_ESCAPING_STR);
         assert_eq!(
+            DataTypeNode::new(r#"Enum8('unknown\%value' = 1)"#).unwrap(),
+            DataTypeNode::Enum(
+                EnumType::Enum8,
+                HashMap::from([(1, "unknown\\%value".to_string())])
+            )
+        );
+        assert_eq!(
             DataTypeNode::new("Enum8('foo' = 0, '' = 42)").unwrap(),
             DataTypeNode::Enum(
                 EnumType::Enum8,
@@ -2107,18 +2130,21 @@ mod tests {
         assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
-    const ENUM_WITH_ESCAPING_STR: &str = "Enum8('f\\'' = 1, 'x =' = 2, 'b\\'\\'' = 3, '\\'c=4=' = 42, 'path\\\\name' = 43, '4' = 100)";
+    const ENUM_WITH_ESCAPING_STR: &str = "Enum8('quote\\'' = 1, 'slash\\\\value' = 2, 'tab\\tvalue' = 3, 'line\\nvalue' = 4, 'cr\\rvalue' = 5, 'back\\bvalue' = 6, 'form\\fvalue' = 7, 'null\\0value' = 8, 'unknown\\\\%value' = 9)";
 
     fn enum_with_escaping() -> DataTypeNode {
         DataTypeNode::Enum(
             EnumType::Enum8,
             HashMap::from([
-                (1, "f'".to_string()),
-                (2, "x =".to_string()),
-                (3, "b''".to_string()),
-                (42, "'c=4=".to_string()),
-                (43, "path\\name".to_string()),
-                (100, "4".to_string()),
+                (1, "quote'".to_string()),
+                (2, "slash\\value".to_string()),
+                (3, "tab\tvalue".to_string()),
+                (4, "line\nvalue".to_string()),
+                (5, "cr\rvalue".to_string()),
+                (6, "back\x08value".to_string()),
+                (7, "form\x0cvalue".to_string()),
+                (8, "null\0value".to_string()),
+                (9, "unknown\\%value".to_string()),
             ]),
         )
     }
