@@ -1,4 +1,4 @@
-#![deny(missing_docs)]
+#![warn(missing_docs)]
 
 use crate::error::Error;
 use crate::native::string::MaybeUtf8;
