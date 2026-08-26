@@ -499,7 +499,7 @@ pub enum TupleWriteError {
         written_len: usize,
     },
 
-    /// Returned by [`TupleWriteError::write()`] if [`Encode::encode()`] returns an error.
+    /// Returned by [`TupleWriter::write()`] if [`Encode::encode()`] returns an error.
     #[error("error writing value at tuple index {index}")]
     ValueWriteError {
         /// The 0-based position in the tuple.

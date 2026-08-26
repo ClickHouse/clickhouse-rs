@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasher, Hash};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-/// A cursor to the data for an individual element in a [`Column`].
+/// A cursor to the data for an individual element in a [`Column`][super::Column].
 pub struct ValueReader<'a> {
     pub(super) data_type: &'a DataTypeNode,
     pub(super) native_bytes: &'a [u8],
