@@ -246,7 +246,7 @@ impl Debug for BlockBuilder {
 
 /// Builder for an individual [`Column`]. May only be created by [`BlockBuilder`].
 pub struct ColumnBuilder<'a, T> {
-    inner: &'a mut ColumnBuilderRaw,
+    pub(super) inner: &'a mut ColumnBuilderRaw,
     _marker: PhantomData<fn(T)>,
 }
 
@@ -287,6 +287,11 @@ where
         self.inner.add_all_unchecked(values)?;
         Ok(self)
     }
+
+    #[cfg(test)]
+    pub(super) fn validate(&self) -> Result<(), String> {
+        self.inner.layout.validate(&self.inner.data_type)
+    }
 }
 
 impl<T> Debug for ColumnBuilder<'_, T> {
@@ -296,7 +301,7 @@ impl<T> Debug for ColumnBuilder<'_, T> {
 }
 
 #[derive(Debug)] // Derived impl works for us here
-struct ColumnBuilderRaw {
+pub(super) struct ColumnBuilderRaw {
     name: MaybeUtf8,
     data_type: DataTypeNode,
     layout: LayoutBuilder,
@@ -540,7 +545,7 @@ impl LayoutBuilder {
         }
     }
 
-    fn validate(&self, data_type: &DataTypeNode) -> Result<(), String> {
+    pub(super) fn validate(&self, data_type: &DataTypeNode) -> Result<(), String> {
         self.validate_nulls(data_type)?;
 
         let non_nullable = if let DataTypeNode::Nullable(inner) = data_type {

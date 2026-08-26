@@ -141,6 +141,35 @@ fn map_writer_rolls_back() {
     assert_eq!(block.num_rows(), 1);
 }
 
+// Verify that `MapWriter` rolls back a successfully written key if the value fails to encode.
+#[test]
+fn map_writer_failed_write_rolls_back() {
+    struct BadValue;
+
+    impl Encode for BadValue {
+        fn produces() -> DataTypeNode {
+            DataTypeNode::String
+        }
+
+        fn encode(&self, _writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
+            Err("BadValue".into())
+        }
+    }
+
+    let mut builder = BlockBuilder::new();
+
+    let mut column = builder.upsert_column("map_column").unwrap();
+
+    let err = column
+        .add(HashMap::from([("foo", BadValue)]))
+        .expect_err("expected error");
+
+    assert_eq!(err.to_string(), "error writing value at entry index 0");
+
+    // Validation would fail if the column was out of sync.
+    column.validate().unwrap();
+}
+
 // A leak writer could put a block out of sync and result in data corruption;
 // it's better if we catch it during validation.
 #[test]
