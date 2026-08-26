@@ -6,7 +6,7 @@ use bytes::{Buf, BufMut};
 #[doc(hidden)]
 pub fn read_leb128(mut buffer: impl Buf) -> Result<u64, TypesError> {
     let mut value = 0u64;
-    let mut shift = 0;
+    let mut shift = 0u32;
     loop {
         if buffer.remaining() < 1 {
             return Err(NotEnoughData(
@@ -14,16 +14,17 @@ pub fn read_leb128(mut buffer: impl Buf) -> Result<u64, TypesError> {
             ));
         }
         let byte = buffer.get_u8();
-        value |= (byte as u64 & 0x7f) << shift;
+        let payload = byte & 0x7f;
+        if shift == 63 && (payload > 1 || byte & 0x80 != 0) {
+            return Err(TypeParsingError(
+                "decoding LEB128, value overflows u64".to_string(),
+            ));
+        }
+        value |= (payload as u64) << shift;
         if byte & 0x80 == 0 {
             break;
         }
         shift += 7;
-        if shift > 57 {
-            return Err(TypeParsingError(
-                "decoding LEB128, unexpected shift value".to_string(),
-            ));
-        }
     }
     Ok(value)
 }
@@ -51,6 +52,11 @@ mod tests {
 
     #[test]
     fn read() {
+        let mut max_encoding = vec![0xFFu8; 9];
+        max_encoding.push(0x01);
+        let mut max_minus_one_encoding = max_encoding.clone();
+        max_minus_one_encoding[0] = 0xFE;
+
         let test_cases = vec![
             // (input bytes, expected value)
             (vec![0], 0),
@@ -60,6 +66,8 @@ mod tests {
             (vec![255, 1], 255),
             (vec![0x85, 0x91, 0x26], 624773),
             (vec![0xE5, 0x8E, 0x26], 624485),
+            (max_minus_one_encoding, u64::MAX - 1),
+            (max_encoding, u64::MAX),
         ];
 
         for (input, expected) in test_cases {
@@ -70,13 +78,18 @@ mod tests {
 
     #[test]
     fn read_errors() {
+        let truncated = vec![0xFFu8; 9];
+        let mut overflow = truncated.clone();
+        overflow.push(0x02);
+        let mut continuation = truncated.clone();
+        continuation.push(0x80);
+
         let test_cases = vec![
             // (input bytes, expected error message)
             (vec![], "decoding LEB128, 0 bytes remaining"),
-            (
-                vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01],
-                "decoding LEB128, unexpected shift value",
-            ),
+            (truncated, "decoding LEB128, 0 bytes remaining"),
+            (overflow, "decoding LEB128, value overflows u64"),
+            (continuation, "decoding LEB128, value overflows u64"),
         ];
 
         for (input, expected_error) in test_cases {
@@ -93,6 +106,11 @@ mod tests {
 
     #[test]
     fn put_and_read() {
+        let mut max_encoding = vec![0xFFu8; 9];
+        max_encoding.push(0x01);
+        let mut max_minus_one_encoding = max_encoding.clone();
+        max_minus_one_encoding[0] = 0xFE;
+
         let test_cases: Vec<(u64, Vec<u8>)> = vec![
             // (value, expected encoding)
             (0u64, vec![0x00]),
@@ -105,6 +123,8 @@ mod tests {
             (624_485, vec![0xE5, 0x8E, 0x26]),
             (10_000_000, vec![0x80, 0xAD, 0xE2, 0x04]),
             (u32::MAX as u64, vec![0xFF, 0xFF, 0xFF, 0xFF, 0x0F]),
+            (u64::MAX - 1, max_minus_one_encoding),
+            (u64::MAX, max_encoding),
         ];
 
         for (value, expected_encoding) in test_cases {
