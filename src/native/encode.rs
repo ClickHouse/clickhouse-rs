@@ -351,6 +351,9 @@ impl<'a> ValueWriter<'a> {
 ///
 /// # Note: Rolls Back on Drop
 /// [`ArrayWriter::finish()`] must be called to commit the array's contents to the column.
+///
+/// If the writer is dropped without calling `finish()`, the written elements are dropped and
+/// no array is written to the column.
 #[must_use = "rolls back the written array elements on-drop if `.finish()` is not called"]
 pub struct ArrayWriter<'a, T> {
     elem_type: &'a DataTypeNode,
@@ -390,6 +393,12 @@ pub enum ArrayWriteError {
 }
 
 impl<T> ArrayWriter<'_, T> {
+    /// Write an element to the array.
+    ///
+    /// Call [`Self::finish()`] after all elements have been written.
+    ///
+    /// # Errors
+    /// * [`ArrayWriteError::ValueWriteError`] if [`Encode::encode()`] returns an error.
     pub fn write(&mut self, value: T) -> Result<&mut Self, ArrayWriteError>
     where
         T: Encode,
@@ -407,6 +416,7 @@ impl<T> ArrayWriter<'_, T> {
         Ok(self)
     }
 
+    /// Commit the array's contents to the column.
     pub fn finish(mut self) {
         self.finish_mut()
     }
@@ -438,6 +448,13 @@ impl<T> Drop for ArrayWriter<'_, T> {
     }
 }
 
+/// Writes an individual tuple to a column.
+///
+/// # Note: Rolls Back on Drop
+/// [`TupleWriter::finish()`] must be called to commit the tuple's contents to the column.
+///
+/// If the writer is dropped without calling `finish()`, the written elements are dropped and
+/// no tuple is written to the column.
 #[must_use = "rolls back the written tuple elements on-drop if `.finish()` is not called"]
 pub struct TupleWriter<'a> {
     index: usize,
@@ -447,39 +464,64 @@ pub struct TupleWriter<'a> {
     finished: bool,
 }
 
+/// Error returned by [`ValueWriter::write_tuple()`] and [`TupleWriter`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum TupleWriteError {
+    /// Returned by [`ValueWriter::write_tuple()`] if the column is not a tuple.
     #[error("attempted to write a tuple to a non-tuple column: {data_type}")]
-    NotATuple { data_type: DataTypeNode },
+    NotATuple {
+        /// The actual column type.
+        data_type: DataTypeNode,
+    },
 
+    /// Returned by [`TupleWriter::write()`] when writing to a tuple that already has all its elements.
     #[error("attempted to write to a full tuple")]
     TupleFull,
 
+    /// Returned by [`TupleWriter::write()`] when writing the wrong type to a tuple at a given position.
     #[error(
         "value type is not compatible with expected type {expected_type} at tuple index {index}"
     )]
     IncompatibleType {
+        /// The 0-based position in the tuple type.
         index: usize,
+        /// The expected type at that position.
         expected_type: DataTypeNode,
     },
 
+    /// Returned by [`TupleWriter::finish()`] if the tuple had more elements to be written.
+    #[error("tuple not fully written; expected {expected_len} values, got {written_len}")]
+    IncompleteTuple {
+        /// The expected number of elements.
+        expected_len: usize,
+        /// The number of elements written.
+        written_len: usize,
+    },
+
+    /// Returned by [`TupleWriteError::write()`] if [`Encode::encode()`] returns an error.
     #[error("error writing value at tuple index {index}")]
     ValueWriteError {
+        /// The 0-based position in the tuple.
         index: usize,
+        /// The error from [`Encode::encode()`].
         #[source]
         error: BoxedError,
     },
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("tuple not fully written; expected {expected_len} values, got {written_len}")]
-pub struct IncompleteTupleError {
-    expected_len: usize,
-    written_len: usize,
-}
-
 impl TupleWriter<'_> {
+    /// Write an element to a tuple.
+    ///
+    /// Individual tuple elements may have different types.
+    ///
+    /// Call [`Self::finish()`] once all elements have been written for this tuple.
+    ///
+    /// # Errors
+    /// * [`TupleWriteError::IncompatibleType`] if the type of the value is wrong for the current
+    ///   position, as determined by [`Encode::compatible()`].
+    /// * [`TupleWriteError::TupleFull`] if the tuple already has all of its elements.
+    /// * [`TupleWriteError::ValueWriteError`] if [`Encode::encode()`] returns an error.
     pub fn write<T>(&mut self, value: T) -> Result<&mut Self, TupleWriteError>
     where
         T: Encode,
@@ -513,9 +555,13 @@ impl TupleWriter<'_> {
         Ok(self)
     }
 
-    pub fn finish(mut self) -> Result<(), IncompleteTupleError> {
+    /// Commit the tuple's contents to the column.
+    ///
+    /// # Errors
+    /// * [`TupleWriteError::IncompleteTuple`] if more elements needed to be written.
+    pub fn finish(mut self) -> Result<(), TupleWriteError> {
         if self.index < self.elem_types.len() {
-            return Err(IncompleteTupleError {
+            return Err(TupleWriteError::IncompleteTuple {
                 expected_len: self.elem_types.len(),
                 written_len: self.index,
             });
@@ -550,6 +596,13 @@ impl Drop for TupleWriter<'_> {
     }
 }
 
+/// Writes an individual `Map` to a column.
+///
+/// # Note: Rolls Back on Drop
+/// [`MapWriter::finish()`] must be called to commit the map's contents to the column.
+///
+/// If the writer is dropped without calling `finish()`, the written elements are dropped and
+/// no map is written to the column.
 #[must_use = "rolls back the written map elements on-drop if `.finish()` is not called"]
 pub struct MapWriter<'a, K, V> {
     key_ty: &'a DataTypeNode,
@@ -566,12 +619,19 @@ where
     K: Encode,
     V: Encode,
 {
+    /// Write an entry to the map.
+    ///
+    /// Call [`Self::finish()`] once all entries have been written for the `Map`.
+    ///
+    /// # Errors
+    /// * [`MapWriteError::KeyWriteError`] if [`Encode::encode()`] returns an error for `key`.
+    /// * [`MapWriteError::ValueWriteError`] if [`Encode::encode()`] returns an error for `value`.
     pub fn write(&mut self, key: K, value: V) -> Result<&mut Self, MapWriteError> {
         key.encode(&mut ValueWriter {
             layout: self.key_layout,
             data_type: self.key_ty,
         })
-        .map_err(|error| MapWriteError::ValueWriteError {
+        .map_err(|error| MapWriteError::KeyWriteError {
             error,
             index: self.key_layout.num_values(),
         })?;
@@ -581,14 +641,20 @@ where
                 layout: self.val_layout,
                 data_type: self.val_ty,
             })
-            .map_err(|error| MapWriteError::ValueWriteError {
-                error,
-                index: self.val_layout.num_values(),
+            .map_err(|error| {
+                // Drop the written key so we don't get out of sync.
+                self.key_layout.truncate(self.val_layout.num_values());
+
+                MapWriteError::ValueWriteError {
+                    error,
+                    index: self.val_layout.num_values(),
+                }
             })?;
 
         Ok(self)
     }
 
+    /// Commit the map's contents to the column.
     pub fn finish(mut self) {
         if self.finished {
             return;
@@ -614,21 +680,49 @@ impl<K, V> Drop for MapWriter<'_, K, V> {
     }
 }
 
+/// Error returned by [`ValueWriter::write_map()`] and [`MapWriter`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum MapWriteError {
+    /// Returned by [`ValueWriter::write_map()`] if the column type is not `Map(...)`.
     #[error("attempted to write a map to a non-map column: {data_type}")]
-    NotAMap { data_type: DataTypeNode },
+    NotAMap {
+        /// The actual column type.
+        data_type: DataTypeNode,
+    },
 
+    /// Returned by [`ValueWriter::write_map()`] if the key type is not compatible with
+    /// the `Map`'s key type, as determined by [`Encode::compatible()`].
     #[error("map key type is not compatible with expected type {expected_type}")]
-    IncompatibleKeyType { expected_type: DataTypeNode },
+    IncompatibleKeyType {
+        /// The actual key type.
+        expected_type: DataTypeNode,
+    },
 
+    /// Returned by [`ValueWriter::write_map()`] if the key type is not compatible with
+    /// the `Map`'s value type, as determined by [`Encode::compatible()`].
     #[error("map value type is not compatible with expected type {expected_type}")]
-    IncompatibleValueType { expected_type: DataTypeNode },
+    IncompatibleValueType {
+        /// The actual value type.
+        expected_type: DataTypeNode,
+    },
 
+    /// Returned by [`MapWriter::write()`] if [`Encode::encode()`] returns an error for the key.
+    #[error("error writing key at entry index {index}")]
+    KeyWriteError {
+        /// The index of the entry that was being written.
+        index: usize,
+        /// The error returned by [`Encode::encode()`].
+        #[source]
+        error: BoxedError,
+    },
+
+    /// Returned by [`MapWriter::write()`] if [`Encode::encode()`] returns an error for the value.
     #[error("error writing value at entry index {index}")]
     ValueWriteError {
+        /// The index of the entry that was being written.
         index: usize,
+        /// The error returned by [`Encode::encode()`].
         #[source]
         error: BoxedError,
     },

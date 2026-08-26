@@ -1,5 +1,5 @@
 #![doc=include_str!("mod.md")]
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 
 use crate::error::Error;
 use crate::native::string::MaybeUtf8;
