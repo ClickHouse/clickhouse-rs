@@ -114,6 +114,7 @@ pub mod uuid_vec {
     use serde::ser::SerializeSeq;
     use std::fmt;
 
+    #[deprecated = "This module is useless: `Nullable(Array(...))` is not allowed by ClickHouse"]
     pub mod option {
         use super::*;
         use ::uuid::Uuid;
@@ -128,11 +129,42 @@ pub mod uuid_vec {
             }
         }
 
+        struct OptionUuidVecVisitor {
+            human_readable: bool,
+        }
+
+        impl<'de> Visitor<'de> for OptionUuidVecVisitor {
+            type Value = Option<Vec<Uuid>>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "a nullable sequence of UUID values")
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(None)
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                deserializer
+                    .deserialize_seq(UuidVecVisitor {
+                        human_readable: self.human_readable,
+                    })
+                    .map(Some)
+            }
+        }
+
         pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<Uuid>>, D::Error>
         where
             D: Deserializer<'de>,
         {
-            Option::<Vec<Uuid>>::deserialize(deserializer)
+            let human_readable = deserializer.is_human_readable();
+            deserializer.deserialize_seq(OptionUuidVecVisitor { human_readable })
         }
     }
 

@@ -119,6 +119,8 @@ async fn vec_smoke() {
 
     assert_eq!(row, original_row);
 }
+
+#[expect(deprecated)]
 #[tokio::test]
 async fn vec_human_readable_smoke() {
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
