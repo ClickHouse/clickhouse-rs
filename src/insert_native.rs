@@ -1,9 +1,16 @@
+//! Support for executing an `INSERT` statement using ClickHouse's [Native columnar format].
+//!
+//! [Native columnar format]: https://clickhouse.com/docs/reference/formats/Native
 use crate::insert_formatted::InsertFormatted;
 use crate::native::Block;
 use crate::native::writer::BlockWriter;
 use crate::{Client, Compression, sql};
 use std::time::Duration;
 
+/// Executes an `INSERT ... FORMAT Native` statement.
+///
+/// The [`InsertNative::end`] must be called to finalize the `INSERT`.
+/// Otherwise, the whole `INSERT` will be aborted.
 #[must_use]
 pub struct InsertNative {
     writer: BlockWriter,
