@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 * Removed error rejecting `Decimal(P, S)` types where `S = 0` ([#449])
+* Fixed decoding of LEB128 in `rowbinary` module to accept a tenth byte ([#457])
+* Fixed parsing of JSON path names quoted with backticks ([#458])
+* Fix handling of enum type names containing escapes ([#466])
+* Replaced `polonius-the-crab` dependency with equivalent code (release PR [#465])
 
 [#417]: https://github.com/ClickHouse/clickhouse-rs/pull/417
 [#424]: https://github.com/ClickHouse/clickhouse-rs/pull/424
@@ -42,7 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#449]: https://github.com/ClickHouse/clickhouse-rs/pull/449
 [#451]: https://github.com/ClickHouse/clickhouse-rs/pull/451
 [#456]: https://github.com/ClickHouse/clickhouse-rs/pull/456
+[#457]: https://github.com/ClickHouse/clickhouse-rs/pull/457
+[#458]: https://github.com/ClickHouse/clickhouse-rs/pull/458
 [#461]: https://github.com/ClickHouse/clickhouse-rs/pull/461
+[#465]: https://github.com/ClickHouse/clickhouse-rs/pull/465
+[#466]: https://github.com/ClickHouse/clickhouse-rs/pull/466
 
 ## [0.15.1] - 2026-06-01
 
