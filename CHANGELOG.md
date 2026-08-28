@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Added support for `BFloat16` ([#417])
 * Added `serde::uuid_vec` for serializing/deserializing `Vec<uuid::Uuid>` to/from `Array(UUID)` ([#424])
 * Implemented `Debug` for `Client` ([#430])
-* Implemented support for queries using `FORMAT Native` ([#441])
+* Implemented support for selects and data-returning queries using `FORMAT Native` ([#441])
     * Implemented `Query::fetch_native()` returning `NativeCursor` which yields `Block`s.
     * `Block` holds data in columnar format and can be indexed by column name or by ordinal.
     * `Column::iter()` returns an iterator that decodes the column data.
