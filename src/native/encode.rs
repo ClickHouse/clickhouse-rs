@@ -627,14 +627,13 @@ where
     /// * [`MapWriteError::KeyWriteError`] if [`Encode::encode()`] returns an error for `key`.
     /// * [`MapWriteError::ValueWriteError`] if [`Encode::encode()`] returns an error for `value`.
     pub fn write(&mut self, key: K, value: V) -> Result<&mut Self, MapWriteError> {
+        let index = self.key_layout.num_values();
+
         key.encode(&mut ValueWriter {
             layout: self.key_layout,
             data_type: self.key_ty,
         })
-        .map_err(|error| MapWriteError::KeyWriteError {
-            error,
-            index: self.key_layout.num_values(),
-        })?;
+        .map_err(|error| MapWriteError::KeyWriteError { error, index })?;
 
         value
             .encode(&mut ValueWriter {
@@ -643,12 +642,9 @@ where
             })
             .map_err(|error| {
                 // Drop the written key so we don't get out of sync.
-                self.key_layout.truncate(self.val_layout.num_values());
+                self.key_layout.truncate(index);
 
-                MapWriteError::ValueWriteError {
-                    error,
-                    index: self.val_layout.num_values(),
-                }
+                MapWriteError::ValueWriteError { error, index }
             })?;
 
         Ok(self)
