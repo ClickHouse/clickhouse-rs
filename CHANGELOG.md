@@ -8,6 +8,158 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.15.2] - 2026-08-24
+
+### Added
+
+* Added support for `BFloat16` ([#417])
+* Added `serde::uuid_vec` for serializing/deserializing `Vec<uuid::Uuid>` to/from `Array(UUID)` ([#424])
+* Implemented `Debug` for `Client` ([#430])
+* Implemented support for selects and data-returning queries using `FORMAT Native` ([#441])
+    * Implemented `Query::fetch_native()` returning `NativeCursor` which yields `Block`s.
+    * `Block` holds data in columnar format and can be indexed by column name or by ordinal.
+    * `Column::iter()` returns an iterator that decodes the column data.
+    * All primitive types, `Nullable`, `Array`, `Tuple`, `Map` and `LowCardinality` are supported 
+      and can be decoded into their appropriate Rust types.
+    * Zero-copy decoding to `&str`, borrowing from the parent `Block`, is supported.
+* Implemented support for inserts using `FORMAT Native` ([#451])
+  * Added `Client::insert_native()` for inserting `Block`s
+  * Added `BlockBuilder` API for filling out and validating `Block`s
+* `Client::with_url()` now recognizes the `database` query parameter of the URL. ([#456])
+    * Added `Client::database()` to read back the configured default database. 
+* Added `Client::query_raw()`, which sends the SQL to the server verbatim, without parsing
+  client-side bind parameters. ([#461])
+    * In this mode, `?` is not treated as a placeholder; `??` is not unescaped; `?fields` is not substituted. 
+    * Server-side parameters via `Query::param()` still work.
+
+### Fixed
+* Removed error rejecting `Decimal(P, S)` types where `S = 0` ([#449])
+* Fixed decoding of LEB128 in `rowbinary` module to accept a tenth byte ([#457])
+* Fixed parsing of JSON path names quoted with backticks ([#458])
+* Fixed handling of enum type names containing escapes ([#466])
+* Replaced `polonius-the-crab` dependency with equivalent code (release PR [#465])
+
+[#417]: https://github.com/ClickHouse/clickhouse-rs/pull/417
+[#424]: https://github.com/ClickHouse/clickhouse-rs/pull/424
+[#430]: https://github.com/ClickHouse/clickhouse-rs/pull/430
+[#441]: https://github.com/ClickHouse/clickhouse-rs/pull/441
+[#449]: https://github.com/ClickHouse/clickhouse-rs/pull/449
+[#451]: https://github.com/ClickHouse/clickhouse-rs/pull/451
+[#456]: https://github.com/ClickHouse/clickhouse-rs/pull/456
+[#457]: https://github.com/ClickHouse/clickhouse-rs/pull/457
+[#458]: https://github.com/ClickHouse/clickhouse-rs/pull/458
+[#461]: https://github.com/ClickHouse/clickhouse-rs/pull/461
+[#465]: https://github.com/ClickHouse/clickhouse-rs/pull/465
+[#466]: https://github.com/ClickHouse/clickhouse-rs/pull/466
+
+## [0.15.1] - 2026-06-01
+
+### Added
+
+* Introduced support for [Apache Arrow in Rust] via a new extension crate, [`clickhouse-ext-arrow`](ext-arrow/README.md). ([#423])
+    * The CHANGELOG for this new crate is tracked in [ext-arrow/CHANGELOG.md](ext-arrow/CHANGELOG.md).
+    * See [examples/arrow.rs](examples/arrow.rs) for usage.
+* Added `BytesCursor::poll_next()` ([#423])
+
+### Fixed
+
+* `Variant` columns containing NULL values no longer fail with a schema mismatch error. 
+  Use `Option<MyEnum>` to deserialize nullable Variant columns. ([#400])
+* Changed `User-Agent` header generation to use correct format for server-side logging/metrics. ([#428])
+
+[Apache Arrow in Rust]: https://crates.io/crates/arrow
+
+[#400]: https://github.com/ClickHouse/clickhouse-rs/pull/400
+[#423]: https://github.com/ClickHouse/clickhouse-rs/pull/423
+[#428]: https://github.com/ClickHouse/clickhouse-rs/pull/428
+
+## [0.15.0] - 2026-04-03
+
+### Added
+
+* Deprecated `::*_option()` methods in favor of `::*_setting()` ([#380])
+    * This is to match the terminology [used by ClickHouse Server][ch-settings].
+* Added support for `zstd` compression ([#388])
+* Added support for [`tracing`] and OpenTelemetry [trace propagation to ClickHouse][ch-tracing] ([#390])
+    * See [examples/opentelemetry.rs](./examples/opentelemetry.rs) for usage.
+* Exposed `X-ClickHouse-Summary` fields from server response ([#397])
+    * Added `RowCursor::summary()` and `BytesCursor::summary()` which is populated 
+      once the response from the server is received, containing potentially useful statistics about the query.
+
+### Changed
+
+* Dropped abandoned `fxhash` and `linked-hash-map` dev-dependencies ([#403])
+
+
+[ch-settings]: https://clickhouse.com/docs/operations/settings/overview
+[`tracing`]: https://crates.io/crates/tracing
+[ch-tracing]: https://clickhouse.com/docs/operations/opentelemetry
+
+[#380]: https://github.com/ClickHouse/clickhouse-rs/pull/380
+[#388]: https://github.com/ClickHouse/clickhouse-rs/pull/388
+[#390]: https://github.com/ClickHouse/clickhouse-rs/pull/390
+[#397]: https://github.com/ClickHouse/clickhouse-rs/pull/397
+[#403]: https://github.com/ClickHouse/clickhouse-rs/pull/403
+
+## [0.14.3] - 2026-03-27
+
+### Added
+
+* Added support for `SimpleAggregateFunction` type ([#394])
+
+### Fixed
+
+* Fixed serialization of `Option::None` with `Query::param()` ([#385])
+* Fixed handling of `Json` type with type hints ([#387])
+* Fixed `Insert` for temporary tables and qualified table names ([#391])
+* Updated `lz4_flex` to get fix for [RUSTSEC-2026-0041] ([#396])
+
+[#385]: https://github.com/ClickHouse/clickhouse-rs/pull/385
+[#387]: https://github.com/ClickHouse/clickhouse-rs/pull/387
+[#391]: https://github.com/ClickHouse/clickhouse-rs/pull/391
+[#394]: https://github.com/ClickHouse/clickhouse-rs/pull/394
+[#396]: https://github.com/ClickHouse/clickhouse-rs/pull/396
+[RUSTSEC-2026-0041]: https://rustsec.org/advisories/RUSTSEC-2026-0041
+
+## [0.14.2] - 2026-01-14
+
+### Added
+
+* Added `Client::insert_formatted_with()` and `InsertFormatted` for inserting data in a chosen format with a specified SQL query. ([#364])
+  * `InsertFormatted` does not buffer data by default, allowing precise control over when the data is sent. For best performance, ensure data is sent in larger chunks or use `.buffered()` to get `BufInsertFormatted` which implements buffering.
+  * Data may optionally be pre-compressed and buffered separately using `CompressedData::new()` and `InsertFormatted::send_compressed()`.
+  * `BufInsertFormatted` also implements [`tokio::io::AsyncWrite`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncWrite.html) for composability.
+* Added `Client::set_option` to modify options through `&mut Client` ([#375])
+* Added `Client::get_option` to read previously set options ([#375])
+* Added support for binding byte-strings as server-side params ([#376])
+  * This means passing types to `Query::param` that call `Serializer::serialize_bytes()` are now supported.
+  * Note that `Vec<u8>` and `&[u8]` serialize as an array of integers. 
+    Use a specialized type, e.g. `bytes::Bytes` or `serde_bytes::Bytes` to bind a byte-string.
+* Implemented `Primitive` for `bytes::Bytes` and `bytes::BytesMut` ([#376])
+  * These can be used to fetch byte-strings as a scalar value, e.g. with `Query::fetch_one()`.
+
+### Fixed
+
+* Implemented parsing for the new exception tagging format in ClickHouse 25.11 ([#365])
+* Fixed a doc comment on `clickhouse::serde::chrono::date` ([#371])
+
+### Changed
+
+* (CI-only change) added scheduled runs against `clickhouse-server:head` tag, reworked secrets access ([#367])
+* `Query` no longer sets [the `readonly` option] by default. ([#377])
+  * This was previously added in [#342] to simulate the default read-only restriction
+    when issuing queries via `GET` requests, but had poor interaction with settings profiles that set `readonly="2"`.
+
+[#364]: https://github.com/ClickHouse/clickhouse-rs/pull/364
+[#365]: https://github.com/ClickHouse/clickhouse-rs/pull/365
+[#367]: https://github.com/ClickHouse/clickhouse-rs/pull/367
+[#371]: https://github.com/ClickHouse/clickhouse-rs/pull/371
+[#375]: https://github.com/ClickHouse/clickhouse-rs/pull/375
+[#376]: https://github.com/ClickHouse/clickhouse-rs/pull/376
+[#377]: https://github.com/ClickHouse/clickhouse-rs/pull/377
+
+[the `readonly` option]: https://clickhouse.com/docs/operations/settings/permissions-for-queries#readonly
+
 ## [0.14.1] - 2025-11-26
 
 ### Added
@@ -510,7 +662,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.2...HEAD
+[0.15.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.1...v0.15.2
+[0.15.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.0...v0.15.1
+[0.15.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.3...v0.15.0
+[0.14.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.2...v0.14.3
+[0.14.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.3...v0.14.0
 [0.13.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.13.2...v0.13.3

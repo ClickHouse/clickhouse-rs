@@ -24,7 +24,7 @@ async fn empty_insert() {
 
     let insert = client
         .insert_formatted_with(format!("INSERT INTO {table_name} FORMAT TabSeparated"))
-        .with_option("query_id", query_id);
+        .with_setting("query_id", query_id);
     insert.end().await.unwrap();
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
@@ -76,7 +76,7 @@ async fn insert_small_chunks() {
 
 #[tokio::test]
 #[cfg(feature = "lz4")]
-async fn insert_compressed() {
+async fn insert_compressed_lz4() {
     use clickhouse::insert_formatted::CompressedData;
 
     let client = prepare_database!()
@@ -85,7 +85,30 @@ async fn insert_compressed() {
 
     create_table(&client).await;
 
-    let data = CompressedData::from_slice(TAXI_DATA_TSV);
+    let data = CompressedData::new(TAXI_DATA_TSV, Compression::Lz4).unwrap();
+
+    let mut insert =
+        client.insert_formatted_with("INSERT INTO nyc_taxi_trips_small FORMAT TabSeparated");
+
+    insert.send_compressed(data).await.unwrap();
+
+    insert.end().await.unwrap();
+
+    verify_insert(&client).await;
+}
+
+#[tokio::test]
+#[cfg(feature = "zstd")]
+async fn insert_compressed_zstd() {
+    use clickhouse::insert_formatted::CompressedData;
+
+    let client = prepare_database!()
+        // `test-util` turns compression off
+        .with_compression(Compression::zstd());
+
+    create_table(&client).await;
+
+    let data = CompressedData::new(TAXI_DATA_TSV, Compression::zstd()).unwrap();
 
     let mut insert =
         client.insert_formatted_with("INSERT INTO nyc_taxi_trips_small FORMAT TabSeparated");
@@ -343,7 +366,7 @@ async fn verify_insert(client: &Client) {
     struct Results {
         min_trip_id: u32,
         max_trip_id: u32,
-        avg_trip_distance: f64,
+        median_trip_distance: f64,
         count: u64,
     }
 
@@ -352,7 +375,7 @@ async fn verify_insert(client: &Client) {
             "SELECT \
                 min(trip_id) min_trip_id, \
                 max(trip_id) max_trip_id, \
-                avg(trip_distance) avg_trip_distance,\
+                median(trip_distance) median_trip_distance,\
                 count(*) count \
             FROM nyc_taxi_trips_small",
         )
@@ -362,6 +385,6 @@ async fn verify_insert(client: &Client) {
 
     assert_eq!(results.min_trip_id, 1199999902);
     assert_eq!(results.max_trip_id, 1200019742);
-    assert_eq!(results.avg_trip_distance, 2.983289997249842);
+    assert_eq!(results.median_trip_distance, 1.7999999523162842);
     assert_eq!(results.count, 1000);
 }

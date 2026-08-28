@@ -106,7 +106,7 @@ async fn fetch_all(client: &Client) -> Result<()> {
 async fn delete(client: &Client) -> Result<()> {
     client
         .clone()
-        .with_option("mutations_sync", "1")
+        .with_setting("mutations_sync", "1")
         .query("ALTER TABLE some DELETE WHERE no >= ?")
         .bind(500)
         .execute()

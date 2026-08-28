@@ -61,8 +61,8 @@ async fn variant_data_type() {
             ENGINE = MergeTree
             ORDER BY ()",
         )
-        .with_option("allow_experimental_variant_type", "1")
-        .with_option("allow_suspicious_variant_types", "1")
+        .with_setting("allow_experimental_variant_type", "1")
+        .with_setting("allow_suspicious_variant_types", "1")
         .execute()
         .await
         .unwrap();

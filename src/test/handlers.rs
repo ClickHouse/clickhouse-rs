@@ -60,6 +60,26 @@ where
     Thunk(Response::new(buffer.into()))
 }
 
+// === provide_with_summary ===
+
+/// Like [`provide`], but includes an `X-ClickHouse-Summary` response header.
+#[track_caller]
+pub fn provide_with_summary<T>(rows: impl IntoIterator<Item = T>, summary: &str) -> impl Handler
+where
+    T: Serialize + Row,
+{
+    let mut buffer = Vec::with_capacity(BUFFER_INITIAL_CAPACITY);
+    for row in rows {
+        rowbinary::serialize_row_binary(&mut buffer, &row).expect("failed to serialize");
+    }
+    Thunk(
+        Response::builder()
+            .header("X-ClickHouse-Summary", summary)
+            .body(Bytes::from(buffer))
+            .expect("invalid builder"),
+    )
+}
+
 // === record ===
 
 struct RecordHandler<T>(PhantomData<T>);

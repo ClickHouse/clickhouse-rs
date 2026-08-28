@@ -1,4 +1,4 @@
-use crate::insert_formatted::BufInsertFormatted;
+use crate::insert_formatted::{BufInsertFormatted, InsertFormatted};
 use crate::row_metadata::RowMetadata;
 use crate::rowbinary::{serialize_row_binary, serialize_with_validation};
 use crate::{
@@ -8,6 +8,7 @@ use crate::{
     row::{self, Row},
 };
 use clickhouse_types::put_rbwnat_columns_header;
+use std::num::Saturating;
 use std::{future::Future, marker::PhantomData, time::Duration};
 
 // The desired max frame size.
@@ -40,6 +41,7 @@ const MIN_CHUNK_SIZE: usize = const {
 pub struct Insert<T> {
     insert: BufInsertFormatted,
     row_metadata: Option<RowMetadata>,
+    sent_rows: Saturating<u64>,
     _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
 }
 
@@ -51,8 +53,6 @@ impl<T> Insert<T> {
         let fields = row::join_column_names::<T>()
             .expect("the row type must be a struct or a wrapper around it");
 
-        // TODO: what about escaping a table name?
-        // https://clickhouse.com/docs/en/sql-reference/syntax#identifiers
         let format = if row_metadata.is_some() {
             formats::ROW_BINARY_WITH_NAMES_AND_TYPES
         } else {
@@ -61,10 +61,10 @@ impl<T> Insert<T> {
         let sql = format!("INSERT INTO {table}({fields}) FORMAT {format}");
 
         Self {
-            insert: client
-                .insert_formatted_with(sql)
+            insert: InsertFormatted::new(client, sql, Some(table))
                 .buffered_with_capacity(BUFFER_SIZE),
             row_metadata,
+            sent_rows: Saturating(0),
             _marker: PhantomData,
         }
     }
@@ -94,8 +94,8 @@ impl<T> Insert<T> {
 
     /// Configure the [roles] to use when executing `INSERT` statements.
     ///
-    /// Overrides any roles previously set by this method, [`Insert::with_option`],
-    /// [`Client::with_roles`] or [`Client::with_option`].
+    /// Overrides any roles previously set by this method, [`Insert::with_setting`],
+    /// [`Client::with_roles`] or [`Client::with_setting`].
     ///
     /// An empty iterator may be passed to clear the set roles.
     ///
@@ -110,8 +110,8 @@ impl<T> Insert<T> {
 
     /// Clear any explicit [roles] previously set on this `Insert` or inherited from [`Client`].
     ///
-    /// Overrides any roles previously set by [`Insert::with_roles`], [`Insert::with_option`],
-    /// [`Client::with_roles`] or [`Client::with_option`].
+    /// Overrides any roles previously set by [`Insert::with_roles`], [`Insert::with_setting`],
+    /// [`Client::with_roles`] or [`Client::with_setting`].
     ///
     /// [roles]: https://clickhouse.com/docs/operations/access-rights#role-management
     ///
@@ -128,8 +128,20 @@ impl<T> Insert<T> {
     /// # Panics
     /// If called after the request is started, e.g., after [`Insert::write`].
     #[track_caller]
+    #[deprecated(since = "0.14.3", note = "please use `with_setting` instead")]
     pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.insert.expect_client_mut().set_option(name, value);
+        self.insert.expect_client_mut().set_setting(name, value);
+        self
+    }
+
+    /// Similar to [`Client::with_setting`], but for this particular INSERT
+    /// statement only.
+    ///
+    /// # Panics
+    /// If called after the request is started, e.g., after [`Insert::write`].
+    #[track_caller]
+    pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.insert.expect_client_mut().set_setting(name, value);
         self
     }
 
@@ -174,6 +186,9 @@ impl<T> Insert<T> {
             if self.insert.buf_len() >= MIN_CHUNK_SIZE {
                 self.insert.flush().await?;
             }
+
+            self.sent_rows += 1;
+
             Ok(())
         }
     }
@@ -198,7 +213,8 @@ impl<T> Insert<T> {
         };
         let written = buffer.len() - old_buf_size;
 
-        if result.is_err() {
+        if let Err(e) = &result {
+            e.record_in_current_span("error serializing row");
             self.abort();
         }
 
@@ -212,6 +228,12 @@ impl<T> Insert<T> {
     ///
     /// NOTE: If it isn't called, the whole `INSERT` is aborted.
     pub async fn end(mut self) -> Result<()> {
+        // `InsertFormatted::end()` will add `sent_bytes` and `encoded_bytes` to the span.
+        tracing::record_all!(
+            self.insert._priv_span(),
+            clickhouse.request.sent_rows = self.sent_rows.0,
+        );
+
         self.insert.end().await
     }
 

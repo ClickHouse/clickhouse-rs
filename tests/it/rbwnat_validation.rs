@@ -240,7 +240,7 @@ async fn invalid_low_cardinality() {
     struct Data {
         a: u32,
     }
-    let client = get_client().with_option("allow_suspicious_low_cardinality_types", "1");
+    let client = get_client().with_setting("allow_suspicious_low_cardinality_types", "1");
     assert_err_on_fetch_with_client!(
         client,
         &["Data.a", "LowCardinality(Int32)", "u32"],
@@ -254,7 +254,7 @@ async fn invalid_nullable_low_cardinality() {
     struct Data {
         a: Option<u32>,
     }
-    let client = get_client().with_option("allow_suspicious_low_cardinality_types", "1");
+    let client = get_client().with_setting("allow_suspicious_low_cardinality_types", "1");
     assert_err_on_fetch_with_client!(
         client,
         &["Data.a", "LowCardinality(Nullable(Int32))", "u32"],
@@ -645,7 +645,7 @@ async fn issue_173() {
         ts: time::OffsetDateTime,
     }
 
-    let client = prepare_database!().with_option("date_time_input_format", "best_effort");
+    let client = prepare_database!().with_setting("date_time_input_format", "best_effort");
 
     execute_statements(&client, &[
         "
@@ -745,7 +745,7 @@ async fn variant_wrong_definition() {
         var: MyVariant,
     }
 
-    let client = get_client().with_option("allow_experimental_variant_type", "1");
+    let client = get_client().with_setting("allow_experimental_variant_type", "1");
 
     assert_err_on_fetch_with_client!(
         client,

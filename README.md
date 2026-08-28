@@ -26,7 +26,7 @@ Official pure Rust typed client for ClickHouse DB.
     * It is possible to switch to `RowBinary`, which can potentially lead to increased performance ([see below](#validation)).
     * There are plans to implement `Native` format over TCP.
 * Supports TLS (see `native-tls` and `rustls-tls` features below).
-* Supports compression and decompression (LZ4 and LZ4HC).
+* Supports compression and decompression (LZ4, LZ4HC, and ZSTD).
 * Provides API for selecting.
 * Provides API for inserting.
 * Provides API for infinite transactional (see below) inserting.
@@ -60,10 +60,10 @@ To use the crate, add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-clickhouse = "0.14.1"
+clickhouse = "0.14.2"
 
 [dev-dependencies]
-clickhouse = { version = "0.14.1", features = ["test-util"] }
+clickhouse = { version = "0.14.2", features = ["test-util"] }
 ```
 
 <details>
@@ -122,8 +122,9 @@ async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
 * Placeholder `?` is replaced with values in following `bind()` calls.
 * Convenient `fetch_one::<Row>()` and `fetch_all::<Row>()` can be used to get a first row or all rows correspondingly.
 * `sql::Identifier` can be used to bind table names.
+* Use `client.query_raw(..)` to send SQL to the server as-is, without any placeholder parsing: `?` is not treated as a placeholder, `??` is not unescaped, and `?fields` is not substituted. To parameterize such queries, use server-side parameters (`{name: type}`) via `.param(..)`.
 
-Note that cursors can return an error even after producing some rows. To avoid this, use `client.with_option("wait_end_of_query", "1")` in order to enable buffering on the server-side. [More details](https://clickhouse.com/docs/en/interfaces/http/#response-buffering). The `buffer_size` option can be useful too.
+Note that cursors can return an error even after producing some rows. To avoid this, use `client.with_setting("wait_end_of_query", "1")` in order to enable buffering on the server-side. [More details](https://clickhouse.com/docs/en/interfaces/http/#response-buffering). The `buffer_size` setting can be useful too.
 
 </details>
 <details>
@@ -229,11 +230,16 @@ async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
 
 ## Feature Flags
 * `lz4` (enabled by default) — enables `Compression::Lz4`. If enabled, `Compression::Lz4` is used by default for all queries.
+* `zstd` — enables `Compression::Zstd(level)`. If enabled and `lz4` is not, `Compression::zstd()` is used by default for all queries. Uses `enable_http_compression` for responses instead of native framing.
 * `inserter` — enables `client.inserter()`.
 * `test-util` — adds mocks. See [the example](https://github.com/ClickHouse/clickhouse-rs/tree/main/examples/mock.rs). Use it only in `dev-dependencies`.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
 * `chrono` — adds `serde::chrono` to work with [chrono](https://docs.rs/chrono) crate.
+* `opentelemetry` — [propagate OpenTelemetry context][otel-context] to [ClickHouse server][otel-in-ch].
+
+[otel-context]: https://opentelemetry.io/docs/concepts/context-propagation/
+[otel-in-ch]: https://clickhouse.com/docs/operations/opentelemetry
 
 ### TLS
 By default, TLS is disabled and one or more following features must be enabled to use HTTPS urls:
@@ -505,7 +511,21 @@ Usage of all mentioned data types are covered in the following examples:
     ```
     </details>
 * `Tuple(A, B, ...)` maps to/from `(A, B, ...)` or a newtype around it.
-* `Array(_)` maps to/from any slice, e.g. `Vec<_>`, `&[_]`. Newtypes are also supported.
+* `Array(_)` maps to/from any slice, e.g. `Vec<_>`, `&[_]`, and `UUID` (using `serde::uuid_vec`). Newtypes are also supported. 
+    <details>
+    <summary>Example</summary>
+
+    ```rust,no_run
+    use serde::{Serialize, Deserialize};
+    use clickhouse::Row;
+
+    #[derive(Row, Serialize, Deserialize)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::uuid_vec")]
+        uuids: Vec<uuid::Uuid>,
+    }
+    ```
+    </details>
 * `Map(K, V)` can be deserialized as `HashMap<K, V>` or `Vec<(K, V)>`.
 * `LowCardinality(_)` is supported seamlessly.
 * `Nullable(_)` maps to/from `Option<_>`. For `clickhouse::serde::*` helpers add `::option`.

@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use clickhouse::sql::Identifier;
@@ -108,6 +109,14 @@ async fn server_side_param() {
     assert_eq!(result, "string");
 
     let result = client
+        .query("SELECT {val1: Nullable(String)} AS result")
+        .param("val1", Option::<String>::None)
+        .fetch_one::<Option<String>>()
+        .await
+        .expect("failed to fetch string");
+    assert_eq!(result, None);
+
+    let result = client
         .query("SELECT {val1: String} AS result")
         .param("val1", "\x01\x02\x03\\ \"\'")
         .fetch_one::<String>()
@@ -122,6 +131,16 @@ async fn server_side_param() {
         .await
         .expect("failed to fetch string");
     assert_eq!(result, &["a", "bc"]);
+
+    // Should not be valid UTF-8
+    let bytes = Bytes::from_static(b"Hello, world!\\\0\t\r\n\x00\x01\xFF\xFE\xFD");
+    let result = client
+        .query("SELECT {val1: String} AS result")
+        .param("val1", &bytes)
+        .fetch_one::<Bytes>()
+        .await
+        .expect("failed to fetch bytes");
+    assert_eq!(result, bytes);
 }
 
 // See #19.
@@ -217,40 +236,40 @@ async fn all_floats() {
 }
 
 #[tokio::test]
-async fn keeps_client_options() {
+async fn keeps_client_settings() {
     let (client_setting_name, client_setting_value) = ("max_block_size", "1000");
     let (query_setting_name, query_setting_value) = ("date_time_input_format", "basic");
 
-    let client = prepare_database!().with_option(client_setting_name, client_setting_value);
+    let client = prepare_database!().with_setting(client_setting_name, client_setting_value);
 
     let value = client
         .query("SELECT value FROM system.settings WHERE name = ? OR name = ? ORDER BY name")
         .bind(query_setting_name)
         .bind(client_setting_name)
-        .with_option(query_setting_name, query_setting_value)
+        .with_setting(query_setting_name, query_setting_value)
         .fetch_all::<String>()
         .await
         .unwrap();
 
-    // should keep the client options
+    // should keep the client settings
     assert_eq!(value, vec!(query_setting_value, client_setting_value));
 }
 
 #[tokio::test]
-async fn overrides_client_options() {
+async fn overrides_client_settings() {
     let (setting_name, setting_value, override_value) = ("max_block_size", "1000", "2000");
 
-    let client = prepare_database!().with_option(setting_name, setting_value);
+    let client = prepare_database!().with_setting(setting_name, setting_value);
 
     let value = client
         .query("SELECT value FROM system.settings WHERE name = ?")
         .bind(setting_name)
-        .with_option(setting_name, override_value)
+        .with_setting(setting_name, override_value)
         .fetch_one::<String>()
         .await
         .unwrap();
 
-    // should override the client options
+    // should override the client settings
     assert_eq!(value, override_value);
 }
 

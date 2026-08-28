@@ -1,12 +1,13 @@
 //! Contains [`Error`] and corresponding [`Result`].
 
+use crate::native::BlockReadError;
 use serde::{de, ser};
 use std::{error::Error as StdError, fmt, io, result, str::Utf8Error};
 
 /// A result with a specified [`Error`] type.
 pub type Result<T, E = Error> = result::Result<T, E>;
 
-type BoxedError = Box<dyn StdError + Send + Sync>;
+pub(crate) type BoxedError = Box<dyn StdError + Send + Sync>;
 
 /// Represents all possible errors.
 #[derive(Debug, thiserror::Error)]
@@ -21,6 +22,8 @@ pub enum Error {
     Compression(#[source] BoxedError),
     #[error("decompression error: {0}")]
     Decompression(#[source] BoxedError),
+    #[error("data format error: {0}")]
+    DataFormat(#[source] BoxedError),
     #[error("no rows returned by a query that expected to return at least one row")]
     RowNotFound,
     #[error("sequences must have a known size ahead of time")]
@@ -109,6 +112,56 @@ impl From<io::Error> for Error {
         } else {
             Self::Other(error.into())
         }
+    }
+}
+
+impl From<BlockReadError> for Error {
+    fn from(error: BlockReadError) -> Self {
+        Self::DataFormat(Box::new(error))
+    }
+}
+
+impl Error {
+    /// https://opentelemetry.io/docs/specs/semconv/registry/attributes/error/#error-type
+    #[cfg(feature = "opentelemetry")]
+    pub(crate) fn error_type(&self) -> &str {
+        match self {
+            Error::InvalidParams(_) => "InvalidParams",
+            Error::Network(_) => "Network",
+            Error::Compression(_) => "Compression",
+            Error::Decompression(_) => "Decompression",
+            Error::DataFormat(_) => "DataFormat",
+            Error::RowNotFound => "RowNotFound",
+            Error::SequenceMustHaveLength => "SequenceMustHaveLength",
+            Error::DeserializeAnyNotSupported => "DeserializeAnyNotSupported",
+            Error::NotEnoughData => "NotEnoughData",
+            Error::InvalidUtf8Encoding(_) => "InvalidUtf8Encoding",
+            Error::InvalidTagEncoding(_) => "InvalidTagEncoding",
+            Error::VariantDiscriminatorIsOutOfBound(_) => "VariantDiscriminatorIsOutOfBound",
+            Error::Custom(_) => "Custom",
+            Error::BadResponse(_) => "BadResponse",
+            Error::TimedOut => "TimedOut",
+            Error::InvalidColumnsHeader(_) => "InvalidColumnsHeader",
+            Error::SchemaMismatch(_) => "SchemaMismatch",
+            Error::Unsupported(_) => "Unsupported",
+            Error::Other(_) => "Other",
+        }
+    }
+
+    /// Record this `Error` in the context of the current `tracing::Span`,
+    /// setting the OpenTelemetry conventional fields if the `opentelemetry` feature is enabled.
+    pub(crate) fn record_in_current_span(&self, msg: &str) {
+        // Span fields that remain unpopulated are not reported,
+        // so we can avoid adding noise to logs if the user isn't utilizing this feature.
+        #[cfg(feature = "opentelemetry")]
+        tracing::record_all!(
+            tracing::Span::current(),
+            otel.status_code = "Error",
+            otel.status_description = format!("{msg}: {self}"),
+            error.type = self.error_type(),
+        );
+
+        tracing::debug!(error=%self, "{msg}");
     }
 }
 

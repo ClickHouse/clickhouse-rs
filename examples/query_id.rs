@@ -10,7 +10,7 @@ async fn main() -> Result<()> {
 
     let numbers = client
         .query("SELECT number FROM system.numbers LIMIT 1")
-        .with_option("query_id", &query_id)
+        .with_setting("query_id", &query_id)
         .fetch_all::<u64>()
         .await?;
     println!("Numbers: {numbers:?}");

@@ -4,7 +4,7 @@ use uuid::Uuid;
 use clickhouse::sql::Identifier;
 use clickhouse::{Client, Row, error::Result};
 
-/// Besides [`Client::with_option`], which will be applied for all requests,
+/// Besides [`Client::with_setting`], which will be applied for all requests,
 /// `session_id` (and other settings) can be set separately for a particular `query`, `insert`,
 /// or when using the `inserter` feature.
 ///
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
 
     let client = Client::default()
         .with_url("http://localhost:8123")
-        .with_option("session_id", &session_id);
+        .with_setting("session_id", &session_id);
 
     client
         .query("CREATE TEMPORARY TABLE ? (i Int32)")

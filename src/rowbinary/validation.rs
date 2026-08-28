@@ -1,10 +1,23 @@
 use crate::error::{Error, Result};
+use crate::types::bf16;
 use crate::types::int256;
 use crate::{Row, row::RowKind, row_metadata::RowMetadata};
 use clickhouse_types::data_types::{Column, DataTypeNode, DecimalType, EnumType};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::marker::PhantomData;
+
+/// How a ClickHouse column encodes NULL on the wire.
+/// Different column types use different encodings; the deserializer
+/// needs to know which strategy to use when reading `Option<T>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NullEncoding {
+    /// `Nullable(T)`: a leading byte where 0 = not null, 1 = null.
+    Nullable,
+    /// `Variant(T1, T2, ...)`: NULL is encoded as discriminator 0xFF,
+    /// with no separate null byte and no value bytes following.
+    Discriminator,
+}
 
 /// This trait is used to validate the schema of a [`crate::Row`] against the parsed RBWNAT schema.
 /// Note that [`SchemaValidator`] is also implemented for `()`,
@@ -33,6 +46,12 @@ pub(crate) trait SchemaValidator<R: Row>: Sized {
     // If the database schema contains a tuple with more elements than it is defined in the struct,
     // this method will emit an error indicating that the struct definition is incomplete.
     fn check_tuple_fully_validated(&self) -> Result<()>;
+    /// Returns the null encoding of the current column, if known.
+    /// Called by the deserializer before reading any bytes in `deserialize_option`
+    /// to determine which null-reading strategy to use.
+    fn null_encoding(&self) -> Option<NullEncoding> {
+        None
+    }
 }
 
 pub(crate) struct DataTypeValidator<'caller, R: Row> {
@@ -193,6 +212,31 @@ impl<'caller, R: Row> SchemaValidator<R> for DataTypeValidator<'caller, R> {
     fn check_tuple_fully_validated(&self) -> Result<()> {
         unreachable!()
     }
+
+    fn null_encoding(&self) -> Option<NullEncoding> {
+        if self.current_column_idx >= self.metadata.columns.len() {
+            return None;
+        }
+        null_encoding_for(&self.metadata.columns[self.current_column_idx].data_type)
+    }
+}
+
+/// Returns the wire-level null encoding of the given type, transparently
+/// stripping `LowCardinality(T)` and `SimpleAggregateFunction(_, T)` since
+/// those are encoded identically to the inner `T`.
+///
+/// This must stay aligned with the same wrapper stripping in `validate_impl`.
+/// If the two drift, `deserialize_option` and `validate(SerdeType::Option)`
+/// will disagree on the NULL marker length and the input stream goes out of sync.
+fn null_encoding_for(node: &DataTypeNode) -> Option<NullEncoding> {
+    let node = node
+        .remove_low_cardinality()
+        .remove_simple_aggregate_function();
+    match node {
+        DataTypeNode::Nullable(_) => Some(NullEncoding::Nullable),
+        DataTypeNode::Variant(_) => Some(NullEncoding::Discriminator),
+        _ => None,
+    }
 }
 
 /// Having a ClickHouse `Map<K, V>` defined as a `HashMap<K, V>` in Rust, Serde will call:
@@ -229,6 +273,7 @@ pub(crate) enum InnerDataTypeValidatorKind<'caller> {
     Map(&'caller [Box<DataTypeNode>; 2], MapValidatorState),
     /// Allows supporting ClickHouse `Map<K, V>` defined as `Vec<(K, V)>` in Rust
     MapAsSequence(&'caller [Box<DataTypeNode>; 2], MapAsSequenceValidatorState),
+    JsonWithHint(&'caller Vec<(String, Box<DataTypeNode>)>),
     Tuple(&'caller [DataTypeNode]),
     /// This is a hack to support deserializing tuples/arrays (and not structs) from fetch calls
     RootTuple(&'caller [Column], usize),
@@ -289,6 +334,13 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                         result
                     }
                 }
+            }
+            InnerDataTypeValidatorKind::JsonWithHint(kv) => {
+                kv.iter().try_for_each(|(_, value)| {
+                    validate_impl(inner.root, value, &serde_type, true).map(|_| ())
+                })?;
+
+                Ok(None)
             }
             InnerDataTypeValidatorKind::Array(inner_type) => {
                 validate_impl(inner.root, inner_type, &serde_type, true)
@@ -382,17 +434,31 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
                 }
                 IdentifierType::Variant => {
                     if let Variant(possible_types, state) = &mut inner.kind {
-                        // ClickHouse guarantees max 255 variants, i.e. the same max value as u8
-                        if value.into_u8() < (possible_types.len() as u8) {
-                            *state = VariantValidationState::Identifier(value.into_u8());
+                        let id = value.into_u8();
+                        if id < (possible_types.len() as u8) {
+                            *state = VariantValidationState::Identifier(id);
                         } else {
                             let (full_name, full_data_type) =
                                 inner.root.get_current_column_name_and_type()?;
 
+                            // 0xFF is the NULL discriminator for Variant columns.
+                            // reaching here means the Rust field is not Option<T>,
+                            // so it cannot represent NULL.
+                            let detail = if id == 0xFF {
+                                "received NULL (0xFF discriminator), \
+                                 but the field is not Option<T>"
+                                    .to_string()
+                            } else {
+                                format!(
+                                    "Variant identifier {id} is out of bounds, \
+                                     max allowed index is {}",
+                                    possible_types.len() - 1
+                                )
+                            };
+
                             return Err(Error::SchemaMismatch(format!(
-                                "While processing column {full_name} defined as {full_data_type}: \
-                                 Variant identifier {value} is out of bounds, max allowed index is {}",
-                                possible_types.len() - 1
+                                "While processing column {full_name} \
+                                 defined as {full_data_type}: {detail}"
                             )));
                         }
                     }
@@ -411,6 +477,38 @@ impl<'caller, R: Row> SchemaValidator<R> for Option<InnerDataTypeValidator<'_, '
     #[cold]
     fn get_schema_index(&self, _struct_idx: usize) -> Result<usize> {
         unreachable!()
+    }
+
+    /// Reports the null encoding of the next nested column the validator is
+    /// about to descend into. Required so that `deserialize_option` picks the
+    /// correct null-reading strategy for nested cases such as
+    /// `Vec<Option<Variant>>` (over `Array(Variant(...))`) or
+    /// `(_, Option<Variant>)` (over `Tuple(_, Variant(...))`).
+    fn null_encoding(&self) -> Option<NullEncoding> {
+        let inner = self.as_ref()?;
+        let node: &DataTypeNode = match &inner.kind {
+            InnerDataTypeValidatorKind::Array(t) => t,
+            InnerDataTypeValidatorKind::RootArray(t) => t,
+            InnerDataTypeValidatorKind::Nullable(t) => t,
+            InnerDataTypeValidatorKind::Tuple(elements) => elements.first()?,
+            InnerDataTypeValidatorKind::RootTuple(cols, idx) => &cols.get(*idx)?.data_type,
+            InnerDataTypeValidatorKind::Map(kv, MapValidatorState::Key) => &kv[0],
+            InnerDataTypeValidatorKind::Map(kv, MapValidatorState::Value) => &kv[1],
+            InnerDataTypeValidatorKind::MapAsSequence(kv, state) => match state {
+                // tuple state is a passthrough: the next validate call only
+                // updates state without consuming any wire bytes
+                MapAsSequenceValidatorState::Tuple => return None,
+                MapAsSequenceValidatorState::Key => &kv[0],
+                MapAsSequenceValidatorState::Value => &kv[1],
+            },
+            InnerDataTypeValidatorKind::Variant(types, VariantValidationState::Identifier(v)) => {
+                types.get(*v as usize)?
+            }
+            // FixedString / Enum / JsonWithHint / Variant(Pending) cannot
+            // host an Option<T> at this position
+            _ => return None,
+        };
+        null_encoding_for(node)
     }
 
     fn check_tuple_fully_validated(&self) -> Result<()> {
@@ -450,7 +548,9 @@ fn validate_impl<'serde, 'caller, R: Row>(
     serde_type: &SerdeType,
     is_inner: bool,
 ) -> Result<Option<InnerDataTypeValidator<'serde, 'caller, R>>> {
-    let data_type = column_data_type.remove_low_cardinality();
+    let data_type = column_data_type
+        .remove_low_cardinality()
+        .remove_simple_aggregate_function();
     match serde_type {
         SerdeType::Bool
             if data_type == &DataTypeNode::Bool || data_type == &DataTypeNode::UInt8 =>
@@ -522,11 +622,14 @@ fn validate_impl<'serde, 'caller, R: Row>(
         SerdeType::U128 if data_type == &DataTypeNode::UInt128 => Ok(None),
         SerdeType::F32 if data_type == &DataTypeNode::Float32 => Ok(None),
         SerdeType::F64 if data_type == &DataTypeNode::Float64 => Ok(None),
-        SerdeType::Str | SerdeType::String
-            if data_type == &DataTypeNode::String || data_type == &DataTypeNode::JSON =>
-        {
-            Ok(None)
-        }
+        SerdeType::Str | SerdeType::String => match data_type {
+            DataTypeNode::JsonWithHint(kv) => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::JsonWithHint(kv),
+            })),
+            DataTypeNode::String | DataTypeNode::JSON => Ok(None),
+            _ => root.err_on_schema_mismatch(data_type, serde_type, is_inner),
+        },
         // allows to work with BLOB strings as well
         SerdeType::Bytes(_) | SerdeType::ByteBuf(_) if data_type == &DataTypeNode::String => {
             Ok(None)
@@ -537,16 +640,21 @@ fn validate_impl<'serde, 'caller, R: Row>(
         {
             Ok(None)
         }
-        SerdeType::Option => {
-            if let DataTypeNode::Nullable(inner_type) = data_type {
-                Ok(Some(InnerDataTypeValidator {
-                    root,
-                    kind: InnerDataTypeValidatorKind::Nullable(inner_type),
-                }))
-            } else {
-                root.err_on_schema_mismatch(data_type, serde_type, is_inner)
-            }
-        }
+        SerdeType::Bytes(bf16::BYTE_LEN) if data_type == &DataTypeNode::BFloat16 => Ok(None),
+        SerdeType::Option => match data_type {
+            DataTypeNode::Nullable(inner_type) => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Nullable(inner_type),
+            })),
+            // variant is implicitly nullable; 0xFF discriminator = NULL.
+            // reuse Nullable inner kind as a passthrough so the subsequent
+            // SerdeType::Variant call resolves against the Variant data type.
+            DataTypeNode::Variant(_) => Ok(Some(InnerDataTypeValidator {
+                root,
+                kind: InnerDataTypeValidatorKind::Nullable(data_type),
+            })),
+            _ => root.err_on_schema_mismatch(data_type, serde_type, is_inner),
+        },
         SerdeType::Seq(_) => match data_type {
             DataTypeNode::Array(inner_type) => Ok(Some(InnerDataTypeValidator {
                 root,
@@ -650,7 +758,12 @@ fn validate_impl<'serde, 'caller, R: Row>(
         _ => root.err_on_schema_mismatch(
             data_type,
             serde_type,
-            is_inner || matches!(column_data_type, DataTypeNode::LowCardinality { .. }),
+            is_inner
+                || matches!(column_data_type, DataTypeNode::LowCardinality { .. })
+                || matches!(
+                    column_data_type,
+                    DataTypeNode::SimpleAggregateFunction { .. }
+                ),
         ),
     }
 }

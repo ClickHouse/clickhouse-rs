@@ -381,7 +381,6 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
 
     unsupported!(
         serialize_map(Option<usize>) -> Result<Impossible>,
-        serialize_bytes(&[u8]),
         serialize_unit,
         serialize_unit_struct(&'static str),
     );
@@ -401,6 +400,11 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
         serialize_f64(f64),
         serialize_bool(bool),
     );
+
+    #[inline]
+    fn serialize_bytes(self, v: &[u8]) -> std::result::Result<Self::Ok, Self::Error> {
+        Ok(escape::escape_ascii(v, self.writer)?)
+    }
 
     #[inline]
     fn serialize_char(self, value: char) -> Result {
@@ -444,7 +448,7 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
 
     #[inline]
     fn serialize_none(self) -> std::result::Result<Self::Ok, Self::Error> {
-        self.writer.write_str("NULL")?;
+        self.writer.write_str(r"\N")?;
         Ok(())
     }
 
@@ -546,6 +550,19 @@ pub(crate) fn write_param(writer: &mut impl Write, value: &impl Serialize) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check_param(v: impl Serialize) -> String {
+        let mut out = String::new();
+        write_param(&mut out, &v).unwrap();
+        out
+    }
+
+    #[test]
+    fn it_writes_param_options() {
+        assert_eq!(check_param(None::<i32>), r"\N");
+        assert_eq!(check_param(Some(32)), "32");
+        assert_eq!(check_param(Some(vec![42, 43])), "[42,43]");
+    }
 
     fn check(v: impl Serialize) -> String {
         let mut out = String::new();

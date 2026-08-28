@@ -26,6 +26,7 @@
 //!   clean up outdated databases based on its creation time.
 
 use clickhouse::{Client, Row, RowOwned, RowRead, RowWrite, sql::Identifier};
+use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
@@ -138,6 +139,13 @@ pub(crate) fn get_client() -> Client {
     }
 }
 
+pub(crate) fn get_client_with_session() -> Client {
+    get_client().with_setting(
+        "session_id",
+        Alphanumeric.sample_string(&mut rand::rng(), 16),
+    )
+}
+
 pub(crate) fn require_env_var(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} environment variable is not set"))
 }
@@ -165,7 +173,7 @@ impl SimpleRow {
 pub(crate) async fn create_simple_table(client: &Client, table_name: &str) {
     client
         .query("CREATE TABLE ?(id UInt64, data String) ENGINE = MergeTree ORDER BY id")
-        .with_option("wait_end_of_query", "1")
+        .with_setting("wait_end_of_query", "1")
         .bind(Identifier(table_name))
         .execute()
         .await
@@ -187,7 +195,7 @@ where
 pub(crate) async fn flush_query_log(client: &Client) {
     client
         .query("SYSTEM FLUSH LOGS")
-        .with_option("wait_end_of_query", "1")
+        .with_setting("wait_end_of_query", "1")
         .execute()
         .await
         .unwrap();
@@ -197,7 +205,7 @@ pub(crate) async fn execute_statements(client: &Client, statements: &[&str]) {
     for statement in statements {
         client
             .query(statement)
-            .with_option("wait_end_of_query", "1")
+            .with_setting("wait_end_of_query", "1")
             .execute()
             .await
             .unwrap_or_else(|err| panic!("cannot execute statement '{statement}', cause: {err}"));
@@ -246,24 +254,34 @@ pub(crate) mod decimals {
     pub(crate) type Decimal128 = FixedPoint<i128, U12>; // Decimal(38, 12) = Decimal128(12)
 }
 
+mod arrow;
+mod bfloat16;
 mod chrono;
 mod cloud_jwt;
 mod compression;
 mod cursor_error;
 mod cursor_stats;
+mod database;
 mod fetch_bytes;
+mod fetch_native;
 mod https_errors;
 mod insert;
 mod insert_formatted;
+mod insert_native;
 #[cfg(feature = "inserter")]
 mod inserter;
 mod int128;
 mod int256;
 mod ip;
 mod mock;
+mod native_types;
 mod nested;
+#[cfg(feature = "opentelemetry")]
+mod opentelemetry;
 mod query;
+mod query_raw;
 mod query_readonly;
+mod query_summary;
 mod query_syntax;
 mod rbwnat_header;
 mod rbwnat_smoke;
@@ -272,6 +290,7 @@ mod time;
 mod user_agent;
 mod uuid;
 mod variant;
+mod variant_null;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TestEnv {
@@ -408,7 +427,7 @@ mod _priv {
 
         client
             .query("DROP DATABASE IF EXISTS ?")
-            .with_option("wait_end_of_query", "1")
+            .with_setting("wait_end_of_query", "1")
             .bind(Identifier(db_name))
             .execute()
             .await
@@ -416,7 +435,7 @@ mod _priv {
 
         client
             .query("CREATE DATABASE ?")
-            .with_option("wait_end_of_query", "1")
+            .with_setting("wait_end_of_query", "1")
             .bind(Identifier(db_name))
             .execute()
             .await

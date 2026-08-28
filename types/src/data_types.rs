@@ -1,4 +1,5 @@
 use crate::error::TypesError;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
@@ -89,12 +90,19 @@ pub enum DataTypeNode {
     /// Function name and its arguments
     AggregateFunction(String, Vec<DataTypeNode>),
 
+    /// Function name and the inner type.
+    /// The wire format is identical to the inner type; the function name is
+    /// metadata for the MergeTree engine, not the client protocol.
+    SimpleAggregateFunction(String, Box<DataTypeNode>),
+
     /// Contains all possible types for this variant
     Variant(Vec<DataTypeNode>),
 
     Dynamic,
     JSON,
 
+    // TODO: Rename for better representation
+    JsonWithHint(Vec<(String, Box<DataTypeNode>)>),
     Point,
     Ring,
     LineString,
@@ -140,7 +148,7 @@ impl DataTypeNode {
             "Polygon" => Ok(Self::Polygon),
             "MultiPolygon" => Ok(Self::MultiPolygon),
 
-            str if str.starts_with("JSON") => Ok(Self::JSON),
+            str if str.starts_with("JSON(") => parse_json(str),
 
             str if str.starts_with("Decimal") => parse_decimal(str),
             str if str.starts_with("DateTime64") => parse_datetime64(str),
@@ -159,6 +167,10 @@ impl DataTypeNode {
             str if str.starts_with("Tuple") => parse_tuple(str),
             str if str.starts_with("Variant") => parse_variant(str),
 
+            str if str.starts_with("SimpleAggregateFunction(") => {
+                parse_simple_aggregate_function(str)
+            }
+
             // ...
             str => Err(TypesError::TypeParsingError(format!(
                 "Unknown data type: {str}"
@@ -172,6 +184,84 @@ impl DataTypeNode {
             DataTypeNode::LowCardinality(inner) => inner,
             _ => self,
         }
+    }
+
+    /// SimpleAggregateFunction(fn, T) -> T
+    ///
+    /// The wire format of a `SimpleAggregateFunction` column is identical to
+    /// its inner type. This method strips the wrapper so that (de)serialization
+    /// validation can treat it as the inner type.
+    pub fn remove_simple_aggregate_function(&self) -> &DataTypeNode {
+        match self {
+            DataTypeNode::SimpleAggregateFunction(_, inner) => inner,
+            _ => self,
+        }
+    }
+
+    /// Remove wrapper types that are semantically identical from a data consumer's perspective.
+    ///
+    /// N.B. `Nullable` is not a valid lift here as nullable column data is not compatible with
+    /// a non-nullable Rust type and vice versa
+    /// (e.g. `Nullable(UInt64)` is not strictly compatible with `u64`).
+    ///
+    /// Current types covered:
+    /// * `LowCardinality`
+    /// * `SimpleAggregateFunction`
+    pub fn remove_compatible_wrappers(&self) -> &DataTypeNode {
+        match self {
+            DataTypeNode::LowCardinality(inner)
+            | DataTypeNode::SimpleAggregateFunction(_, inner) => inner,
+            _ => self,
+        }
+    }
+
+    /// If `self` has a static string representation (e.g. `"UInt8"`), return it.
+    ///
+    /// Returns `None` for polymorphic types (e.g. `Array(T)` or `Decimal(P, S)`).
+    pub fn as_str(&self) -> Option<&'static str> {
+        use DataTypeNode::*;
+
+        Some(match self {
+            UInt8 => "UInt8",
+            UInt16 => "UInt16",
+            UInt32 => "UInt32",
+            UInt64 => "UInt64",
+            UInt128 => "UInt128",
+            UInt256 => "UInt256",
+            Int8 => "Int8",
+            Int16 => "Int16",
+            Int32 => "Int32",
+            Int64 => "Int64",
+            Int128 => "Int128",
+            Int256 => "Int256",
+            Float32 => "Float32",
+            Float64 => "Float64",
+            BFloat16 => "BFloat16",
+            String => "String",
+            UUID => "UUID",
+            Date => "Date",
+            Date32 => "Date32",
+            DateTime(None) => "DateTime",
+            Time => "Time",
+            IPv4 => "IPv4",
+            IPv6 => "IPv6",
+            Bool => "Bool",
+            JSON => "JSON",
+            Dynamic => "Dynamic",
+            Point => "Point",
+            Ring => "Ring",
+            LineString => "LineString",
+            MultiLineString => "MultiLineString",
+            Polygon => "Polygon",
+            MultiPolygon => "MultiPolygon",
+            _ => return None,
+        })
+    }
+
+    /// Return the string representation for this type, without allocating if possible.
+    pub fn to_str(&self) -> Cow<'static, str> {
+        self.as_str()
+            .map_or_else(|| self.to_string().into(), Cow::Borrowed)
     }
 }
 
@@ -243,7 +333,7 @@ impl Display for DataTypeNode {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "'{name}' = {index}")?;
+                    write!(f, "'{}' = {index}", escape_enum_name(name))?;
                 }
                 write!(f, ")")
             }
@@ -256,6 +346,9 @@ impl Display for DataTypeNode {
                     write!(f, "{element}")?;
                 }
                 write!(f, ")")
+            }
+            SimpleAggregateFunction(func_name, inner) => {
+                write!(f, "SimpleAggregateFunction({func_name}, {inner})")
             }
             FixedString(size) => {
                 write!(f, "FixedString({size})")
@@ -278,8 +371,25 @@ impl Display for DataTypeNode {
             MultiLineString => write!(f, "MultiLineString"),
             Polygon => write!(f, "Polygon"),
             MultiPolygon => write!(f, "MultiPolygon"),
+            JsonWithHint(json) => format_json_with_hint(json, f),
         }
     }
+}
+
+fn format_json_with_hint(
+    json: &[(String, Box<DataTypeNode>)],
+    f: &mut Formatter<'_>,
+) -> Result<(), std::fmt::Error> {
+    write!(f, "JSON(")?;
+
+    for (i, (name, ty)) in json.iter().enumerate() {
+        if i > 0 {
+            write!(f, ", ")?;
+        }
+        write!(f, "{} {}", name, ty)?;
+    }
+
+    write!(f, ")")
 }
 
 /// Represents the underlying integer size of an Enum type.
@@ -540,9 +650,9 @@ fn parse_decimal(input: &str) -> Result<DataTypeNode, TypesError> {
             })?;
         let precision = parsed[0];
         let scale = parsed[1];
-        if scale < 1 || precision < 1 {
+        if precision == 0 {
             return Err(TypesError::TypeParsingError(format!(
-                "Invalid Decimal format, expected Decimal(P, S) with P > 0 and S > 0, got {input}"
+                "Invalid Decimal format, expected Decimal(P, S) with P > 0, got {input}"
             )));
         }
         if precision < scale {
@@ -602,6 +712,41 @@ fn parse_low_cardinality(input: &str) -> Result<DataTypeNode, TypesError> {
     )))
 }
 
+/// `SimpleAggregateFunction(func_name, InnerType)` is a transparent wrapper.
+/// The wire format is identical to `InnerType`; the function name is
+/// metadata for the MergeTree engine, not the client protocol.
+/// We preserve the full type so that it is correctly serialized back
+/// when sending column type headers during INSERT (RBWNAT format).
+fn parse_simple_aggregate_function(input: &str) -> Result<DataTypeNode, TypesError> {
+    let prefix = "SimpleAggregateFunction(";
+    let inner = &input[prefix.len()..input.len() - 1];
+    // Find the first top-level comma (not inside parentheses) to split
+    // the function name from the inner type.
+    let mut depth = 0u32;
+    let mut comma_pos = None;
+    for (i, b) in inner.bytes().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                comma_pos = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let comma_pos = comma_pos.ok_or_else(|| {
+        TypesError::TypeParsingError(format!("Invalid SimpleAggregateFunction: {input}"))
+    })?;
+    let func_name = inner[..comma_pos].trim().to_string();
+    let inner_type_str = inner[comma_pos + 1..].trim_start();
+    let inner_type = DataTypeNode::new(inner_type_str)?;
+    Ok(DataTypeNode::SimpleAggregateFunction(
+        func_name,
+        Box::new(inner_type),
+    ))
+}
+
 fn parse_nullable(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 10 {
         let inner_type_str = &input[9..input.len() - 1];
@@ -630,6 +775,81 @@ fn parse_map(input: &str) -> Result<DataTypeNode, TypesError> {
     Err(TypesError::TypeParsingError(format!(
         "Invalid Map format, expected Map(KeyType, ValueType), got {input}"
     )))
+}
+
+fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
+    let hints = remove_json_header(input)?;
+
+    let mut columns = Vec::new();
+    let mut last_element_index = 0;
+    for i in unquoted_positions(hints, b',') {
+        columns.push(&hints[last_element_index..i]);
+        last_element_index = i + 1;
+    }
+    columns.push(&hints[last_element_index..]);
+
+    let inner_types = columns
+        .into_iter()
+        .map(|column| column.trim())
+        .filter(|column| {
+            unquoted_positions(column, b'=').next().is_none() && !column.starts_with("SKIP")
+        })
+        .map(|column| {
+            let separator_index = unquoted_positions(column, b' ').next().ok_or_else(|| {
+                TypesError::TypeParsingError(format!(
+                    "Invalid JSON type hint, expected `path Type`, got {column} in {input}"
+                ))
+            })?;
+            let key_type = column[..separator_index].to_string();
+            let value_type = DataTypeNode::new(column[separator_index + 1..].trim_start())?;
+
+            Ok((key_type, Box::new(value_type)))
+        })
+        .collect::<Result<Vec<(String, Box<DataTypeNode>)>, TypesError>>()?;
+
+    if inner_types.is_empty() {
+        return Ok(DataTypeNode::JSON);
+    }
+
+    Ok(DataTypeNode::JsonWithHint(inner_types))
+}
+
+/// Yields the indices of every `separator` byte in `input` that is not inside a
+/// back-quoted identifier. A JSON path name is back-quoted by the server when it
+/// contains a character that requires quoting, so both the separator between the
+/// hints and the one between a path and its type have to skip such spans:
+/// ```text
+///  let input = "`a,b` Int64, `c d` String"; // two hints, not four
+/// ```
+/// A back-quote escaped with a backslash does not end the identifier.
+fn unquoted_positions(input: &str, separator: u8) -> impl Iterator<Item = usize> + '_ {
+    let mut quote_open = false;
+    let mut char_escaped = false;
+
+    input.bytes().enumerate().filter_map(move |(i, byte)| {
+        if char_escaped {
+            char_escaped = false;
+        } else if byte == b'\\' {
+            char_escaped = true;
+        } else if byte == b'`' {
+            quote_open = !quote_open;
+        } else if byte == separator && !quote_open {
+            return Some(i);
+        }
+        None
+    })
+}
+
+fn remove_json_header(input: &str) -> Result<&str, TypesError> {
+    if input.starts_with("JSON") && input.ends_with(')') {
+        let new = input[5..].trim();
+
+        Ok(new.trim_end_matches(')'))
+    } else {
+        Err(TypesError::TypeParsingError(format!(
+            "Invalid JSON format, expected JSON(Type), got {input}"
+        )))
+    }
 }
 
 fn parse_tuple(input: &str) -> Result<DataTypeNode, TypesError> {
@@ -744,6 +964,59 @@ fn parse_enum_index(input_bytes: &[u8], input: &str) -> Result<i16, TypesError> 
         })
 }
 
+fn escape_enum_name(name: &str) -> String {
+    let mut escaped = String::with_capacity(name.len());
+    for character in name.chars() {
+        match character {
+            '\0' => escaped.push_str("\\0"),
+            '\x08' => escaped.push_str("\\b"),
+            '\x0c' => escaped.push_str("\\f"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\\' => escaped.push_str("\\\\"),
+            '\'' => escaped.push_str("\\'"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn unescape_enum_name(input: &[u8], source: &str) -> Result<String, TypesError> {
+    let mut name = Vec::with_capacity(input.len());
+    let mut char_escaped = false;
+
+    for &byte in input {
+        if char_escaped {
+            match byte {
+                b'0' => name.push(b'\0'),
+                b'b' => name.push(0x08),
+                b'f' => name.push(0x0c),
+                b'n' => name.push(b'\n'),
+                b'r' => name.push(b'\r'),
+                b't' => name.push(b'\t'),
+                b'\\' => name.push(b'\\'),
+                b'\'' => name.push(b'\''),
+                _ => {
+                    name.push(b'\\');
+                    name.push(byte);
+                }
+            }
+            char_escaped = false;
+        } else if byte == b'\\' {
+            char_escaped = true;
+        } else {
+            name.push(byte);
+        }
+    }
+
+    String::from_utf8(name).map_err(|_| {
+        TypesError::TypeParsingError(format!(
+            "Invalid UTF-8 sequence in input for the enum name: {source}"
+        ))
+    })
+}
+
 fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError> {
     let mut names: Vec<String> = Vec::new();
     let mut indices: Vec<i16> = Vec::new();
@@ -762,12 +1035,7 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
             } else if input_bytes[i] == b'\'' {
                 // non-escaped closing tick - push the name
                 let name_bytes = &input_bytes[start_index..i];
-                let name = String::from_utf8(name_bytes.to_vec()).map_err(|_| {
-                    TypesError::TypeParsingError(format!(
-                        "Invalid UTF-8 sequence in input for the enum name: {}",
-                        &input[start_index..i]
-                    ))
-                })?;
+                let name = unescape_enum_name(name_bytes, &input[start_index..i])?;
                 names.push(name);
 
                 // Skip ` = ` and the first digit, as it will always have at least one
@@ -865,6 +1133,18 @@ mod tests {
     }
 
     #[test]
+    fn test_json_with_hint_display() {
+        let json_with_hint = DataTypeNode::JsonWithHint(vec![
+            ("foo".to_string(), Box::new(DataTypeNode::String)),
+            ("bar".to_string(), Box::new(DataTypeNode::Int32)),
+        ]);
+        assert_eq!(
+            json_with_hint.to_string(),
+            "JSON(foo String, bar Int32)".to_string()
+        );
+    }
+
+    #[test]
     fn test_enum_display() {
         let mut values1 = HashMap::new();
         values1.insert(1, "one".to_string());
@@ -956,8 +1236,21 @@ mod tests {
         assert_eq!(DataTypeNode::new("Dynamic").unwrap(), DataTypeNode::Dynamic);
         assert_eq!(DataTypeNode::new("JSON").unwrap(), DataTypeNode::JSON);
         assert_eq!(
-            DataTypeNode::new("JSON(max_dynamic_types=8, max_dynamic_paths=64)").unwrap(),
+            DataTypeNode::new(
+                "JSON(max_dynamic_types=8, max_dynamic_paths=64, SKIP internal_metrics)"
+            )
+            .unwrap(),
             DataTypeNode::JSON
+        );
+        assert_eq!(
+            DataTypeNode::new(
+                "JSON(max_dynamic_types=8, max_dynamic_paths=64, SKIP internal_metrics, foo String, bar Int32)"
+            )
+            .unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                ("foo".to_string(), Box::new(DataTypeNode::String)),
+                ("bar".to_string(), Box::new(DataTypeNode::Int32))
+            ])
         );
         assert!(DataTypeNode::new("SomeUnknownType").is_err());
     }
@@ -1027,6 +1320,10 @@ mod tests {
         assert_eq!(
             DataTypeNode::new("Decimal(42, 8)").unwrap(),
             DataTypeNode::Decimal(42, 8, DecimalType::Decimal256)
+        );
+        assert_eq!(
+            DataTypeNode::new("Decimal(25, 0)").unwrap(),
+            DataTypeNode::Decimal(25, 0, DecimalType::Decimal128)
         );
         assert!(DataTypeNode::new("Decimal").is_err());
         assert!(DataTypeNode::new("Decimal(").is_err());
@@ -1337,6 +1634,51 @@ mod tests {
     }
 
     #[test]
+    fn test_data_type_new_json_with_quoted_paths() {
+        // ClickHouse back-quotes a JSON path when its name contains a character
+        // that requires quoting, such as a space or a comma
+        assert_eq!(
+            DataTypeNode::new("JSON(`a b` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![("`a b`".to_string(), Box::new(DataTypeNode::Int64))])
+        );
+        assert_eq!(
+            DataTypeNode::new("JSON(`a,b` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![("`a,b`".to_string(), Box::new(DataTypeNode::Int64))])
+        );
+        // an escaped back-quote does not end the quoted path
+        assert_eq!(
+            DataTypeNode::new("JSON(`a\\`,b` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![(
+                "`a\\`,b`".to_string(),
+                Box::new(DataTypeNode::Int64)
+            )])
+        );
+        assert_eq!(
+            DataTypeNode::new("JSON(`a,b` Int64, `c d` String, e UInt8)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                ("`a,b`".to_string(), Box::new(DataTypeNode::Int64)),
+                ("`c d`".to_string(), Box::new(DataTypeNode::String)),
+                ("e".to_string(), Box::new(DataTypeNode::UInt8)),
+            ])
+        );
+        // settings are still skipped, and a quoted path is not mistaken for one
+        assert_eq!(
+            DataTypeNode::new("JSON(max_dynamic_types=8, SKIP a, `b=c` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![("`b=c`".to_string(), Box::new(DataTypeNode::Int64))])
+        );
+        // a hint without a type is an error instead of a panic
+        assert!(DataTypeNode::new("JSON(`a,b`)").is_err());
+        // the parsed type is sent back to the server as is, so quoting must survive
+        for input in [
+            "JSON(`a b` Int64)",
+            "JSON(`a,b` Int64)",
+            "JSON(`a,b` Int64, `c d` String, e UInt8)",
+        ] {
+            assert_eq!(DataTypeNode::new(input).unwrap().to_string(), input);
+        }
+    }
+
+    #[test]
     fn test_data_type_new_variant() {
         assert_eq!(
             DataTypeNode::new("Variant(UInt8, String)").unwrap(),
@@ -1433,9 +1775,15 @@ mod tests {
                 HashMap::from([(1, "A".to_string()), (2, "B".to_string())])
             )
         );
+        let parsed = DataTypeNode::new(ENUM_WITH_ESCAPING_STR).unwrap();
+        assert_eq!(parsed, enum_with_escaping());
+        assert_eq!(parsed.to_string(), ENUM_WITH_ESCAPING_STR);
         assert_eq!(
-            DataTypeNode::new(ENUM_WITH_ESCAPING_STR).unwrap(),
-            enum_with_escaping()
+            DataTypeNode::new(r#"Enum8('unknown\%value' = 1)"#).unwrap(),
+            DataTypeNode::Enum(
+                EnumType::Enum8,
+                HashMap::from([(1, "unknown\\%value".to_string())])
+            )
         );
         assert_eq!(
             DataTypeNode::new("Enum8('foo' = 0, '' = 42)").unwrap(),
@@ -1799,19 +2147,113 @@ mod tests {
         assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
-    const ENUM_WITH_ESCAPING_STR: &str =
-        "Enum8('f\\'' = 1, 'x =' = 2, 'b\\'\\'' = 3, '\\'c=4=' = 42, '4' = 100)";
+    const ENUM_WITH_ESCAPING_STR: &str = "Enum8('quote\\'' = 1, 'slash\\\\value' = 2, 'tab\\tvalue' = 3, 'line\\nvalue' = 4, 'cr\\rvalue' = 5, 'back\\bvalue' = 6, 'form\\fvalue' = 7, 'null\\0value' = 8, 'unknown\\\\%value' = 9)";
 
     fn enum_with_escaping() -> DataTypeNode {
         DataTypeNode::Enum(
             EnumType::Enum8,
             HashMap::from([
-                (1, "f\\'".to_string()),
-                (2, "x =".to_string()),
-                (3, "b\\'\\'".to_string()),
-                (42, "\\'c=4=".to_string()),
-                (100, "4".to_string()),
+                (1, "quote'".to_string()),
+                (2, "slash\\value".to_string()),
+                (3, "tab\tvalue".to_string()),
+                (4, "line\nvalue".to_string()),
+                (5, "cr\rvalue".to_string()),
+                (6, "back\x08value".to_string()),
+                (7, "form\x0cvalue".to_string()),
+                (8, "null\0value".to_string()),
+                (9, "unknown\\%value".to_string()),
             ]),
         )
+    }
+
+    #[test]
+    fn simple_aggregate_function_min_uint32() {
+        let dt = DataTypeNode::new("SimpleAggregateFunction(min, UInt32)").unwrap();
+        match dt {
+            DataTypeNode::SimpleAggregateFunction(func, inner) => {
+                assert_eq!(func, "min");
+                assert_eq!(*inner, DataTypeNode::UInt32);
+            }
+            other => panic!("expected SimpleAggregateFunction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_aggregate_function_max_uint64() {
+        let dt = DataTypeNode::new("SimpleAggregateFunction(max, UInt64)").unwrap();
+        match dt {
+            DataTypeNode::SimpleAggregateFunction(func, inner) => {
+                assert_eq!(func, "max");
+                assert_eq!(*inner, DataTypeNode::UInt64);
+            }
+            other => panic!("expected SimpleAggregateFunction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_aggregate_function_sum_float64() {
+        let dt = DataTypeNode::new("SimpleAggregateFunction(sum, Float64)").unwrap();
+        match dt {
+            DataTypeNode::SimpleAggregateFunction(func, inner) => {
+                assert_eq!(func, "sum");
+                assert_eq!(*inner, DataTypeNode::Float64);
+            }
+            other => panic!("expected SimpleAggregateFunction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_aggregate_function_group_bit_and_uint8() {
+        let dt = DataTypeNode::new("SimpleAggregateFunction(groupBitAnd, UInt8)").unwrap();
+        match dt {
+            DataTypeNode::SimpleAggregateFunction(func, inner) => {
+                assert_eq!(func, "groupBitAnd");
+                assert_eq!(*inner, DataTypeNode::UInt8);
+            }
+            other => panic!("expected SimpleAggregateFunction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_aggregate_function_with_array_inner() {
+        let dt =
+            DataTypeNode::new("SimpleAggregateFunction(groupArrayArray, Array(UInt32))").unwrap();
+        match dt {
+            DataTypeNode::SimpleAggregateFunction(func, inner) => {
+                assert_eq!(func, "groupArrayArray");
+                assert_eq!(*inner, DataTypeNode::Array(Box::new(DataTypeNode::UInt32)));
+            }
+            other => panic!("expected SimpleAggregateFunction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_aggregate_function_invalid_format() {
+        let result = DataTypeNode::new("SimpleAggregateFunction(min)");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn simple_aggregate_function_display_roundtrip() {
+        let input = "SimpleAggregateFunction(min, UInt32)";
+        let dt = DataTypeNode::new(input).unwrap();
+        assert_eq!(dt.to_string(), input);
+
+        let input2 = "SimpleAggregateFunction(groupArrayArray, Array(UInt32))";
+        let dt2 = DataTypeNode::new(input2).unwrap();
+        assert_eq!(dt2.to_string(), input2);
+    }
+
+    #[test]
+    fn simple_aggregate_function_remove() {
+        let dt = DataTypeNode::new("SimpleAggregateFunction(min, UInt32)").unwrap();
+        assert_eq!(*dt.remove_simple_aggregate_function(), DataTypeNode::UInt32);
+
+        // Non-SimpleAggregateFunction should return self
+        let dt2 = DataTypeNode::UInt64;
+        assert_eq!(
+            *dt2.remove_simple_aggregate_function(),
+            DataTypeNode::UInt64
+        );
     }
 }

@@ -1,11 +1,13 @@
-use crate::{cursors::RawCursor, error::Result, response::Response};
+use crate::{cursors::RawCursor, error::Result, query_summary::QuerySummary, response::Response};
 use bytes::{Buf, Bytes, BytesMut};
+use futures_util::TryFutureExt;
 use std::{
     io::Result as IoResult,
     pin::Pin,
     task::{Context, Poll, ready},
 };
 use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
+use tracing::Instrument;
 
 /// A cursor over raw bytes of the response returned by [`Query::fetch_bytes`].
 ///
@@ -35,15 +37,17 @@ use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 pub struct BytesCursor {
     raw: RawCursor,
     bytes: Bytes,
+    span: tracing::Span,
 }
 
 // TODO: what if any next/poll_* called AFTER error returned?
 
 impl BytesCursor {
-    pub(crate) fn new(response: Response) -> Self {
+    pub(crate) fn new(response: Response, span: tracing::Span) -> Self {
         Self {
             raw: RawCursor::new(response),
             bytes: Bytes::default(),
+            span,
         }
     }
 
@@ -58,7 +62,24 @@ impl BytesCursor {
             "mixing `BytesCursor::next()` and `AsyncRead` API methods is not allowed"
         );
 
-        self.raw.next().await
+        self.raw
+            .next()
+            .inspect_err(|e| tracing::debug!(error=?e, "error from BytesCursor::next()"))
+            .instrument(self.span.clone())
+            .await
+    }
+
+    /// Poll for the next chunk of bytes.
+    #[inline(always)]
+    pub fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<Bytes>>> {
+        assert!(
+            self.bytes.is_empty(),
+            "mixing `BytesCursor::poll_next()` and `AsyncRead` API methods is not allowed"
+        );
+
+        let _guard = self.span.enter();
+
+        self.raw.poll_next(cx)
     }
 
     /// Collects the whole response into a single [`Bytes`].
@@ -94,13 +115,19 @@ impl BytesCursor {
     fn poll_refill(&mut self, cx: &mut Context<'_>) -> Poll<IoResult<bool>> {
         debug_assert_eq!(self.bytes.len(), 0);
 
+        let _guard = self.span.enter();
+
         // Theoretically, `self.raw.poll_next(cx)` can return empty chunks.
         // In this case, we should continue polling until we get a non-empty chunk or
         // end of stream in order to avoid false positive `Ok(0)` in I/O traits.
         while self.bytes.is_empty() {
-            match ready!(self.raw.poll_next(cx)?) {
-                Some(chunk) => self.bytes = chunk,
-                None => return Poll::Ready(Ok(false)),
+            match ready!(self.raw.poll_next(cx)) {
+                Ok(Some(chunk)) => self.bytes = chunk,
+                Ok(None) => return Poll::Ready(Ok(false)),
+                Err(e) => {
+                    tracing::debug!(error=?e, "error reading from cursor");
+                    return Poll::Ready(Err(e.into()));
+                }
             }
         }
 
@@ -122,6 +149,22 @@ impl BytesCursor {
     #[inline]
     pub fn decoded_bytes(&self) -> u64 {
         self.raw.decoded_bytes()
+    }
+
+    /// Returns the parsed `X-ClickHouse-Summary` response header, if
+    /// present. Available once the response headers have been received.
+    ///
+    /// Note: the summary values may be incomplete unless the query was
+    /// executed with `wait_end_of_query=1`.
+    #[inline]
+    pub fn summary(&self) -> Option<&QuerySummary> {
+        self.raw.summary()
+    }
+
+    #[inline]
+    #[doc(hidden)]
+    pub fn _priv_span(&self) -> &tracing::Span {
+        &self.span
     }
 }
 
@@ -167,6 +210,20 @@ impl AsyncBufRead for BytesCursor {
     }
 }
 
+impl Drop for BytesCursor {
+    fn drop(&mut self) {
+        let _span = self.span.enter();
+
+        tracing::record_all!(
+            self.span,
+            clickhouse.response.received_bytes = self.received_bytes(),
+            clickhouse.response.decoded_bytes = self.decoded_bytes(),
+        );
+
+        tracing::debug!("finished raw query");
+    }
+}
+
 #[cfg(feature = "futures03")]
 impl futures_util::AsyncRead for BytesCursor {
     #[inline]
@@ -205,7 +262,11 @@ impl futures_util::stream::Stream for BytesCursor {
             "mixing `Stream` and `AsyncRead` API methods is not allowed"
         );
 
-        self.raw.poll_next(cx).map(Result::transpose)
+        let this = &mut *self;
+
+        let _guard = this.span.enter();
+
+        this.raw.poll_next(cx).map(Result::transpose)
     }
 }
 

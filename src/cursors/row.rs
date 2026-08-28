@@ -6,15 +6,15 @@ use crate::{
     bytes_ext::BytesExt,
     cursors::RawCursor,
     error::{Error, Result},
+    query_summary::QuerySummary,
     response::Response,
     rowbinary,
 };
-use bytes::Buf;
 use clickhouse_types::error::TypesError;
 use clickhouse_types::parse_rbwnat_columns_header;
-use polonius_the_crab::prelude::*;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::ptr;
 use std::task::{Context, Poll, ready};
 
 /// A cursor that emits rows deserialized as structures from RowBinary.
@@ -26,17 +26,21 @@ pub struct RowCursor<T> {
     /// [`None`] until the first call to [`RowCursor::next()`],
     /// as [`RowCursor::new`] is not `async`, so it loads lazily.
     row_metadata: Option<RowMetadata>,
+    span: tracing::Span,
+    returned_rows: u64,
     _marker: PhantomData<fn() -> T>,
 }
 
 impl<T> RowCursor<T> {
-    pub(crate) fn new(response: Response, validation: bool) -> Self {
+    pub(crate) fn new(response: Response, validation: bool, span: tracing::Span) -> Self {
         Self {
             _marker: PhantomData,
             raw: RawCursor::new(response),
             bytes: BytesExt::default(),
             row_metadata: None,
             validation,
+            span,
+            returned_rows: 0,
         }
     }
 
@@ -46,6 +50,8 @@ impl<T> RowCursor<T> {
     where
         T: RowRead,
     {
+        let _span = self.span.enter();
+
         loop {
             if self.bytes.remaining() > 0 {
                 let mut slice = self.bytes.slice();
@@ -101,7 +107,7 @@ impl<T> RowCursor<T> {
     }
 
     #[inline]
-    fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<T::Value<'_>>>>
+    fn poll_next<'a>(&'a mut self, cx: &mut Context<'_>) -> Poll<Result<Option<T::Value<'a>>>>
     where
         T: RowRead,
     {
@@ -110,36 +116,80 @@ impl<T> RowCursor<T> {
             debug_assert!(self.row_metadata.is_some());
         }
 
-        let mut bytes = &mut self.bytes;
+        let _span = self.span.enter();
 
         loop {
-            polonius!(|bytes| -> Poll<Result<Option<T::Value<'polonius>>>> {
-                if bytes.remaining() > 0 {
-                    let mut slice = bytes.slice();
-                    let result = rowbinary::deserialize_row::<T::Value<'_>>(
-                        &mut slice,
-                        self.row_metadata.as_ref(),
-                    );
+            if self.bytes.remaining() > 0 {
+                // SAFETY: we take an immutable borrow to `self.bytes` for this scope so that
+                // we can't accidentally mutate it while having an outstanding borrow to it.
+                //
+                // `BytesExt::set_remaining()` is safe to call because
+                // it only takes an immutable reference.
+                let bytes_ref = &self.bytes;
 
-                    match result {
-                        Ok(value) => {
-                            bytes.set_remaining(slice.len());
-                            polonius_return!(Poll::Ready(Ok(Some(value))))
-                        }
-                        Err(Error::NotEnoughData) => {}
-                        Err(err) => polonius_return!(Poll::Ready(Err(err))),
+                // SAFETY: raw pointer reborrow to break the connection to `self`,
+                // but reassigned the same lifetime to ensure it is valid.
+                //
+                // * The reborrow is scoped to this block only.
+                // * We take an immutable borrow of `self.bytes` to prevent mutation while
+                //   we have an immutable reference in `slice`.
+                //
+                // # Motivation
+                // NLL doesn't allow us to return the deserialized value directly
+                // because it sees `self.bytes` as still being borrowed in the next iteration.
+                //
+                // This is a common limitation: https://github.com/rust-lang/rust/issues/51132
+                //
+                // The `polonius-the-crab` crate provides a workaround for this,
+                // but it introduces four(!) transitive dependencies to give it a nice API,
+                // (one of which had a RUSTSEC advisory for being unmaintained until it was replaced)
+                // when the code really just boils down to a single line of `unsafe`.
+                //
+                // The ultimate solution is the new Polonius borrow checker,
+                // but as of writing it's only available on nightly Rust:
+                // https://blog.rust-lang.org/2026/08/04/enabling-polonius-alpha-on-nightly
+                //
+                // This can be deleted when Polonius lands in stable Rust.
+                let mut slice: &'a [u8] = unsafe { &*ptr::from_ref(bytes_ref.slice()) };
+
+                let result = rowbinary::deserialize_row::<T::Value<'a>>(
+                    &mut slice,
+                    self.row_metadata.as_ref(),
+                );
+
+                match result {
+                    Ok(value) => {
+                        self.returned_rows += 1;
+                        bytes_ref.set_remaining(slice.len());
+                        return Poll::Ready(Ok(Some(value)));
+                    }
+                    Err(Error::NotEnoughData) => {}
+                    Err(err) => {
+                        tracing::debug!(error=?err, "error deserializing row");
+                        return Poll::Ready(Err(err));
                     }
                 }
-            });
+            }
 
-            match ready!(self.raw.poll_next(cx))? {
-                Some(chunk) => bytes.extend(chunk),
-                None if bytes.remaining() > 0 => {
-                    // If some data is left, we have an incomplete row in the buffer.
-                    // This is usually a schema mismatch on the client side.
-                    return Poll::Ready(Err(Error::NotEnoughData));
+            match ready!(self.raw.poll_next(cx)) {
+                Ok(Some(chunk)) => self.bytes.extend(chunk),
+                Ok(None) => {
+                    return if self.bytes.remaining() > 0 {
+                        // If some data is left, we have an incomplete row in the buffer.
+                        // This is usually a schema mismatch on the client side.
+                        tracing::warn!(
+                            bytes_remaining = self.bytes.remaining(),
+                            "incomplete read from cursor"
+                        );
+                        Poll::Ready(Err(Error::NotEnoughData))
+                    } else {
+                        Poll::Ready(Ok(None))
+                    };
                 }
-                None => return Poll::Ready(Ok(None)),
+                Err(e) => {
+                    tracing::debug!(error=?e, "error from raw cursor");
+                    return Poll::Ready(Err(e));
+                }
             }
         }
     }
@@ -158,6 +208,37 @@ impl<T> RowCursor<T> {
     #[inline]
     pub fn decoded_bytes(&self) -> u64 {
         self.raw.decoded_bytes()
+    }
+
+    /// Returns the total number of rows that have been decoded so far.
+    #[inline]
+    pub fn returned_rows(&self) -> u64 {
+        self.returned_rows
+    }
+
+    /// Returns the parsed `X-ClickHouse-Summary` response header, if
+    /// present. Available once the response headers have been received.
+    ///
+    /// Note: the summary values may be incomplete unless the query was
+    /// executed with `wait_end_of_query=1`.
+    #[inline]
+    pub fn summary(&self) -> Option<&QuerySummary> {
+        self.raw.summary()
+    }
+}
+
+impl<T> Drop for RowCursor<T> {
+    fn drop(&mut self) {
+        let _span = self.span.enter();
+
+        tracing::record_all!(
+            self.span,
+            db.response.returned_rows = self.returned_rows,
+            clickhouse.response.received_bytes = self.received_bytes(),
+            clickhouse.response.decoded_bytes = self.decoded_bytes(),
+        );
+
+        tracing::debug!("finished typed query");
     }
 }
 
@@ -198,14 +279,20 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Temporarily take the cursor out in order for `cursor.poll_next` to return a value with
         // the correct lifetime `'a` rather than the unnamed lifetime of `&mut self`.
-        let mut cursor = self.cursor.take().expect("Future polled after completion");
+        let cursor = self.cursor.take().expect("Future polled after completion");
 
-        polonius!(|cursor| -> Poll<Result<Option<T::Value<'polonius>>>> {
-            match cursor.poll_next(cx) {
-                Poll::Ready(value) => polonius_return!(Poll::Ready(value)),
-                Poll::Pending => {}
+        {
+            // SAFETY: raw pointer reborrow to break the connection to `self`,
+            // but reassigned the same lifetime to ensure it is valid,
+            // and scoped tightly to the `poll_next()` to prevent mutable aliasing.
+            //
+            // See `RowCursor::poll_next()` for details.
+            let cursor: &'a mut RowCursor<T> = unsafe { &mut *ptr::from_mut(cursor) };
+
+            if let Poll::Ready(res) = cursor.poll_next(cx) {
+                return Poll::Ready(res);
             }
-        });
+        }
 
         self.cursor = Some(cursor);
         Poll::Pending

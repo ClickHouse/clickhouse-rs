@@ -35,3 +35,10 @@ async fn lz4() {
     let client = prepare_database!().with_compression(Compression::Lz4);
     check(client).await;
 }
+
+#[cfg(feature = "zstd")]
+#[tokio::test]
+async fn zstd() {
+    let client = prepare_database!().with_compression(Compression::zstd());
+    check(client).await;
+}
