@@ -232,7 +232,7 @@ impl BlockReader {
             });
         }
 
-        match data_type {
+        match data_type.remove_simple_aggregate_function() {
             DataTypeNode::String => {
                 // Assume default growth strategy is fine
                 let mut data = BytesMut::new();
