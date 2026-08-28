@@ -18,6 +18,7 @@ use crate::{
 pub use crate::cursors::{BytesCursor, NativeCursor, RowCursor};
 use crate::headers::with_authentication;
 use crate::settings;
+use crate::settings::CLIENT_PROTOCOL_VERSION;
 
 #[must_use]
 #[derive(Clone)]
@@ -182,6 +183,24 @@ impl Query {
     pub fn fetch_native(mut self) -> Result<NativeCursor> {
         let span = self.make_span(Some("Native")).entered();
 
+        let client_protocol_version = self.client.settings.get(CLIENT_PROTOCOL_VERSION);
+
+        // Setting `client_protocol_version` to a nonzero value changes the Native response format
+        // in ways we are unable to handle, and we would have no way to detect a nonzero version
+        // in the response. Return an error if the user is messing around with this setting
+        // (which they should not be).
+        //
+        // https://clickhouse.com/docs/reference/interfaces/specs/NativeFormat#revision-output
+        // Original report: https://github.com/ClickHouse/clickhouse-rs/pull/464
+        if let Some(version) = client_protocol_version
+            && version != "0"
+        {
+            return Err(Error::Other(format!(
+                "Client does not support a nonzero `{CLIENT_PROTOCOL_VERSION}` setting ({version:?}), \
+                 please set this setting to \"0\" or leave it unset"
+            ).into()));
+        }
+
         // FIXME: use HTTP body compression instead of block-level compression
         self.client = self.client.with_compression(Compression::None);
 
@@ -343,5 +362,37 @@ impl Query {
         } else {
             self.with_setting(format!("param_{name}"), param)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::error::Error;
+    use crate::{Client, settings};
+
+    #[test]
+    fn fetch_native_errors_nonzero_client_protocol_version() {
+        let client = Client::default().with_url("http://localhost:8123");
+
+        // Assert that it does not error by default.
+        let _cursor = client.query("SELECT * FROM foo").fetch_native().unwrap();
+
+        let err = client
+            .query("SELECT * FROM foo")
+            .with_setting(settings::CLIENT_PROTOCOL_VERSION, "54492")
+            .fetch_native()
+            .err()
+            .unwrap_or_else(|| panic!("expected error"));
+
+        let Error::Other(e) = err else {
+            panic!("unexpected error kind: {err:?}");
+        };
+
+        let err_str = e.to_string();
+
+        assert!(
+            err_str.contains("client_protocol_version"),
+            "unexpected error: {err_str:?}"
+        );
     }
 }

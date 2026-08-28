@@ -782,6 +782,7 @@ mod settings {
     pub(crate) const QUERY: &str = "query";
     pub(crate) const QUERY_ID: &str = "query_id";
     pub(crate) const SESSION_ID: &str = "session_id";
+    pub(crate) const CLIENT_PROTOCOL_VERSION: &str = "client_protocol_version";
 }
 
 /// This is a private API exported only for internal purposes.

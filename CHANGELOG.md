@@ -8,16 +8,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.15.2] - 2026-08-24
+
 ### Added
 
-* `Client::with_url()` now recognizes the `database` query parameter of the URL. Added `Client::database()` to read back the configured default database. ([#448])
+* Added support for `BFloat16` ([#417])
+* Added `serde::uuid_vec` for serializing/deserializing `Vec<uuid::Uuid>` to/from `Array(UUID)` ([#424])
+* Implemented `Debug` for `Client` ([#430])
+* Implemented support for selects and data-returning queries using `FORMAT Native` ([#441])
+    * Implemented `Query::fetch_native()` returning `NativeCursor` which yields `Block`s.
+    * `Block` holds data in columnar format and can be indexed by column name or by ordinal.
+    * `Column::iter()` returns an iterator that decodes the column data.
+    * All primitive types, `Nullable`, `Array`, `Tuple`, `Map` and `LowCardinality` are supported 
+      and can be decoded into their appropriate Rust types.
+    * Zero-copy decoding to `&str`, borrowing from the parent `Block`, is supported.
+* Implemented support for inserts using `FORMAT Native` ([#451])
+  * Added `Client::insert_native()` for inserting `Block`s
+  * Added `BlockBuilder` API for filling out and validating `Block`s
+* `Client::with_url()` now recognizes the `database` query parameter of the URL. ([#456])
+    * Added `Client::database()` to read back the configured default database. 
 * Added `Client::query_raw()`, which sends the SQL to the server verbatim, without parsing
-  client-side bind parameters: `?` is not treated as a placeholder, `??` is not unescaped,
-  and `?fields` is not substituted. Server-side parameters via `Query::param()` still work.
-  ([adbc_clickhouse#53])
+  client-side bind parameters. ([#461])
+    * In this mode, `?` is not treated as a placeholder; `??` is not unescaped; `?fields` is not substituted. 
+    * Server-side parameters via `Query::param()` still work.
 
-[#448]: https://github.com/ClickHouse/clickhouse-rs/issues/448
-[adbc_clickhouse#53]: https://github.com/ClickHouse/adbc_clickhouse/issues/53
+### Fixed
+* Removed error rejecting `Decimal(P, S)` types where `S = 0` ([#449])
+* Fixed decoding of LEB128 in `rowbinary` module to accept a tenth byte ([#457])
+* Fixed parsing of JSON path names quoted with backticks ([#458])
+* Fixed handling of enum type names containing escapes ([#466])
+* Replaced `polonius-the-crab` dependency with equivalent code (release PR [#465])
+
+[#417]: https://github.com/ClickHouse/clickhouse-rs/pull/417
+[#424]: https://github.com/ClickHouse/clickhouse-rs/pull/424
+[#430]: https://github.com/ClickHouse/clickhouse-rs/pull/430
+[#441]: https://github.com/ClickHouse/clickhouse-rs/pull/441
+[#449]: https://github.com/ClickHouse/clickhouse-rs/pull/449
+[#451]: https://github.com/ClickHouse/clickhouse-rs/pull/451
+[#456]: https://github.com/ClickHouse/clickhouse-rs/pull/456
+[#457]: https://github.com/ClickHouse/clickhouse-rs/pull/457
+[#458]: https://github.com/ClickHouse/clickhouse-rs/pull/458
+[#461]: https://github.com/ClickHouse/clickhouse-rs/pull/461
+[#465]: https://github.com/ClickHouse/clickhouse-rs/pull/465
+[#466]: https://github.com/ClickHouse/clickhouse-rs/pull/466
 
 ## [0.15.1] - 2026-06-01
 
@@ -629,7 +662,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Client::query()` for selecting from tables and DDL statements.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.2...HEAD
+[0.15.2]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.3...v0.15.0
 [0.14.3]: https://github.com/ClickHouse/clickhouse-rs/compare/v0.14.2...v0.14.3
