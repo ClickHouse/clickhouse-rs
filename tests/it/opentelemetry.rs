@@ -72,7 +72,7 @@ async fn insert_with_opentelemetry() {
     let client = prepare_database!();
 
     client
-        .query("CREATE TABLE foo(bar Int32, baz String)")
+        .query("CREATE TABLE foo(bar Int32, baz String) ENGINE = MergeTree PRIMARY KEY(bar)")
         .execute()
         .await
         .unwrap();
