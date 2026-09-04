@@ -458,7 +458,14 @@ fn multipart_query_body(
     parameters.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
 
     let boundary = multipart_boundary(query, parameters)?;
-    let mut body = Vec::new();
+    let body_capacity = parameters
+        .iter()
+        .fold(query.len(), |capacity, (name, value)| {
+            capacity
+                .saturating_add(name.len())
+                .saturating_add(value.len())
+        });
+    let mut body = Vec::with_capacity(body_capacity);
 
     append_multipart_field(&mut body, &boundary, "query", query);
     for (field_name, value) in parameters {
