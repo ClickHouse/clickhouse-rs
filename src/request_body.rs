@@ -24,8 +24,8 @@ enum Message {
 }
 
 impl RequestBody {
-    pub(crate) fn full(content: String) -> Self {
-        Self(Inner::Full(Bytes::from(content)))
+    pub(crate) fn full(content: impl Into<Bytes>) -> Self {
+        Self(Inner::Full(content.into()))
     }
 
     pub(crate) fn chunked() -> (ChunkSender, Self) {

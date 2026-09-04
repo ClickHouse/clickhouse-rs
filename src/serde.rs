@@ -114,6 +114,60 @@ pub mod uuid_vec {
     use serde::ser::SerializeSeq;
     use std::fmt;
 
+    pub mod option {
+        use super::*;
+        use ::uuid::Uuid;
+
+        pub fn serialize<S>(uuids: &Option<Vec<Uuid>>, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            struct UuidVec<'a>(&'a [Uuid]);
+
+            impl Serialize for UuidVec<'_> {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    super::serialize(self.0, serializer)
+                }
+            }
+
+            match uuids {
+                Some(uuids) => serializer.serialize_some(&UuidVec(uuids)),
+                None => serializer.serialize_none(),
+            }
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<Uuid>>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct OptionUuidVecVisitor;
+
+            impl<'de> Visitor<'de> for OptionUuidVecVisitor {
+                type Value = Option<Vec<Uuid>>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("an optional sequence of UUID values")
+                }
+
+                fn visit_none<E>(self) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(None)
+                }
+
+                fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+                where
+                    D: Deserializer<'de>,
+                {
+                    super::deserialize(deserializer).map(Some)
+                }
+            }
+
+            deserializer.deserialize_option(OptionUuidVecVisitor)
+        }
+    }
+
     pub fn serialize<S>(uuids: &[Uuid], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,

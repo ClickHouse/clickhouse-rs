@@ -106,6 +106,23 @@ fn sample() -> Sample<'static> {
     }
 }
 
+#[cfg(feature = "uuid")]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct NullableUuidVec {
+    #[serde(with = "crate::serde::uuid_vec::option")]
+    uuids: Option<Vec<uuid::Uuid>>,
+}
+
+#[cfg(feature = "uuid")]
+impl Row for NullableUuidVec {
+    const NAME: &'static str = "NullableUuidVec";
+    const COLUMN_NAMES: &'static [&'static str] = &["uuids"];
+    const COLUMN_COUNT: usize = 1;
+    const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
+
+    type Value<'a> = NullableUuidVec;
+}
+
 fn sample_serialized() -> Vec<u8> {
     vec![
         // [Int8] -42
@@ -177,6 +194,43 @@ fn it_deserializes() {
 
         let actual: Sample<'_> = super::deserialize_row(&mut input.as_slice(), None).unwrap();
         assert_eq!(actual, sample());
+    }
+}
+
+#[cfg(feature = "uuid")]
+#[test]
+fn it_round_trips_nullable_uuid_vec() {
+    for expected in [
+        NullableUuidVec {
+            uuids: Some(vec![
+                uuid::Uuid::from_u64_pair(0x1234_5678_9abc_def0, 0xfedc_ba98_7654_3210),
+                uuid::Uuid::from_u64_pair(0x0fed_cba9_8765_4321, 0x0123_4567_89ab_cdef),
+            ]),
+        },
+        NullableUuidVec { uuids: None },
+    ] {
+        let expected_bytes = match &expected.uuids {
+            Some(uuids) => {
+                let mut bytes = vec![0, uuids.len() as u8];
+                for uuid in uuids {
+                    let (high, low) = uuid.as_u64_pair();
+                    bytes.extend_from_slice(&high.to_le_bytes());
+                    bytes.extend_from_slice(&low.to_le_bytes());
+                }
+                bytes
+            }
+            None => vec![1],
+        };
+
+        let mut bytes = Vec::new();
+        super::serialize_row_binary(&mut bytes, &expected).unwrap();
+        assert_eq!(bytes, expected_bytes);
+
+        let mut input = bytes.as_slice();
+        let actual: NullableUuidVec = super::deserialize_row(&mut input, None).unwrap();
+
+        assert!(input.is_empty());
+        assert_eq!(actual, expected);
     }
 }
 

@@ -386,6 +386,11 @@ impl Client {
 
     /// Used to specify a header that will be passed to all queries.
     ///
+    /// For query requests with server-side parameters (settings named `param_*`,
+    /// including those added by [`query::Query::param`]), the client replaces
+    /// `Content-Type` and removes caller-provided `Content-Length` and
+    /// `Transfer-Encoding` so it can frame the request body.
+    ///
     /// # Example
     /// ```
     /// # use clickhouse::Client;

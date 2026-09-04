@@ -137,6 +137,47 @@ pub fn record<T>() -> impl Handler<Control = RecordControl<T>> {
     RecordHandler(PhantomData)
 }
 
+// === record_request ===
+
+#[cfg(test)]
+struct RecordRequestHandler;
+
+#[cfg(test)]
+impl super::sealed::Sealed for RecordRequestHandler {}
+
+#[cfg(test)]
+impl super::Handler for RecordRequestHandler {
+    type Control = RecordRequestControl;
+
+    #[doc(hidden)]
+    fn make(self) -> (HandlerFn, Self::Control) {
+        let (tx, rx) = oneshot::channel();
+        let control = RecordRequestControl(rx);
+
+        let handler = Box::new(move |request: Request<Bytes>| -> Response<Bytes> {
+            let _ = tx.send(request);
+            Response::new(Bytes::new())
+        });
+
+        (handler, control)
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct RecordRequestControl(oneshot::Receiver<Request<Bytes>>);
+
+#[cfg(test)]
+impl RecordRequestControl {
+    pub(crate) async fn request(self) -> Request<Bytes> {
+        self.0.await.expect("query canceled")
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn record_request() -> impl Handler<Control = RecordRequestControl> {
+    RecordRequestHandler
+}
+
 // === record_ddl ===
 
 struct RecordDdlHandler;
