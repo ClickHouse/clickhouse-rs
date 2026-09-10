@@ -61,10 +61,6 @@ pub trait ArrowClientExt {
 
 impl ArrowClientExt for Client {
     fn insert_arrow(&self, table: &str) -> Result<ArrowInsert, Error> {
-        let mut query_prefix = "INSERT INTO (".to_string();
-        clickhouse::_priv::sql_escape_identifier(table, &mut query_prefix)
-            .map_err(|e| Error::Other(e.into()))?;
-
         Ok(ArrowInsert {
             state: InsertState::TableName {
                 client: self.clone(),
