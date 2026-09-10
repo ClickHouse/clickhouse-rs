@@ -165,7 +165,7 @@ impl Error {
     }
 }
 
-#[cfg(tests)]
+#[cfg(test)]
 mod tests {
     use crate::error::Error;
     use std::io;
