@@ -1,3 +1,6 @@
+#![doc = include_str!("../README.md")]
+#![forbid(missing_docs, unsafe_code)]
+
 mod date16;
 mod date32;
 mod signed_duration32;
