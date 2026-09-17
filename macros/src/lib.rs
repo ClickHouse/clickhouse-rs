@@ -9,6 +9,8 @@ use syn::{Data, DataStruct, DeriveInput, Error, Fields, Lifetime, Result, parse_
 
 mod attributes;
 
+mod from_columns;
+
 #[cfg(test)]
 mod tests;
 
@@ -18,6 +20,14 @@ mod tests;
 pub fn row(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     row_impl(input)
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_derive(FromColumns, attributes(clickhouse))]
+pub fn from_columns(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    from_columns::expand(input)
         .unwrap_or_else(Error::into_compile_error)
         .into()
 }
@@ -53,6 +63,12 @@ fn row_impl(input: DeriveInput) -> Result<TokenStream> {
     let cx = Ctxt::new();
 
     let Attributes { crate_path } = input.attrs[..].try_into()?;
+
+    // Note: changing this to `::clickhouse` is likely a breaking change;
+    // it's possible that the user has renamed the `clickhouse` package,
+    // but then aliased it back to `clickhouse` to fix the derive.
+    let crate_path = crate_path
+        .unwrap_or_else(|| syn::parse_str("clickhouse").expect("BUG: crate_path should parse"));
 
     let container = Container::from_ast(&cx, &input);
     let name = input.ident;

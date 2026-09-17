@@ -13,11 +13,13 @@ pub use reader::BlockReadError;
 
 use crate::native::decode::Decode;
 pub use clickhouse_types::DataTypeNode;
+use crate::native::builder::BlockBuilder;
 
 pub(crate) mod array;
 pub mod builder;
 pub mod decode;
 pub mod encode;
+pub mod from_columns;
 pub(crate) mod reader;
 pub(crate) mod string;
 mod utils;
@@ -232,4 +234,8 @@ impl<'a, T> ColumnIter<'a, T> {
     pub fn column(&self) -> &'a Column {
         self.column
     }
+}
+
+pub trait ToColumns {
+    fn to_columns(&self, builder: &mut BlockBuilder) -> Result<(), Box<dyn std::error::Error>>;
 }

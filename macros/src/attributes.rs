@@ -1,18 +1,8 @@
 use syn::meta::ParseNestedMeta;
 
+#[derive(Default)]
 pub struct Attributes {
-    pub crate_path: syn::Path,
-}
-
-impl Default for Attributes {
-    fn default() -> Self {
-        Attributes {
-            // Note: changing this to `::clickhouse` is likely a breaking change;
-            // it's possible that the user has renamed the `clickhouse` package,
-            // but then aliased it back to `clickhouse` to fix the derive.
-            crate_path: syn::parse_str("clickhouse").expect("BUG: crate_path should parse"),
-        }
-    }
+    pub crate_path: Option<syn::Path>,
 }
 
 impl TryFrom<&[syn::Attribute]> for Attributes {
@@ -37,13 +27,13 @@ impl TryFrom<&[syn::Attribute]> for Attributes {
 fn parse_nested_meta(meta: ParseNestedMeta<'_>, out: &mut Attributes) -> syn::Result<()> {
     // #[clickhouse(crate = "<path>")]
     if meta.path.is_ident("crate") {
-        out.crate_path = meta
+        out.crate_path = Some(meta
             // Expect and eat the `=` token
             .value()?
             // Expect a string literal like Serde: https://serde.rs/container-attrs.html#crate
             .parse::<syn::LitStr>()?
             // Parse the literal content as `Path`
-            .parse()?;
+            .parse()?);
     } else {
         return Err(meta.error("unexpected `#[clickhouse(...)]` argument"));
     }

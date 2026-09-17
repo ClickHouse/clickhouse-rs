@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse"
-version = "0.15.2"
+version = "0.16.0-alpha.1"
 description = "Official Rust client for ClickHouse DB"
 keywords = ["clickhouse", "database", "driver", "tokio", "hyper"]
 readme = "README.md"
@@ -24,7 +24,7 @@ homepage = "https://clickhouse.com"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 # N.B. be sure to update this in `rust-toolchain.toml` as well
-rust-version = "1.89.0"
+rust-version = "1.96.0"
 
 [lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
