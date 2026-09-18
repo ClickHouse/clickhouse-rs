@@ -255,16 +255,21 @@ impl Query {
             pairs.append_pair(settings::DATABASE, database);
         }
 
-        if self.client.compression.is_enabled() {
+        match self.client.compression {
             #[cfg(feature = "zstd")]
-            if matches!(self.client.compression, crate::Compression::Zstd(_)) {
-                pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
-            } else {
-                pairs.append_pair(settings::COMPRESS, "1");
+            Compression::Zstd(level) => {
+                pairs
+                    .append_pair(settings::ENABLE_HTTP_COMPRESSION, "1")
+                    .append_pair(settings::HTTP_ZLIB_COMPRESSION_LEVEL, &level.to_string());
             }
-
-            #[cfg(not(feature = "zstd"))]
-            pairs.append_pair(settings::COMPRESS, "1");
+            #[cfg(feature = "lz4")]
+            #[allow(deprecated)]
+            Compression::Lz4 | Compression::Lz4Hc(_) => {
+                pairs
+                    .append_pair(settings::COMPRESS, "1")
+                    .append_pair(settings::NETWORK_COMPRESSION_METHOD, "lz4");
+            }
+            Compression::None => (),
         }
 
         for (name, value) in &self.client.settings {
@@ -280,7 +285,7 @@ impl Query {
         builder = with_authentication(builder, &self.client.authentication);
 
         #[cfg(feature = "zstd")]
-        if matches!(self.client.compression, crate::Compression::Zstd(_)) {
+        if matches!(self.client.compression, Compression::Zstd(_)) {
             builder = builder.header("Accept-Encoding", "zstd");
         }
 
