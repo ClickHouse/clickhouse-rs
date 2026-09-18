@@ -9,17 +9,18 @@ Use the following table to choose compatible versions of the `clickhouse`, `arro
 
 <!-- Sorting by the `clickhouse` crate version first makes it easier to maintain the table. -->
 
-| `clickhouse` version  | `arrow` version | `clickhouse-ext-arrow` version |
-|-----------------------|-----------------|--------------------------------|
-| `clickhouse = "0.15"` | `arrow = "58"`  | `clickhouse-ext-arrow = "0.1"` |
+| `clickhouse` version    | `arrow` version | `clickhouse-ext-arrow` version |
+|-------------------------|-----------------|--------------------------------|
+| `clickhouse = "0.15.1"` | `arrow = "59"`  | `clickhouse-ext-arrow = "0.2"` |
+| `clickhouse = "0.15.1"` | `arrow = "58"`  | `clickhouse-ext-arrow = "0.1"` |
 
 Newer minor versions that are compatible with these specifications may be substituted, for example: 
 
 ```toml
 [dependencies]
-clickhouse = "0.15.1"
-arrow = "58.3.0"
-clickhouse-ext-arrow = "0.1.0"
+clickhouse = "0.15.2"
+arrow = "59.3.0"
+clickhouse-ext-arrow = "0.2.0"
 ```
 
 [caret-versions]: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#version-requirement-syntax
