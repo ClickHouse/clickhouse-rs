@@ -6,9 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 
-## [Unreleased] - ReleaseDate
+## Unreleased - ReleaseDate
 
-## [0.1.0] - 2026-06-01
+## 0.2.0 - 2026-09-17
+
+* Increased `arrow-*` crate version to `59.0.0`.
+
+## 0.1.0 - 2026-06-01
 
 Initial release.
 
