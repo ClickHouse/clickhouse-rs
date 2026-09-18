@@ -776,8 +776,14 @@ mod settings {
     pub(crate) const DEFAULT_FORMAT: &str = "default_format";
     pub(crate) const COMPRESS: &str = "compress";
     pub(crate) const DECOMPRESS: &str = "decompress";
+    #[cfg(feature = "lz4")]
+    pub(crate) const NETWORK_COMPRESSION_METHOD: &str = "network_compression_method";
+
     #[cfg(feature = "zstd")]
     pub(crate) const ENABLE_HTTP_COMPRESSION: &str = "enable_http_compression";
+
+    #[cfg(feature = "zstd")]
+    pub(crate) const HTTP_ZLIB_COMPRESSION_LEVEL: &str = "http_zlib_compression_level";
     pub(crate) const ROLE: &str = "role";
     pub(crate) const QUERY: &str = "query";
     pub(crate) const QUERY_ID: &str = "query_id";
