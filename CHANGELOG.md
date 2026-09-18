@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## Fixed
+
+* Added `network_compression_level=lz4` when Lz4 compression is requested, 
+  fixing a regression introduced in the upcoming ClickHouse server 26.9. ([#476], [issue #468])
+
+[#476]: https://github.com/ClickHouse/clickhouse-rs/pull/476
+
+[issue #468]: https://github.com/ClickHouse/clickhouse-rs/issues/468
+
 ## [0.15.2] - 2026-08-24
 
 ### Added
