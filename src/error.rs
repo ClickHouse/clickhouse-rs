@@ -163,6 +163,11 @@ impl Error {
 
         tracing::debug!(error=%self, "{msg}");
     }
+
+    // Convenient wrapper, and a good place to set breakpoints.
+    pub(crate) fn decompression(e: impl Into<BoxedError>) -> Self {
+        Error::Decompression(e.into())
+    }
 }
 
 #[cfg(tests)]

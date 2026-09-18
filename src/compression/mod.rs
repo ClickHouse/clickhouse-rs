@@ -1,10 +1,8 @@
-use crate::error::Error;
 use crate::response::Chunk;
-use bytes::{Buf, Bytes, BytesMut};
-use cityhash_rs::cityhash_102_128;
+use bytes::{Buf, Bytes};
 use futures_util::Stream;
 use std::pin::Pin;
-use std::task::{Context, Poll, ready};
+use std::task::{Context, Poll};
 
 #[cfg(feature = "lz4")]
 pub(crate) mod lz4;
@@ -78,21 +76,19 @@ impl Compression {
 }
 
 const MAX_COMPRESSED_SIZE: usize = 1024 * 1024 * 1024; // 1 GiB
+const MAX_DECOMPRESSED_SIZE: usize = 4 * MAX_COMPRESSED_SIZE;
+
 const LZ4_MAGIC: u8 = 0x82;
 const ZSTD_MAGIC: u8 = 0x90;
 
 pub(crate) struct DecompressStream<S> {
     stream: S,
-    decompress: Option<DecompressState>,
+    // If compression isn't enabled, we can eliminate a lot of dead code.
+    #[cfg(feature = "__compression")]
+    decompress: Option<decompress::State>,
 }
 
-pub(crate) struct DecompressState {
-    in_buffer: BytesMut,
-    out_buffer: BytesMut,
-    header: Option<FrameHeader>,
-}
-
-struct FrameHeader {
+struct FrameMeta {
     checksum: u128,
     method: u8,
     compressed_size: u32,
@@ -104,13 +100,13 @@ where
     S: Stream<Item = crate::Result<Bytes>> + Unpin,
 {
     pub(crate) fn new(stream: S, compression: Compression) -> Self {
+        #[cfg(not(feature = "__compression"))]
+        assert!(!compression.is_enabled());
+
         DecompressStream {
             stream,
-            decompress: compression.is_enabled().then(|| DecompressState {
-                in_buffer: BytesMut::with_capacity(16384),
-                out_buffer: BytesMut::zeroed(16384),
-                header: None,
-            }),
+            #[cfg(feature = "__compression")]
+            decompress: compression.is_enabled().then(decompress::State::new),
         }
     }
 }
@@ -125,7 +121,10 @@ where
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = &mut *self;
 
+        #[cfg(feature = "__compression")]
         if let Some(decompress) = &mut this.decompress {
+            use std::task::ready;
+
             loop {
                 if let Some(chunk) = decompress.drain()? {
                     return Poll::Ready(Some(Ok(chunk)));
@@ -152,143 +151,16 @@ where
     }
 }
 
-impl DecompressState {
-    fn feed(&mut self, bytes: Bytes) {
-        self.in_buffer.extend_from_slice(&bytes);
-    }
-
-    fn drain(&mut self) -> crate::Result<Option<Chunk>> {
-        let header = match self.header {
-            Some(ref header) => header,
-            None => match FrameHeader::try_decode(&mut self.in_buffer) {
-                Some(header) => self.header.insert(header),
-                None => return Ok(None),
-            },
-        };
-
-        // Check compression method before we allocate or anything else.
-        match header.method {
-            LZ4_MAGIC => if cfg!(not(feature = "lz4")) {
-                return Err(Error::Decompression("compressed data frame uses Lz4, but `lz4` feature of `clickhouse` crate is not enabled".into()));
-            }
-            ZSTD_MAGIC => if cfg!(not(feature = "zstd")) {
-                return Err(Error::Decompression("compressed data frame uses Zstd, but `zstd` feature of `clickhouse` crate is not enabled".into()));
-            }
-            other => {
-                return Err(Error::Decompression(format!("unexpected compression method {other:#02x} for ClickHouse compressed data frame").into()))
-            }
-        }
-
-        // Error is only possible on 16-bit targets
-        let compressed_size: usize = header.compressed_size.try_into().map_err(|_| {
-            Error::Decompression(
-                format!(
-                    "compressed_size of frame overflows `usize` for this platform: {}",
-                    header.compressed_size
-                )
-                .into(),
-            )
-        })?;
-
-        if compressed_size > MAX_COMPRESSED_SIZE {
-            return Err(Error::Decompression(
-                format!(
-                    "compressed_size of frame exceeds safe limit (1 GiB): {}",
-                    header.compressed_size
-                )
-                .into(),
-            ));
-        }
-
-        let decompressed_size: usize = header.decompressed_size.try_into().map_err(|_| {
-            Error::Decompression(
-                format!(
-                    "decompressed_size of frame overflows `usize` for this platform: {}",
-                    header.decompressed_size
-                )
-                .into(),
-            )
-        })?;
-
-        if self.in_buffer.len() < compressed_size {
-            return Ok(None);
-        }
-
-        self.out_buffer.resize(decompressed_size, 0);
-
-        let actual_size = match header.method {
-            #[cfg(feature = "lz4")]
-            LZ4_MAGIC => {
-                lz4_flex::decompress_into(&self.in_buffer[..compressed_size], &mut self.out_buffer)
-                    .map_err(|e| Error::Decompression(e.into()))?
-            }
-            #[cfg(feature = "zstd")]
-            ZSTD_MAGIC => ::zstd::bulk::decompress_to_buffer(
-                &self.in_buffer[..compressed_size],
-                &mut self.out_buffer,
-            )
-            .map_err(|e| Error::Decompression(e.into()))?,
-            other => unreachable!("BUG: unhandled compression method {other:#02x}"),
-        };
-
-        if decompressed_size != actual_size {
-            return Err(Error::Decompression(format!("compressed data frame reported decompressed_size={decompressed_size}, but actual size was {actual_size}").into()));
-        }
-
-        #[cfg(feature = "__compression")]
-        {
-            let actual_checksum = calc_checksum(&self.out_buffer);
-
-            if header.checksum != actual_checksum {
-                return Err(Error::Decompression(format!("compressed data frame checksum mismatch; expected={:#032x}, actual={actual_checksum:#032x}", header.checksum).into()));
-            }
-        }
-
-        let net_size = FrameHeader::CHECKSUM_SIZE + compressed_size;
-
-        // Read new frame on next call
-        self.header = None;
-
-        Ok(Some(Chunk {
-            data: self.out_buffer.split().freeze(),
-            net_size,
-        }))
-    }
-
-    fn finish(&mut self) -> crate::Result<()> {
-        if self.in_buffer.is_empty() {
-            // Forward jumps are generally predicted as not-taken
-            return Ok(());
-        }
-
-        if let Some(header) = &self.header {
-            return Err(Error::Decompression(
-                format!(
-                    "incomplete compression frame at end of stream: expected {} bytes, got {}",
-                    header.compressed_size,
-                    self.in_buffer.len()
-                )
-                .into(),
-            ));
-        }
-
-        Err(Error::Decompression(
-            format!(
-                "incomplete compression frame header at end of stream: expected {} bytes, got {}",
-                FrameHeader::SIZE,
-                self.in_buffer.len()
-            )
-            .into(),
-        ))
-    }
-}
-
-impl FrameHeader {
+impl FrameMeta {
     const CHECKSUM_SIZE: usize = size_of::<u128>();
-    const SIZE: usize = Self::CHECKSUM_SIZE + 1 + 4 + 4; // checksum + method + compressed_size + uncompressed_size
 
-    fn try_decode(bytes: &mut BytesMut) -> Option<Self> {
-        (bytes.len() >= Self::SIZE).then(|| Self {
+    const HEADER_SIZE: usize = 1 + size_of::<u32>() * 2; // method + compressed_size + uncompressed_size
+
+    const TOTAL_SIZE: usize = Self::CHECKSUM_SIZE + Self::HEADER_SIZE;
+
+    #[cfg(feature = "__compression")]
+    fn try_decode(mut bytes: &[u8]) -> Option<Self> {
+        (bytes.len() >= Self::TOTAL_SIZE).then(|| Self {
             checksum: bytes.get_u128_le(),
             method: bytes.get_u8(),
             compressed_size: bytes.get_u32_le(),
@@ -299,7 +171,7 @@ impl FrameHeader {
 
 #[cfg(feature = "__compression")]
 fn calc_checksum(buffer: &[u8]) -> u128 {
-    let hash = cityhash_102_128(buffer);
+    let hash = cityhash_rs::cityhash_102_128(buffer);
     // Note (abonander): not sure why this is necessary, the checksum is documented as
     // low 8 bytes (LE), high 8 bytes (LE) which would seem to just be u128LE:
     // https://clickhouse.com/docs/reference/interfaces/specs/NativeFormat#checksum
@@ -309,4 +181,168 @@ fn calc_checksum(buffer: &[u8]) -> u128 {
     // I'm assuming the `cityhash-rs` crate returns it with the parts swapped by mistake
     // and this exists to fix that.
     hash.rotate_right(64)
+}
+
+#[cfg(feature = "__compression")]
+mod decompress {
+    use crate::compression::{
+        FrameMeta, LZ4_MAGIC, MAX_COMPRESSED_SIZE, MAX_DECOMPRESSED_SIZE, ZSTD_MAGIC, calc_checksum,
+    };
+    use crate::error::Error;
+    use crate::response::Chunk;
+    use bytes::{Buf, Bytes, BytesMut};
+
+    pub(crate) struct State {
+        in_buffer: BytesMut,
+        out_buffer: BytesMut,
+        meta: Option<FrameMeta>,
+    }
+
+    impl State {
+        pub(super) fn new() -> Self {
+            Self {
+                in_buffer: BytesMut::with_capacity(8192),
+                out_buffer: BytesMut::zeroed(8192),
+                meta: None,
+            }
+        }
+
+        pub(super) fn feed(&mut self, bytes: Bytes) {
+            self.in_buffer.extend_from_slice(&bytes);
+        }
+
+        pub(super) fn drain(&mut self) -> crate::Result<Option<Chunk>> {
+            let header = match self.meta {
+                Some(ref header) => header,
+                None => match FrameMeta::try_decode(&self.in_buffer) {
+                    Some(header) => self.meta.insert(header),
+                    None => return Ok(None),
+                },
+            };
+
+            // Check compression method before we allocate or anything else.
+            match header.method {
+                LZ4_MAGIC => {
+                    if cfg!(not(feature = "lz4")) {
+                        return Err(Error::decompression(
+                            "compressed data frame uses Lz4, but `lz4` feature of `clickhouse` crate is not enabled",
+                        ));
+                    }
+                }
+                ZSTD_MAGIC => {
+                    if cfg!(not(feature = "zstd")) {
+                        return Err(Error::decompression(
+                            "compressed data frame uses Zstd, but `zstd` feature of `clickhouse` crate is not enabled",
+                        ));
+                    }
+                }
+                other => {
+                    return Err(Error::decompression(format!(
+                        "unexpected compression method {other:#02x} for ClickHouse compressed data frame"
+                    )));
+                }
+            }
+
+            let compressed_size = usize::try_from(header.compressed_size)
+                // Error is only possible on architectures smaller than 32-bit
+                .map_err(|_| {
+                    Error::decompression(format!(
+                        "compressed_size of frame overflows `usize` for this platform: {}",
+                        header.compressed_size
+                    ))
+                })?;
+
+            if compressed_size > MAX_COMPRESSED_SIZE {
+                return Err(Error::decompression(format!(
+                    "compressed_size of frame exceeds safe limit ({MAX_COMPRESSED_SIZE} bytes): {compressed_size}",
+                )));
+            }
+
+            let decompressed_size: usize = header.decompressed_size.try_into().map_err(|_| {
+                Error::decompression(format!(
+                    "decompressed_size of frame overflows `usize` for this platform: {}",
+                    header.decompressed_size
+                ))
+            })?;
+
+            if decompressed_size > MAX_DECOMPRESSED_SIZE {
+                return Err(Error::decompression(format!(
+                    "decompressed_size of frame exceeds safe limit ({MAX_DECOMPRESSED_SIZE} bytes): {decompressed_size}",
+                )));
+            }
+
+            let net_size = FrameMeta::CHECKSUM_SIZE + compressed_size;
+
+            if self.in_buffer.len() < net_size {
+                return Ok(None);
+            }
+
+            // Checksum covers `(method, compressed_size, uncompressed_size, compressed_data)`
+            let actual_checksum =
+                calc_checksum(&self.in_buffer[FrameMeta::CHECKSUM_SIZE..][..compressed_size]);
+
+            if header.checksum != actual_checksum {
+                return Err(Error::decompression(format!(
+                    "compressed data frame checksum mismatch; expected={:#032x}, actual={actual_checksum:#032x}",
+                    header.checksum
+                )));
+            }
+
+            self.out_buffer.resize(decompressed_size, 0);
+
+            let compressed_data_len = compressed_size
+                .checked_sub(FrameMeta::HEADER_SIZE)
+                .ok_or_else(|| Error::decompression(format!("invalid compressed data frame: compressed_size ({compressed_size}) - header_size ({}) underflowed", FrameMeta::HEADER_SIZE)))?;
+
+            let compressed_data = &self.in_buffer[FrameMeta::TOTAL_SIZE..][..compressed_data_len];
+
+            let actual_len = match header.method {
+                #[cfg(feature = "lz4")]
+                LZ4_MAGIC => lz4_flex::decompress_into(compressed_data, &mut self.out_buffer)
+                    .map_err(Error::decompression)?,
+                #[cfg(feature = "zstd")]
+                ZSTD_MAGIC => {
+                    zstd::bulk::decompress_to_buffer(compressed_data, &mut self.out_buffer)
+                        .map_err(Error::decompression)?
+                }
+                other => unreachable!("BUG: unhandled compression method {other:#02x}"),
+            };
+
+            if decompressed_size != actual_len {
+                return Err(Error::decompression(format!(
+                    "compressed data frame reported decompressed_size={decompressed_size}, but actual size was {actual_len}"
+                )));
+            }
+
+            self.in_buffer.advance(net_size);
+
+            // Read new frame on next call
+            self.meta = None;
+
+            Ok(Some(Chunk {
+                data: self.out_buffer.split().freeze(),
+                net_size,
+            }))
+        }
+
+        pub(super) fn finish(&mut self) -> crate::Result<()> {
+            if self.in_buffer.is_empty() {
+                return Ok(());
+            }
+
+            if let Some(header) = &self.meta {
+                return Err(Error::decompression(format!(
+                    "incomplete compression frame at end of stream: expected {} bytes, got {}",
+                    header.compressed_size,
+                    self.in_buffer.len()
+                )));
+            }
+
+            Err(Error::decompression(format!(
+                "incomplete compression frame header at end of stream: expected {} bytes, got {}",
+                FrameMeta::TOTAL_SIZE,
+                self.in_buffer.len()
+            )))
+        }
+    }
 }
