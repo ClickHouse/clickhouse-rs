@@ -13,6 +13,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use crate::compression::DecompressStream;
 #[cfg(feature = "lz4")]
 use crate::compression::lz4::Lz4Decoder;
 #[cfg(feature = "zstd")]
@@ -23,7 +24,6 @@ use crate::{
     query_summary::QuerySummary,
 };
 use tracing::Instrument;
-
 // === Response ===
 
 pub(crate) enum Response {
@@ -196,13 +196,13 @@ pub(crate) struct Chunk {
 // * Uses `Option<_>` to make this stream fused.
 // * Uses `Box<_>` in order to reduce the size of cursors.
 pub(crate) struct Chunks {
-    inner: Option<Box<DetectDbException<Decompress<IncomingStream>>>>,
+    inner: Option<Box<DetectDbException<DecompressStream<IncomingStream>>>>,
 }
 
 impl Chunks {
     fn new(stream: Incoming, compression: Compression, exception_tag: Option<Box<[u8]>>) -> Self {
         let stream = IncomingStream(stream);
-        let stream = Decompress::new(stream, compression);
+        let stream = DecompressStream::new(stream, compression);
         let stream = DetectDbException {
             stream,
             exception_tag,

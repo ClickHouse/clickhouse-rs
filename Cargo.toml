@@ -94,14 +94,14 @@ required-features = ["opentelemetry"]
 debug = true
 
 [features]
-default = ["lz4"]
+default = ["lz4", "zstd"]
 
 test-util = ["hyper/server"]
 inserter = ["dep:quanta"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
-lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
-zstd = ["dep:zstd", "dep:cityhash-rs"]
+lz4 = ["dep:lz4_flex", "__compression"]
+zstd = ["dep:zstd", "__compression"]
 chrono = ["dep:chrono"]
 futures03 = []
 opentelemetry = ["dep:opentelemetry", "dep:opentelemetry-http"]
@@ -128,6 +128,9 @@ rustls-tls-native-roots = [
     "dep:hyper-rustls",
     "hyper-rustls?/native-tokio",
 ]
+
+# Internal feature flags
+__compression = ["dep:cityhash-rs"]
 
 [dependencies]
 clickhouse-macros = { version = "0.3.0", path = "macros" }
