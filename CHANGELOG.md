@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+* Added support for Zstd native compression framing, used by default in ClickHouse 26.9 onwards. ([#475])
+  * `zstd` crate feature required (now enabled by default).
+
+### Changed
+
+* Added `zstd` to the default crate features. ([#475])
+* Changed `Compression::Zstd(_)` to use ClickHouse's native compression framing instead of HTTP compression ([#475]).
+
+### Fixed
+
+* Fixed `Error: Decompression("incorrect magic number")` which occurs with ClickHouse 26.9 ([#475], [issue #468]).
+    * `zstd` crate feature required (now enabled by default).
+
+[#475]: https://github.com/ClickHouse/clickhouse-rs/pull/475
+
+[issue #468]: https://github.com/ClickHouse/clickhouse-rs/issues/468
+
 ## [0.15.2] - 2026-08-24
 
 ### Added
