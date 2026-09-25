@@ -14,6 +14,9 @@ use crate::{
     response::Chunk,
 };
 
+mod frame;
+mod header;
+
 const MAX_COMPRESSED_SIZE: u32 = 1024 * 1024 * 1024;
 
 pub(crate) struct Lz4Decoder<S> {
@@ -66,6 +69,12 @@ where
 
         Poll::Ready(Some(Ok(Chunk { data, net_size })))
     }
+}
+
+pub struct Lz4HttpDecoder<S> {
+    stream: S,
+    input_buf: BytesMut,
+    output_buf: BytesMut,
 }
 
 // Meta = checksum + header
