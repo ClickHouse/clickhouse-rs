@@ -354,6 +354,12 @@ impl Query {
         self
     }
 
+    /// Removes a setting inherited from the client, for this query only.
+    pub(crate) fn without_setting(mut self, name: &str) -> Self {
+        self.client.settings.remove(name);
+        self
+    }
+
     // Used in `clickhouse-ext-arrow` to track Arrow adoption.
     /// Similar to [`Client::with_product_info()`], but for this query only.
     pub fn with_product_info(
@@ -410,5 +416,30 @@ mod tests {
             err_str.contains("client_protocol_version"),
             "unexpected error: {err_str:?}"
         );
+    }
+
+    #[test]
+    fn insert_metadata_query_does_not_inherit_query_id() {
+        let client = Client::default()
+            .with_url("http://localhost:8123")
+            .with_setting(settings::QUERY_ID, "my-insert")
+            .with_setting(settings::SESSION_ID, "my-session")
+            .with_setting("max_block_size", "1000");
+
+        let query = client.insert_metadata_query("foo");
+
+        assert_eq!(query.client.get_setting(settings::QUERY_ID), None);
+        assert_eq!(
+            query.client.get_setting(settings::SESSION_ID),
+            Some("my-session")
+        );
+        assert_eq!(query.client.get_setting("max_block_size"), Some("1000"));
+        assert_eq!(
+            query.client.get_setting("describe_include_subcolumns"),
+            Some("0")
+        );
+
+        // The client itself (and so the `INSERT`) keeps the `query_id`.
+        assert_eq!(client.get_setting(settings::QUERY_ID), Some("my-insert"));
     }
 }

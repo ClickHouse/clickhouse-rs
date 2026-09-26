@@ -73,6 +73,51 @@ async fn keeps_client_settings() {
     assert_eq!(rows, vec!(row))
 }
 
+// https://github.com/ClickHouse/clickhouse-rs/issues/477
+#[tokio::test]
+async fn query_id_is_not_used_for_describe() {
+    let table_name = "insert_query_id_is_not_used_for_describe";
+    let query_id = uuid::Uuid::new_v4().to_string();
+
+    let client = prepare_database!();
+    create_simple_table(&client, table_name).await;
+
+    let row = SimpleRow::new(42, "foo");
+
+    // Triggers the internal `DESCRIBE TABLE` with `query_id` set on the client.
+    let mut insert = client
+        .clone()
+        .with_setting("query_id", &query_id)
+        .insert::<SimpleRow>(table_name)
+        .await
+        .unwrap();
+
+    insert.write(&row).await.unwrap();
+    insert.end().await.unwrap();
+
+    flush_query_log(&client).await;
+
+    let query_kinds = client
+        .query(
+            "
+            SELECT query_kind
+            FROM system.query_log
+            WHERE query_id = ?
+            AND type = 'QueryFinish'
+            ORDER BY event_time_microseconds
+            ",
+        )
+        .bind(&query_id)
+        .fetch_all::<String>()
+        .await
+        .unwrap();
+
+    assert_eq!(query_kinds, vec!["Insert"]);
+
+    let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
+    assert_eq!(rows, vec!(row))
+}
+
 #[tokio::test]
 async fn overrides_client_settings() {
     let table_name = "insert_overrides_client_settings";

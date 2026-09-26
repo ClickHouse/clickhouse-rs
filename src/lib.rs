@@ -692,6 +692,16 @@ impl Client {
         self
     }
 
+    /// Builds the internal `DESCRIBE TABLE` query used to fetch the schema before an insert.
+    fn insert_metadata_query(&self, raw_table_name: &str) -> query::Query {
+        self.query(&_priv::row_insert_metadata_query(raw_table_name))
+            .with_setting("describe_include_subcolumns", "0")
+            // The `query_id` is meant for the `INSERT`: reusing it here would log the `DESCRIBE`
+            // under the same id and may fail the `INSERT` with `QUERY_WITH_SAME_ID_IS_ALREADY_RUNNING`.
+            // Other settings, e.g. `session_id` (needed for temporary tables), are kept.
+            .without_setting(settings::QUERY_ID)
+    }
+
     async fn get_insert_metadata(&self, raw_table_name: &str) -> Result<Arc<InsertMetadata>> {
         #[derive(::serde::Deserialize, clickhouse_macros::Row)]
         #[clickhouse(crate = "self")]
@@ -719,8 +729,7 @@ impl Client {
         let mut write_lock = self.insert_metadata_cache.0.write().await;
 
         let mut columns_cursor = self
-            .query(&_priv::row_insert_metadata_query(raw_table_name))
-            .with_setting("describe_include_subcolumns", "0")
+            .insert_metadata_query(raw_table_name)
             .fetch::<DescribeColumn>()?;
 
         let mut columns = Vec::new();
