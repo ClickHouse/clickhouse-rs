@@ -782,7 +782,7 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
 
     let mut columns = Vec::new();
     let mut last_element_index = 0;
-    for i in unquoted_positions(hints, b',') {
+    for i in top_level_positions(hints, b',') {
         columns.push(&hints[last_element_index..i]);
         last_element_index = i + 1;
     }
@@ -792,10 +792,10 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
         .into_iter()
         .map(|column| column.trim())
         .filter(|column| {
-            unquoted_positions(column, b'=').next().is_none() && !column.starts_with("SKIP")
+            top_level_positions(column, b'=').next().is_none() && !column.starts_with("SKIP")
         })
         .map(|column| {
-            let separator_index = unquoted_positions(column, b' ').next().ok_or_else(|| {
+            let separator_index = top_level_positions(column, b' ').next().ok_or_else(|| {
                 TypesError::TypeParsingError(format!(
                     "Invalid JSON type hint, expected `path Type`, got {column} in {input}"
                 ))
@@ -814,16 +814,19 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
     Ok(DataTypeNode::JsonWithHint(inner_types))
 }
 
-/// Yields the indices of every `separator` byte in `input` that is not inside a
-/// back-quoted identifier. A JSON path name is back-quoted by the server when it
-/// contains a character that requires quoting, so both the separator between the
-/// hints and the one between a path and its type have to skip such spans:
+/// Yields the indices of every `separator` byte in `input` that is neither inside
+/// a quoted span nor inside parentheses. A JSON path name is back-quoted by the
+/// server when it contains a character that requires quoting, a hint type can
+/// have its own arguments, and a `SKIP REGEXP` pattern is a string literal, so
+/// both the separator between the hints and the one between a path and its type
+/// have to skip such spans:
 /// ```text
-///  let input = "`a,b` Int64, `c d` String"; // two hints, not four
+///  let input = "`a,b` Int64, c Map(String, Int32), SKIP REGEXP 'd,e'"; // three entries
 /// ```
-/// A back-quote escaped with a backslash does not end the identifier.
-fn unquoted_positions(input: &str, separator: u8) -> impl Iterator<Item = usize> + '_ {
-    let mut quote_open = false;
+/// A quote escaped with a backslash does not end the span.
+fn top_level_positions(input: &str, separator: u8) -> impl Iterator<Item = usize> + '_ {
+    let mut open_quote = None;
+    let mut open_parens = 0;
     let mut char_escaped = false;
 
     input.bytes().enumerate().filter_map(move |(i, byte)| {
@@ -831,25 +834,35 @@ fn unquoted_positions(input: &str, separator: u8) -> impl Iterator<Item = usize>
             char_escaped = false;
         } else if byte == b'\\' {
             char_escaped = true;
-        } else if byte == b'`' {
-            quote_open = !quote_open;
-        } else if byte == separator && !quote_open {
+        } else if let Some(quote) = open_quote {
+            if byte == quote {
+                open_quote = None;
+            }
+        } else if byte == b'`' || byte == b'\'' {
+            open_quote = Some(byte);
+        } else if byte == b'(' {
+            open_parens += 1;
+        } else if byte == b')' {
+            open_parens -= 1;
+        } else if byte == separator && open_parens == 0 {
             return Some(i);
         }
         None
     })
 }
 
+/// Strips `JSON(` and exactly one closing `)`, so that a hint type ending with
+/// its own parentheses, such as `JSON(a Nullable(String))`, is kept intact.
 fn remove_json_header(input: &str) -> Result<&str, TypesError> {
-    if input.starts_with("JSON") && input.ends_with(')') {
-        let new = input[5..].trim();
-
-        Ok(new.trim_end_matches(')'))
-    } else {
-        Err(TypesError::TypeParsingError(format!(
-            "Invalid JSON format, expected JSON(Type), got {input}"
-        )))
-    }
+    input
+        .strip_prefix("JSON(")
+        .and_then(|hints| hints.strip_suffix(')'))
+        .map(str::trim)
+        .ok_or_else(|| {
+            TypesError::TypeParsingError(format!(
+                "Invalid JSON format, expected JSON(Type), got {input}"
+            ))
+        })
 }
 
 fn parse_tuple(input: &str) -> Result<DataTypeNode, TypesError> {
@@ -1673,6 +1686,78 @@ mod tests {
             "JSON(`a b` Int64)",
             "JSON(`a,b` Int64)",
             "JSON(`a,b` Int64, `c d` String, e UInt8)",
+        ] {
+            assert_eq!(DataTypeNode::new(input).unwrap().to_string(), input);
+        }
+    }
+
+    #[test]
+    fn test_data_type_new_json_with_nested_hint_types() {
+        // a hint type with its own parentheses keeps its closing ones
+        assert_eq!(
+            DataTypeNode::new("JSON(a Nullable(String))").unwrap(),
+            DataTypeNode::JsonWithHint(vec![(
+                "a".to_string(),
+                Box::new(DataTypeNode::Nullable(Box::new(DataTypeNode::String)))
+            )])
+        );
+        // commas inside a hint type do not separate the hints
+        assert_eq!(
+            DataTypeNode::new("JSON(a Map(String, Int32), b Array(Tuple(UInt8, String)))").unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                (
+                    "a".to_string(),
+                    Box::new(DataTypeNode::Map([
+                        Box::new(DataTypeNode::String),
+                        Box::new(DataTypeNode::Int32)
+                    ]))
+                ),
+                (
+                    "b".to_string(),
+                    Box::new(DataTypeNode::Array(Box::new(DataTypeNode::Tuple(vec![
+                        DataTypeNode::UInt8,
+                        DataTypeNode::String
+                    ]))))
+                ),
+            ])
+        );
+        // an `=` inside a hint type does not make it a setting
+        assert_eq!(
+            DataTypeNode::new("JSON(a Enum8('x' = 1, 'y' = 2))").unwrap(),
+            DataTypeNode::JsonWithHint(vec![(
+                "a".to_string(),
+                Box::new(DataTypeNode::Enum(
+                    EnumType::Enum8,
+                    HashMap::from([(1, "x".to_string()), (2, "y".to_string())])
+                ))
+            )])
+        );
+        // settings and skipped paths are still ignored
+        assert_eq!(
+            DataTypeNode::new(
+                "JSON(max_dynamic_paths=10, a.b Nullable(Int64), SKIP a.c, SKIP REGEXP 'x,(y', `d,(e` LowCardinality(Nullable(String)))"
+            )
+            .unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                (
+                    "a.b".to_string(),
+                    Box::new(DataTypeNode::Nullable(Box::new(DataTypeNode::Int64)))
+                ),
+                (
+                    "`d,(e`".to_string(),
+                    Box::new(DataTypeNode::LowCardinality(Box::new(
+                        DataTypeNode::Nullable(Box::new(DataTypeNode::String))
+                    )))
+                ),
+            ])
+        );
+        // unbalanced parentheses are an error
+        assert!(DataTypeNode::new("JSON(a Nullable(String)").is_err());
+        assert!(DataTypeNode::new("JSON(a Nullable(String)))").is_err());
+        // the parsed type is sent back to the server as is
+        for input in [
+            "JSON(a Nullable(String))",
+            "JSON(a Map(String, Int32), b Array(Tuple(UInt8, String)))",
         ] {
             assert_eq!(DataTypeNode::new(input).unwrap().to_string(), input);
         }
