@@ -386,6 +386,7 @@ impl Client {
 
     /// Used to specify a header that will be passed to all queries.
     ///
+    /// # Note: Some Headers May Be Overridden
     /// For query requests with server-side parameters (settings named `param_*`,
     /// including those added by [`query::Query::param`]), the client replaces
     /// `Content-Type` and removes caller-provided `Content-Length` and
