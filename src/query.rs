@@ -3,6 +3,7 @@ use hyper::{
     Method, Request,
     header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderValue, TRANSFER_ENCODING},
 };
+use rand::distr::{Alphanumeric, SampleString};
 use serde::Serialize;
 use std::fmt::Display;
 use tracing::Instrument;
@@ -285,7 +286,7 @@ impl Query {
         drop(pairs);
 
         let multipart = (!parameters.is_empty())
-            .then(|| multipart_query_body(&query, &mut parameters))
+            .then(|| multipart_query_body(&query, &parameters))
             .transpose()
             .inspect_err(|err| err.record_in_current_span("invalid params in query"))?;
 
@@ -305,14 +306,7 @@ impl Query {
             if let Some(headers) = builder.headers_mut() {
                 headers.remove(CONTENT_LENGTH);
                 headers.remove(TRANSFER_ENCODING);
-                headers.insert(
-                    CONTENT_TYPE,
-                    HeaderValue::from_str(&multipart.content_type).map_err(|err| {
-                        let err = Error::InvalidParams(Box::new(err));
-                        err.record_in_current_span("invalid params in query");
-                        err
-                    })?,
-                );
+                headers.insert(CONTENT_TYPE, multipart.content_type);
             }
 
             RequestBody::full(multipart.body)
@@ -440,14 +434,11 @@ const MULTIPART_BOUNDARY_PREFIX: &str = "clickhouse-rs-boundary-";
 
 struct MultipartQueryBody {
     body: Bytes,
-    content_type: String,
+    content_type: HeaderValue,
 }
 
-fn multipart_query_body(
-    query: &str,
-    parameters: &mut [(&str, &str)],
-) -> Result<MultipartQueryBody> {
-    for (field_name, _) in parameters.iter() {
+fn multipart_query_body(query: &str, parameters: &[(&str, &str)]) -> Result<MultipartQueryBody> {
+    for (field_name, _) in parameters {
         if !is_valid_parameter_field_name(field_name) {
             return Err(invalid_params(format!(
                 "invalid ClickHouse query parameter name: {field_name:?}"
@@ -455,29 +446,41 @@ fn multipart_query_body(
         }
     }
 
-    parameters.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-
-    let boundary = multipart_boundary(query, parameters)?;
-    let body_capacity = parameters
-        .iter()
-        .fold(query.len(), |capacity, (name, value)| {
+    let suffix = Alphanumeric.sample_string(&mut rand::rng(), 16);
+    let boundary = format!("{MULTIPART_BOUNDARY_PREFIX}{suffix}");
+    let fields = std::iter::once(("query", query)).chain(parameters.iter().copied());
+    // Include each field's boundary, header and trailing CRLF, plus the closing boundary.
+    let field_overhead =
+        boundary.len() + b"--\r\nContent-Disposition: form-data; name=\"\"\r\n\r\n\r\n".len();
+    let body_capacity = fields.clone().fold(
+        boundary.len() + b"----\r\n".len(),
+        |capacity, (name, value)| {
             capacity
+                .saturating_add(field_overhead)
                 .saturating_add(name.len())
                 .saturating_add(value.len())
-        });
+        },
+    );
     let mut body = Vec::with_capacity(body_capacity);
 
-    append_multipart_field(&mut body, &boundary, "query", query);
-    for (field_name, value) in parameters {
-        append_multipart_field(&mut body, &boundary, field_name, value);
+    for (name, value) in fields {
+        append_multipart_field(&mut body, &boundary, name, value)?;
     }
     body.extend_from_slice(b"--");
     body.extend_from_slice(boundary.as_bytes());
     body.extend_from_slice(b"--\r\n");
+    debug_assert_eq!(body.len(), body_capacity);
+
+    let content_type = format!("multipart/form-data; boundary={boundary}");
+    let content_type = HeaderValue::from_str(&content_type).unwrap_or_else(|err| {
+        panic!(
+            "BUG: generated invalid `Content-Type` header for request ({err:?}): {content_type:?}"
+        )
+    });
 
     Ok(MultipartQueryBody {
         body: Bytes::from(body),
-        content_type: format!("multipart/form-data; boundary={boundary}"),
+        content_type,
     })
 }
 
@@ -490,29 +493,18 @@ fn is_valid_parameter_field_name(field_name: &str) -> bool {
         && chars.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-fn multipart_boundary(query: &str, parameters: &[(&str, &str)]) -> Result<String> {
-    let mut suffix = 0_usize;
-    loop {
-        let boundary = format!("{MULTIPART_BOUNDARY_PREFIX}{suffix}");
-        if !payload_contains_boundary(query, &boundary)
-            && parameters
-                .iter()
-                .all(|(_, value)| !payload_contains_boundary(value, &boundary))
-        {
-            return Ok(boundary);
-        }
-
-        suffix = suffix
-            .checked_add(1)
-            .ok_or_else(|| invalid_params("unable to construct multipart query body"))?;
+fn append_multipart_field(
+    body: &mut Vec<u8>,
+    boundary: &str,
+    name: &str,
+    value: &str,
+) -> Result<()> {
+    if value.contains(boundary) {
+        return Err(invalid_params(format!(
+            "multipart boundary occurs in field {name:?}"
+        )));
     }
-}
 
-fn payload_contains_boundary(payload: &str, boundary: &str) -> bool {
-    payload.starts_with(&format!("--{boundary}")) || payload.contains(&format!("\r\n--{boundary}"))
-}
-
-fn append_multipart_field(body: &mut Vec<u8>, boundary: &str, name: &str, value: &str) {
     body.extend_from_slice(b"--");
     body.extend_from_slice(boundary.as_bytes());
     body.extend_from_slice(b"\r\nContent-Disposition: form-data; name=\"");
@@ -520,6 +512,7 @@ fn append_multipart_field(body: &mut Vec<u8>, boundary: &str, name: &str, value:
     body.extend_from_slice(b"\"\r\n\r\n");
     body.extend_from_slice(value.as_bytes());
     body.extend_from_slice(b"\r\n");
+    Ok(())
 }
 
 fn invalid_params(message: impl Into<String>) -> Error {
@@ -533,20 +526,26 @@ fn invalid_params(message: impl Into<String>) -> Error {
 mod multipart_tests {
     use super::*;
 
+    fn boundary(multipart: &MultipartQueryBody) -> &str {
+        multipart
+            .content_type
+            .to_str()
+            .unwrap()
+            .strip_prefix("multipart/form-data; boundary=")
+            .unwrap()
+    }
+
     #[test]
     fn post_query_params_multipart_body() {
         let query = "SELECT {a: String}";
-        let mut parameters = [("param_z", "last"), ("param_a", "first")];
+        let parameters = [("param_z", "last"), ("param_a", "first")];
 
-        let multipart = multipart_query_body(query, &mut parameters).unwrap();
-        let boundary = multipart
-            .content_type
-            .strip_prefix("multipart/form-data; boundary=")
-            .unwrap();
+        let multipart = multipart_query_body(query, &parameters).unwrap();
+        let boundary = boundary(&multipart);
         let expected = format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"query\"\r\n\r\n{query}\r\n\
-             --{boundary}\r\nContent-Disposition: form-data; name=\"param_a\"\r\n\r\nfirst\r\n\
              --{boundary}\r\nContent-Disposition: form-data; name=\"param_z\"\r\n\r\nlast\r\n\
+             --{boundary}\r\nContent-Disposition: form-data; name=\"param_a\"\r\n\r\nfirst\r\n\
              --{boundary}--\r\n"
         );
 
@@ -554,17 +553,66 @@ mod multipart_tests {
     }
 
     #[test]
-    fn post_query_params_boundary_collisions() {
-        let boundary = format!("{MULTIPART_BOUNDARY_PREFIX}0");
-        let value = format!("\r\n--{boundary}inside");
-        let mut parameters = [("param_value", value.as_str())];
-        let multipart =
-            multipart_query_body(&format!("--{boundary}at-the-start"), &mut parameters).unwrap();
+    fn post_query_params_random_boundary() {
+        let parameters = [("param_value", "value")];
+        let first = multipart_query_body("SELECT {value: String}", &parameters).unwrap();
+        let second = multipart_query_body("SELECT {value: String}", &parameters).unwrap();
+        assert_ne!(first.content_type, second.content_type);
 
-        assert_eq!(
-            multipart.content_type,
-            format!("multipart/form-data; boundary={MULTIPART_BOUNDARY_PREFIX}1")
-        );
+        for multipart in [first, second] {
+            let suffix = boundary(&multipart)
+                .strip_prefix(MULTIPART_BOUNDARY_PREFIX)
+                .unwrap();
+            assert_eq!(suffix.len(), 16);
+            assert!(suffix.bytes().all(|byte| byte.is_ascii_alphanumeric()));
+        }
+    }
+
+    #[test]
+    fn post_query_params_boundary_collisions() {
+        let boundary = format!("{MULTIPART_BOUNDARY_PREFIX}0123456789abcdef");
+        for name in ["query", "param_value"] {
+            for value in [
+                boundary.clone(),
+                format!("--{boundary}at-the-start"),
+                format!("before\r\n--{boundary}after"),
+                format!("before\n--{boundary}after"),
+                format!("before{boundary}after"),
+            ] {
+                let mut body = b"existing field\r\n".to_vec();
+                let original = body.clone();
+                let error = append_multipart_field(&mut body, &boundary, name, &value).unwrap_err();
+                assert!(matches!(error, Error::InvalidParams(_)));
+                assert_eq!(body, original);
+            }
+        }
+    }
+
+    #[test]
+    fn post_query_params_capacity_includes_framing() {
+        for count in [0, 1, 1_000] {
+            let names = (0..count)
+                .map(|index| format!("param_p{index}"))
+                .collect::<Vec<_>>();
+            let parameters = names
+                .iter()
+                .enumerate()
+                .map(|(index, name)| (name.as_str(), if index % 2 == 0 { "" } else { "雪" }))
+                .collect::<Vec<_>>();
+            let query = "SELECT 'é'";
+            let multipart = multipart_query_body(query, &parameters).unwrap();
+            let boundary = boundary(&multipart);
+            let mut expected = format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"query\"\r\n\r\n{query}\r\n"
+            );
+            for (name, value) in parameters {
+                expected.push_str(&format!(
+                    "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+                ));
+            }
+            expected.push_str(&format!("--{boundary}--\r\n"));
+            assert_eq!(multipart.body, expected);
+        }
     }
 
     #[test]
@@ -583,7 +631,7 @@ mod multipart_tests {
             "param_a\\b",
         ] {
             assert!(!is_valid_parameter_field_name(name), "{name:?}");
-            assert!(multipart_query_body("SELECT 1", &mut [(name, "value")]).is_err());
+            assert!(multipart_query_body("SELECT 1", &[(name, "value")]).is_err());
         }
     }
 }
@@ -711,13 +759,18 @@ mod transport_tests {
             "missing compression setting in {pairs:?}"
         );
 
+        let mut fields = parse_multipart_fields(&request);
         assert_eq!(
-            parse_multipart_fields(&request),
+            fields.remove(0),
+            (
+                "query".to_owned(),
+                b"SELECT {a: UInt8}, {z: String}".to_vec()
+            )
+        );
+        fields.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        assert_eq!(
+            fields,
             vec![
-                (
-                    "query".to_owned(),
-                    b"SELECT {a: UInt8}, {z: String}".to_vec()
-                ),
                 ("param_a".to_owned(), b"42".to_vec()),
                 ("param_z".to_owned(), b"last".to_vec()),
             ]
