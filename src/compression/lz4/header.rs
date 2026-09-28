@@ -4,6 +4,7 @@
 // Calls to `Read::read_exact()` on `&[u8]` have been replaced with `read_fixed()`.
 use twox_hash::XxHash32;
 
+use std::fmt::{Display, Formatter};
 use std::{fmt::Debug, hash::Hasher};
 
 const FLG_RESERVED_MASK: u8 = 0b00000010;
@@ -33,11 +34,7 @@ pub(crate) const BLOCK_INFO_SIZE: usize = 4;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 /// Different predefines blocksizes to choose when compressing data.
-#[derive(Default)]
 pub enum BlockSize {
-    /// Will detect optimal frame size based on the size of the first write call
-    #[default]
-    Auto = 0,
     /// The default block size.
     Max64KB = 4,
     /// 256KB block size.
@@ -51,21 +48,8 @@ pub enum BlockSize {
 }
 
 impl BlockSize {
-    /// Try to find optimal size based on passed buffer length.
-    pub(crate) fn from_buf_length(buf_len: usize) -> Self {
-        let mut blocksize = BlockSize::Max4MB;
-
-        for candidate in [BlockSize::Max256KB, BlockSize::Max64KB] {
-            if buf_len > candidate.get_size() {
-                return blocksize;
-            }
-            blocksize = candidate;
-        }
-        BlockSize::Max64KB
-    }
-    pub(crate) fn get_size(&self) -> usize {
+    pub(crate) fn get(&self) -> usize {
         match self {
-            BlockSize::Auto => unreachable!(),
             BlockSize::Max64KB => 64 * 1024,
             BlockSize::Max256KB => 256 * 1024,
             BlockSize::Max1MB => 1024 * 1024,
@@ -123,7 +107,7 @@ pub enum BlockMode {
 // |:----------:| ------ |:----------------:|
 // |  4 bytes   |        |   0 - 4 bytes    |
 //
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 /// The metadata for de/compressing with lz4 frame format.
 pub struct FrameInfo {
     /// If set, includes the total uncompressed size of data in the frame.
@@ -147,47 +131,23 @@ pub struct FrameInfo {
 }
 
 impl FrameInfo {
-    pub(crate) fn read_size(input: &[u8]) -> Result<usize, Error> {
-        let mut required = MIN_FRAME_INFO_SIZE;
-        // We don't care to actually advance `input` here
-        let magic_num = u32::from_le_bytes(read_fixed(&mut &*input)?);
-        if magic_num == LZ4F_LEGACY_MAGIC_NUMBER {
-            return Ok(MAGIC_NUMBER_SIZE);
-        }
-
-        if input.len() < required {
-            return Ok(required);
-        }
-
-        if LZ4F_SKIPPABLE_MAGIC_RANGE.contains(&magic_num) {
-            return Ok(8);
-        }
-        if magic_num != LZ4F_MAGIC_NUMBER {
-            return Err(Error::WrongMagicNumber);
-        }
-
-        if input[4] & FLG_CONTENT_SIZE != 0 {
-            required += 8;
-        }
-        if input[4] & FLG_DICTIONARY_ID != 0 {
-            required += 4
-        }
-        Ok(required)
-    }
-
-    pub(crate) fn read(mut input: &[u8]) -> Result<FrameInfo, Error> {
-        let original_input = input;
+    pub(crate) fn read(input: &mut &[u8]) -> Result<FrameInfo, Error> {
+        let original_input = &**input;
         // 4 byte Magic
-        let magic_num = { u32::from_le_bytes(read_fixed(&mut input)?) };
+        let magic_num = { u32::from_le_bytes(read_fixed(input)?) };
         if magic_num == LZ4F_LEGACY_MAGIC_NUMBER {
             return Ok(FrameInfo {
+                content_size: None,
+                dict_id: None,
                 block_size: BlockSize::Max8MB,
+                block_mode: Default::default(),
+                block_checksums: false,
+                content_checksum: false,
                 legacy_frame: true,
-                ..FrameInfo::default()
             });
         }
         if LZ4F_SKIPPABLE_MAGIC_RANGE.contains(&magic_num) {
-            let user_data_len = u32::from_le_bytes(read_fixed(&mut input)?);
+            let user_data_len = u32::from_le_bytes(read_fixed(input)?);
             return Err(Error::SkippableFrame(user_data_len));
         }
         if magic_num != LZ4F_MAGIC_NUMBER {
@@ -195,7 +155,7 @@ impl FrameInfo {
         }
 
         // fixed size section
-        let [flg_byte, bd_byte] = read_fixed(&mut input)?;
+        let [flg_byte, bd_byte] = read_fixed(input)?;
 
         if flg_byte & FLG_VERSION_MASK != FLG_SUPPORTED_VERSION_BITS {
             // version is always 01
@@ -226,16 +186,16 @@ impl FrameInfo {
         // var len section
         let mut content_size = None;
         if flg_byte & FLG_CONTENT_SIZE != 0 {
-            content_size = Some(u64::from_le_bytes(read_fixed(&mut input)?));
+            content_size = Some(u64::from_le_bytes(read_fixed(input)?));
         }
 
         let mut dict_id = None;
         if flg_byte & FLG_DICTIONARY_ID != 0 {
-            dict_id = Some(u32::from_le_bytes(read_fixed(&mut input)?));
+            dict_id = Some(u32::from_le_bytes(read_fixed(input)?));
         }
 
         // 1 byte header checksum
-        let [expected_checksum] = read_fixed(&mut input)?;
+        let [expected_checksum] = read_fixed(input)?;
 
         let mut hasher = XxHash32::with_seed(0);
         hasher.write(&original_input[4..original_input.len() - input.len() - 1]);
@@ -264,8 +224,8 @@ pub(crate) enum BlockInfo {
 }
 
 impl BlockInfo {
-    pub(crate) fn read(mut input: &[u8]) -> Result<Self, Error> {
-        let size = u32::from_le_bytes(read_fixed(&mut input)?);
+    pub(crate) fn read(input: &mut &[u8]) -> Result<Self, Error> {
+        let size = u32::from_le_bytes(read_fixed(input)?);
         if size == 0 {
             Ok(BlockInfo::EndMark)
         } else if size & BLOCK_UNCOMPRESSED_SIZE_BIT != 0 {
@@ -285,6 +245,7 @@ fn read_fixed<const LEN: usize>(input: &mut &[u8]) -> Result<[u8; LEN], Error> {
     Ok(*chunk)
 }
 
+#[derive(Debug)]
 pub enum Error {
     /// Not enough data to read the frame header.
     ///
@@ -321,3 +282,11 @@ pub enum Error {
         actual: u64,
     },
 }
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for Error {}
