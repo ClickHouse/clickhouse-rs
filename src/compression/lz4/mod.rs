@@ -1,13 +1,14 @@
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use cityhash_rs::cityhash_102_128;
+use futures_util::stream::Stream;
+use lz4_flex::block;
+use std::ops::ControlFlow;
 use std::{
     pin::Pin,
     task::{Context, Poll, ready},
 };
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use cityhash_rs::cityhash_102_128;
-use futures_util::stream::Stream;
-use lz4_flex::block;
-
+use crate::compression::lz4::frame::Lz4FramePushDecoder;
 use crate::{
     bytes_ext::BytesExt,
     error::{Error, Result},
@@ -71,10 +72,50 @@ where
     }
 }
 
-pub struct Lz4HttpDecoder<S> {
+pub(crate) struct Lz4HttpDecoder<S> {
     stream: S,
-    input_buf: BytesMut,
-    output_buf: BytesMut,
+    decoder: Lz4FramePushDecoder,
+}
+
+impl<S> Lz4HttpDecoder<S> {
+    pub(crate) fn new(stream: S) -> Self {
+        Self {
+            stream,
+            decoder: Lz4FramePushDecoder::new(),
+        }
+    }
+}
+
+impl<S> Stream for Lz4HttpDecoder<S>
+where
+    S: Stream<Item = Result<Bytes>> + Unpin,
+{
+    type Item = Result<Chunk>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Note(abonander): I chose not to introduce any forced yields here
+        // because Lz4 is quoted at decompressing at ~5000 MB/s,
+        // so the network should almost always be the bottleneck.
+        loop {
+            if let ControlFlow::Break(chunk) = self.decoder.drain()? {
+                return Poll::Ready(Some(Ok(chunk)));
+            }
+
+            match Pin::new(&mut self.stream).poll_next(cx) {
+                Poll::Ready(Some(res)) => {
+                    self.decoder.push(res?);
+                    continue;
+                }
+                Poll::Ready(None) => {
+                    self.decoder.finish()?;
+                    return Poll::Ready(None);
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
+                }
+            }
+        }
+    }
 }
 
 // Meta = checksum + header

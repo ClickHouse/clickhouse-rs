@@ -1,9 +1,18 @@
+#[cfg(feature = "lz4")]
+use crate::compression::lz4::Lz4HttpDecoder;
+#[cfg(feature = "zstd")]
+use crate::compression::zstd::ZstdHttpDecoder;
+use crate::{
+    error::{Error, Result},
+    query_summary::QuerySummary,
+};
 use bstr::ByteSlice;
 use bytes::{BufMut, Bytes};
 use futures_util::stream::{self, Stream, TryStreamExt};
 use http_body_util::BodyExt as _;
+use hyper::header::CONTENT_ENCODING;
 use hyper::{
-    StatusCode,
+    HeaderMap, StatusCode,
     body::{Body as _, Incoming},
 };
 use hyper_util::client::legacy::ResponseFuture as HyperResponseFuture;
@@ -11,16 +20,6 @@ use std::{
     future::{self, Future},
     pin::{Pin, pin},
     task::{Context, Poll},
-};
-
-#[cfg(feature = "lz4")]
-use crate::compression::lz4::Lz4Decoder;
-#[cfg(feature = "zstd")]
-use crate::compression::zstd::ZstdHttpDecoder;
-use crate::{
-    compression::Compression,
-    error::{Error, Result},
-    query_summary::QuerySummary,
 };
 use tracing::Instrument;
 
@@ -38,7 +37,7 @@ pub(crate) type ResponseFuture =
     Pin<Box<dyn Future<Output = Result<(Chunks, Option<Box<QuerySummary>>)>> + Send>>;
 
 impl Response {
-    pub(crate) fn new(response: HyperResponseFuture, compression: Compression) -> Self {
+    pub(crate) fn new(response: HyperResponseFuture) -> Self {
         let span = tracing::info_span!(
             "response",
             otel.status_code = tracing::field::Empty,
@@ -47,9 +46,7 @@ impl Response {
             db.response_code = tracing::field::Empty,
         );
 
-        Self::Waiting(Box::pin(
-            collect_response(response, compression).instrument(span),
-        ))
+        Self::Waiting(Box::pin(collect_response(response).instrument(span)))
     }
 
     pub(crate) fn into_future(self) -> ResponseFuture {
@@ -77,12 +74,11 @@ impl Response {
 
 async fn collect_response(
     response: HyperResponseFuture,
-    compression: Compression,
 ) -> Result<(Chunks, Option<Box<QuerySummary>>)> {
-    let response = response.await?;
+    let (parts, body) = response.await?.into_parts();
 
-    let status = response.status();
-    let exception_code = response.headers().get("X-ClickHouse-Exception-Code");
+    let status = parts.status;
+    let exception_code = parts.headers.get("X-ClickHouse-Exception-Code");
 
     tracing::record_all!(
         tracing::Span::current(),
@@ -91,19 +87,19 @@ async fn collect_response(
     );
 
     if status == StatusCode::OK && exception_code.is_none() {
-        let tag = response
-            .headers()
+        let tag = parts
+            .headers
             .get("X-ClickHouse-Exception-Tag")
             .map(|value| value.as_bytes().into());
 
-        let summary = response
-            .headers()
+        let summary = parts
+            .headers
             .get("X-ClickHouse-Summary")
             .and_then(|v| v.to_str().ok())
             .and_then(QuerySummary::from_header)
             .map(Box::new); // More likely to be successful, start streaming.
         // It still can fail, but we'll handle it in `DetectDbException`.
-        Ok((Chunks::new(response.into_body(), compression, tag), summary))
+        Ok((Chunks::new(body, &parts.headers, tag)?, summary))
     } else {
         // An instantly failed request.
         let error = collect_bad_response(
@@ -111,8 +107,8 @@ async fn collect_response(
             exception_code
                 .and_then(|value| value.to_str().ok())
                 .map(|code| format!("Code: {code}")),
-            response.into_body(),
-            compression,
+            body,
+            parts.headers,
         )
         .await;
 
@@ -128,7 +124,7 @@ async fn collect_bad_response(
     status: StatusCode,
     exception_code: Option<String>,
     body: Incoming,
-    compression: Compression,
+    headers: HeaderMap,
 ) -> Error {
     // Collect the whole body into one contiguous buffer to simplify handling.
     // Only network errors can occur here and we return them instead of status code
@@ -147,13 +143,19 @@ async fn collect_bad_response(
 
     // Try to decompress the body, because CH uses compression even for errors.
     let stream = stream::once(future::ready(Result::<_>::Ok(raw_bytes.slice(..))));
-    let stream = Decompress::new(stream, compression).map_ok(|chunk| chunk.data);
-
-    // We're collecting already fetched chunks, thus only decompression errors can
-    // be here. If decompression is failed, we should try the raw body because
-    // it can be sent without any compression if some proxy is used, which
-    // typically know nothing about CH params.
-    let bytes = collect_bytes(stream).await.unwrap_or(raw_bytes);
+    let bytes = match Decompress::new(stream, &headers) {
+        // We're collecting already fetched chunks, thus only decompression errors can
+        // be here. If decompression is failed, we should try the raw body because
+        // it can be sent without any compression if some proxy is used, which
+        // typically know nothing about CH params.
+        Ok(stream) => collect_bytes(stream.map_ok(|chunk| chunk.data))
+            .await
+            .unwrap_or(raw_bytes),
+        Err(e) => {
+            tracing::warn!("decompression error in collecting error-response: {e}");
+            raw_bytes
+        }
+    };
 
     let reason = String::from_utf8(bytes.into())
         .map(|reason| reason.trim().into())
@@ -200,16 +202,20 @@ pub(crate) struct Chunks {
 }
 
 impl Chunks {
-    fn new(stream: Incoming, compression: Compression, exception_tag: Option<Box<[u8]>>) -> Self {
+    fn new(
+        stream: Incoming,
+        headers: &HeaderMap,
+        exception_tag: Option<Box<[u8]>>,
+    ) -> Result<Self> {
         let stream = IncomingStream(stream);
-        let stream = Decompress::new(stream, compression);
+        let stream = Decompress::new(stream, headers)?;
         let stream = DetectDbException {
             stream,
             exception_tag,
         };
-        Self {
+        Ok(Self {
             inner: Some(Box::new(stream)),
-        }
+        })
     }
 
     pub(crate) fn empty() -> Self {
@@ -275,21 +281,48 @@ impl Stream for IncomingStream {
 enum Decompress<S> {
     Plain(S),
     #[cfg(feature = "lz4")]
-    Lz4(Lz4Decoder<S>),
+    Lz4(Lz4HttpDecoder<S>),
     #[cfg(feature = "zstd")]
     Zstd(ZstdHttpDecoder<S>),
 }
 
 impl<S> Decompress<S> {
-    fn new(stream: S, compression: Compression) -> Self {
-        match compression {
-            Compression::None => Self::Plain(stream),
-            #[cfg(feature = "lz4")]
-            #[allow(deprecated)]
-            Compression::Lz4 | Compression::Lz4Hc(_) => Self::Lz4(Lz4Decoder::new(stream)),
+    fn new(stream: S, headers: &HeaderMap) -> Result<Self> {
+        let Some(content_encoding) = headers.get(CONTENT_ENCODING) else {
+            return Ok(Self::Plain(stream));
+        };
+
+        if content_encoding
+            .as_bytes()
+            .trim_ascii()
+            .eq_ignore_ascii_case(b"zstd")
+        {
             #[cfg(feature = "zstd")]
-            Compression::Zstd(_) => Self::Zstd(ZstdHttpDecoder::new(stream)),
+            return Ok(Self::Zstd(ZstdHttpDecoder::new(stream)));
+
+            #[cfg(not(feature = "zstd"))]
+            return Err(Error::decompression(
+                "ClickHouse server or proxy returned `Content-Encoding: zstd` but the `zstd` feature of the `clickhouse` crate is not enabled",
+            ));
         }
+
+        if content_encoding
+            .as_bytes()
+            .trim_ascii()
+            .eq_ignore_ascii_case(b"lz4")
+        {
+            #[cfg(feature = "lz4")]
+            return Ok(Self::Lz4(Lz4HttpDecoder::new(stream)));
+
+            #[cfg(not(feature = "lz4"))]
+            return Err(Error::decompression(
+                "ClickHouse server or proxy returned `Content-Encoding: lz4` but the `lz4` feature of the `clickhouse` crate is not enabled",
+            ));
+        }
+
+        Err(Error::decompression(format!(
+            "ClickHouse server or proxy returned unknown `Content-Encoding`: {content_encoding:?}"
+        )))
     }
 }
 
