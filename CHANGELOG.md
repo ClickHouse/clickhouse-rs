@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+* Switched Lz4 compression to use HTTP standard `Accept-Encoding` negotiation, fixing a regression in ClickHouse 26.9. ([#482], [issue #468])
+
+[#482]: https://github.com/ClickHouse/clickhouse-rs/pull/482
+
+[issue #468]: 
+
 ## [0.15.2] - 2026-08-24
 
 ### Added
