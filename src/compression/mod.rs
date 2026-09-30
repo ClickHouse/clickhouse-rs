@@ -68,3 +68,149 @@ impl Compression {
         *self != Compression::None
     }
 }
+
+/// Utils for writing ClickHouse's native compression framing (`compress=1`/`decompress=1`).
+#[cfg(any(feature = "lz4", feature = "zstd"))]
+mod native_framing {
+    use crate::error::Error;
+    use bytes::BufMut;
+
+    pub(crate) const CHECKSUM_SIZE: usize = 16;
+    pub(crate) const HEADER_SIZE: usize = 9;
+    pub(crate) const META_SIZE: usize = CHECKSUM_SIZE + HEADER_SIZE;
+
+    pub(crate) fn write_meta(
+        buffer: &mut [u8],
+        magic_byte: u8,
+        uncompressed_len: usize,
+    ) -> Result<(), Error> {
+        let (mut checksum_bytes, header_and_data_bytes) = buffer.split_at_mut(CHECKSUM_SIZE);
+
+        let compressed_len = u32::try_from(header_and_data_bytes.len()).map_err(|_| {
+            Error::Compression(
+                format!(
+                    "compressed size of frame exceeds 4 GiB: {}",
+                    header_and_data_bytes.len()
+                )
+                .into(),
+            )
+        })?;
+
+        let uncompressed_len = u32::try_from(uncompressed_len).map_err(|_| {
+            Error::Compression(
+                format!("un-compressed size of frame exceeds 4 GiB: {uncompressed_len}").into(),
+            )
+        })?;
+
+        // https://clickhouse.com/docs/reference/interfaces/specs/NativeFormat#frame-format
+        let mut header = &mut header_and_data_bytes[..HEADER_SIZE];
+        header.put_u8(magic_byte);
+        header.put_u32_le(compressed_len);
+        header.put_u32_le(uncompressed_len);
+
+        let checksum = calc_checksum(header_and_data_bytes);
+        checksum_bytes.put_u128_le(checksum);
+
+        Ok(())
+    }
+
+    fn calc_checksum(buffer: &[u8]) -> u128 {
+        let hash = cityhash_rs::cityhash_102_128(buffer);
+        hash.rotate_right(64)
+    }
+}
+
+#[cfg(test)]
+mod test_util {
+    use futures_util::Stream;
+    use std::cmp;
+    use std::pin::Pin;
+    use std::task::{Context, Poll, Waker};
+
+    use crate::Error;
+    use crate::response::Chunk;
+    use bytes::Bytes;
+
+    pub(super) trait TestDecoder {
+        type Stream<S>: Stream<Item = Result<Chunk, Error>> + Unpin
+        where
+            S: Stream<Item = Result<Bytes, Error>> + Unpin;
+
+        fn with_stream<S>(stream: S) -> Self::Stream<S>
+        where
+            S: Stream<Item = Result<Bytes, Error>> + Unpin;
+    }
+
+    pub(super) fn test_decoder<D: TestDecoder>(compressed: Bytes, uncompressed: &[u8]) {
+        // Some normal and some arbitrary/weird chunk sizes to test with.
+        let chunk_sizes = [32, 53, 64, 67, 128, 131, 256, 277, 384, 463, 512];
+
+        for chunk_size in chunk_sizes {
+            let mut offset = 0;
+
+            let mut stream = D::with_stream(ChunkStream {
+                data: compressed.clone(),
+                chunk_size,
+            });
+
+            loop {
+                match Pin::new(&mut stream).poll_next(&mut Context::from_waker(Waker::noop())) {
+                    Poll::Ready(Some(Ok(chunk))) => {
+                        assert!(
+                            offset + chunk.data.len() <= uncompressed.len(),
+                            "chunk length ({}) at offset {offset} exceeds expected length ({}) (chunk size {chunk_size})",
+                            chunk.data.len(),
+                            uncompressed.len(),
+                        );
+
+                        for (actual, (offset, expected)) in chunk
+                            .data
+                            .iter()
+                            .zip(uncompressed.iter().enumerate().skip(offset))
+                        {
+                            assert_eq!(
+                                actual, expected,
+                                "unexpected byte in decompressed data (offset {offset}, chunk size {chunk_size})"
+                            );
+                        }
+
+                        offset += chunk.data.len();
+                    }
+                    Poll::Ready(Some(Err(e))) => {
+                        panic!("decoder returned error (chunk size {chunk_size}): {e:#}");
+                    }
+                    Poll::Ready(None) => {
+                        assert_eq!(offset, uncompressed.len(), "");
+                        break;
+                    }
+                    Poll::Pending => {
+                        panic!(
+                            "decoder returned `Poll::Pending` when underlying implementation did not"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    struct ChunkStream {
+        data: Bytes,
+        chunk_size: usize,
+    }
+
+    impl Stream for ChunkStream {
+        type Item = Result<Bytes, Error>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            let this = &mut *self;
+
+            if this.data.is_empty() || this.chunk_size == 0 {
+                return Poll::Ready(None);
+            }
+
+            Poll::Ready(Some(Ok(this
+                .data
+                .split_to(cmp::min(this.chunk_size, this.data.len())))))
+        }
+    }
+}

@@ -1,4 +1,6 @@
-use hyper::{Method, Request, header::CONTENT_LENGTH};
+use hyper::header::ACCEPT_ENCODING;
+use hyper::http::HeaderValue;
+use hyper::{HeaderMap, Method, Request, header::CONTENT_LENGTH};
 use serde::Serialize;
 use std::fmt::Display;
 use tracing::Instrument;
@@ -256,15 +258,29 @@ impl Query {
         }
 
         if self.client.compression.is_enabled() {
-            #[cfg(feature = "zstd")]
-            if matches!(self.client.compression, crate::Compression::Zstd(_)) {
-                pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
-            } else {
-                pairs.append_pair(settings::COMPRESS, "1");
-            }
+            pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
+        }
 
-            #[cfg(not(feature = "zstd"))]
-            pairs.append_pair(settings::COMPRESS, "1");
+        let mut headers = HeaderMap::new();
+
+        match self.client.compression {
+            #[expect(deprecated)]
+            #[cfg(feature = "lz4")]
+            Compression::Lz4 | Compression::Lz4Hc(_) => {
+                pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
+                headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("lz4"));
+            }
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(level) => {
+                pairs
+                    .append_pair(settings::ENABLE_HTTP_COMPRESSION, "1")
+                    // `http_zlib_compression_level` affects all compression codecs:
+                    // https://clickhouse.com/docs/concepts/features/interfaces/http#compression
+                    .append_pair(settings::HTTP_ZLIB_COMPRESSION_LEVEL, &level.to_string());
+
+                headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("zstd"));
+            }
+            _ => (),
         }
 
         for (name, value) in &self.client.settings {
@@ -276,13 +292,13 @@ impl Query {
         drop(pairs);
 
         let mut builder = Request::builder().method(Method::POST).uri(url.as_str());
+
+        if let Some(headers_mut) = builder.headers_mut() {
+            *headers_mut = headers;
+        }
+
         builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
         builder = with_authentication(builder, &self.client.authentication);
-
-        #[cfg(feature = "zstd")]
-        if matches!(self.client.compression, crate::Compression::Zstd(_)) {
-            builder = builder.header("Accept-Encoding", "zstd");
-        }
 
         let content_length = query.len();
         builder = builder.header(CONTENT_LENGTH, content_length.to_string());
@@ -294,7 +310,7 @@ impl Query {
         })?;
 
         let future = self.client.http.request(request);
-        Ok(Response::new(future, self.client.compression))
+        Ok(Response::new(future))
     }
 
     /// Configure the [roles] to use when executing this query.
