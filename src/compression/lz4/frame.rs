@@ -29,14 +29,15 @@ enum State {
         frame: FrameInfo,
         overhead: usize,
         total_content_size: usize,
-        content_hasher: Option<XxHash32>,
+        // 256 bytes that we shouldn't store inline if we don't have to.
+        content_hasher: Option<Box<XxHash32>>,
     },
     Block {
         frame: FrameInfo,
         block: BlockInfo,
         overhead: usize,
         total_content_size: usize,
-        content_hasher: Option<XxHash32>,
+        content_hasher: Option<Box<XxHash32>>,
     },
 }
 
@@ -79,7 +80,7 @@ impl Lz4FramePushDecoder {
                             self.state = State::NextBlock {
                                 overhead: consumed,
                                 total_content_size: 0,
-                                content_hasher: frame.content_checksum.then(XxHash32::default),
+                                content_hasher: frame.content_checksum.then(Default::default),
                                 frame,
                             };
                             self.input_buffer.advance(consumed);
