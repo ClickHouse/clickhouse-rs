@@ -5,15 +5,18 @@ use crate::error::Error;
 use crate::response::Chunk;
 use bytes::{Buf, Bytes, BytesMut};
 use std::cmp;
+use std::hash::Hasher;
 use std::ops::ControlFlow;
+use twox_hash::XxHash32;
 
 const WINDOW_SIZE: usize = 65536;
+const CHECKSUM_SIZE: usize = size_of::<u32>();
 
 /// Push-based decoder of the Lz4 frame format.
 ///
 /// [`lz4_flex::frame::FrameDecoder`] exists but depends on the blocking `Read` trait,
 /// and its implementation is not re-entrant so returning `WouldBlock` is not enough.
-pub struct Lz4FramePushDecoder {
+pub(crate) struct Lz4FramePushDecoder {
     state: State,
     input_buffer: BytesExt,
     output_buffer: BytesMut,
@@ -25,16 +28,20 @@ enum State {
     NextBlock {
         frame: FrameInfo,
         overhead: usize,
+        total_content_size: usize,
+        content_hasher: Option<XxHash32>,
     },
     Block {
         frame: FrameInfo,
         block: BlockInfo,
         overhead: usize,
+        total_content_size: usize,
+        content_hasher: Option<XxHash32>,
     },
 }
 
 impl Lz4FramePushDecoder {
-    pub fn new() -> Lz4FramePushDecoder {
+    pub(crate) fn new() -> Lz4FramePushDecoder {
         Self {
             state: State::NextFrame,
             input_buffer: BytesExt::default(),
@@ -43,11 +50,11 @@ impl Lz4FramePushDecoder {
         }
     }
 
-    pub fn push(&mut self, chunk: Bytes) {
+    pub(crate) fn push(&mut self, chunk: Bytes) {
         self.input_buffer.extend(chunk);
     }
 
-    pub fn drain(&mut self) -> Result<ControlFlow<Chunk, usize>, Error> {
+    pub(crate) fn drain(&mut self) -> Result<ControlFlow<Chunk, usize>, Error> {
         loop {
             match self.state {
                 State::NextFrame => {
@@ -70,8 +77,10 @@ impl Lz4FramePushDecoder {
                             let consumed = self.input_buffer.remaining() - input.len();
 
                             self.state = State::NextBlock {
-                                frame,
                                 overhead: consumed,
+                                total_content_size: 0,
+                                content_hasher: frame.content_checksum.then(XxHash32::default),
+                                frame,
                             };
                             self.input_buffer.advance(consumed);
                         }
@@ -84,19 +93,23 @@ impl Lz4FramePushDecoder {
                 State::NextBlock {
                     ref frame,
                     overhead,
+                    total_content_size,
+                    ref mut content_hasher,
                 } => {
                     let mut input = self.input_buffer.slice();
 
                     match BlockInfo::read(&mut input) {
                         Ok(block) => {
                             let consumed = self.input_buffer.remaining() - input.len();
+                            self.input_buffer.set_remaining(input.len());
 
                             self.state = State::Block {
                                 frame: frame.clone(),
                                 block,
                                 overhead: overhead + consumed,
+                                total_content_size,
+                                content_hasher: content_hasher.take(),
                             };
-                            self.input_buffer.set_remaining(input.len());
                         }
                         Err(header::Error::InsufficientData(len)) => {
                             return Ok(ControlFlow::Continue(len));
@@ -108,6 +121,8 @@ impl Lz4FramePushDecoder {
                     ref frame,
                     ref block,
                     overhead,
+                    mut total_content_size,
+                    ref mut content_hasher,
                 } => {
                     if let BlockMode::Independent = frame.block_mode {
                         self.window.clear();
@@ -135,7 +150,15 @@ impl Lz4FramePushDecoder {
                                 ));
                             }
 
-                            (len, self.input_buffer.copy_to_bytes(len))
+                            let content = self.input_buffer.copy_to_bytes(len);
+
+                            if let Some(content_hasher) = content_hasher {
+                                content_hasher.write(&content);
+                            }
+
+                            total_content_size += len;
+
+                            (len, content)
                         }
                         BlockInfo::Compressed(compressed_len) => {
                             let compressed_len = usize::try_from(compressed_len).map_err(|_| {
@@ -150,9 +173,12 @@ impl Lz4FramePushDecoder {
                                 )));
                             }
 
-                            if self.input_buffer.remaining() < compressed_len {
+                            let expected_len =
+                                compressed_len + if frame.block_checksums { 4 } else { 0 };
+
+                            if self.input_buffer.remaining() < expected_len {
                                 return Ok(ControlFlow::Continue(
-                                    compressed_len - self.input_buffer.remaining(),
+                                    expected_len - self.input_buffer.remaining(),
                                 ));
                             }
 
@@ -162,18 +188,68 @@ impl Lz4FramePushDecoder {
                                 self.output_buffer.resize(max_block_size, 0);
                             }
 
+                            let (compressed_data, mut rest) =
+                                self.input_buffer.slice().split_at(compressed_len);
+
                             let len = lz4_flex::block::decompress_into_with_dict(
-                                &self.input_buffer.slice()[..compressed_len],
+                                compressed_data,
                                 &mut self.output_buffer,
                                 self.window.slice(),
                             )
                             .map_err(Error::decompression)?;
 
-                            self.input_buffer.advance(compressed_len);
+                            if frame.block_checksums {
+                                let expected_checksum = rest.try_get_u32_le().map_err(|_| {
+                                    Error::decompression("expected 4-byte checksum after Lz4 block")
+                                })?;
 
-                            (compressed_len, self.output_buffer.split_to(len).freeze())
+                                let actual_checksum = XxHash32::oneshot(0, compressed_data);
+
+                                if expected_checksum != actual_checksum {
+                                    return Err(Error::decompression(format!(
+                                        "Lz4 block checksum mismatch; expected: {expected_checksum:#x}, actual: {actual_checksum:#x}"
+                                    )));
+                                }
+                            }
+
+                            self.input_buffer.advance(expected_len);
+
+                            let content = self.output_buffer.split_to(len).freeze();
+
+                            if let Some(content_hasher) = content_hasher {
+                                content_hasher.write(&content);
+                            }
+
+                            total_content_size += len;
+
+                            (compressed_len, content)
                         }
                         BlockInfo::EndMark => {
+                            if let Some(content_hasher) = content_hasher {
+                                let Ok(expected_checksum) = self.input_buffer.try_get_u32_le()
+                                else {
+                                    return Ok(ControlFlow::Continue(
+                                        CHECKSUM_SIZE - self.input_buffer.remaining(),
+                                    ));
+                                };
+
+                                let actual_checksum = content_hasher.finish_32();
+
+                                if expected_checksum != actual_checksum {
+                                    return Err(Error::decompression(format!(
+                                        "Lz4 content checksum mismatch; expected: {expected_checksum:#x}, actual: {actual_checksum:#x}"
+                                    )));
+                                }
+                            }
+
+                            if let Some(expected_content_size) = frame.content_size
+                                && expected_content_size != total_content_size as u64
+                            {
+                                return Err(Error::decompression(format!(
+                                    "Lz4 content size mismatch; expected: {expected_content_size}, actual: {total_content_size}"
+                                )));
+                            }
+
                             self.state = State::NextFrame;
                             continue;
                         }
@@ -194,6 +270,8 @@ impl Lz4FramePushDecoder {
                     self.state = State::NextBlock {
                         frame: frame.clone(),
                         overhead: 0,
+                        total_content_size,
+                        content_hasher: content_hasher.take(),
                     };
 
                     return Ok(ControlFlow::Break(Chunk {
@@ -205,7 +283,7 @@ impl Lz4FramePushDecoder {
         }
     }
 
-    pub fn finish(&mut self) -> Result<(), Error> {
+    pub(crate) fn finish(&mut self) -> Result<(), Error> {
         if self.input_buffer.remaining() != 0 {
             return Err(Error::decompression("unconsumed data in Lz4 frame buffer"));
         }
@@ -215,18 +293,18 @@ impl Lz4FramePushDecoder {
             State::NextBlock { .. } => Err(Error::decompression(
                 "unexpected EOF in Lz4 frame stream: expected next block or EndMark",
             )),
-            State::Block { block, .. } => {
-                let len = match *block {
-                    BlockInfo::Uncompressed(len) => len,
-                    BlockInfo::Compressed(len) => len,
-                    BlockInfo::EndMark => unreachable!(),
-                };
-
-                Err(Error::decompression(format!(
-                    "unexpected EOF in Lz4 frame stream: expected {len} bytes for next block, got {}",
+            State::Block { block, .. } => match *block {
+                BlockInfo::Uncompressed(len) | BlockInfo::Compressed(len) => {
+                    Err(Error::decompression(format!(
+                        "unexpected EOF in Lz4 frame stream: expected {len} bytes for next block, got {}",
+                        self.input_buffer.remaining()
+                    )))
+                }
+                BlockInfo::EndMark => Err(Error::decompression(format!(
+                    "unexpected EOF in Lz4 frame stream: expected {CHECKSUM_SIZE} bytes for content checksum, got {}",
                     self.input_buffer.remaining()
-                )))
-            }
+                ))),
+            },
         }
     }
 }

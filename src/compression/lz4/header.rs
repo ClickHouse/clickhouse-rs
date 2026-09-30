@@ -4,8 +4,7 @@
 // Calls to `Read::read_exact()` on `&[u8]` have been replaced with `read_fixed()`.
 use twox_hash::XxHash32;
 
-use std::fmt::{Display, Formatter};
-use std::{fmt::Debug, hash::Hasher};
+use std::fmt::{Debug, Display, Formatter};
 
 const FLG_RESERVED_MASK: u8 = 0b00000010;
 const FLG_VERSION_MASK: u8 = 0b11000000;
@@ -27,14 +26,9 @@ const LZ4F_MAGIC_NUMBER: u32 = 0x184D2204;
 pub(crate) const LZ4F_LEGACY_MAGIC_NUMBER: u32 = 0x184C2102;
 const LZ4F_SKIPPABLE_MAGIC_RANGE: std::ops::RangeInclusive<u32> = 0x184D2A50..=0x184D2A5F;
 
-pub(crate) const MAGIC_NUMBER_SIZE: usize = 4;
-pub(crate) const MIN_FRAME_INFO_SIZE: usize = 7;
-pub(crate) const MAX_FRAME_INFO_SIZE: usize = 19;
-pub(crate) const BLOCK_INFO_SIZE: usize = 4;
-
 #[derive(Clone, Copy, PartialEq, Debug)]
 /// Different predefines blocksizes to choose when compressing data.
-pub enum BlockSize {
+pub(crate) enum BlockSize {
     /// The default block size.
     Max64KB = 4,
     /// 256KB block size.
@@ -62,7 +56,7 @@ impl BlockSize {
 #[derive(Clone, Copy, PartialEq, Debug)]
 /// The two `BlockMode` operations that can be set on (`FrameInfo`)[FrameInfo]
 #[derive(Default)]
-pub enum BlockMode {
+pub(crate) enum BlockMode {
     /// Every block is compressed independently. The default.
     #[default]
     Independent,
@@ -109,25 +103,25 @@ pub enum BlockMode {
 //
 #[derive(Debug, Clone)]
 /// The metadata for de/compressing with lz4 frame format.
-pub struct FrameInfo {
+pub(crate) struct FrameInfo {
     /// If set, includes the total uncompressed size of data in the frame.
-    pub content_size: Option<u64>,
+    pub(crate) content_size: Option<u64>,
     /// The identifier for the dictionary that must be used to correctly decode data.
     /// The compressor and the decompressor must use exactly the same dictionary.
     ///
     /// Note that this is currently unsupported and for this reason it's not pub.
     pub(crate) dict_id: Option<u32>,
     /// The maximum uncompressed size of each data block.
-    pub block_size: BlockSize,
+    pub(crate) block_size: BlockSize,
     /// The block mode.
-    pub block_mode: BlockMode,
+    pub(crate) block_mode: BlockMode,
     /// If set, includes a checksum for each data block in the frame.
-    pub block_checksums: bool,
+    pub(crate) block_checksums: bool,
     /// If set, includes a content checksum to verify that the full frame contents have been
     /// decoded correctly.
-    pub content_checksum: bool,
+    pub(crate) content_checksum: bool,
     /// If set, use the legacy frame format
-    pub legacy_frame: bool,
+    pub(crate) legacy_frame: bool,
 }
 
 impl FrameInfo {
@@ -197,11 +191,13 @@ impl FrameInfo {
         // 1 byte header checksum
         let [expected_checksum] = read_fixed(input)?;
 
-        let mut hasher = XxHash32::with_seed(0);
-        hasher.write(&original_input[4..original_input.len() - input.len() - 1]);
-        let header_hash = (hasher.finish() >> 8) as u8;
+        let hash = XxHash32::oneshot(
+            0,
+            &original_input[4..original_input.len() - input.len() - 1],
+        );
+        let header_hash = (hash >> 8) as u8;
         if header_hash != expected_checksum {
-            return Err(Error::HeaderChecksumError);
+            return Err(Error::HeaderChecksum);
         }
 
         Ok(FrameInfo {
@@ -246,41 +242,24 @@ fn read_fixed<const LEN: usize>(input: &mut &[u8]) -> Result<[u8; LEN], Error> {
 }
 
 #[derive(Debug)]
-pub enum Error {
+pub(crate) enum Error {
     /// Not enough data to read the frame header.
     ///
     /// Included is the amount of additional bytes to be read.
     InsufficientData(usize),
     /// Unsupported block size.
-    UnsupportedBlocksize(u8),
+    UnsupportedBlocksize(#[expect(dead_code)] u8),
     /// Unsupported frame version.
-    UnsupportedVersion(u8),
+    UnsupportedVersion(#[expect(dead_code)] u8),
     /// Wrong magic number for the LZ4 frame format.
     WrongMagicNumber,
     /// Reserved bits set.
     ReservedBitsSet,
-    /// Block header is malformed.
-    InvalidBlockInfo,
-    /// Read a block larger than specified in the Frame header.
-    BlockTooBig,
     /// The Frame header checksum doesn't match.
-    HeaderChecksumError,
-    /// The block checksum doesn't match.
-    BlockChecksumError,
-    /// The content checksum doesn't match.
-    ContentChecksumError,
+    HeaderChecksum,
     /// Read an skippable frame.
     /// The caller may read the specified amount of bytes from the underlying io::Read.
-    SkippableFrame(u32),
-    /// External dictionaries are not supported.
-    DictionaryNotSupported,
-    /// Content length differs.
-    ContentLengthError {
-        /// Expected content length.
-        expected: u64,
-        /// Actual content length.
-        actual: u64,
-    },
+    SkippableFrame(#[expect(dead_code)] u32),
 }
 
 impl Display for Error {
