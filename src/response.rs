@@ -277,7 +277,7 @@ impl Stream for IncomingStream {
 }
 
 // === Decompress ===
-
+#[allow(clippy::large_enum_variant)] // the structure ultimately gets boxed in `Chunks`
 enum Decompress<S> {
     Plain(S),
     #[cfg(feature = "lz4")]

@@ -29,15 +29,14 @@ enum State {
         frame: FrameInfo,
         overhead: usize,
         total_content_size: usize,
-        // 256 bytes that we shouldn't store inline if we don't have to.
-        content_hasher: Option<Box<XxHash32>>,
+        content_hasher: Option<XxHash32>,
     },
     Block {
         frame: FrameInfo,
         block: BlockInfo,
         overhead: usize,
         total_content_size: usize,
-        content_hasher: Option<Box<XxHash32>>,
+        content_hasher: Option<XxHash32>,
     },
 }
 
