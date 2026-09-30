@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [#482]: https://github.com/ClickHouse/clickhouse-rs/pull/482
 
-[issue #468]: 
+[issue #468]: https://github.com/ClickHouse/clickhouse-rs/issues/468
 
 ## [0.15.2] - 2026-08-24
 
