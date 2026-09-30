@@ -1,6 +1,8 @@
 use bytes::Bytes;
+#[cfg(any(feature = "lz4", feature = "zstd"))]
+use hyper::header::ACCEPT_ENCODING;
 use hyper::{
-    Method, Request,
+    HeaderMap, Method, Request,
     header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderValue, TRANSFER_ENCODING},
 };
 use rand::distr::{Alphanumeric, SampleString};
@@ -261,15 +263,29 @@ impl Query {
         }
 
         if self.client.compression.is_enabled() {
-            #[cfg(feature = "zstd")]
-            if matches!(self.client.compression, crate::Compression::Zstd(_)) {
-                pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
-            } else {
-                pairs.append_pair(settings::COMPRESS, "1");
-            }
+            pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
+        }
 
-            #[cfg(not(feature = "zstd"))]
-            pairs.append_pair(settings::COMPRESS, "1");
+        let mut headers = HeaderMap::new();
+
+        match self.client.compression {
+            #[expect(deprecated)]
+            #[cfg(feature = "lz4")]
+            Compression::Lz4 | Compression::Lz4Hc(_) => {
+                pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
+                headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("lz4"));
+            }
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(level) => {
+                pairs
+                    .append_pair(settings::ENABLE_HTTP_COMPRESSION, "1")
+                    // `http_zlib_compression_level` affects all compression codecs:
+                    // https://clickhouse.com/docs/concepts/features/interfaces/http#compression
+                    .append_pair(settings::HTTP_ZLIB_COMPRESSION_LEVEL, &level.to_string());
+
+                headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("zstd"));
+            }
+            _ => (),
         }
 
         let mut parameters = Vec::new();
@@ -291,13 +307,13 @@ impl Query {
             .inspect_err(|err| err.record_in_current_span("invalid params in query"))?;
 
         let mut builder = Request::builder().method(Method::POST).uri(url.as_str());
+
+        if let Some(headers_mut) = builder.headers_mut() {
+            *headers_mut = headers;
+        }
+
         builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
         builder = with_authentication(builder, &self.client.authentication);
-
-        #[cfg(feature = "zstd")]
-        if matches!(self.client.compression, crate::Compression::Zstd(_)) {
-            builder = builder.header("Accept-Encoding", "zstd");
-        }
 
         let body = if let Some(multipart) = multipart {
             // The client controls headers that frame this body. `headers_mut()` is
@@ -323,7 +339,7 @@ impl Query {
         })?;
 
         let future = self.client.http.request(request);
-        Ok(Response::new(future, self.client.compression))
+        Ok(Response::new(future))
     }
 
     /// Configure the [roles] to use when executing this query.
@@ -751,13 +767,20 @@ mod transport_tests {
             );
         }
         assert!(!pairs.iter().any(|(name, _)| name.starts_with("param_")));
+        assert!(!pairs.iter().any(|(name, _)| name == "compress"));
         #[cfg(feature = "lz4")]
-        assert!(
-            pairs
-                .iter()
-                .any(|(name, value)| name == "compress" && value == "1"),
-            "missing compression setting in {pairs:?}"
-        );
+        {
+            assert!(
+                pairs.iter().any(|(name, value)| {
+                    name == settings::ENABLE_HTTP_COMPRESSION && value == "1"
+                }),
+                "missing compression setting in {pairs:?}"
+            );
+            assert_eq!(
+                request.headers().get(ACCEPT_ENCODING),
+                Some(&HeaderValue::from_static("lz4"))
+            );
+        }
 
         let mut fields = parse_multipart_fields(&request);
         assert_eq!(
@@ -821,7 +844,7 @@ mod transport_tests {
 
         Client::default()
             .with_mock(&mock)
-            .with_compression(Compression::zstd())
+            .with_compression(Compression::Zstd(7))
             .query("SELECT {value: UInt8}")
             .param("value", 1)
             .execute()
@@ -836,8 +859,13 @@ mod transport_tests {
                 .iter()
                 .any(|(name, value)| { name == settings::ENABLE_HTTP_COMPRESSION && value == "1" })
         );
+        assert!(
+            pairs
+                .iter()
+                .any(|(name, value)| name == settings::HTTP_ZLIB_COMPRESSION_LEVEL && value == "7")
+        );
         assert_eq!(
-            request.headers().get("Accept-Encoding"),
+            request.headers().get(ACCEPT_ENCODING),
             Some(&HeaderValue::from_static("zstd"))
         );
         assert_eq!(

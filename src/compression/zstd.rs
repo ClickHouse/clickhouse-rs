@@ -1,49 +1,35 @@
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
-use bytes::{BufMut, Bytes, BytesMut};
-use cityhash_rs::cityhash_102_128;
-use futures_util::stream::Stream;
-use zstd::stream::raw::Operation;
-
+use crate::compression::native_framing;
 use crate::error::{Error, Result};
 use crate::response::Chunk;
+use bytes::{Bytes, BytesMut};
+use futures_util::stream::Stream;
+use zstd::stream::raw::Operation;
 
 const OUTPUT_BUFFER_SIZE: usize = 64 * 1024;
 
 // ClickHouse native compression framing.
-const CHECKSUM_SIZE: usize = 16;
-const HEADER_SIZE: usize = 9;
-const META_SIZE: usize = CHECKSUM_SIZE + HEADER_SIZE;
 const ZSTD_MAGIC: u8 = 0x90;
-
-fn calc_checksum(buffer: &[u8]) -> u128 {
-    let hash = cityhash_102_128(buffer);
-    hash.rotate_right(64)
-}
 
 pub(crate) fn compress(uncompressed: &[u8], level: Option<i32>) -> Result<Bytes> {
     let level = level.unwrap_or(zstd::DEFAULT_COMPRESSION_LEVEL);
     let max_compressed_size = zstd::zstd_safe::compress_bound(uncompressed.len());
 
     let mut buffer = BytesMut::new();
-    buffer.resize(META_SIZE + max_compressed_size, 0);
+    buffer.resize(native_framing::META_SIZE + max_compressed_size, 0);
 
-    let compressed_data_size =
-        zstd::zstd_safe::compress(&mut buffer[META_SIZE..], uncompressed, level)
-            .map_err(|code| Error::Compression(zstd::zstd_safe::get_error_name(code).into()))?;
+    let compressed_data_size = zstd::zstd_safe::compress(
+        &mut buffer[native_framing::META_SIZE..],
+        uncompressed,
+        level,
+    )
+    .map_err(|code| Error::Compression(zstd::zstd_safe::get_error_name(code).into()))?;
 
-    buffer.truncate(META_SIZE + compressed_data_size);
+    buffer.truncate(native_framing::META_SIZE + compressed_data_size);
 
-    // Write header: [magic] [compressed_size] [uncompressed_size]
-    let mut header = &mut buffer[CHECKSUM_SIZE..META_SIZE];
-    header.put_u8(ZSTD_MAGIC);
-    header.put_u32_le((HEADER_SIZE + compressed_data_size) as u32);
-    header.put_u32_le(uncompressed.len() as u32);
-
-    // Write checksum over header + data.
-    let checksum = calc_checksum(&buffer[CHECKSUM_SIZE..]);
-    (&mut buffer[..CHECKSUM_SIZE]).put_u128_le(checksum);
+    native_framing::write_meta(&mut buffer, ZSTD_MAGIC, uncompressed.len())?;
 
     Ok(buffer.freeze())
 }
@@ -183,9 +169,10 @@ fn it_compresses_and_decompresses() {
     let compressed = compress(&source, None).unwrap();
 
     // Verify the magic byte.
-    assert_eq!(compressed[CHECKSUM_SIZE], ZSTD_MAGIC);
+    assert_eq!(compressed[native_framing::CHECKSUM_SIZE], ZSTD_MAGIC);
 
     // Verify decompression of the payload.
-    let decompressed = zstd::bulk::decompress(&compressed[META_SIZE..], source.len()).unwrap();
+    let decompressed =
+        zstd::bulk::decompress(&compressed[native_framing::META_SIZE..], source.len()).unwrap();
     assert_eq!(decompressed, source);
 }

@@ -38,6 +38,11 @@ impl BytesExt {
         *self.cursor.get_mut() += n;
     }
 
+    pub(crate) fn clear(&mut self) {
+        *self.cursor.get_mut() = 0;
+        self.bytes.clear();
+    }
+
     /// Adds the provided chunk into available bytes.
     #[inline(always)]
     pub(crate) fn extend(&mut self, chunk: Bytes) {
@@ -78,6 +83,14 @@ impl Buf for BytesExt {
     #[inline(always)]
     fn advance(&mut self, cnt: usize) {
         self.advance(cnt);
+    }
+
+    fn copy_to_bytes(&mut self, len: usize) -> Bytes {
+        let start = self.cursor.get();
+        self.advance(len);
+        let end = self.cursor.get();
+
+        self.bytes.slice(start..end)
     }
 }
 
