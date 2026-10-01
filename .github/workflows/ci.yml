@@ -87,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        clickhouse: [ latest, head ]
+        clickhouse: [ '25.8', '26.3', '26.5', '26.6', '26.7', latest, head ]
         include:
           - clickhouse: latest
             coverage: true
