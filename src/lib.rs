@@ -1091,12 +1091,13 @@ Client {
     headers: [
         \"X-Trace-Id\",
     ],
-    products_info: [
+    app_product_info: [
         ProductInfo {
             name: \"MyApp\",
             version: \"0.0.1\",
         },
     ],
+    stack_product_info: [],
     validation: false,
     ..
 }";
