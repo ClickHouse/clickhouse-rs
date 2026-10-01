@@ -1,0 +1,14 @@
+[[disallowed-methods]]
+path = "clickhouse::Client::with_product_info"
+reason = "will place product info at front of user agent string, ahead of the app's product info"
+replacement = "clickhouse::Client::with_stack_product_info"
+
+[[disallowed-methods]]
+path = "clickhouse::query::Query::with_product_info"
+reason = "will place product info at front of user agent string, ahead of the app's product info"
+replacement = "clickhouse::query::Query::with_stack_product_info"
+
+[[disallowed-methods]]
+path = "clickhouse::insert_formatted::InsertFormatted::with_product_info"
+reason = "will place product info at front of user agent string, ahead of the app's product info"
+replacement = "clickhouse::insert_formatted::InsertFormatted::with_stack_product_info"

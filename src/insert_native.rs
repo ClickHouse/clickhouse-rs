@@ -189,7 +189,7 @@ mod tests {
 
         let insert = client.insert_native("foo");
 
-        let product_info = &insert.writer.expect_client().products_info;
+        let product_info = &insert.writer.expect_client().app_product_info;
         assert!(
             product_info.is_empty(),
             "unexpected product_info: {product_info:?}"
@@ -199,7 +199,7 @@ mod tests {
             .with_product_info("foo", "1.0.0")
             .with_product_info("bar", "0.1.0-alpha.1");
 
-        let product_info = &insert.writer.expect_client().products_info;
+        let product_info = &insert.writer.expect_client().app_product_info;
 
         assert_eq!(
             *product_info,
