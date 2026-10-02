@@ -81,13 +81,14 @@ jobs:
       - run: cargo miri setup
       - run: cargo miri test --all-features -- _miri
 
-  # uses a single local Docker container with a few ClickHouse versions
+  # uses a single local Docker container with current and minimum supported ClickHouse versions
   test-local:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        clickhouse: [ latest, head ]
+        # 25.8 is the minimum currently supported ClickHouse LTS release.
+        clickhouse: [ latest, head, 25.8 ]
         include:
           - clickhouse: latest
             coverage: true
