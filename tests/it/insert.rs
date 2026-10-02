@@ -75,8 +75,8 @@ async fn keeps_client_settings() {
 
 // https://github.com/ClickHouse/clickhouse-rs/issues/477
 #[tokio::test]
-async fn query_id_is_not_used_for_describe() {
-    let table_name = "insert_query_id_is_not_used_for_describe";
+async fn describe_query_id_is_linked_to_insert() {
+    let table_name = "insert_describe_query_id_is_linked_to_insert";
     let query_id = uuid::Uuid::new_v4().to_string();
 
     let client = prepare_database!();
@@ -97,22 +97,30 @@ async fn query_id_is_not_used_for_describe() {
 
     flush_query_log(&client).await;
 
-    let query_kinds = client
+    let describe_query_id = format!("{query_id}-describe");
+    let queries = client
         .query(
             "
-            SELECT query_kind
+            SELECT query_id, query_kind
             FROM system.query_log
-            WHERE query_id = ?
+            WHERE query_id IN (?, ?)
             AND type = 'QueryFinish'
             ORDER BY event_time_microseconds
             ",
         )
         .bind(&query_id)
-        .fetch_all::<String>()
+        .bind(&describe_query_id)
+        .fetch_all::<(String, String)>()
         .await
         .unwrap();
 
-    assert_eq!(query_kinds, vec!["Insert"]);
+    assert_eq!(
+        queries,
+        vec![
+            (describe_query_id, "Describe".into()),
+            (query_id, "Insert".into()),
+        ]
+    );
 
     let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
     assert_eq!(rows, vec!(row))

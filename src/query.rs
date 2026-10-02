@@ -354,12 +354,6 @@ impl Query {
         self
     }
 
-    /// Removes a setting inherited from the client, for this query only.
-    pub(crate) fn without_setting(mut self, name: &str) -> Self {
-        self.client.settings.remove(name);
-        self
-    }
-
     // Used in `clickhouse-ext-arrow` to track Arrow adoption.
     /// Similar to [`Client::with_product_info()`], but for this query only.
     pub fn with_product_info(
@@ -419,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_metadata_query_does_not_inherit_query_id() {
+    fn insert_metadata_query_derives_query_id() {
         let client = Client::default()
             .with_url("http://localhost:8123")
             .with_setting(settings::QUERY_ID, "my-insert")
@@ -428,7 +422,10 @@ mod tests {
 
         let query = client.insert_metadata_query("foo");
 
-        assert_eq!(query.client.get_setting(settings::QUERY_ID), None);
+        assert_eq!(
+            query.client.get_setting(settings::QUERY_ID),
+            Some("my-insert-describe")
+        );
         assert_eq!(
             query.client.get_setting(settings::SESSION_ID),
             Some("my-session")
@@ -441,5 +438,17 @@ mod tests {
 
         // The client itself (and so the `INSERT`) keeps the `query_id`.
         assert_eq!(client.get_setting(settings::QUERY_ID), Some("my-insert"));
+    }
+
+    #[test]
+    fn insert_metadata_query_preserves_generated_query_ids() {
+        for query_id in [None, Some("")] {
+            let mut client = Client::default();
+            if let Some(query_id) = query_id {
+                client = client.with_setting(settings::QUERY_ID, query_id);
+            }
+            let query = client.insert_metadata_query("foo");
+            assert_eq!(query.client.get_setting(settings::QUERY_ID), query_id);
+        }
     }
 }
