@@ -11,14 +11,14 @@ Use the following table to choose compatible versions of the `clickhouse`, `arro
 
 | `clickhouse` version    | `arrow` version | `clickhouse-ext-arrow` version |
 |-------------------------|-----------------|--------------------------------|
-| `clickhouse = "0.15.1"` | `arrow = "59"`  | `clickhouse-ext-arrow = "0.2"` |
+| `clickhouse = "0.15.3"` | `arrow = "59"`  | `clickhouse-ext-arrow = "0.2"` |
 | `clickhouse = "0.15.1"` | `arrow = "58"`  | `clickhouse-ext-arrow = "0.1"` |
 
 Newer minor versions that are compatible with these specifications may be substituted, for example: 
 
 ```toml
 [dependencies]
-clickhouse = "0.15.2"
+clickhouse = "0.15.3"
 arrow = "59.3.0"
 clickhouse-ext-arrow = "0.2.0"
 ```
