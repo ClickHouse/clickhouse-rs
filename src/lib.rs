@@ -448,6 +448,20 @@ impl Client {
         self
     }
 
+    /// NOTE: not meant for general use; prefer `.with_product_info()`.
+    /// Used in `clickhouse-ext-arrow` to track Arrow adoption.
+    /// A separate method is necessary to ensure this doesn't end up ahead of the end-user's
+    /// product info in the user agent string.
+    #[doc(hidden)]
+    pub fn with_stack_product_info(
+        mut self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        self.add_stack_product_info(product_name.into(), product_version.into());
+        self
+    }
+
     pub(crate) fn add_product_info(&mut self, product_name: String, product_version: String) {
         self.app_product_info.push(ProductInfo {
             name: product_name,
