@@ -433,4 +433,44 @@ mod tests {
             "unexpected error: {err_str:?}"
         );
     }
+
+    #[test]
+    fn insert_metadata_query_derives_query_id() {
+        let client = Client::default()
+            .with_url("http://localhost:8123")
+            .with_setting(settings::QUERY_ID, "my-insert")
+            .with_setting(settings::SESSION_ID, "my-session")
+            .with_setting("max_block_size", "1000");
+
+        let query = client.insert_metadata_query("foo");
+
+        assert_eq!(
+            query.client.get_setting(settings::QUERY_ID),
+            Some("my-insert-describe")
+        );
+        assert_eq!(
+            query.client.get_setting(settings::SESSION_ID),
+            Some("my-session")
+        );
+        assert_eq!(query.client.get_setting("max_block_size"), Some("1000"));
+        assert_eq!(
+            query.client.get_setting("describe_include_subcolumns"),
+            Some("0")
+        );
+
+        // The client itself (and so the `INSERT`) keeps the `query_id`.
+        assert_eq!(client.get_setting(settings::QUERY_ID), Some("my-insert"));
+    }
+
+    #[test]
+    fn insert_metadata_query_preserves_generated_query_ids() {
+        for query_id in [None, Some("")] {
+            let mut client = Client::default();
+            if let Some(query_id) = query_id {
+                client = client.with_setting(settings::QUERY_ID, query_id);
+            }
+            let query = client.insert_metadata_query("foo");
+            assert_eq!(query.client.get_setting(settings::QUERY_ID), query_id);
+        }
+    }
 }
