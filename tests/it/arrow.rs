@@ -250,7 +250,10 @@ async fn query_empty_response() {
 
 #[tokio::test]
 async fn ext_arrow_adds_user_agent() {
-    let client = prepare_database!();
+    let client = prepare_database!()
+        // Ensure the product info added by `clickhouse-ext-arrow` is at the right place;
+        // it shouldn't end up ahead of our end-user's product info here.
+        .with_product_info("clickhouse-ext-arrow-test", "0.0.0");
 
     client.query("CREATE TABLE arrow_product_info_test(foo Int32, bar String) ENGINE = MergeTree ORDER BY foo")
         .execute()
@@ -295,7 +298,7 @@ async fn ext_arrow_adds_user_agent() {
         .unwrap();
 
     let expected_user_agent = format!(
-        "clickhouse-ext-arrow/{ARROW_EXT_VER} clickhouse-rs/{PKG_VER} (lv:rust/{RUST_VER}; os:{OS})"
+        "clickhouse-ext-arrow-test/0.0.0 clickhouse-ext-arrow/{ARROW_EXT_VER} clickhouse-rs/{PKG_VER} (lv:rust/{RUST_VER}; os:{OS})"
     );
 
     assert_eq!(recorded_user_agents.len(), 1);

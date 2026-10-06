@@ -297,7 +297,12 @@ impl Query {
             *headers_mut = headers;
         }
 
-        builder = with_request_headers(builder, &self.client.headers, &self.client.products_info);
+        builder = with_request_headers(
+            builder,
+            &self.client.headers,
+            &self.client.app_product_info,
+            &self.client.stack_product_info,
+        );
         builder = with_authentication(builder, &self.client.authentication);
 
         let content_length = query.len();
@@ -354,7 +359,6 @@ impl Query {
         self
     }
 
-    // Used in `clickhouse-ext-arrow` to track Arrow adoption.
     /// Similar to [`Client::with_product_info()`], but for this query only.
     pub fn with_product_info(
         self,
@@ -363,6 +367,24 @@ impl Query {
     ) -> Self {
         Self {
             client: self.client.with_product_info(product_name, product_version),
+            ..self
+        }
+    }
+
+    /// NOTE: not meant for general use; prefer `.with_product_info()`.
+    /// Used in `clickhouse-ext-arrow` to track Arrow adoption.
+    /// A separate method is necessary to ensure this doesn't end up ahead of the end-user's
+    /// product info in the user agent string.
+    #[doc(hidden)]
+    pub fn with_stack_product_info(
+        self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: self
+                .client
+                .with_stack_product_info(product_name, product_version),
             ..self
         }
     }

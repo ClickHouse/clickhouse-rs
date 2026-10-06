@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+* Changed how product info is added internally so it doesn't end up in the user agent string ahead of any user-added
+  product info. ([#484])
+
+[#484]: https://github.com/ClickHouse/clickhouse-rs/pull/484
+
 ## [0.1.0] - 2026-06-01
 
 Initial release.
