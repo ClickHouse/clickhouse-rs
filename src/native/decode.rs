@@ -1,3 +1,5 @@
+//! Types and impls for decoding Native format.
+
 use crate::error::BoxedError;
 use crate::native::array::{ArrayData, TupleIter};
 use clickhouse_types::DataTypeNode;
@@ -5,16 +7,30 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasher, Hash};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+/// A cursor to the data for an individual element in a [`Column`][super::Column].
 pub struct ValueReader<'a> {
     pub(super) data_type: &'a DataTypeNode,
     pub(super) native_bytes: &'a [u8],
 }
 
 impl<'a> ValueReader<'a> {
+    /// The data type of this value.
     pub fn data_type(&self) -> &DataTypeNode {
         self.data_type
     }
 
+    /// The byte slice underlying this cursor.
+    ///
+    /// Some bytes may have been consumed from the view if [`Self::read_bytes_fixed()`]
+    /// was previously called.
+    pub fn native_bytes(&self) -> &'a [u8] {
+        self.native_bytes
+    }
+
+    /// Read a fixed number of bytes from this cursor.
+    ///
+    /// # Errors
+    /// If less than `LEN` bytes remain.
     pub fn read_bytes_fixed<const LEN: usize>(&mut self) -> Result<&'a [u8; LEN], ValueReadError> {
         let (ret, rem) =
             self.native_bytes
@@ -30,30 +46,74 @@ impl<'a> ValueReader<'a> {
     }
 }
 
+/// Errors returned by [`ValueReader`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ValueReadError {
+    /// Returned by [`ValueReader::read_bytes_fixed()`].
     #[error("expected {expected} bytes, got {actual}")]
-    InvalidLength { expected: usize, actual: usize },
+    InvalidLength {
+        /// The expected number of bytes.
+        expected: usize,
+        /// The actual number of bytes remaining in the [`ValueReader`].
+        actual: usize,
+    },
 }
 
+/// Decode a Rust type from its equivalent in ClickHouse's [Native format].
+///
+/// [Native format]: https://clickhouse.com/docs/reference/formats/Native
 pub trait Decode<'a>: 'a + Sized {
+    /// Return `true` if the given data type is compatible with this Rust type.
+    ///
+    /// The implementation should accept both `LowCardinality(_)`
+    /// and `SimpleAggregateFunction(_, _)` as valid; the data provided during decode will be
+    /// identical to the unwrapped type.
+    ///
+    /// Use [`DataTypeNode::remove_compatible_wrappers()`] when matching on types.
     fn compatible(data_type: &DataTypeNode) -> bool;
 
+    /// Decode the given value, which may involve parsing.
+    ///
+    /// The exact error type should not be considered stable.
     fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError>;
 
+    /// Decode a `NULL` value.
+    ///
+    /// Default implementation returns an error.
     fn decode_null(data_type: &DataTypeNode) -> Result<Self, BoxedError> {
         Err(format!("data type {data_type:?} cannot be NULL").into())
     }
 
+    /// Decode an array of values.
+    ///
+    /// Default implementation returns an error.
+    ///
+    /// Do not override unless implementing a custom array/slice type like `Vec<T>`.
+    ///
+    /// Generic implementations for `Vec<T>` and `Box<[T]>` are already provided.
     fn decode_array(data: ArrayData<'a>) -> Result<Self, BoxedError> {
         Err(format!("unexpected data type Array({})", data.elem_type).into())
     }
 
+    /// Decode a tuple of values.
+    ///
+    /// Default implementation returns an error.
+    ///
+    /// Do not override unless implementing a custom tuple struct type.
+    ///
+    /// Generic implementations for `(T...)` up to 16 elements are already provided.
     fn decode_tuple(data: TupleIter<'a>) -> Result<Self, BoxedError> {
         Err(format!("unexpected data type Tuple({:?})", data.types.as_slice()).into())
     }
 
+    /// Decode a `Map`.
+    ///
+    /// Default implementation returns an error.
+    ///
+    /// Do not override unless implementing a custom map type like `HashMap<K, V>`.
+    ///
+    /// Generic implementations for [`HashMap`] and [`BTreeMap`] are already provided.
     fn decode_map(key_data: ArrayData<'a>, value_data: ArrayData<'a>) -> Result<Self, BoxedError> {
         Err(format!(
             "unexpected data type Map({}, {})",
@@ -86,6 +146,7 @@ macro_rules! impl_from_le_bytes {
                     type_matches!(data_type, DataTypeNode::$dataty)
                 }
 
+                #[doc=concat!("Decode this type from `", stringify!($dataty), "`.")]
                 fn decode(
                     reader: &mut ValueReader<'a>,
                 ) -> Result<Self, BoxedError> {
@@ -119,6 +180,7 @@ impl Decode<'_> for bool {
         type_matches!(data_type, DataTypeNode::Bool)
     }
 
+    /// Decode this type from `Bool`.
     fn decode(reader: &mut ValueReader<'_>) -> Result<Self, BoxedError> {
         // https://clickhouse.com/docs/interfaces/specs/NativeFormat#bool
         let [b] = reader.read_bytes_fixed()?;
@@ -126,13 +188,22 @@ impl Decode<'_> for bool {
     }
 }
 
+// Note: no impl for `&[u8]` because it could be confused with the blanket impl for `Vec<u8>`
+/// Zero-copy decoding for strings.
 impl<'a> Decode<'a> for &'a str {
     fn compatible(data_type: &DataTypeNode) -> bool {
-        <&[u8] as Decode>::compatible(data_type)
+        type_matches!(
+            data_type,
+            DataTypeNode::String | DataTypeNode::FixedString(_)
+        )
     }
 
+    /// Decode this type from `String` or `FixedString`.
+    ///
+    /// # Errors
+    /// If the string data is not valid UTF-8.
     fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
-        Ok(str::from_utf8(<&[u8] as Decode>::decode(reader)?)?)
+        Ok(str::from_utf8(reader.native_bytes)?)
     }
 }
 
@@ -141,21 +212,12 @@ impl<'a> Decode<'a> for String {
         <&str as Decode>::compatible(data_type)
     }
 
+    /// Decode this type from `String` or `FixedString`.
+    ///
+    /// # Errors
+    /// If the string data is not valid UTF-8.
     fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
         Ok(<&str as Decode>::decode(reader)?.into())
-    }
-}
-
-impl<'a> Decode<'a> for &'a [u8] {
-    fn compatible(data_type: &DataTypeNode) -> bool {
-        type_matches!(
-            data_type,
-            DataTypeNode::String | DataTypeNode::FixedString(_)
-        )
-    }
-
-    fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
-        Ok(reader.native_bytes)
     }
 }
 
@@ -192,11 +254,10 @@ impl<'a, T: Decode<'a>> Decode<'a> for Option<T> {
     }
 }
 
-// FIXME: need to decide if `Vec<u8>` corresponds to `String` or `Array<UInt8>`
 impl<'a, T: Decode<'a> + 'a> Decode<'a> for Vec<T> {
     fn compatible(data_type: &DataTypeNode) -> bool {
         if let DataTypeNode::Array(elem_type) = data_type {
-            T::compatible(elem_type.remove_low_cardinality())
+            T::compatible(elem_type.remove_compatible_wrappers())
         } else {
             false
         }
@@ -230,8 +291,8 @@ macro_rules! tuple_impl {
                     return false;
                 };
 
-                <$ty1 as Decode>::compatible($var1.remove_low_cardinality())
-                $(&& <$ty as Decode>::compatible($var.remove_low_cardinality()))*
+                <$ty1 as Decode>::compatible($var1.remove_compatible_wrappers())
+                $(&& <$ty as Decode>::compatible($var.remove_compatible_wrappers()))*
 
             }
 
@@ -271,8 +332,8 @@ where
             return false;
         };
 
-        K::compatible(key_ty.remove_low_cardinality())
-            && V::compatible(val_ty.remove_low_cardinality())
+        K::compatible(key_ty.remove_compatible_wrappers())
+            && V::compatible(val_ty.remove_compatible_wrappers())
     }
 
     fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
@@ -298,8 +359,8 @@ where
             return false;
         };
 
-        K::compatible(key_ty.remove_low_cardinality())
-            && V::compatible(val_ty.remove_low_cardinality())
+        K::compatible(key_ty.remove_compatible_wrappers())
+            && V::compatible(val_ty.remove_compatible_wrappers())
     }
 
     fn decode(reader: &mut ValueReader<'a>) -> Result<Self, BoxedError> {
@@ -341,6 +402,10 @@ impl Decode<'_> for Ipv6Addr {
     }
 }
 
+/// Accepts either a `IPv4` or `IPv6` type.
+///
+/// # Note: No `Encode` Impl
+/// ClickHouse does not have a polymorphic IP address type, so this cannot be infallibly encoded.
 impl Decode<'_> for IpAddr {
     fn compatible(data_type: &DataTypeNode) -> bool {
         type_matches!(data_type, DataTypeNode::IPv4 | DataTypeNode::IPv6)

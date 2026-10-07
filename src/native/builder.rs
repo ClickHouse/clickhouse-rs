@@ -1,3 +1,4 @@
+//! Types for building and populating a [`Block`] with data.
 use crate::error::BoxedError;
 use crate::native::encode::{Encode, ValueWriter};
 use crate::native::string::MaybeUtf8;
@@ -11,66 +12,115 @@ use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem;
 
+/// Builder type for [`Block`]. Use this to create data for insertion.
 #[derive(Default)]
 pub struct BlockBuilder {
     column_names: HashMap<MaybeUtf8, usize>,
     columns: Vec<ColumnBuilderRaw>,
 }
 
+/// Errors that may be returned by [`BlockBuilder::upsert_column()`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum BlockBuilderError {
+pub enum UpsertColumnError {
+    /// [`BlockBuilder::upsert_column()`] was called with one type, but the column already existed
+    /// using a different type.
     #[error(
         "attempting to overwrite existing column `{name} {existing_type}` with a different type: {new_type}"
     )]
     ColumnExists {
-        name: String,
-        existing_type: DataTypeNode,
-        new_type: DataTypeNode,
+        /// The name of the column.
+        name: Box<str>,
+
+        /// The existing data type of the column.
+        // Clippy complains about the error type being too large if these aren't boxed
+        existing_type: Box<DataTypeNode>,
+
+        /// The data type of the attempted upsert, according to [`Encode::produces()`].
+        new_type: Box<DataTypeNode>,
     },
+
+    /// [`BlockBuilder::upsert_column()`] was called with a type that is not currently supported.
     #[error("unsupported type or subtype of column `{column_name}`:  `{data_type}`")]
     UnsupportedType {
-        column_name: String,
-        data_type: DataTypeNode,
+        /// The name of the column for the attempted upsert.
+        column_name: Box<str>,
+
+        /// The data type of the attempted upsert, according to [`Encode::produces()`].
+        data_type: Box<DataTypeNode>,
     },
+}
+
+/// Errors that may be returned by [`BlockBuilder::build()`].
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum BlockBuilderError {
+    /// [`BlockBuilder::build()`] was called while the block contained columns with different lengths.
+    ///
+    /// Ensure every column in the block has the same number of elements.
     #[error(
         "block contains columns of mismatched lengths; \
          longest column: `{longest_column}` (len: {longest_len}), \
          shortest column: `{shortest_column}` (len: {shortest_len})"
     )]
     MismatchedLengths {
-        longest_column: String,
+        /// The name of the column with the most elements.
+        longest_column: Box<str>,
+        /// The number of elements in the longest column.
         longest_len: usize,
-        shortest_column: String,
+        /// The name of the column with the fewest elements.
+        shortest_column: Box<str>,
+        /// The number of elements in the shortest column.
         shortest_len: usize,
     },
+
+    /// Returned from [`BlockBuilder::build()`] when a column contains invalid data for its type.
+    ///
+    /// This likely indicates a bug in an `Encode` implementation,
+    /// be it manual or provided by this crate.
     #[error("column `{column_name} {column_type}` contains invalid data: {message}")]
     ColumnDataInvalid {
-        column_name: String,
-        column_type: DataTypeNode,
-        message: String,
+        /// The column name that failed validation.
+        column_name: Box<str>,
+        /// The column's data type.
+        column_type: Box<DataTypeNode>,
+        /// The validation error.
+        message: Box<str>,
     },
+
+    /// Returned from [`BlockBuilder::build()`] if the block contains zero rows of data.
+    ///
+    /// An empty block is used as a sentinel value in the `Native` format,
+    /// so it is a logic error to try to explicitly send an empty block when inserting.
+    ///
+    /// Instead, simply call [`InsertNative::end()`][crate::insert_native::InsertNative::end]
+    /// to finish the insert.
     #[error("cannot build an empty block")]
     BlockEmpty,
 }
 
 impl BlockBuilder {
+    /// Begin with an empty block (zero columns, zero rows).
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Add an empty column to the block, or get a reference to an existing one.
     ///
+    /// The data type of the column is taken from [`Encode::produces()`].
+    ///
     /// The given data type will have any `LowCardinality(_)` or `SimpleAggregateFunction(...)`
     /// wrappers erased for ease of implementation.
     ///
     /// # Errors
-    /// * If a column with the same name already exists, but with a different type.
-    /// * If the given type is not currently supported by the implementation.
+    /// * [`UpsertColumnError::ColumnExists`] if a column with the same name already exists,
+    ///   but with a different type.
+    /// * [`UpsertColumnError::UnsupportedType`] if the given type is not currently supported
+    ///   by the implementation.
     pub fn upsert_column<T: Encode>(
         &mut self,
         name: impl Into<String>,
-    ) -> Result<ColumnBuilder<'_, T>, Box<BlockBuilderError>> {
+    ) -> Result<ColumnBuilder<'_, T>, UpsertColumnError> {
         self.upsert_column_with(name, T::produces())
             .map(|inner| ColumnBuilder {
                 inner,
@@ -82,7 +132,7 @@ impl BlockBuilder {
         &mut self,
         name: impl Into<String>,
         data_type: DataTypeNode,
-    ) -> Result<&mut ColumnBuilderRaw, Box<BlockBuilderError>> {
+    ) -> Result<&mut ColumnBuilderRaw, UpsertColumnError> {
         let data_type = erase_wrappers(data_type);
 
         match self.column_names.entry(MaybeUtf8::from_string(name)) {
@@ -90,12 +140,11 @@ impl BlockBuilder {
                 let col = &mut self.columns[*existing.get()];
 
                 if col.data_type != data_type {
-                    return Err(BlockBuilderError::ColumnExists {
-                        name: col.name.to_string(),
-                        existing_type: col.data_type.clone(),
-                        new_type: data_type,
-                    }
-                    .into());
+                    return Err(UpsertColumnError::ColumnExists {
+                        name: col.name.to_string().into(),
+                        existing_type: col.data_type.clone().into(),
+                        new_type: data_type.into(),
+                    });
                 }
 
                 Ok(col)
@@ -115,7 +164,12 @@ impl BlockBuilder {
         }
     }
 
-    pub fn build(&mut self) -> Result<Block, Box<BlockBuilderError>> {
+    /// Validate and finish building the block.
+    ///
+    /// # Errors
+    /// * If the block is empty (contains zero rows).
+    /// * If the columns of the block have mismatched lengths.
+    pub fn build(&mut self) -> Result<Block, BlockBuilderError> {
         let mut num_rows = 0;
 
         // Check that all the columns have the same length
@@ -140,26 +194,25 @@ impl BlockBuilder {
 
             if len_mismatch {
                 return Err(BlockBuilderError::MismatchedLengths {
-                    longest_column: longest_col.name.to_string(),
+                    longest_column: longest_col.name.to_string().into(),
                     longest_len: longest_col.num_values(),
-                    shortest_column: shortest_col.name.to_string(),
+                    shortest_column: shortest_col.name.to_string().into(),
                     shortest_len: shortest_col.num_values(),
-                }
-                .into());
+                });
             }
         }
 
         if num_rows == 0 {
-            return Err(BlockBuilderError::BlockEmpty.into());
+            return Err(BlockBuilderError::BlockEmpty);
         }
 
         // Note: try to perform as much validation as possible before consuming `self`
         for col in &self.columns {
             col.layout.validate(&col.data_type).map_err(|message| {
                 BlockBuilderError::ColumnDataInvalid {
-                    column_name: col.name.to_string(),
-                    column_type: col.data_type.clone(),
-                    message,
+                    column_name: col.name.to_string().into(),
+                    column_type: col.data_type.clone().into(),
+                    message: message.into(),
                 }
             })?;
         }
@@ -191,8 +244,9 @@ impl Debug for BlockBuilder {
     }
 }
 
+/// Builder for an individual [`Column`]. May only be created by [`BlockBuilder`].
 pub struct ColumnBuilder<'a, T> {
-    inner: &'a mut ColumnBuilderRaw,
+    pub(super) inner: &'a mut ColumnBuilderRaw,
     _marker: PhantomData<fn(T)>,
 }
 
@@ -200,22 +254,43 @@ impl<T> ColumnBuilder<'_, T>
 where
     T: Encode,
 {
+    /// The number of values added to this column so far (including nulls, if applicable).
     pub fn num_values(&self) -> usize {
         self.inner.layout.num_values()
     }
 
+    /// Add a value to this column.
+    ///
+    /// Any error returned from [`Encode::encode()`] is returned without additional wrapping.
     pub fn add(&mut self, value: T) -> Result<&mut Self, BoxedError> {
         // Compatibility checked when this was created
         self.inner.add_unchecked(value)?;
         Ok(self)
     }
 
+    /// Add multiple values to this column at once.
+    ///
+    /// This is more efficient than adding values one at a time, because space can be pre-allocated
+    /// using [`Iterator::size_hint()`].
+    ///
+    /// Any error returned from [`Encode::encode()`] is returned without additional wrapping.
+    ///
+    /// # Note: Errors Do Not Trigger Rollback
+    /// Any encoding error does not cause previously encoded values to be rolled back.
+    ///
+    /// If resuming after an error, check [`Self::num_values()`] to see how many values
+    /// have been successfully encoded in total.
     pub fn add_all<I>(&mut self, values: I) -> Result<&mut Self, BoxedError>
     where
         I: IntoIterator<Item = T>,
     {
         self.inner.add_all_unchecked(values)?;
         Ok(self)
+    }
+
+    #[cfg(test)]
+    pub(super) fn validate(&self) -> Result<(), String> {
+        self.inner.layout.validate(&self.inner.data_type)
     }
 }
 
@@ -226,7 +301,7 @@ impl<T> Debug for ColumnBuilder<'_, T> {
 }
 
 #[derive(Debug)] // Derived impl works for us here
-struct ColumnBuilderRaw {
+pub(super) struct ColumnBuilderRaw {
     name: MaybeUtf8,
     data_type: DataTypeNode,
     layout: LayoutBuilder,
@@ -310,16 +385,13 @@ pub(super) enum LayoutBuilderKind {
 }
 
 impl LayoutBuilder {
-    fn new(
-        column_name: &MaybeUtf8,
-        data_type: &DataTypeNode,
-    ) -> Result<Self, Box<BlockBuilderError>> {
+    fn new(column_name: &MaybeUtf8, data_type: &DataTypeNode) -> Result<Self, UpsertColumnError> {
         let (non_nullable, nulls) = if let DataTypeNode::Nullable(inner) = data_type {
             if is_forbidden_nullable(inner) {
-                return Err(Box::new(BlockBuilderError::UnsupportedType {
-                    column_name: column_name.to_string(),
-                    data_type: data_type.clone(),
-                }));
+                return Err(UpsertColumnError::UnsupportedType {
+                    column_name: column_name.to_string().into(),
+                    data_type: data_type.clone().into(),
+                });
             }
 
             (&**inner, Some(BytesMut::new()))
@@ -371,10 +443,10 @@ impl LayoutBuilder {
                     end_indices: vec![],
                 },
             }),
-            _ => Err(Box::new(BlockBuilderError::UnsupportedType {
-                column_name: column_name.to_string(),
-                data_type: data_type.clone(),
-            })),
+            _ => Err(UpsertColumnError::UnsupportedType {
+                column_name: column_name.to_string().into(),
+                data_type: data_type.clone().into(),
+            }),
         }
     }
 
@@ -473,7 +545,7 @@ impl LayoutBuilder {
         }
     }
 
-    fn validate(&self, data_type: &DataTypeNode) -> Result<(), String> {
+    pub(super) fn validate(&self, data_type: &DataTypeNode) -> Result<(), String> {
         self.validate_nulls(data_type)?;
 
         let non_nullable = if let DataTypeNode::Nullable(inner) = data_type {

@@ -1,9 +1,16 @@
+//! Support for executing an `INSERT` statement using ClickHouse's [Native columnar format].
+//!
+//! [Native columnar format]: https://clickhouse.com/docs/reference/formats/Native
 use crate::insert_formatted::InsertFormatted;
 use crate::native::Block;
 use crate::native::writer::BlockWriter;
 use crate::{Client, Compression, sql};
 use std::time::Duration;
 
+/// Executes an `INSERT ... FORMAT Native` statement.
+///
+/// The [`InsertNative::end`] must be called to finalize the `INSERT`.
+/// Otherwise, the whole `INSERT` will be aborted.
 #[must_use]
 pub struct InsertNative {
     writer: BlockWriter,
@@ -125,6 +132,7 @@ impl InsertNative {
         self.writer.write(block).await
     }
 
+    /// Finish the current `INSERT` request.
     pub async fn end(self) -> crate::Result<()> {
         self.writer.end().await
     }
@@ -181,7 +189,7 @@ mod tests {
 
         let insert = client.insert_native("foo");
 
-        let product_info = &insert.writer.expect_client().products_info;
+        let product_info = &insert.writer.expect_client().app_product_info;
         assert!(
             product_info.is_empty(),
             "unexpected product_info: {product_info:?}"
@@ -191,7 +199,7 @@ mod tests {
             .with_product_info("foo", "1.0.0")
             .with_product_info("bar", "0.1.0-alpha.1");
 
-        let product_info = &insert.writer.expect_client().products_info;
+        let product_info = &insert.writer.expect_client().app_product_info;
 
         assert_eq!(
             *product_info,

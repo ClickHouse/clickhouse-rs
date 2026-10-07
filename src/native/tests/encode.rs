@@ -141,6 +141,35 @@ fn map_writer_rolls_back() {
     assert_eq!(block.num_rows(), 1);
 }
 
+// Verify that `MapWriter` rolls back a successfully written key if the value fails to encode.
+#[test]
+fn map_writer_failed_write_rolls_back() {
+    struct BadValue;
+
+    impl Encode for BadValue {
+        fn produces() -> DataTypeNode {
+            DataTypeNode::String
+        }
+
+        fn encode(&self, _writer: &mut ValueWriter<'_>) -> Result<(), BoxedError> {
+            Err("BadValue".into())
+        }
+    }
+
+    let mut builder = BlockBuilder::new();
+
+    let mut column = builder.upsert_column("map_column").unwrap();
+
+    let err = column
+        .add(HashMap::from([("foo", BadValue)]))
+        .expect_err("expected error");
+
+    assert_eq!(err.to_string(), "error writing value at entry index 0");
+
+    // Validation would fail if the column was out of sync.
+    column.validate().unwrap();
+}
+
 // A leak writer could put a block out of sync and result in data corruption;
 // it's better if we catch it during validation.
 #[test]
@@ -186,17 +215,17 @@ fn leaked_array_writer_fails_validation() {
         column_name,
         column_type,
         message,
-    } = *err
+    } = err
     else {
         panic!("unexpected error kind: {err}");
     };
 
-    assert_eq!(column_name, "foo");
-    assert_eq!(column_type, <[u32] as Encode>::produces());
+    assert_eq!(*column_name, *"foo");
+    assert_eq!(*column_type, <[u32] as Encode>::produces());
 
     assert_eq!(
-        message,
-        "last array index (6) out of sync with total elements: 11"
+        *message,
+        *"last array index (6) out of sync with total elements: 11"
     );
 }
 
@@ -246,17 +275,20 @@ fn leaked_tuple_writer_fails_validation() {
         column_name,
         column_type,
         message,
-    } = *err
+    } = err
     else {
         panic!("unexpected error kind: {err}");
     };
 
-    assert_eq!(column_name, "foo");
-    assert_eq!(column_type, <(i32, String, Vec<i64>) as Encode>::produces());
+    assert_eq!(*column_name, *"foo");
+    assert_eq!(
+        *column_type,
+        <(i32, String, Vec<i64>) as Encode>::produces()
+    );
 
     assert_eq!(
-        message,
-        "tuple index 2 (type Array(Int64)) total elements out of sync: 1 vs 2"
+        *message,
+        *"tuple index 2 (type Array(Int64)) total elements out of sync: 1 vs 2"
     );
 }
 
@@ -309,16 +341,16 @@ fn leaked_map_writer_fails_validation() {
         column_name,
         column_type,
         message,
-    } = *err
+    } = err
     else {
         panic!("unexpected error kind: {err}");
     };
 
-    assert_eq!(column_name, "foo");
-    assert_eq!(column_type, <HashMap<u32, String> as Encode>::produces());
+    assert_eq!(*column_name, *"foo");
+    assert_eq!(*column_type, <HashMap<u32, String> as Encode>::produces());
 
     assert_eq!(
-        message,
-        "last map index (5) out of sync with total elements: 10"
+        *message,
+        *"last map index (5) out of sync with total elements: 10"
     );
 }

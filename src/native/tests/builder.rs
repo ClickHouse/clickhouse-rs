@@ -1,4 +1,4 @@
-use crate::native::builder::{BlockBuilder, BlockBuilderError};
+use crate::native::builder::{BlockBuilder, BlockBuilderError, UpsertColumnError};
 use clickhouse_types::DataTypeNode;
 use std::collections::BTreeMap;
 
@@ -12,18 +12,18 @@ fn forbids_incompatible_upsert() {
         panic!("expected error")
     };
 
-    let BlockBuilderError::ColumnExists {
+    let UpsertColumnError::ColumnExists {
         name,
         existing_type,
         new_type,
-    } = *e
+    } = e
     else {
         panic!("unexpected error variant: {e:?}")
     };
 
-    assert_eq!(name, "foo");
-    assert_eq!(existing_type, DataTypeNode::Int32);
-    assert_eq!(new_type, DataTypeNode::UInt32);
+    assert_eq!(*name, *"foo");
+    assert_eq!(*existing_type, DataTypeNode::Int32);
+    assert_eq!(*new_type, DataTypeNode::UInt32);
 }
 
 #[test]
@@ -51,15 +51,15 @@ fn forbids_mismatched_lengths() {
         longest_len,
         shortest_column,
         shortest_len,
-    } = *err
+    } = err
     else {
         panic!("unexpected error variant: {err:?}")
     };
 
-    assert_eq!(longest_column, "foo");
+    assert_eq!(*longest_column, *"foo");
     assert_eq!(longest_len, 6);
 
-    assert_eq!(shortest_column, "bar");
+    assert_eq!(*shortest_column, *"bar");
     assert_eq!(shortest_len, 4);
 }
 
@@ -140,17 +140,17 @@ fn errors_on_forbidden_types() {
         panic!("expected error");
     };
 
-    let BlockBuilderError::UnsupportedType {
+    let UpsertColumnError::UnsupportedType {
         column_name,
         data_type,
-    } = *e
+    } = e
     else {
         panic!("unexpected error kind: {e:?}")
     };
 
-    assert_eq!(column_name, "foo");
+    assert_eq!(*column_name, *"foo");
     assert_eq!(
-        data_type,
+        *data_type,
         DataTypeNode::Nullable(DataTypeNode::Array(DataTypeNode::Int32.into()).into())
     );
 
@@ -158,17 +158,17 @@ fn errors_on_forbidden_types() {
         panic!("expected error");
     };
 
-    let BlockBuilderError::UnsupportedType {
+    let UpsertColumnError::UnsupportedType {
         column_name,
         data_type,
-    } = *e
+    } = e
     else {
         panic!("unexpected error kind: {e:?}")
     };
 
-    assert_eq!(column_name, "foo");
+    assert_eq!(*column_name, *"foo");
     assert_eq!(
-        data_type,
+        *data_type,
         DataTypeNode::Nullable(
             DataTypeNode::Map([DataTypeNode::Int32.into(), DataTypeNode::String.into(),]).into()
         )
@@ -184,7 +184,7 @@ fn errors_on_empty_block() {
     };
 
     assert!(
-        matches!(*e, BlockBuilderError::BlockEmpty),
+        matches!(e, BlockBuilderError::BlockEmpty),
         "unexpected error kind: {e:?}"
     );
 
@@ -196,7 +196,7 @@ fn errors_on_empty_block() {
     };
 
     assert!(
-        matches!(*e, BlockBuilderError::BlockEmpty),
+        matches!(e, BlockBuilderError::BlockEmpty),
         "unexpected error kind: {e:?}"
     );
 }

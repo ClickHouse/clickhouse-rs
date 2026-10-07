@@ -114,28 +114,6 @@ pub mod uuid_vec {
     use serde::ser::SerializeSeq;
     use std::fmt;
 
-    pub mod option {
-        use super::*;
-        use ::uuid::Uuid;
-
-        pub fn serialize<S>(uuids: &Option<Vec<Uuid>>, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            match uuids {
-                Some(uuids) => super::serialize(uuids, serializer),
-                None => serializer.serialize_none(),
-            }
-        }
-
-        pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<Uuid>>, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            Option::<Vec<Uuid>>::deserialize(deserializer)
-        }
-    }
-
     pub fn serialize<S>(uuids: &[Uuid], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,

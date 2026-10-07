@@ -198,6 +198,23 @@ impl DataTypeNode {
         }
     }
 
+    /// Remove wrapper types that are semantically identical from a data consumer's perspective.
+    ///
+    /// N.B. `Nullable` is not a valid lift here as nullable column data is not compatible with
+    /// a non-nullable Rust type and vice versa
+    /// (e.g. `Nullable(UInt64)` is not strictly compatible with `u64`).
+    ///
+    /// Current types covered:
+    /// * `LowCardinality`
+    /// * `SimpleAggregateFunction`
+    pub fn remove_compatible_wrappers(&self) -> &DataTypeNode {
+        match self {
+            DataTypeNode::LowCardinality(inner)
+            | DataTypeNode::SimpleAggregateFunction(_, inner) => inner,
+            _ => self,
+        }
+    }
+
     /// If `self` has a static string representation (e.g. `"UInt8"`), return it.
     ///
     /// Returns `None` for polymorphic types (e.g. `Array(T)` or `Decimal(P, S)`).
@@ -316,7 +333,7 @@ impl Display for DataTypeNode {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "'{name}' = {index}")?;
+                    write!(f, "'{}' = {index}", escape_enum_name(name))?;
                 }
                 write!(f, ")")
             }
@@ -761,16 +778,30 @@ fn parse_map(input: &str) -> Result<DataTypeNode, TypesError> {
 }
 
 fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
-    let columns = remove_json_header(input)?.split(',').collect::<Vec<_>>();
+    let hints = remove_json_header(input)?;
+
+    let mut columns = Vec::new();
+    let mut last_element_index = 0;
+    for i in top_level_positions(hints, b',') {
+        columns.push(&hints[last_element_index..i]);
+        last_element_index = i + 1;
+    }
+    columns.push(&hints[last_element_index..]);
 
     let inner_types = columns
         .into_iter()
         .map(|column| column.trim())
-        .filter(|column| !column.contains('=') && !column.starts_with("SKIP"))
+        .filter(|column| {
+            top_level_positions(column, b'=').next().is_none() && !column.starts_with("SKIP ")
+        })
         .map(|column| {
-            let map = column.split(' ').collect::<Vec<_>>();
-            let key_type = map[0].to_string();
-            let value_type = DataTypeNode::new(map[1])?;
+            let separator_index = top_level_positions(column, b' ').next().ok_or_else(|| {
+                TypesError::TypeParsingError(format!(
+                    "Invalid JSON type hint, expected `path Type`, got {column} in {input}"
+                ))
+            })?;
+            let key_type = column[..separator_index].to_string();
+            let value_type = DataTypeNode::new(column[separator_index + 1..].trim_start())?;
 
             Ok((key_type, Box::new(value_type)))
         })
@@ -783,16 +814,55 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
     Ok(DataTypeNode::JsonWithHint(inner_types))
 }
 
-fn remove_json_header(input: &str) -> Result<&str, TypesError> {
-    if input.starts_with("JSON") && input.ends_with(')') {
-        let new = input[5..].trim();
+/// Yields the indices of every `separator` byte in `input` that is neither inside
+/// a quoted span nor inside parentheses. A JSON path name is back-quoted by the
+/// server when it contains a character that requires quoting, a hint type can
+/// have its own arguments, and a `SKIP REGEXP` pattern is a string literal, so
+/// both the separator between the hints and the one between a path and its type
+/// have to skip such spans:
+/// ```text
+///  let input = "`a,b` Int64, c Map(String, Int32), SKIP REGEXP 'd,e'"; // three entries
+/// ```
+/// A quote escaped with a backslash does not end the span.
+fn top_level_positions(input: &str, separator: u8) -> impl Iterator<Item = usize> + '_ {
+    let mut open_quote = None;
+    let mut open_parens = 0;
+    let mut char_escaped = false;
 
-        Ok(new.trim_end_matches(')'))
-    } else {
-        Err(TypesError::TypeParsingError(format!(
-            "Invalid JSON format, expected JSON(Type), got {input}"
-        )))
-    }
+    input.bytes().enumerate().filter_map(move |(i, byte)| {
+        if char_escaped {
+            char_escaped = false;
+        } else if byte == b'\\' {
+            char_escaped = true;
+        } else if let Some(quote) = open_quote {
+            if byte == quote {
+                open_quote = None;
+            }
+        } else if byte == b'`' || byte == b'\'' {
+            open_quote = Some(byte);
+        } else if byte == b'(' {
+            open_parens += 1;
+        } else if byte == b')' {
+            open_parens -= 1;
+        } else if byte == separator && open_parens == 0 {
+            return Some(i);
+        }
+        None
+    })
+}
+
+/// Strips `JSON(` and exactly one closing `)`, so that a hint type ending with
+/// its own parentheses, such as `JSON(a Nullable(String))`, is kept intact.
+fn remove_json_header(input: &str) -> Result<&str, TypesError> {
+    input
+        .strip_prefix("JSON(")
+        .and_then(|hints| hints.strip_suffix(')'))
+        .map(str::trim)
+        .ok_or_else(|| {
+            TypesError::TypeParsingError(format!(
+                "Invalid JSON format, expected JSON(Type), got {input}"
+            ))
+        })
 }
 
 fn parse_tuple(input: &str) -> Result<DataTypeNode, TypesError> {
@@ -907,6 +977,59 @@ fn parse_enum_index(input_bytes: &[u8], input: &str) -> Result<i16, TypesError> 
         })
 }
 
+fn escape_enum_name(name: &str) -> String {
+    let mut escaped = String::with_capacity(name.len());
+    for character in name.chars() {
+        match character {
+            '\0' => escaped.push_str("\\0"),
+            '\x08' => escaped.push_str("\\b"),
+            '\x0c' => escaped.push_str("\\f"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\\' => escaped.push_str("\\\\"),
+            '\'' => escaped.push_str("\\'"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn unescape_enum_name(input: &[u8], source: &str) -> Result<String, TypesError> {
+    let mut name = Vec::with_capacity(input.len());
+    let mut char_escaped = false;
+
+    for &byte in input {
+        if char_escaped {
+            match byte {
+                b'0' => name.push(b'\0'),
+                b'b' => name.push(0x08),
+                b'f' => name.push(0x0c),
+                b'n' => name.push(b'\n'),
+                b'r' => name.push(b'\r'),
+                b't' => name.push(b'\t'),
+                b'\\' => name.push(b'\\'),
+                b'\'' => name.push(b'\''),
+                _ => {
+                    name.push(b'\\');
+                    name.push(byte);
+                }
+            }
+            char_escaped = false;
+        } else if byte == b'\\' {
+            char_escaped = true;
+        } else {
+            name.push(byte);
+        }
+    }
+
+    String::from_utf8(name).map_err(|_| {
+        TypesError::TypeParsingError(format!(
+            "Invalid UTF-8 sequence in input for the enum name: {source}"
+        ))
+    })
+}
+
 fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError> {
     let mut names: Vec<String> = Vec::new();
     let mut indices: Vec<i16> = Vec::new();
@@ -925,12 +1048,7 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
             } else if input_bytes[i] == b'\'' {
                 // non-escaped closing tick - push the name
                 let name_bytes = &input_bytes[start_index..i];
-                let name = String::from_utf8(name_bytes.to_vec()).map_err(|_| {
-                    TypesError::TypeParsingError(format!(
-                        "Invalid UTF-8 sequence in input for the enum name: {}",
-                        &input[start_index..i]
-                    ))
-                })?;
+                let name = unescape_enum_name(name_bytes, &input[start_index..i])?;
                 names.push(name);
 
                 // Skip ` = ` and the first digit, as it will always have at least one
@@ -1529,6 +1647,158 @@ mod tests {
     }
 
     #[test]
+    fn test_data_type_new_json_with_quoted_paths() {
+        // ClickHouse back-quotes a JSON path when its name contains a character
+        // that requires quoting, such as a space or a comma
+        assert_eq!(
+            DataTypeNode::new("JSON(`a b` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![("`a b`".to_string(), Box::new(DataTypeNode::Int64))])
+        );
+        assert_eq!(
+            DataTypeNode::new("JSON(`a,b` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![("`a,b`".to_string(), Box::new(DataTypeNode::Int64))])
+        );
+        // an escaped back-quote does not end the quoted path
+        assert_eq!(
+            DataTypeNode::new("JSON(`a\\`,b` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![(
+                "`a\\`,b`".to_string(),
+                Box::new(DataTypeNode::Int64)
+            )])
+        );
+        assert_eq!(
+            DataTypeNode::new("JSON(`a,b` Int64, `c d` String, e UInt8)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                ("`a,b`".to_string(), Box::new(DataTypeNode::Int64)),
+                ("`c d`".to_string(), Box::new(DataTypeNode::String)),
+                ("e".to_string(), Box::new(DataTypeNode::UInt8)),
+            ])
+        );
+        // settings are still skipped, and a quoted path is not mistaken for one
+        assert_eq!(
+            DataTypeNode::new("JSON(max_dynamic_types=8, SKIP a, `b=c` Int64)").unwrap(),
+            DataTypeNode::JsonWithHint(vec![("`b=c`".to_string(), Box::new(DataTypeNode::Int64))])
+        );
+        // a hint without a type is an error instead of a panic
+        assert!(DataTypeNode::new("JSON(`a,b`)").is_err());
+        // the parsed type is sent back to the server as is, so quoting must survive
+        for input in [
+            "JSON(`a b` Int64)",
+            "JSON(`a,b` Int64)",
+            "JSON(`a,b` Int64, `c d` String, e UInt8)",
+        ] {
+            assert_eq!(DataTypeNode::new(input).unwrap().to_string(), input);
+        }
+    }
+
+    #[test]
+    fn test_data_type_new_json_with_skip_prefixed_paths() {
+        for path in [
+            "SKIPper",
+            "SKIP_REGEXP",
+            "SKIP2",
+            "`SKIPped.nested`",
+            "`SKIP name`",
+        ] {
+            let input = format!("JSON({path} String)");
+            let expected = DataTypeNode::JsonWithHint(vec![(
+                path.to_string(),
+                Box::new(DataTypeNode::String),
+            )]);
+            let parsed = DataTypeNode::new(&input).unwrap();
+            assert_eq!(parsed, expected, "Input: {input}");
+            assert_eq!(parsed.to_string(), input);
+        }
+    }
+
+    #[test]
+    fn test_data_type_new_json_with_skip_instructions_and_hints() {
+        assert_eq!(
+            DataTypeNode::new(
+                "JSON(max_dynamic_paths=10, SKIP ignored, SKIP REGEXP '^drop.*', SKIPper String, SKIP_REGEXP Int64, regular UInt8)"
+            )
+            .unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                ("SKIPper".to_string(), Box::new(DataTypeNode::String)),
+                ("SKIP_REGEXP".to_string(), Box::new(DataTypeNode::Int64)),
+                ("regular".to_string(), Box::new(DataTypeNode::UInt8)),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_data_type_new_json_with_nested_hint_types() {
+        // a hint type with its own parentheses keeps its closing ones
+        assert_eq!(
+            DataTypeNode::new("JSON(a Nullable(String))").unwrap(),
+            DataTypeNode::JsonWithHint(vec![(
+                "a".to_string(),
+                Box::new(DataTypeNode::Nullable(Box::new(DataTypeNode::String)))
+            )])
+        );
+        // commas inside a hint type do not separate the hints
+        assert_eq!(
+            DataTypeNode::new("JSON(a Map(String, Int32), b Array(Tuple(UInt8, String)))").unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                (
+                    "a".to_string(),
+                    Box::new(DataTypeNode::Map([
+                        Box::new(DataTypeNode::String),
+                        Box::new(DataTypeNode::Int32)
+                    ]))
+                ),
+                (
+                    "b".to_string(),
+                    Box::new(DataTypeNode::Array(Box::new(DataTypeNode::Tuple(vec![
+                        DataTypeNode::UInt8,
+                        DataTypeNode::String
+                    ]))))
+                ),
+            ])
+        );
+        // an `=` inside a hint type does not make it a setting
+        assert_eq!(
+            DataTypeNode::new("JSON(a Enum8('x' = 1, 'y' = 2))").unwrap(),
+            DataTypeNode::JsonWithHint(vec![(
+                "a".to_string(),
+                Box::new(DataTypeNode::Enum(
+                    EnumType::Enum8,
+                    HashMap::from([(1, "x".to_string()), (2, "y".to_string())])
+                ))
+            )])
+        );
+        // settings and skipped paths are still ignored
+        assert_eq!(
+            DataTypeNode::new(
+                "JSON(max_dynamic_paths=10, a.b Nullable(Int64), SKIP a.c, SKIP REGEXP 'x,(y', `d,(e` LowCardinality(Nullable(String)))"
+            )
+            .unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                (
+                    "a.b".to_string(),
+                    Box::new(DataTypeNode::Nullable(Box::new(DataTypeNode::Int64)))
+                ),
+                (
+                    "`d,(e`".to_string(),
+                    Box::new(DataTypeNode::LowCardinality(Box::new(
+                        DataTypeNode::Nullable(Box::new(DataTypeNode::String))
+                    )))
+                ),
+            ])
+        );
+        // unbalanced parentheses are an error
+        assert!(DataTypeNode::new("JSON(a Nullable(String)").is_err());
+        assert!(DataTypeNode::new("JSON(a Nullable(String)))").is_err());
+        // the parsed type is sent back to the server as is
+        for input in [
+            "JSON(a Nullable(String))",
+            "JSON(a Map(String, Int32), b Array(Tuple(UInt8, String)))",
+        ] {
+            assert_eq!(DataTypeNode::new(input).unwrap().to_string(), input);
+        }
+    }
+
+    #[test]
     fn test_data_type_new_variant() {
         assert_eq!(
             DataTypeNode::new("Variant(UInt8, String)").unwrap(),
@@ -1625,9 +1895,15 @@ mod tests {
                 HashMap::from([(1, "A".to_string()), (2, "B".to_string())])
             )
         );
+        let parsed = DataTypeNode::new(ENUM_WITH_ESCAPING_STR).unwrap();
+        assert_eq!(parsed, enum_with_escaping());
+        assert_eq!(parsed.to_string(), ENUM_WITH_ESCAPING_STR);
         assert_eq!(
-            DataTypeNode::new(ENUM_WITH_ESCAPING_STR).unwrap(),
-            enum_with_escaping()
+            DataTypeNode::new(r#"Enum8('unknown\%value' = 1)"#).unwrap(),
+            DataTypeNode::Enum(
+                EnumType::Enum8,
+                HashMap::from([(1, "unknown\\%value".to_string())])
+            )
         );
         assert_eq!(
             DataTypeNode::new("Enum8('foo' = 0, '' = 42)").unwrap(),
@@ -1991,18 +2267,21 @@ mod tests {
         assert!(DataTypeNode::new("Time64(x)").is_err());
     }
 
-    const ENUM_WITH_ESCAPING_STR: &str =
-        "Enum8('f\\'' = 1, 'x =' = 2, 'b\\'\\'' = 3, '\\'c=4=' = 42, '4' = 100)";
+    const ENUM_WITH_ESCAPING_STR: &str = "Enum8('quote\\'' = 1, 'slash\\\\value' = 2, 'tab\\tvalue' = 3, 'line\\nvalue' = 4, 'cr\\rvalue' = 5, 'back\\bvalue' = 6, 'form\\fvalue' = 7, 'null\\0value' = 8, 'unknown\\\\%value' = 9)";
 
     fn enum_with_escaping() -> DataTypeNode {
         DataTypeNode::Enum(
             EnumType::Enum8,
             HashMap::from([
-                (1, "f\\'".to_string()),
-                (2, "x =".to_string()),
-                (3, "b\\'\\'".to_string()),
-                (42, "\\'c=4=".to_string()),
-                (100, "4".to_string()),
+                (1, "quote'".to_string()),
+                (2, "slash\\value".to_string()),
+                (3, "tab\tvalue".to_string()),
+                (4, "line\nvalue".to_string()),
+                (5, "cr\rvalue".to_string()),
+                (6, "back\x08value".to_string()),
+                (7, "form\x0cvalue".to_string()),
+                (8, "null\0value".to_string()),
+                (9, "unknown\\%value".to_string()),
             ]),
         )
     }

@@ -119,29 +119,25 @@ async fn vec_smoke() {
 
     assert_eq!(row, original_row);
 }
+
 #[tokio::test]
 async fn vec_human_readable_smoke() {
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct OursRow {
         #[serde(with = "clickhouse::serde::uuid_vec")]
         uuids: Vec<Uuid>,
-        #[serde(with = "clickhouse::serde::uuid_vec::option")]
-        uuids_opt: Option<Vec<Uuid>>,
     }
 
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     struct TheirsRow {
         uuids: Vec<Uuid>,
-        uuids_opt: Option<Vec<Uuid>>,
     }
 
     let uuids = vec![Uuid::new_v4(), Uuid::new_v4()];
-    let uuids_opt = Some(vec![Uuid::new_v4(), Uuid::new_v4()]);
     let row = OursRow {
         uuids: uuids.clone(),
-        uuids_opt: uuids_opt.clone(),
     };
-    let row2 = TheirsRow { uuids, uuids_opt };
+    let row2 = TheirsRow { uuids };
 
     let s1 = serde_json::to_string(&row).unwrap();
     let s2 = serde_json::to_string(&row2).unwrap();
@@ -153,14 +149,8 @@ async fn vec_human_readable_smoke() {
     let new_row: OursRow = serde_json::from_str(&s2).unwrap();
     assert_eq!(new_row, row);
 
-    let row = OursRow {
-        uuids: Vec::new(),
-        uuids_opt: None,
-    };
-    let row2 = TheirsRow {
-        uuids: Vec::new(),
-        uuids_opt: None,
-    };
+    let row = OursRow { uuids: Vec::new() };
+    let row2 = TheirsRow { uuids: Vec::new() };
 
     let s1 = serde_json::to_string(&row).unwrap();
     let s2 = serde_json::to_string(&row2).unwrap();

@@ -46,10 +46,13 @@ async fn mixed_types(num_rows: u64) {
                 arrayMap(x -> rightPad(toString(x), x, '-'), number_array) AS text_array,
                 arrayZip(number_array, text_array) AS number_text_tuple_array,
                 mapFromArrays(number_array, text_array) AS number_to_text_map,
-                toLowCardinality(text) as low_cardinality_text,
-                toLowCardinality(nullable_text) as low_cardinality_nullable
-            FROM system.numbers
-            LIMIT {limit:UInt64}",
+                toLowCardinality(text) AS low_cardinality_text,
+                toLowCardinality(nullable_text) AS low_cardinality_nullable,
+                sumSimpleState(number) AS simple_aggregate_number,
+                anySimpleState(text) AS simple_aggregate_text
+            FROM numbers({limit:UInt64})
+            GROUP BY number
+            ORDER BY number",
         )
         .param("limit", num_rows)
         .fetch_native()
@@ -65,7 +68,7 @@ async fn mixed_types(num_rows: u64) {
 
     assert_eq!(block.num_rows() as u64, num_rows);
 
-    assert_eq!(block.columns().len(), 12);
+    assert_eq!(block.columns().len(), 14);
 
     assert_eq!(block[0].name(), "number");
 
@@ -96,6 +99,8 @@ async fn mixed_types(num_rows: u64) {
 
         if row > 0 {
             assert_eq!(text, format!("{row:.>width$}", width = row as usize));
+        } else {
+            assert_eq!(text, "");
         }
     }
 
@@ -297,6 +302,32 @@ async fn mixed_types(num_rows: u64) {
     }
 
     assert!(lc_nullable_text_iter.next().is_none());
+
+    let mut simple_agg_number_iter = block["simple_aggregate_number"].iter::<u64>().unwrap();
+
+    for (number, row) in simple_agg_number_iter.by_ref().zip(0u64..num_rows) {
+        let number = number.unwrap();
+
+        assert_eq!(number, row);
+    }
+
+    assert!(simple_agg_number_iter.next().is_none());
+
+    let mut simple_agg_text_iter = block["simple_aggregate_text"].iter::<String>().unwrap();
+
+    for (text, row) in simple_agg_text_iter.by_ref().zip(0u64..num_rows) {
+        let text = text.unwrap();
+
+        assert_eq!(text.len() as u64, row);
+
+        if row > 0 {
+            assert_eq!(text, format!("{row:.>width$}", width = row as usize));
+        } else {
+            assert_eq!(text, "");
+        }
+    }
+
+    assert!(simple_agg_text_iter.next().is_none());
 }
 
 #[tokio::test]

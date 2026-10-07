@@ -8,6 +8,7 @@ use std::slice;
 use crate::native::Decode;
 use crate::native::decode::ValueReader;
 
+/// Iterator over data in an `Array(_)` column or subtype.
 pub struct ArrayReader<'a, T> {
     elem_type: &'a DataTypeNode,
     kind: IterKind<'a>,
@@ -16,12 +17,19 @@ pub struct ArrayReader<'a, T> {
     _marker: PhantomData<&'a T>,
 }
 
+/// View into the data for an `Array(_)` column or subtype.
+///
+/// Decode array elements as a Rust type using [`ArrayData::into_reader()`].
 pub struct ArrayData<'a> {
     pub(super) elem_type: &'a DataTypeNode,
     pub(super) layout: &'a Layout,
     pub(super) indices: Range<usize>,
 }
 
+/// Iterator over heterogeneous elements of an individual `Tuple(...)` cell.
+///
+/// As an example, a column `Tuple(UInt32, String, Map<String, String>)` will
+/// yield a `UInt32` value, then a `String` value, then the `Map<...>` value.
 pub struct TupleIter<'a> {
     pub(super) types: slice::Iter<'a, DataTypeNode>,
     pub(super) layouts: slice::Iter<'a, Layout>,
@@ -72,11 +80,19 @@ impl<'a> ArrayData<'a> {
         }
     }
 
+    /// Validate and begin decoding the array data.
+    ///
+    /// # Errors
+    /// Returns [`Error::SchemaMismatch`] if the element type is not compatible with `T`
+    /// according to [`Decode::compatible()`].
+    ///
+    /// This is an extra sanity check as the outer `Decode` impl should already have validated for
+    /// compatibility.
     pub fn into_reader<T>(self) -> Result<ArrayReader<'a, T>, Error>
     where
         T: Decode<'a>,
     {
-        if !T::compatible(self.elem_type.remove_low_cardinality()) {
+        if !T::compatible(self.elem_type.remove_compatible_wrappers()) {
             return Err(Error::SchemaMismatch(format!(
                 "incompatible data type {}",
                 self.elem_type
@@ -342,6 +358,11 @@ where
 }
 
 impl<'a> TupleIter<'a> {
+    /// Decode the next element in the tuple.
+    ///
+    /// For example, a tuple type `Tuple(UInt32, String, Map<String, String>)`
+    /// should first decode a `u32`, then a (Rust) `String`, then `HashMap<String, String>`
+    /// or `BTreeMap<String, String>`.
     pub fn decode_next<T: Decode<'a>>(&mut self) -> Result<T, Error> {
         let (elem_type, layout) = self.types.next().zip(self.layouts.next()).ok_or_else(|| {
             Error::SchemaMismatch("attempting to decode tuple with more types than received".into())

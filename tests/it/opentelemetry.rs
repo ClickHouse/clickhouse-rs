@@ -129,6 +129,9 @@ async fn insert_with_opentelemetry() {
     assert_eq!(query_id, span_query_id);
 }
 
+// FIXME: this test is far too flaky to be useful
+// https://github.com/ClickHouse/clickhouse-rs/issues/463
+#[ignore]
 #[tokio::test]
 async fn error_sets_span_status() {
     let tracer = get_tracer();

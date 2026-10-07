@@ -81,12 +81,14 @@ jobs:
       - run: cargo miri setup
       - run: cargo miri test --all-features -- _miri
 
-  # uses a single local Docker container with a few ClickHouse versions
+  # uses a single local Docker container with current and minimum supported ClickHouse versions
   test-local:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
+        # tests that need a newer server than the oldest entry here skip
+        # themselves via `require_server_version!` (e.g. `insert_native` needs 26.6)
         clickhouse: [ '25.8', '26.3', '26.5', '26.6', '26.7', latest, head ]
         include:
           - clickhouse: latest

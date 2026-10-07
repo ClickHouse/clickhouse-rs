@@ -122,6 +122,12 @@ impl From<BlockReadError> for Error {
 }
 
 impl Error {
+    /// Convenient wrapper function for [`Error::Decompression`] which also serves as a place
+    /// to set a breakpoint.
+    pub(crate) fn decompression(e: impl Into<BoxedError>) -> Self {
+        Error::Decompression(e.into())
+    }
+
     /// https://opentelemetry.io/docs/specs/semconv/registry/attributes/error/#error-type
     #[cfg(feature = "opentelemetry")]
     pub(crate) fn error_type(&self) -> &str {

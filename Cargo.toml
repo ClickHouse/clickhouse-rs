@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse"
-version = "0.15.1"
+version = "0.15.3"
 description = "Official Rust client for ClickHouse DB"
 keywords = ["clickhouse", "database", "driver", "tokio", "hyper"]
 readme = "README.md"
@@ -100,7 +100,7 @@ test-util = ["hyper/server"]
 inserter = ["dep:quanta"]
 uuid = ["dep:uuid"]
 time = ["dep:time"]
-lz4 = ["dep:lz4_flex", "dep:cityhash-rs"]
+lz4 = ["dep:lz4_flex", "dep:cityhash-rs", "dep:twox-hash"]
 zstd = ["dep:zstd", "dep:cityhash-rs"]
 chrono = ["dep:chrono"]
 futures03 = []
@@ -131,7 +131,7 @@ rustls-tls-native-roots = [
 
 [dependencies]
 clickhouse-macros = { version = "0.3.0", path = "macros" }
-clickhouse-types = { version = "0.1.2", path = "types" }
+clickhouse-types = { version = "0.1.3", path = "types" }
 
 serde = { version = "1.0.106", features = ["derive"] }
 serde_json = "1"
@@ -152,9 +152,8 @@ hyper-rustls = { version = "0.27.3", default-features = false, features = [
 url = "2.1.1"
 futures-util = { version = "0.3.5", default-features = false, features = ["sink", "io"] }
 futures-channel = { version = "0.3.30", features = ["sink"] }
-lz4_flex = { version = "0.11.6", default-features = false, features = [
-    "std",
-], optional = true }
+twox-hash = { version = "2.1.4", optional = true }
+lz4_flex = { version = "0.14.0", optional = true, default-features = false, features = ["std"] }
 cityhash-rs = { version = "=1.0.1", optional = true } # exact version for safety, this package has been stable for years
 zstd = { version = "0.13", default-features = false, optional = true }
 uuid = { version = "1", optional = true }
@@ -162,7 +161,7 @@ time = { version = "0.3", optional = true }
 chrono = { version = "0.4", optional = true, features = ["serde"] }
 bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
-polonius-the-crab = "0.5.0"
+rand = "0.9"
 
 hashbrown = "0.17.1"
 

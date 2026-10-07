@@ -275,6 +275,22 @@ impl InsertFormatted {
         self
     }
 
+    /// NOTE: not meant for general use; prefer `.with_product_info()`.
+    /// Used in `clickhouse-ext-arrow` to track Arrow adoption.
+    /// A separate method is necessary to ensure this doesn't end up ahead of the end-user's
+    /// product info in the user agent string.
+    #[doc(hidden)]
+    pub fn with_stack_product_info(
+        mut self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        self.state
+            .expect_client_mut()
+            .add_stack_product_info(product_name.into(), product_version.into());
+        self
+    }
+
     pub(crate) fn expect_client(&self) -> &Client {
         self.state.expect_client()
     }
@@ -497,7 +513,12 @@ impl InsertFormatted {
         drop(pairs);
 
         let mut builder = Request::post(url.as_str());
-        builder = with_request_headers(builder, &client.headers, &client.products_info);
+        builder = with_request_headers(
+            builder,
+            &client.headers,
+            &client.app_product_info,
+            &client.stack_product_info,
+        );
         builder = with_authentication(builder, &client.authentication);
 
         let (sender, body) = RequestBody::chunked();
@@ -511,7 +532,7 @@ impl InsertFormatted {
         let future = client.http.request(request);
 
         // Ensure the span created internally is captured as a child of the current span.
-        let mut response = Response::new(future, Compression::None);
+        let mut response = Response::new(future);
 
         // TODO: introduce `Executor` to allow bookkeeping of spawned tasks.
         let handle = tokio::spawn(async move { response.finish().await });
