@@ -161,6 +161,7 @@ time = { version = "0.3", optional = true }
 chrono = { version = "0.4", optional = true, features = ["serde"] }
 bstr = { version = "1.11.0", default-features = false }
 quanta = { version = "0.12", optional = true }
+rand = "0.9"
 
 hashbrown = "0.17.1"
 

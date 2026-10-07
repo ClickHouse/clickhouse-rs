@@ -141,6 +141,34 @@ async fn server_side_param() {
         .await
         .expect("failed to fetch bytes");
     assert_eq!(result, bytes);
+
+    let result = client
+        .query("SELECT toUInt64(getSetting('max_block_size')) WHERE {value: UInt8} = 1")
+        .with_setting("max_block_size", "123")
+        .param("value", 1)
+        .fetch_one::<u64>()
+        .await
+        .expect("failed to apply an ordinary setting to a parameterized query");
+    assert_eq!(result, 123);
+}
+
+#[tokio::test]
+async fn post_query_params_large_array() {
+    let client = prepare_database!();
+    // Keep the serialized form field within ClickHouse's default 128 KiB
+    // `http_max_field_value_size`.
+    let values = (0..120)
+        .map(|index| format!("{index:03}-{}", "x".repeat(1024)))
+        .collect::<Vec<_>>();
+
+    let length = client
+        .query("SELECT length({value: Array(String)})")
+        .param("value", values)
+        .fetch_one::<u64>()
+        .await
+        .expect("failed to execute query with a large parameter");
+
+    assert_eq!(length, 120);
 }
 
 // See #19.
