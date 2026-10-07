@@ -221,7 +221,9 @@ async fn insert_with_json_hint() {
                     i UInt8,
                     jv JSON(
                         foo String,
-                        bar Int
+                        bar Int,
+                        SKIPper String,
+                        SKIP_REGEXP Int64
                     )
                 )
                 ENGINE = MergeTree
@@ -237,7 +239,9 @@ async fn insert_with_json_hint() {
         i: 1,
         jv: r#"{
             "foo": "hello",
-            "bar": 123
+            "bar": 123,
+            "SKIPper": "kept",
+            "SKIP_REGEXP": 456
         }"#
         .to_string(),
     };

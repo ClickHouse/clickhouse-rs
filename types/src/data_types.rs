@@ -792,7 +792,7 @@ fn parse_json(input: &str) -> Result<DataTypeNode, TypesError> {
         .into_iter()
         .map(|column| column.trim())
         .filter(|column| {
-            top_level_positions(column, b'=').next().is_none() && !column.starts_with("SKIP")
+            top_level_positions(column, b'=').next().is_none() && !column.starts_with("SKIP ")
         })
         .map(|column| {
             let separator_index = top_level_positions(column, b' ').next().ok_or_else(|| {
@@ -1689,6 +1689,41 @@ mod tests {
         ] {
             assert_eq!(DataTypeNode::new(input).unwrap().to_string(), input);
         }
+    }
+
+    #[test]
+    fn test_data_type_new_json_with_skip_prefixed_paths() {
+        for path in [
+            "SKIPper",
+            "SKIP_REGEXP",
+            "SKIP2",
+            "`SKIPped.nested`",
+            "`SKIP name`",
+        ] {
+            let input = format!("JSON({path} String)");
+            let expected = DataTypeNode::JsonWithHint(vec![(
+                path.to_string(),
+                Box::new(DataTypeNode::String),
+            )]);
+            let parsed = DataTypeNode::new(&input).unwrap();
+            assert_eq!(parsed, expected, "Input: {input}");
+            assert_eq!(parsed.to_string(), input);
+        }
+    }
+
+    #[test]
+    fn test_data_type_new_json_with_skip_instructions_and_hints() {
+        assert_eq!(
+            DataTypeNode::new(
+                "JSON(max_dynamic_paths=10, SKIP ignored, SKIP REGEXP '^drop.*', SKIPper String, SKIP_REGEXP Int64, regular UInt8)"
+            )
+            .unwrap(),
+            DataTypeNode::JsonWithHint(vec![
+                ("SKIPper".to_string(), Box::new(DataTypeNode::String)),
+                ("SKIP_REGEXP".to_string(), Box::new(DataTypeNode::Int64)),
+                ("regular".to_string(), Box::new(DataTypeNode::UInt8)),
+            ])
+        );
     }
 
     #[test]
