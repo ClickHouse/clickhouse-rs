@@ -8,13 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+## [0.15.3] - 2026-10-07
+
+### Changed
+* Changed query parameters to be sent through a `multipart/form-data` body to avoid issues with URL length limits. ([#455])
+    * If the `Content-Type`, `Content-Length` or `Transfer-Encoding` headers are already set, they will be overridden.
+      This is not considered a breaking behavior change because user code should never be setting these headers.
+
 ### Fixed
 
-* Switched Lz4 compression to use HTTP standard `Accept-Encoding` negotiation, fixing a regression in ClickHouse 26.9. ([#482], [issue #468])
+* Fixed JSON type hints parsing to properly handle parenthesized types. ([#478])
+* Switched internal schema fetch query issued by `Client::insert()` to not use the user-set query ID. ([#481])
+    * If a query ID is already set, a derived query ID is used instead (`{query_id}-describe`). 
+* Switched Lz4 compression to use HTTP standard `Accept-Encoding` negotiation, fixing a regression in ClickHouse 26.9. ([#482])
+* Fixed handling of JSON type hints starting with `SKIP`. ([#485])
 
+[#455]: https://github.com/ClickHouse/clickhouse-rs/pull/455
+[#478]: https://github.com/ClickHouse/clickhouse-rs/pull/478
+[#481]: https://github.com/ClickHouse/clickhouse-rs/pull/481
 [#482]: https://github.com/ClickHouse/clickhouse-rs/pull/482
-
-[issue #468]: https://github.com/ClickHouse/clickhouse-rs/issues/468
+[#485]: https://github.com/ClickHouse/clickhouse-rs/pull/485
 
 ## [0.15.2] - 2026-08-24
 
