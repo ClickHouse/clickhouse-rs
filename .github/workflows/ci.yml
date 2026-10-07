@@ -87,7 +87,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        clickhouse: [ latest, head, 26.3 ]
+        # `tests/insert_native.rs` requires 26.6 but it's not an LTS release
+        clickhouse: [ latest, head, 26.7 ]
         include:
           - clickhouse: latest
             coverage: true
