@@ -87,8 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 25.8 is the minimum currently supported ClickHouse LTS release.
-        clickhouse: [ latest, head, 25.8 ]
+        clickhouse: [ latest, head, 26.3 ]
         include:
           - clickhouse: latest
             coverage: true
