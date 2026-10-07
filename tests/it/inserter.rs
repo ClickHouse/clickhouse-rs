@@ -249,6 +249,55 @@ async fn keeps_client_settings() {
     assert_eq!(rows, vec!(row))
 }
 
+/// Similar to [`crate::insert::describe_query_id_is_linked_to_insert`].
+#[tokio::test]
+async fn describe_query_id_is_linked_to_insert() {
+    let table_name = "inserter_describe_query_id_is_linked_to_insert";
+    let query_id = uuid::Uuid::new_v4().to_string();
+
+    let client = prepare_database!();
+    create_simple_table(&client, table_name).await;
+
+    let row = SimpleRow::new(42, "foo");
+
+    let mut inserter = client
+        .inserter::<SimpleRow>(table_name)
+        .with_setting("query_id", &query_id);
+
+    inserter.write(&row).await.unwrap();
+    inserter.end().await.unwrap();
+
+    flush_query_log(&client).await;
+
+    let describe_query_id = format!("{query_id}-describe");
+    let queries = client
+        .query(
+            "
+            SELECT query_id, query_kind
+            FROM system.query_log
+            WHERE query_id IN (?, ?)
+            AND type = 'QueryFinish'
+            ORDER BY event_time_microseconds
+            ",
+        )
+        .bind(&query_id)
+        .bind(&describe_query_id)
+        .fetch_all::<(String, String)>()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        queries,
+        vec![
+            (describe_query_id, "Describe".into()),
+            (query_id, "Insert".into()),
+        ]
+    );
+
+    let rows = fetch_rows::<SimpleRow>(&client, table_name).await;
+    assert_eq!(rows, vec!(row))
+}
+
 /// Similar to [`crate::insert::overrides_client_settings`] with minor differences.
 #[tokio::test]
 async fn overrides_client_settings() {

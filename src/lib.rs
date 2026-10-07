@@ -66,7 +66,10 @@ pub struct Client {
     roles: HashSet<String>,
     settings: HashMap<String, String>,
     headers: HashMap<String, String>,
-    products_info: Vec<ProductInfo>,
+    // Separate product info added by the user from product info added by the stack
+    // (e.g. `clickhouse-ext-arrow`) so it appears in the right order in logs.
+    app_product_info: Vec<ProductInfo>,
+    stack_product_info: Vec<ProductInfo>,
     validation: bool,
     insert_metadata_cache: Arc<InsertMetadataCache>,
 
@@ -134,7 +137,8 @@ impl std::fmt::Debug for Client {
             .field("roles", &self.roles)
             .field("settings", &self.settings)
             .field("headers", &self.headers.keys()) // redact values
-            .field("products_info", &self.products_info)
+            .field("app_product_info", &self.app_product_info)
+            .field("stack_product_info", &self.stack_product_info)
             .field("validation", &self.validation)
             .finish_non_exhaustive()
     }
@@ -159,7 +163,8 @@ impl Client {
             roles: HashSet::new(),
             settings: HashMap::new(),
             headers: HashMap::new(),
-            products_info: Vec::default(),
+            app_product_info: Vec::default(),
+            stack_product_info: Vec::default(),
             validation: true,
             insert_metadata_cache: Arc::new(InsertMetadataCache::default()),
             #[cfg(feature = "test-util")]
@@ -449,8 +454,29 @@ impl Client {
         self
     }
 
+    /// NOTE: not meant for general use; prefer `.with_product_info()`.
+    /// Used in `clickhouse-ext-arrow` to track Arrow adoption.
+    /// A separate method is necessary to ensure this doesn't end up ahead of the end-user's
+    /// product info in the user agent string.
+    #[doc(hidden)]
+    pub fn with_stack_product_info(
+        mut self,
+        product_name: impl Into<String>,
+        product_version: impl Into<String>,
+    ) -> Self {
+        self.add_stack_product_info(product_name.into(), product_version.into());
+        self
+    }
+
     pub(crate) fn add_product_info(&mut self, product_name: String, product_version: String) {
-        self.products_info.push(ProductInfo {
+        self.app_product_info.push(ProductInfo {
+            name: product_name,
+            version: product_version,
+        });
+    }
+
+    pub(crate) fn add_stack_product_info(&mut self, product_name: String, product_version: String) {
+        self.stack_product_info.push(ProductInfo {
             name: product_name,
             version: product_version,
         });
@@ -698,6 +724,24 @@ impl Client {
         self
     }
 
+    /// Builds the internal `DESCRIBE TABLE` query used to fetch the schema before an insert.
+    fn insert_metadata_query(&self, raw_table_name: &str) -> query::Query {
+        let mut query = self
+            .query(&_priv::row_insert_metadata_query(raw_table_name))
+            .with_setting("describe_include_subcolumns", "0");
+
+        // Link the schema lookup to the INSERT without reusing its query id.
+        // An empty id still asks the server to generate an id for each query.
+        if let Some(query_id) = self
+            .get_setting(settings::QUERY_ID)
+            .filter(|id| !id.is_empty())
+        {
+            query = query.with_setting(settings::QUERY_ID, format!("{query_id}-describe"));
+        }
+
+        query
+    }
+
     async fn get_insert_metadata(&self, raw_table_name: &str) -> Result<Arc<InsertMetadata>> {
         #[derive(::serde::Deserialize, clickhouse_macros::Row)]
         #[clickhouse(crate = "self")]
@@ -725,8 +769,7 @@ impl Client {
         let mut write_lock = self.insert_metadata_cache.0.write().await;
 
         let mut columns_cursor = self
-            .query(&_priv::row_insert_metadata_query(raw_table_name))
-            .with_setting("describe_include_subcolumns", "0")
+            .insert_metadata_query(raw_table_name)
             .fetch::<DescribeColumn>()?;
 
         let mut columns = Vec::new();
@@ -1085,12 +1128,13 @@ Client {
     headers: [
         \"X-Trace-Id\",
     ],
-    products_info: [
+    app_product_info: [
         ProductInfo {
             name: \"MyApp\",
             version: \"0.0.1\",
         },
     ],
+    stack_product_info: [],
     validation: false,
     ..
 }";

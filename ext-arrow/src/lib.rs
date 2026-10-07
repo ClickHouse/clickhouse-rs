@@ -61,10 +61,6 @@ pub trait ArrowClientExt {
 
 impl ArrowClientExt for Client {
     fn insert_arrow(&self, table: &str) -> Result<ArrowInsert, Error> {
-        let mut query_prefix = "INSERT INTO (".to_string();
-        clickhouse::_priv::sql_escape_identifier(table, &mut query_prefix)
-            .map_err(|e| Error::Other(e.into()))?;
-
         Ok(ArrowInsert {
             state: InsertState::TableName {
                 client: self.clone(),
@@ -121,7 +117,7 @@ impl ArrowQueryExt for Query {
                 // Prevent ClickHouse from double-compressing
                 .with_setting("output_format_arrow_compression_method", "none")
                 // Add specific product info to let us track Arrow adoption
-                .with_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
+                .with_stack_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
                 .fetch_bytes("ArrowStream")?,
             buffer: Buffer::default(),
             decoder: StreamDecoder::new(),
@@ -291,7 +287,7 @@ impl InsertState {
                 let insert = client
                     .insert_formatted_with(query_string)
                     // Add specific product info to let us track Arrow adoption
-                    .with_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
+                    .with_stack_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
                     .buffered();
 
                 tracing::record_all!(insert._priv_span(), db.collection.name = table);
@@ -306,7 +302,7 @@ impl InsertState {
                 let insert = client
                     .insert_formatted_with(sql)
                     // Add specific product info to let us track Arrow adoption
-                    .with_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
+                    .with_stack_product_info("clickhouse-ext-arrow", _priv::CARGO_PKG_VERSION)
                     .buffered();
 
                 *self = Self::Started(
