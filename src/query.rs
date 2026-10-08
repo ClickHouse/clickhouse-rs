@@ -262,27 +262,18 @@ impl Query {
             pairs.append_pair(settings::DATABASE, database);
         }
 
-        if self.client.compression.is_enabled() {
-            pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
-        }
-
         let mut headers = HeaderMap::new();
 
+        // Note: setting `enable_http_compression` or `http_zlib_compression_level` may fail
+        // under a readonly user: https://github.com/ClickHouse/clickhouse-rs/issues/486
         match self.client.compression {
             #[expect(deprecated)]
             #[cfg(feature = "lz4")]
             Compression::Lz4 | Compression::Lz4Hc(_) => {
-                pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
                 headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("lz4"));
             }
             #[cfg(feature = "zstd")]
-            Compression::Zstd(level) => {
-                pairs
-                    .append_pair(settings::ENABLE_HTTP_COMPRESSION, "1")
-                    // `http_zlib_compression_level` affects all compression codecs:
-                    // https://clickhouse.com/docs/concepts/features/interfaces/http#compression
-                    .append_pair(settings::HTTP_ZLIB_COMPRESSION_LEVEL, &level.to_string());
-
+            Compression::Zstd(_) => {
                 headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("zstd"));
             }
             _ => (),
