@@ -893,8 +893,6 @@ mod transport_tests {
             .unwrap();
 
         let request = record.request().await;
-        let pairs = url::form_urlencoded::parse(request.uri().query().unwrap().as_bytes())
-            .collect::<Vec<_>>();
         assert_eq!(
             request.headers().get(ACCEPT_ENCODING),
             Some(&HeaderValue::from_static("zstd"))
