@@ -104,10 +104,149 @@ impl super::test_util::TestDecoder for Lz4HttpDecoder<()> {
 mod tests {
     use crate::compression::lz4::{Lz4HttpDecoder, compress};
     use crate::compression::test_util::test_decoder;
+    use crate::error::Error;
     use bytes::Bytes;
+    use futures_util::stream::{self, TryStreamExt};
+    use twox_hash::XxHash32;
 
     const UNCOMPRESSED_TAXI_TRIPS: &[u8] =
         include_bytes!("../../../tests/it/fixtures/nyc-taxi_trips_0_head_1000.tsv");
+
+    // Each block contains its wire bytes and whether its uncompressed bit is set.
+    fn http_frame(flags: u8, block_size: u8, blocks: &[(&[u8], bool)]) -> Vec<u8> {
+        let descriptor = [flags, block_size];
+        let mut frame = vec![0x04, 0x22, 0x4d, 0x18, flags, block_size];
+        frame.push((XxHash32::oneshot(0, &descriptor) >> 8) as u8);
+
+        for &(data, uncompressed) in blocks {
+            let mut length = u32::try_from(data.len()).unwrap();
+            if uncompressed {
+                length |= 0x8000_0000;
+            }
+            frame.extend_from_slice(&length.to_le_bytes());
+            frame.extend_from_slice(data);
+            if flags & 0x10 != 0 {
+                frame.extend_from_slice(&XxHash32::oneshot(0, data).to_le_bytes());
+            }
+        }
+
+        frame.extend_from_slice(&0_u32.to_le_bytes());
+        frame
+    }
+
+    async fn assert_http_frame_error(frame: &[u8], expected: &str) {
+        for split in [0, 1, frame.len() / 2, frame.len() - 1, frame.len()] {
+            let chunks = [&frame[..split], &frame[split..]];
+            let stream = stream::iter(
+                chunks
+                    .into_iter()
+                    .map(|data| Ok::<_, Error>(Bytes::copy_from_slice(data))),
+            );
+            let error = Lz4HttpDecoder::new(stream)
+                .try_fold(Vec::new(), |mut bytes, chunk| async move {
+                    bytes.extend_from_slice(&chunk.data);
+                    Ok(bytes)
+                })
+                .await
+                .expect_err("malformed LZ4 frame must be rejected");
+            assert!(matches!(error, Error::Decompression(_)));
+            assert!(
+                error.to_string().contains(expected),
+                "unexpected error at split {split}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn decompress_linked_three_blocks_retains_history() {
+        // Includes both full 64-KiB blocks and blocks on either side of the
+        // history-window size. The final block genuinely references its peers.
+        for (old_size, new_size, offset) in [
+            (3, 5, 8_u16),
+            (32_768, 32_768, 65_535),
+            (65_536, 32_768, 65_535),
+            (32_768, 65_536, 65_535),
+            (65_536, 65_536, 65_535),
+            (65_536, 131_072, 65_535),
+            (131_072, 16_384, 65_535),
+        ] {
+            let old = vec![b'x'; old_size];
+            let new = vec![b'y'; new_size];
+            let [low, high] = offset.to_le_bytes();
+            // A twelve-byte match followed by five terminal literals.
+            let matched = [0x08, low, high, 0x50, b't', b'a', b'i', b'l', b'!'];
+            let frame = http_frame(
+                0x40,
+                0x50,
+                &[(&old, true), (&new, true), (&matched, false)],
+            );
+            let mut expected = old;
+            expected.extend_from_slice(&new);
+            for _ in 0..12 {
+                expected.push(expected[expected.len() - usize::from(offset)]);
+            }
+            expected.extend_from_slice(b"tail!");
+
+            test_decoder::<Lz4HttpDecoder<()>>(Bytes::from(frame), &expected);
+        }
+    }
+
+    #[test]
+    fn decompress_concatenated_linked_frames() {
+        let old = vec![b'x'; 32];
+        let new = vec![b'y'; 32];
+        let matched = [0x08, 1, 0, 0x50, b't', b'a', b'i', b'l', b'!'];
+        let mut frames = http_frame(0x40, 0x40, &[(&old, true)]);
+        frames.extend(http_frame(0x40, 0x40, &[(&new, true), (&matched, false)]));
+        let mut expected = old;
+        expected.extend_from_slice(&new);
+        expected.extend_from_slice(&[b'y'; 12]);
+        expected.extend_from_slice(b"tail!");
+
+        test_decoder::<Lz4HttpDecoder<()>>(Bytes::from(frames), &expected);
+    }
+
+    #[tokio::test]
+    async fn reject_previous_linked_frame_dictionary() {
+        let matched = [0x08, 1, 0, 0x50, b't', b'a', b'i', b'l', b'!'];
+        let mut frames = http_frame(0x40, 0x40, &[(b"previous frame", true)]);
+        frames.extend(http_frame(0x40, 0x40, &[(&matched, false)]));
+
+        assert_http_frame_error(&frames, "offset to copy").await;
+    }
+
+    #[tokio::test]
+    async fn reject_malformed_frame_checksums() {
+        let mut header = http_frame(0x60, 0x40, &[(b"hello", true)]);
+        header[6] ^= 1;
+        assert_http_frame_error(&header, "HeaderChecksum").await;
+
+        let compressed = [0x50, b'h', b'e', b'l', b'l', b'o'];
+        let mut block = http_frame(0x70, 0x40, &[(&compressed, false)]);
+        block[7 + 4 + compressed.len()] ^= 1;
+        assert_http_frame_error(&block, "block checksum mismatch").await;
+
+        let mut content = http_frame(0x64, 0x40, &[(b"hello", true)]);
+        content.extend_from_slice(&(XxHash32::oneshot(0, b"hello") ^ 1).to_le_bytes());
+        assert_http_frame_error(&content, "content checksum mismatch").await;
+    }
+
+    #[test]
+    fn decompress_uncompressed_block_checksum() {
+        let frame = http_frame(0x50, 0x40, &[(b"hello", true), (b"world", true)]);
+
+        test_decoder::<Lz4HttpDecoder<()>>(Bytes::from(frame), b"helloworld");
+    }
+
+    #[tokio::test]
+    async fn reject_uncompressed_block_checksum() {
+        let mut frame = http_frame(0x50, 0x40, &[(b"hello", true)]);
+        frame[7 + 4 + 5] ^= 1;
+        assert_http_frame_error(&frame, "block checksum mismatch").await;
+
+        let truncated = &frame[..7 + 4 + 5 + 3];
+        assert_http_frame_error(truncated, "unexpected EOF").await;
+    }
 
     #[test]
     fn decompress_taxi_trips() {
