@@ -233,6 +233,28 @@ mod tests {
 
     #[test]
     fn decompress_uncompressed_block_checksum() {
+        use std::ops::ControlFlow;
+
+        let payload = [b'x'; 64];
+        let independent = http_frame(0x70, 0x40, &[(&payload, true)]);
+        let payload_end = 7 + 4 + payload.len();
+        let mut decoder = super::frame::Lz4FramePushDecoder::new();
+        decoder.push(Bytes::copy_from_slice(&independent[..payload_end]));
+        assert!(matches!(decoder.drain().unwrap(), ControlFlow::Continue(4)));
+
+        decoder.push(Bytes::copy_from_slice(
+            &independent[payload_end..payload_end + 4],
+        ));
+        let ControlFlow::Break(chunk) = decoder.drain().unwrap() else {
+            panic!("complete raw block checksum must permit its payload");
+        };
+        assert_eq!(chunk.data.as_ref(), payload.as_slice());
+        assert!(matches!(decoder.drain().unwrap(), ControlFlow::Continue(4)));
+
+        decoder.push(Bytes::copy_from_slice(&independent[payload_end + 4..]));
+        assert!(matches!(decoder.drain().unwrap(), ControlFlow::Continue(_)));
+        decoder.finish().unwrap();
+
         let frame = http_frame(0x50, 0x40, &[(b"hello", true), (b"world", true)]);
 
         test_decoder::<Lz4HttpDecoder<()>>(Bytes::from(frame), b"helloworld");
@@ -244,8 +266,10 @@ mod tests {
         frame[7 + 4 + 5] ^= 1;
         assert_http_frame_error(&frame, "block checksum mismatch");
 
-        let truncated = &frame[..7 + 4 + 5 + 3];
-        assert_http_frame_error(truncated, "unexpected EOF");
+        for trailer_len in 0..4 {
+            let truncated = &frame[..7 + 4 + 5 + trailer_len];
+            assert_http_frame_error(truncated, "unconsumed data in Lz4 frame buffer");
+        }
     }
 
     #[test]
