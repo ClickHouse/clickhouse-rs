@@ -76,6 +76,8 @@ impl Lz4FramePushDecoder {
 
                             let consumed = self.input_buffer.remaining() - input.len();
 
+                            self.window.clear();
+
                             self.state = State::NextBlock {
                                 overhead: consumed,
                                 total_content_size: 0,
@@ -256,15 +258,11 @@ impl Lz4FramePushDecoder {
                     };
 
                     if let BlockMode::Linked = frame.block_mode {
-                        let mut advance_amt =
+                        let overflow =
                             (self.window.remaining() + data.len()).saturating_sub(WINDOW_SIZE);
-
-                        self.window
-                            .advance(cmp::min(advance_amt, self.window.remaining()));
-
-                        advance_amt = advance_amt.saturating_sub(self.window.remaining());
-
-                        self.window.extend(data.slice(advance_amt..));
+                        let evicted = cmp::min(overflow, self.window.remaining());
+                        self.window.advance(evicted);
+                        self.window.extend(data.slice(overflow - evicted..));
                     }
 
                     self.state = State::NextBlock {

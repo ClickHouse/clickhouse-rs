@@ -42,6 +42,7 @@ pub(crate) struct ZstdHttpDecoder<S> {
     input: BytesMut,
     output: BytesMut,
     stream_ended: bool,
+    frame_open: bool,
 }
 
 impl<S> ZstdHttpDecoder<S> {
@@ -52,6 +53,7 @@ impl<S> ZstdHttpDecoder<S> {
             input: BytesMut::new(),
             output: BytesMut::zeroed(OUTPUT_BUFFER_SIZE),
             stream_ended: false,
+            frame_open: false,
         }
     }
 }
@@ -80,6 +82,8 @@ where
                     .run_on_buffers(&this.input, &mut this.output)
                     .map_err(|err| Error::Decompression(err.into()))?;
 
+                this.frame_open = status.remaining != 0;
+
                 let net_size = status.bytes_read;
                 let bytes_written = status.bytes_written;
 
@@ -90,7 +94,10 @@ where
                     return Poll::Ready(Some(Ok(Chunk { data, net_size })));
                 }
 
-                // ZSTD consumed input but produced no output yet; need more data.
+                // Consume a buffered following frame before asking for more input.
+                if net_size > 0 {
+                    continue;
+                }
             }
 
             if this.stream_ended {
@@ -107,7 +114,7 @@ where
                     this.stream_ended = true;
 
                     // Flush any remaining buffered output from the decoder.
-                    if !this.input.is_empty() {
+                    if !this.input.is_empty() || this.frame_open {
                         return Poll::Ready(Some(Err(Error::Decompression(
                             "unexpected end of ZSTD stream".into(),
                         ))));
