@@ -175,11 +175,7 @@ mod tests {
             let [low, high] = offset.to_le_bytes();
             // A twelve-byte match followed by five terminal literals.
             let matched = [0x08, low, high, 0x50, b't', b'a', b'i', b'l', b'!'];
-            let frame = http_frame(
-                0x40,
-                0x50,
-                &[(&old, true), (&new, true), (&matched, false)],
-            );
+            let frame = http_frame(0x40, 0x50, &[(&old, true), (&new, true), (&matched, false)]);
             let mut expected = old;
             expected.extend_from_slice(&new);
             for _ in 0..12 {
