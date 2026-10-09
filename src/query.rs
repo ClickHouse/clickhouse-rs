@@ -817,12 +817,6 @@ mod transport_tests {
         assert!(!pairs.iter().any(|(name, _)| name == "compress"));
         #[cfg(feature = "lz4")]
         {
-            assert!(
-                pairs.iter().any(|(name, value)| {
-                    name == settings::ENABLE_HTTP_COMPRESSION && value == "1"
-                }),
-                "missing compression setting in {pairs:?}"
-            );
             assert_eq!(
                 request.headers().get(ACCEPT_ENCODING),
                 Some(&HeaderValue::from_static("lz4"))
@@ -901,16 +895,6 @@ mod transport_tests {
         let request = record.request().await;
         let pairs = url::form_urlencoded::parse(request.uri().query().unwrap().as_bytes())
             .collect::<Vec<_>>();
-        assert!(
-            pairs
-                .iter()
-                .any(|(name, value)| { name == settings::ENABLE_HTTP_COMPRESSION && value == "1" })
-        );
-        assert!(
-            pairs
-                .iter()
-                .any(|(name, value)| name == settings::HTTP_ZLIB_COMPRESSION_LEVEL && value == "7")
-        );
         assert_eq!(
             request.headers().get(ACCEPT_ENCODING),
             Some(&HeaderValue::from_static("zstd"))

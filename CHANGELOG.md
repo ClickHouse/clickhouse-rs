@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Changed query parameters to be sent through a `multipart/form-data` body to avoid issues with URL length limits. ([#455])
     * If the `Content-Type`, `Content-Length` or `Transfer-Encoding` headers are already set, they will be overridden.
       This is not considered a breaking behavior change because user code should never be setting these headers.
+* `enable_http_compression` and `http_zlib_compression_level` are no longer sent because they may trigger an error 
+  in readonly mode. (release PR [#487])
+    * Only affects `Query`.  
+    * See added documentation on `Client::with_compression()` for details.
 
 ### Fixed
 
@@ -28,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#481]: https://github.com/ClickHouse/clickhouse-rs/pull/481
 [#482]: https://github.com/ClickHouse/clickhouse-rs/pull/482
 [#485]: https://github.com/ClickHouse/clickhouse-rs/pull/485
+[#487]: https://github.com/ClickHouse/clickhouse-rs/pull/487
 
 ## [0.15.2] - 2026-08-24
 
