@@ -76,6 +76,8 @@ impl Lz4FramePushDecoder {
 
                             let consumed = self.input_buffer.remaining() - input.len();
 
+                            self.window.clear();
+
                             self.state = State::NextBlock {
                                 overhead: consumed,
                                 total_content_size: 0,
@@ -144,13 +146,33 @@ impl Lz4FramePushDecoder {
                                 )));
                             }
 
-                            if self.input_buffer.remaining() < len {
+                            let expected_len = len + if frame.block_checksums { 4 } else { 0 };
+
+                            if self.input_buffer.remaining() < expected_len {
                                 return Ok(ControlFlow::Continue(
-                                    len - self.input_buffer.remaining(),
+                                    expected_len - self.input_buffer.remaining(),
                                 ));
                             }
 
-                            let content = self.input_buffer.copy_to_bytes(len);
+                            let (uncompressed_data, mut rest) =
+                                self.input_buffer.slice().split_at(len);
+
+                            if frame.block_checksums {
+                                let expected_checksum = rest.try_get_u32_le().map_err(|_| {
+                                    Error::decompression("expected 4-byte checksum after Lz4 block")
+                                })?;
+
+                                let actual_checksum = XxHash32::oneshot(0, uncompressed_data);
+
+                                if expected_checksum != actual_checksum {
+                                    return Err(Error::decompression(format!(
+                                        "Lz4 block checksum mismatch; expected: {expected_checksum:#x}, actual: {actual_checksum:#x}"
+                                    )));
+                                }
+                            }
+
+                            let content =
+                                self.input_buffer.copy_to_bytes(expected_len).slice(..len);
 
                             if let Some(content_hasher) = content_hasher {
                                 content_hasher.write(&content);
@@ -256,15 +278,11 @@ impl Lz4FramePushDecoder {
                     };
 
                     if let BlockMode::Linked = frame.block_mode {
-                        let mut advance_amt =
+                        let overflow =
                             (self.window.remaining() + data.len()).saturating_sub(WINDOW_SIZE);
-
-                        self.window
-                            .advance(cmp::min(advance_amt, self.window.remaining()));
-
-                        advance_amt = advance_amt.saturating_sub(self.window.remaining());
-
-                        self.window.extend(data.slice(advance_amt..));
+                        let evicted = cmp::min(overflow, self.window.remaining());
+                        self.window.advance(evicted);
+                        self.window.extend(data.slice(overflow - evicted..));
                     }
 
                     self.state = State::NextBlock {
