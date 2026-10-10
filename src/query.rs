@@ -2,7 +2,7 @@ use bytes::Bytes;
 #[cfg(any(feature = "lz4", feature = "zstd"))]
 use hyper::header::ACCEPT_ENCODING;
 use hyper::{
-    HeaderMap, Method, Request,
+    Method, Request,
     header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderValue, TRANSFER_ENCODING},
 };
 use rand::distr::{Alphanumeric, SampleString};
@@ -262,32 +262,6 @@ impl Query {
             pairs.append_pair(settings::DATABASE, database);
         }
 
-        if self.client.compression.is_enabled() {
-            pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
-        }
-
-        let mut headers = HeaderMap::new();
-
-        match self.client.compression {
-            #[expect(deprecated)]
-            #[cfg(feature = "lz4")]
-            Compression::Lz4 | Compression::Lz4Hc(_) => {
-                pairs.append_pair(settings::ENABLE_HTTP_COMPRESSION, "1");
-                headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("lz4"));
-            }
-            #[cfg(feature = "zstd")]
-            Compression::Zstd(level) => {
-                pairs
-                    .append_pair(settings::ENABLE_HTTP_COMPRESSION, "1")
-                    // `http_zlib_compression_level` affects all compression codecs:
-                    // https://clickhouse.com/docs/concepts/features/interfaces/http#compression
-                    .append_pair(settings::HTTP_ZLIB_COMPRESSION_LEVEL, &level.to_string());
-
-                headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("zstd"));
-            }
-            _ => (),
-        }
-
         let mut parameters = Vec::new();
         for (name, value) in &self.client.settings {
             if name.starts_with("param_") {
@@ -308,8 +282,19 @@ impl Query {
 
         let mut builder = Request::builder().method(Method::POST).uri(url.as_str());
 
-        if let Some(headers_mut) = builder.headers_mut() {
-            *headers_mut = headers;
+        // Note: setting `enable_http_compression` or `http_zlib_compression_level` may fail
+        // under a readonly user: https://github.com/ClickHouse/clickhouse-rs/issues/486
+        match self.client.compression {
+            #[expect(deprecated)]
+            #[cfg(feature = "lz4")]
+            Compression::Lz4 | Compression::Lz4Hc(_) => {
+                builder = builder.header(ACCEPT_ENCODING, HeaderValue::from_static("lz4"));
+            }
+            #[cfg(feature = "zstd")]
+            Compression::Zstd(_) => {
+                builder = builder.header(ACCEPT_ENCODING, HeaderValue::from_static("zstd"));
+            }
+            _ => (),
         }
 
         builder = with_request_headers(
@@ -832,12 +817,6 @@ mod transport_tests {
         assert!(!pairs.iter().any(|(name, _)| name == "compress"));
         #[cfg(feature = "lz4")]
         {
-            assert!(
-                pairs.iter().any(|(name, value)| {
-                    name == settings::ENABLE_HTTP_COMPRESSION && value == "1"
-                }),
-                "missing compression setting in {pairs:?}"
-            );
             assert_eq!(
                 request.headers().get(ACCEPT_ENCODING),
                 Some(&HeaderValue::from_static("lz4"))
@@ -914,18 +893,6 @@ mod transport_tests {
             .unwrap();
 
         let request = record.request().await;
-        let pairs = url::form_urlencoded::parse(request.uri().query().unwrap().as_bytes())
-            .collect::<Vec<_>>();
-        assert!(
-            pairs
-                .iter()
-                .any(|(name, value)| { name == settings::ENABLE_HTTP_COMPRESSION && value == "1" })
-        );
-        assert!(
-            pairs
-                .iter()
-                .any(|(name, value)| name == settings::HTTP_ZLIB_COMPRESSION_LEVEL && value == "7")
-        );
         assert_eq!(
             request.headers().get(ACCEPT_ENCODING),
             Some(&HeaderValue::from_static("zstd"))

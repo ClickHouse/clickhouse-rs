@@ -351,6 +351,39 @@ impl Client {
     /// Specifies a compression mode. See [`Compression`] for details.
     /// By default, `Lz4` is used if the `lz4` feature is enabled.
     ///
+    /// This sets `Accept-Encoding: <lz4|zstd>` for `Query` and `decompress=1` for `Insert`,
+    /// `InsertFormatted`, `BufInsertFormatted`, and `InsertNative`.
+    ///
+    /// The compression level for [Zstandard] _only_ applies for `Insert`, `InsertFormatted`,
+    /// `BufInsertFormatted` and `InsertNative`. Compression for responses (result sets from `Query`)
+    /// is controlled by server-side settings; see below for details.
+    ///
+    /// [Zstandard]: Compression::Zstd
+    ///
+    /// # Note: Response Compression Controlled by Server Settings
+    /// The [`enable_http_compression`] setting governs whether the server will compress responses
+    /// (result sets from `Query`).
+    /// If set to `0` (disabled), the server will not compress the response,
+    /// regardless of whether the client requests it (using `Accept-Encoding`).
+    /// This setting defaults to `1` (enabled) from server version 25.10 onward.
+    ///
+    /// The [`http_zlib_compression_level`] setting governs the compression level used for responses
+    /// (result sets from `Query`), _not_ this method. Though the setting name mentions `zlib`,
+    /// this setting applies to Zstandard compression as well. This setting defaults to `3`
+    /// at the time of writing.
+    ///
+    /// You may override either of these settings using [`Client::with_setting()`].
+    /// However, beware when doing this with [`readonly`] enabled, as the server will return
+    /// an error if attempting to override these settings _unless_ they already match
+    /// the server-side setting.
+    ///
+    /// For the same reason, it is too hazardous for this client to send these settings
+    /// unconditionally, so the decision is left to the caller.
+    ///
+    /// [`enable_http_compression`]: https://clickhouse.com/docs/reference/settings/session-settings/enable#enable_http_compression
+    /// [`http_zlib_compression_level`]: https://clickhouse.com/docs/reference/settings/session-settings/http#http_zlib_compression_level
+    /// [`readonly`]: https://clickhouse.com/docs/concepts/features/configuration/settings/permissions-for-queries#readonly
+    ///
     /// # Examples
     /// ```
     /// # use clickhouse::{Client, Compression};
@@ -824,10 +857,6 @@ mod settings {
     pub(crate) const DATABASE: &str = "database";
     pub(crate) const DEFAULT_FORMAT: &str = "default_format";
     pub(crate) const DECOMPRESS: &str = "decompress";
-    pub(crate) const ENABLE_HTTP_COMPRESSION: &str = "enable_http_compression";
-
-    #[cfg_attr(not(feature = "zstd"), expect(dead_code))]
-    pub(crate) const HTTP_ZLIB_COMPRESSION_LEVEL: &str = "http_zlib_compression_level";
     pub(crate) const ROLE: &str = "role";
     pub(crate) const QUERY: &str = "query";
     pub(crate) const QUERY_ID: &str = "query_id";
