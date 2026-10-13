@@ -6,7 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 
-## [Unreleased] - ReleaseDate
+## Unreleased - ReleaseDate
+
+## 0.2.0 - 2026-09-17
+
+### Breaking
+
+* Upgraded `arrow-*` crate version to `59.0.0`.
+* Upgraded `clickhouse` crate version to `0.15.3`. 
+    * See [the CHANGELOG in the parent directory](../CHANGELOG.md#0153---2026-10-07) for details.
 
 ### Fixed
 
@@ -15,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [#484]: https://github.com/ClickHouse/clickhouse-rs/pull/484
 
-## [0.1.0] - 2026-06-01
+## 0.1.0 - 2026-06-01
 
 Initial release.
 
