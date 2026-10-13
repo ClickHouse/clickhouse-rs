@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
-* Increased `arrow-*` crate version to `59.0.0`.
+* Upgraded `arrow-*` crate version to `59.0.0`.
+* Upgraded `clickhouse` crate version to `0.15.3`. 
+    * See [the CHANGELOG in the parent directory](../CHANGELOG.md#0153---2026-10-07) for details.
 
 ### Fixed
 
