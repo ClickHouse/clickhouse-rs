@@ -387,6 +387,9 @@ fn extract_exception(chunk: &[u8], tag: Option<&[u8]>) -> Option<Error> {
         // `))\n` is very rare in real data, so it's fast dirty check.
         // In random data, it occurs with a probability of ~6*10^-8 only.
         extract_exception_old(chunk)
+    } else if chunk.ends_with(b")\"}\n") {
+        // JSON formats (e.g. `JSONEachRow`) write the same error as a row.
+        extract_exception_json(chunk)
     } else {
         None
     }
@@ -407,6 +410,28 @@ fn extract_exception_old(chunk: &[u8]) -> Option<Error> {
 
     let exception = String::from_utf8_lossy(&chunk[index..chunk.len() - 1]);
     Some(Error::BadResponse(exception.into()))
+}
+
+// Format:
+// ```
+//   <data>{"exception": "Code: <code>. DB::Exception: <desc> (version <version> (official build))"}\n
+// ```
+#[cold]
+#[inline(never)]
+fn extract_exception_json(chunk: &[u8]) -> Option<Error> {
+    let line = chunk.strip_suffix(b"\n")?;
+    let line = &line[line.rfind(b"\n").map_or(0, |i| i + 1)..];
+    let message = line.strip_prefix(b"{\"exception\": ")?.strip_suffix(b"}")?;
+    let exception: String = serde_json::from_slice(message).ok()?;
+
+    if !(exception.starts_with("Code:")
+        && exception.contains("DB::")
+        && exception.contains("Exception:"))
+    {
+        return None;
+    }
+
+    Some(Error::BadResponse(exception))
 }
 
 // https://github.com/ClickHouse/ClickHouse/blob/4eaa92852bac117e95f28abe61237b0257d939d6/src/Server/HTTP/WriteBufferFromHTTPServerResponse.cpp#L347-L357
@@ -491,4 +516,24 @@ fn it_extracts_exception_new() {
 
     let err = extract_exception(chunk, Some(tag)).expect("failed to extract exception");
     assert_eq!(err.to_string(), format!("bad response: {error}"));
+}
+
+#[test]
+fn it_extracts_exception_json_row() {
+    let error = "Code: 395. DB::Exception: Value passed to 'throwIf' function is non-zero: while executing 'FUNCTION throwIf(equals(__table1.number, 100000_UInt32))'. (FUNCTION_THROW_IF_VALUE_IS_NON_ZERO) (version 25.8.33.6 (official build))";
+    let chunk = format!("{{\"number\":1}}\n{{\"exception\": \"{error}\"}}\n");
+    let err = extract_exception(chunk.as_bytes(), None).expect("failed to extract exception");
+    assert_eq!(err.to_string(), format!("bad response: {error}"));
+
+    // The message is a JSON string, so quotes in it arrive escaped.
+    let chunk = br#"{"exception": "Code: 62. DB::Exception: Syntax error: failed at position 8 (\"x\"). (SYNTAX_ERROR) (version 25.8.33.6 (official build))"}
+"#;
+    let err = extract_exception(chunk, None).expect("failed to extract exception");
+    assert_eq!(
+        err.to_string(),
+        r#"bad response: Code: 62. DB::Exception: Syntax error: failed at position 8 ("x"). (SYNTAX_ERROR) (version 25.8.33.6 (official build))"#
+    );
+
+    // A data row with the same key but no ClickHouse exception is data.
+    assert!(extract_exception(b"{\"exception\": \"none\"}\n", None).is_none());
 }
