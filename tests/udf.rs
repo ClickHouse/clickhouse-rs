@@ -100,6 +100,37 @@ fn consecutive_chunks_fragmented_rows_and_borrowed_results() {
 }
 
 #[test]
+fn matching_configuration_consumes_all_chunk_bytes() {
+    #[derive(Row, Deserialize)]
+    struct TwoStrings<'a> {
+        first: &'a str,
+        second: &'a str,
+    }
+
+    // One row with two String arguments, matched by two Rust fields.
+    let mut writer = Writer::default();
+    Executor::new(&b"1\n\x01a\x01b"[..], &mut writer)
+        .run::<TwoStrings<'_>, u64, _>(|row| {
+            assert_eq!((row.first, row.second), ("a", "b"));
+            Ok((row.first.len() + row.second.len()) as u64)
+        })
+        .unwrap();
+    assert_eq!(writer.bytes, 2_u64.to_le_bytes());
+    assert_eq!(writer.flushes, 1);
+}
+
+#[test]
+fn mismatched_configuration_rejects_remaining_chunk_bytes() {
+    // The same two String arguments, but Input declares only one field.
+    let mut writer = Writer::default();
+    let error = Executor::new(&b"1\n\x01a\x01b"[..], &mut writer)
+        .run::<Input<'_>, u64, _>(|row| Ok(row.data.len() as u64))
+        .unwrap_err();
+    assert!(matches!(error, Error::TrailingBytes(2)));
+    assert_eq!(writer.flushes, 0);
+}
+
+#[test]
 fn eof_and_empty_chunks() {
     let empty = lengths(&b""[..]).unwrap();
     assert!(empty.bytes.is_empty());

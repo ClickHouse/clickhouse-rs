@@ -77,6 +77,11 @@ pub enum Error {
     /// The decimal chunk header was malformed or overflowed.
     #[error("invalid UDF chunk header: {0}")]
     InvalidHeader(&'static str),
+    /// Input bytes remained buffered after the chunk's declared rows were decoded.
+    #[error(
+        "UDF chunk has {0} unconsumed bytes; input row fields may not match the configured arguments"
+    )]
+    TrailingBytes(usize),
     /// Reserving memory for the input buffer failed.
     #[error("UDF input allocation failed: {0}")]
     Allocation(#[from] std::collections::TryReserveError),
@@ -118,6 +123,7 @@ impl<I: BufRead, W: Write> Executor<I, W> {
     /// before it expires. The handler is never retried after being called.
     ///
     /// Empty chunks are flushed too. EOF inside a header or row is an error.
+    /// Buffered input left after decoding the declared rows is also an error.
     /// Any error is fatal to the worker; previously written rows are not rolled back.
     ///
     /// For UDFs processing large rows (>8KiB), such as LLM prompts or text payloads,
@@ -184,6 +190,10 @@ impl<I: BufRead, W: Write> Executor<I, W> {
                         None => input.refill()?,
                     }
                 }
+            }
+            let remaining = input.bytes.len() - input.position;
+            if remaining != 0 {
+                return Err(Error::TrailingBytes(remaining));
             }
             output.flush()?;
             input.bytes.clear();
