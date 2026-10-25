@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+* `Client::with_url()` now takes the user and password from the URL, e.g. `http://user:secret@localhost:8123`,
+  as if passed to `with_user()` and `with_password()`. ([#467])
+
+[#467]: https://github.com/ClickHouse/clickhouse-rs/issues/467
+
 ## [0.15.3] - 2026-10-07
 
 ### Changed
