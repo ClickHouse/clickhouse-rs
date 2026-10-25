@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+* `Query::bind()` no longer gets quadratically slower with the number of arguments. ([#502])
+
+[#502]: https://github.com/ClickHouse/clickhouse-rs/pull/502
+
 ## [0.15.3] - 2026-10-07
 
 ### Changed

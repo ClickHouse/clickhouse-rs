@@ -13,7 +13,8 @@ pub(crate) mod ser;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SqlBuilder {
-    InProgress(Vec<Part>),
+    /// The parts and the index to start looking for the next unbound `?` from.
+    InProgress(Vec<Part>, usize),
     Raw(String),
     Failed(String),
 }
@@ -29,7 +30,7 @@ pub(crate) enum Part {
 impl fmt::Display for SqlBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SqlBuilder::InProgress(parts) => {
+            SqlBuilder::InProgress(parts, _) => {
                 for part in parts {
                     match part {
                         Part::Arg => f.write_char('?')?,
@@ -77,12 +78,12 @@ impl SqlBuilder {
             parts.push(Part::Text(rest.to_string()));
         }
 
-        SqlBuilder::InProgress(parts)
+        SqlBuilder::InProgress(parts, 0)
     }
 
     pub(crate) fn bind_arg(&mut self, value: impl Bind) {
-        let parts = match self {
-            Self::InProgress(parts) => parts,
+        let (parts, next_arg) = match self {
+            Self::InProgress(parts, next_arg) => (parts, next_arg),
             Self::Raw(_) => {
                 return self.error(
                     "bind() is not supported for raw queries, \
@@ -93,21 +94,29 @@ impl SqlBuilder {
             _ => return,
         };
 
-        if let Some(part) = parts.iter_mut().find(|p| matches!(p, Part::Arg)) {
+        // Args are bound left to right, so everything before `next_arg` is already bound.
+        // Scanning from the start each time made binding N args O(N^2).
+        let found = parts[*next_arg..]
+            .iter()
+            .position(|p| matches!(p, Part::Arg))
+            .map(|offset| *next_arg + offset);
+
+        if let Some(idx) = found {
             let mut s = String::new();
 
             if let Err(err) = value.write(&mut s) {
                 return self.error(format_args!("invalid argument: {err}"));
             }
 
-            *part = Part::Text(s);
+            parts[idx] = Part::Text(s);
+            *next_arg = idx + 1;
         } else {
             self.error("unexpected bind(), all arguments are already bound");
         }
     }
 
     pub(crate) fn bind_fields<T: Row>(&mut self) {
-        let Self::InProgress(parts) = self else {
+        let Self::InProgress(parts, _) = self else {
             return;
         };
 
@@ -124,7 +133,7 @@ impl SqlBuilder {
         let mut sql = String::new();
 
         match self {
-            Self::InProgress(parts) => {
+            Self::InProgress(parts, _) => {
                 for part in parts {
                     match part {
                         Part::Text(text) => sql.push_str(&text),
@@ -206,6 +215,26 @@ mod tests {
         assert_eq!(
             sql.finish().unwrap(),
             r"SELECT `a`,`b` FROM test WHERE a = 'foo' AND b < 42"
+        );
+    }
+
+    #[test]
+    fn many_args() {
+        let n = 10_000;
+        let template = format!(
+            "SELECT ?fields, '??' WHERE x IN ({})",
+            vec!["?"; n].join(",")
+        );
+        let mut sql = SqlBuilder::new(&template);
+        for i in 0..n {
+            sql.bind_arg(i);
+        }
+        sql.bind_fields::<Row>();
+
+        let expected = (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+        assert_eq!(
+            sql.finish().unwrap(),
+            format!("SELECT `a`,`b`, '?' WHERE x IN ({expected})")
         );
     }
 
