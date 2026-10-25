@@ -250,6 +250,10 @@ By default, TLS is disabled and one or more following features must be enabled t
 * `rustls-tls-webpki-roots` — uses [rustls] with certificates provided by the [webpki-roots] crate.
 * `rustls-tls-native-roots` — uses [rustls] with certificates provided by the [rustls-native-certs] crate.
 
+`rustls-tls-aws-lc` and `rustls-tls-ring` can be used without a roots feature. In that case, the default client
+trusts no certificates, and `Client::with_rustls_config()` should be used to provide a `rustls::ClientConfig` with
+your own root certificates.
+
 If multiple features are enabled, the following priority is applied:
 * `native-tls` > `rustls-tls-aws-lc` > `rustls-tls-ring`
 * `rustls-tls-native-roots` > `rustls-tls-webpki-roots`
@@ -257,7 +261,8 @@ If multiple features are enabled, the following priority is applied:
 How to choose between all these features? Here are some considerations:
 * A good starting point is `rustls-tls`, e.g. if you use ClickHouse Cloud.
 * To be more environment-agnostic, prefer `rustls-tls` over `native-tls`.
-* Enable `rustls-tls-native-roots` or `native-tls` if you want to use self-signed certificates.
+* Enable `rustls-tls-native-roots` or `native-tls` if you want to use self-signed certificates from the OS trust store.
+* Use `Client::with_rustls_config()` to trust a private CA directly from the application (see [custom_ca.rs](./examples/custom_ca.rs)).
 
 [native-tls]: https://docs.rs/native-tls
 [rustls]: https://docs.rs/rustls

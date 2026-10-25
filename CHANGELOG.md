@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+* Added `Client::with_rustls_config()` to use a custom `rustls::ClientConfig` (e.g. with a private CA)
+  together with the default HTTP client settings. ([#499])
+* `rustls-tls-aws-lc` and `rustls-tls-ring` features no longer require `rustls-tls-webpki-roots` or
+  `rustls-tls-native-roots`. Without either of them, the default client trusts no certificates. ([#499])
+
+[#499]: https://github.com/ClickHouse/clickhouse-rs/pull/499
+
 ## [0.15.3] - 2026-10-07
 
 ### Changed

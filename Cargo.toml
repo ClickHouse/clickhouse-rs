@@ -73,6 +73,10 @@ name = "clickhouse_cloud"
 required-features = ["rustls-tls"]
 
 [[example]]
+name = "custom_ca"
+required-features = ["rustls-tls-aws-lc"]
+
+[[example]]
 name = "data_types_derive_simple"
 required-features = ["time", "uuid", "chrono"]
 

@@ -172,6 +172,38 @@ impl Client {
         }
     }
 
+    /// Creates a new client that uses the given [`rustls::ClientConfig`] for HTTPS connections,
+    /// e.g. to trust only the certificates of a private CA:
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use rustls::pki_types::{CertificateDer, pem::PemObject};
+    ///
+    /// let mut roots = rustls::RootCertStore::empty();
+    /// for cert in CertificateDer::pem_file_iter("ca.pem")? {
+    ///     roots.add(cert?)?;
+    /// }
+    /// let config = rustls::ClientConfig::builder()
+    ///     .with_root_certificates(roots)
+    ///     .with_no_client_auth();
+    ///
+    /// let client = clickhouse::Client::with_rustls_config(config)
+    ///     .with_url("https://clickhouse.internal:8443");
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// Everything else is set up like in [`Client::default()`].
+    /// The `rustls-tls-webpki-roots` and `rustls-tls-native-roots` features are not needed for this.
+    #[cfg(any(feature = "rustls-tls-aws-lc", feature = "rustls-tls-ring"))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(feature = "rustls-tls-aws-lc", feature = "rustls-tls-ring")))
+    )]
+    pub fn with_rustls_config(config: rustls::ClientConfig) -> Self {
+        Self::with_http_client(http_client::with_rustls_config(config))
+    }
+
     /// Specifies ClickHouse's url. Should point to HTTP endpoint.
     ///
     /// A default database may be set with the `database` query parameter,

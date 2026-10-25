@@ -27,6 +27,7 @@ If something is missing, or you found a mistake in one of these examples, please
 
 - [arrow.rs](arrow.rs) - reading and writing [Apache Arrow](https://arrow.apache.org/) `RecordBatch`es via the [`clickhouse-ext-arrow`](../ext-arrow) crate.
 - [custom_http_client.rs](custom_http_client.rs) - using a custom Hyper client, tweaking its connection pool settings
+- [custom_ca.rs](custom_ca.rs) - connecting over HTTPS to a server with a certificate signed by a private CA, via `Client::with_rustls_config`. Cargo features: requires `rustls-tls-aws-lc` or `rustls-tls-ring`.
 - [custom_http_headers.rs](custom_http_headers.rs) - setting additional HTTP headers to the client, or overriding the generated ones
 - [opentelemetry.rs](opentelemetry.rs) - configuring the integration with [`tracing`] and [the OpenTelemetry Rust SDK]
 - [query_id.rs](query_id.rs) - setting a specific `query_id` on the query level
