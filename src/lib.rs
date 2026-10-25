@@ -179,8 +179,15 @@ impl Client {
     /// [`Client::with_database`]: whichever of the two is configured last wins,
     /// and a URL without the parameter leaves the configured database unchanged.
     ///
+    /// Likewise, credentials in the URL, e.g. `http://user:secret@localhost:8123`,
+    /// are percent-decoded and used as if passed to [`Client::with_user`] and
+    /// [`Client::with_password`], and removed from the URL itself.
+    ///
     /// Automatically [clears the metadata cache][Self::clear_cached_metadata]
     /// for this instance only.
+    ///
+    /// # Panics
+    /// If the URL has credentials and [`Client::with_access_token`] was called before.
     ///
     /// # Examples
     /// ```
@@ -200,6 +207,16 @@ impl Client {
 
         if let Some(database) = extract_url_database(&self.url) {
             self.database = Some(database);
+        }
+
+        if let Some((url, user, password)) = take_url_credentials(&self.url) {
+            self.url = url;
+            if let Some(user) = user {
+                self = self.with_user(user);
+            }
+            if let Some(password) = password {
+                self = self.with_password(password);
+            }
         }
 
         // Assume our cached metadata is invalid.
@@ -848,6 +865,27 @@ fn extract_url_database(url: &str) -> Option<String> {
         .last()
 }
 
+/// Splits the user and password off `url`, decoded; `None` if it has neither.
+fn take_url_credentials(url: &str) -> Option<(String, Option<String>, Option<String>)> {
+    let mut url = url::Url::parse(url).ok()?;
+    let decode = |value: &str| {
+        percent_encoding::percent_decode_str(value)
+            .decode_utf8_lossy()
+            .into_owned()
+    };
+    let user = Some(url.username())
+        .filter(|user| !user.is_empty())
+        .map(decode);
+    let password = url.password().map(decode);
+    if user.is_none() && password.is_none() {
+        return None;
+    }
+    // Both only fail for a URL that cannot have credentials, which this one had.
+    url.set_username("").ok()?;
+    url.set_password(None).ok()?;
+    Some((url.into(), user, password))
+}
+
 mod formats {
     pub(crate) const ROW_BINARY: &str = "RowBinary";
     pub(crate) const ROW_BINARY_WITH_NAMES_AND_TYPES: &str = "RowBinaryWithNamesAndTypes";
@@ -1079,6 +1117,46 @@ mod client_tests {
         let client_clone = client.clone();
         let client = client.with_setting("async_insert", "1");
         assert_ne!(client.settings, client_clone.settings,);
+    }
+
+    #[test]
+    fn it_takes_credentials_from_url() {
+        let client =
+            Client::default().with_url("http://alice:s%40cret@localhost:8123/?database=foo");
+        assert_eq!(
+            client.authentication,
+            Authentication::Credentials {
+                user: Some("alice".into()),
+                password: Some("s@cret".into()),
+            }
+        );
+        assert_eq!(client.url, "http://localhost:8123/?database=foo");
+
+        // A user alone keeps the password set before, and the last call wins
+        let client = Client::default()
+            .with_password("secret")
+            .with_url("http://bob@localhost:8123")
+            .with_user("carol");
+        assert_eq!(
+            client.authentication,
+            Authentication::Credentials {
+                user: Some("carol".into()),
+                password: Some("secret".into()),
+            }
+        );
+
+        // Without credentials, the URL stays as given
+        let client = Client::default().with_url("http://localhost:8123");
+        assert_eq!(client.authentication, Authentication::default());
+        assert_eq!(client.url, "http://localhost:8123");
+    }
+
+    #[test]
+    #[should_panic(expected = "`user` cannot be set together with `access_token`")]
+    fn it_rejects_url_credentials_with_access_token() {
+        let _ = Client::default()
+            .with_access_token("my_jwt")
+            .with_url("http://alice@localhost:8123");
     }
 
     #[test]

@@ -150,6 +150,7 @@ hyper-rustls = { version = "0.27.3", default-features = false, features = [
     "tls12",
 ], optional = true }
 url = "2.1.1"
+percent-encoding = "2.1"
 futures-util = { version = "0.3.5", default-features = false, features = ["sink", "io"] }
 futures-channel = { version = "0.3.30", features = ["sink"] }
 twox-hash = { version = "2.1.4", optional = true }
