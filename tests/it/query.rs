@@ -171,6 +171,27 @@ async fn post_query_params_large_array() {
     assert_eq!(length, 120);
 }
 
+// See #501.
+#[tokio::test]
+async fn post_query_params_large_query() {
+    let client = prepare_database!();
+    // With a parameter, the SQL text is sent in the multipart body. Make it larger than
+    // ClickHouse's default 128 KiB `http_max_field_value_size` (but within the default
+    // 256 KiB `max_query_size`). With this prefix, 3-byte characters put the 128 KiB mark
+    // inside a character.
+    let literal = "雪".repeat(60_000);
+
+    let (value, got) = client
+        .query(&format!("SELECT {{value: UInt8}}, '{literal}'"))
+        .param("value", 42)
+        .fetch_one::<(u8, String)>()
+        .await
+        .expect("failed to execute a parameterized query over 128 KiB");
+
+    assert_eq!(value, 42);
+    assert_eq!(got, literal);
+}
+
 // See #19.
 #[tokio::test]
 async fn long_query() {
