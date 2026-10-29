@@ -127,7 +127,9 @@ macro_rules! test_type {
     };
 }
 
-test_type!(test_bool(bool) { "false" == false, "true" == true });
+// The SQL type is explicit: servers before 26.0 infer `UInt8`, not `Bool`,
+// for the `false` and `true` literals in the `Values(...)` table function.
+test_type!(test_bool(bool, "Bool") { "false" == false, "true" == true });
 
 test_type!(test_uint8(u8) { "0" == 0, "1" == 1, "255" == 255 });
 test_type!(test_uint16(u16) { "0" == 0, "1" == 1, "255" == 255, "16384" == 16384, "65535" == 65535 });

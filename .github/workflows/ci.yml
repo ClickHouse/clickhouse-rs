@@ -87,8 +87,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `tests/insert_native.rs` requires 26.6 but it's not an LTS release
-        clickhouse: [ latest, head, 26.7 ]
+        # tests that need a newer server than the oldest entry here skip
+        # themselves via `require_server_version!` (e.g. `insert_native` needs 26.6)
+        clickhouse: [ '25.8', '26.3', '26.5', '26.6', '26.7', latest, head ]
         include:
           - clickhouse: latest
             coverage: true

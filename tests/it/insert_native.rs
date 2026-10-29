@@ -24,9 +24,11 @@ async fn mixed_types_1000() {
 }
 
 async fn mixed_types(num_rows: u64) {
-    let client = get_client_with_session()
-        // Note: only in ClickHouse 26.6
-        .with_setting("enable_nullable_tuple_type", "1");
+    // The table below has a `Nullable(Tuple(...))` column, which the server
+    // supports only from 26.6 on, behind `enable_nullable_tuple_type`.
+    require_server_version!(26, 6);
+
+    let client = get_client_with_session().with_setting("enable_nullable_tuple_type", "1");
 
     client
         .query(
