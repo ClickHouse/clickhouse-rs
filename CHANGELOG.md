@@ -11,8 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 * `Query::bind()` no longer gets quadratically slower with the number of arguments. ([#502])
+* A value that ends like an old-format exception (`Code: … DB::Exception: …))\n`) no longer fails the query on
+  servers that send an exception tag (25.11+). ([#503])
 
 [#502]: https://github.com/ClickHouse/clickhouse-rs/pull/502
+[#503]: https://github.com/ClickHouse/clickhouse-rs/pull/503
 
 ## [0.15.3] - 2026-10-07
 

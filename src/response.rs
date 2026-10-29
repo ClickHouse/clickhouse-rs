@@ -379,10 +379,13 @@ where
 fn extract_exception(chunk: &[u8], tag: Option<&[u8]>) -> Option<Error> {
     // 25.11 introduced a new exception tagging format that's incompatible with the previous
     // https://github.com/ClickHouse/clickhouse-rs/issues/359
-    if let Some(tag) = tag
-        && chunk.ends_with(b"__exception__\r\n")
-    {
-        extract_exception_new(chunk, tag)
+    if let Some(tag) = tag {
+        // A server that sent a tag writes exceptions only in the new format, so text in the data
+        // that merely looks like an old exception must not end the stream.
+        chunk
+            .ends_with(b"__exception__\r\n")
+            .then(|| extract_exception_new(chunk, tag))
+            .flatten()
     } else if chunk.ends_with(b"))\n") {
         // `))\n` is very rare in real data, so it's fast dirty check.
         // In random data, it occurs with a probability of ~6*10^-8 only.
@@ -491,4 +494,13 @@ fn it_extracts_exception_new() {
 
     let err = extract_exception(chunk, Some(tag)).expect("failed to extract exception");
     assert_eq!(err.to_string(), format!("bad response: {error}"));
+}
+
+#[test]
+fn it_ignores_old_exception_text_when_tagged() {
+    // A string column can end a chunk with text shaped like an old-format exception.
+    let chunk = b"\x05helloCode: 202. DB::Exception: Too many simultaneous queries. (TOO_MANY_SIMULTANEOUS_QUERIES) (version 25.12.1.649 (official build))\n";
+
+    assert!(extract_exception(chunk, Some(b"rnywyenlaeqynhmu")).is_none());
+    assert!(extract_exception(chunk, None).is_some());
 }
