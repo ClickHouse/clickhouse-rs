@@ -227,7 +227,7 @@ impl InsertMetadata {
         let mut result_columns: Vec<Column> = Vec::with_capacity(T::COLUMN_COUNT);
         let mut set_columns: Vec<bool> = vec![false; self.row_metadata.columns.len()];
 
-        for struct_column_name in T::COLUMN_NAMES {
+        for struct_column_name in T::INSERT_COLUMN_NAMES {
             match self.column_lookup.get(*struct_column_name) {
                 Some(&col) => {
                     if self.column_default_kinds[col].is_immutable() {
@@ -248,7 +248,7 @@ impl InsertMetadata {
                         "While processing struct {}: database schema has no column named {struct_column_name}.\
                         \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
                         T::NAME,
-                        join_panic_schema_hint(T::COLUMN_NAMES),
+                        join_panic_schema_hint(T::INSERT_COLUMN_NAMES),
                         join_panic_schema_hint(&self.row_metadata.columns),
                     )));
                 }
@@ -270,7 +270,7 @@ impl InsertMetadata {
                 "While processing struct {}: the following non-default columns are missing:\n{missing_columns_hint}\
                  \n#### All struct fields:\n{}\n#### All schema columns:\n{}",
                 T::NAME,
-                join_panic_schema_hint(T::COLUMN_NAMES),
+                join_panic_schema_hint(T::INSERT_COLUMN_NAMES),
                 join_panic_schema_hint(&self.row_metadata.columns),
             )));
         }
