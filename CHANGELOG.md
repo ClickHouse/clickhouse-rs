@@ -12,8 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * A value that ends like an old-format exception (`Code: … DB::Exception: …))\n`) no longer fails the query on
   servers that send an exception tag (25.11+). ([#503])
+* An exception block split across response chunks is now detected and parsed correctly on servers that send an
+  exception tag (25.11+). Previously the error message could be lost or the error not reported at all. ([#505])
 
 [#503]: https://github.com/ClickHouse/clickhouse-rs/pull/503
+[#505]: https://github.com/ClickHouse/clickhouse-rs/pull/505
 
 ## [0.15.3] - 2026-10-07
 
