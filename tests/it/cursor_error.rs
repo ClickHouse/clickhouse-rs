@@ -109,3 +109,19 @@ async fn deferred_lz4() {
         "expected TIMEOUT_EXCEEDED in error string, got {err_s:?}; original: {err:?}"
     );
 }
+
+#[tokio::test]
+async fn data_resembling_old_exception() {
+    let client = prepare_database!();
+
+    // Ends the response with text a pre-25.11 server would have written for an error.
+    let text = "Code: 202. DB::Exception: Too many simultaneous queries. \
+                (TOO_MANY_SIMULTANEOUS_QUERIES) (version 24.10.1.2812 (official build))\n";
+    let fetched = client
+        .query("SELECT ?")
+        .bind(text)
+        .fetch_one::<String>()
+        .await
+        .unwrap();
+    assert_eq!(fetched, text);
+}
