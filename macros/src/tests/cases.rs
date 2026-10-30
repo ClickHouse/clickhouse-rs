@@ -97,6 +97,48 @@ fn serde_rename() {
 }
 
 #[test]
+fn serde_rename_ser_de() {
+    render! {
+        #[derive(Row)]
+        struct Sample {
+            a: i32,
+            #[serde(rename(serialize = "b_ser", deserialize = "b_de"))]
+            b: u32,
+            #[serde(rename(deserialize = "c_de"))]
+            c: u32,
+            #[serde(rename(serialize = "d_ser"))]
+            d: u32,
+        }
+    }
+}
+
+#[test]
+fn serde_rename_all() {
+    render! {
+        #[derive(Row)]
+        #[serde(rename_all = "camelCase")]
+        struct Sample {
+            field_one: i32,
+            #[serde(rename = "explicit")]
+            field_two: u32,
+        }
+    }
+}
+
+#[test]
+fn serde_rename_all_ser_de() {
+    render! {
+        #[derive(Row)]
+        #[serde(rename_all(serialize = "SCREAMING_SNAKE_CASE", deserialize = "camelCase"))]
+        struct Sample {
+            field_one: i32,
+            #[serde(rename(deserialize = "explicit_de"))]
+            field_two: u32,
+        }
+    }
+}
+
+#[test]
 fn serde_skip_serializing() {
     render! {
         #[derive(Row)]

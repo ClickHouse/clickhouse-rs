@@ -8,11 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+* `#[derive(Row)]` supports different column names for serialization and deserialization, e.g.
+  `#[serde(rename(serialize = "a", deserialize = "b"))]`: `INSERT` uses the serialize names, while
+  fetching rows and `?fields` use the deserialize names. ([#360])
+
 ### Fixed
 
+* `#[derive(Row)]` now applies `#[serde(rename_all)]` like serde does: the serialize and deserialize rules are applied
+  to their respective sides, and fields with an explicit `#[serde(rename)]` are not affected by it. ([#360])
+  **This changes the column name** of a field that has both: e.g. `rename = "foo"` with `rename_all = "UPPERCASE"`
+  used to give the column `FOO`, and now gives `foo`, matching what serde itself uses.
 * A value that ends like an old-format exception (`Code: … DB::Exception: …))\n`) no longer fails the query on
   servers that send an exception tag (25.11+). ([#503])
 
+[#360]: https://github.com/ClickHouse/clickhouse-rs/issues/360
 [#503]: https://github.com/ClickHouse/clickhouse-rs/pull/503
 
 ## [0.15.3] - 2026-10-07
