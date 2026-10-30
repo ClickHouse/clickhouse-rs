@@ -607,6 +607,21 @@ impl BufInsertFormatted {
         self.nominal_capacity
     }
 
+    /// Change the nominal capacity of the buffer.
+    ///
+    /// An empty buffer is reallocated with the new capacity;
+    /// a non-empty one is only grown if needed.
+    pub(crate) fn set_nominal_capacity(&mut self, capacity: usize) {
+        self.nominal_capacity = capacity;
+
+        if self.buffer.is_empty() {
+            self.buffer = BytesMut::with_capacity(capacity);
+        } else {
+            self.buffer
+                .reserve(capacity.saturating_sub(self.buffer.len()));
+        }
+    }
+
     #[inline(always)]
     pub(crate) fn buffer_mut(&mut self) -> &mut BytesMut {
         &mut self.buffer
