@@ -34,6 +34,14 @@ Official pure Rust typed client for ClickHouse DB.
 
 Note: [ch2rs](https://github.com/ClickHouse/ch2rs) is useful to generate a row type from ClickHouse.
 
+## Executable UDFs
+
+`clickhouse::udf::Executor` runs synchronous executable UDFs with borrowed rows, reusable buffers,
+chunk framing and one result per input row. It requires ClickHouse settings
+`format=RowBinary` and `send_chunk_header=true`. Input `Row` fields must match the SQL argument
+types **and order**; field names do not reorder data and schema validation is disabled. Output must
+match the declared return type. See the [executable UDF example](examples/udf.rs).
+
 ## Validation
 
 Starting from 0.14.0, the crate uses `RowBinaryWithNamesAndTypes` format by default, which allows row types validation
