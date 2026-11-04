@@ -347,7 +347,6 @@ async fn empty_arrays() {
         "LowCardinality(String)",
         "LowCardinality(Nullable(String))",
         "Tuple(UInt64, String, String)",
-        "Nullable(Tuple(UInt64, String, String))",
         "Map(UInt64, String)",
         "Map(LowCardinality(UInt64), String)",
     ];
@@ -391,9 +390,32 @@ async fn empty_arrays() {
     assert_array_empty::<String>(&block[6]);
     assert_array_empty::<Option<String>>(&block[7]);
     assert_array_empty::<(u64, String, String)>(&block[8]);
-    assert_array_empty::<Option<(u64, String, String)>>(&block[9]);
+    assert_array_empty::<HashMap<u64, String>>(&block[9]);
     assert_array_empty::<HashMap<u64, String>>(&block[10]);
-    assert_array_empty::<HashMap<u64, String>>(&block[11]);
+}
+
+/// `Nullable(Tuple(...))` is a separate test because the server accepts it
+/// only from 26.6 on; before that, `defaultValueOfTypeName` rejects the type.
+#[tokio::test]
+async fn empty_arrays_of_nullable_tuple() {
+    require_server_version!(26, 6);
+
+    let client = get_client();
+
+    let mut cursor = client
+        .query("SELECT defaultValueOfTypeName('Array(Nullable(Tuple(UInt64, String, String)))')")
+        .fetch_native()
+        .unwrap();
+
+    let block = cursor.next().await.unwrap().expect("expected one block");
+
+    let mut iter = block[0]
+        .iter::<Vec<Option<(u64, String, String)>>>()
+        .unwrap();
+
+    let vec = iter.next().expect("expected array").unwrap();
+    assert!(vec.is_empty(), "got nonempty array: {vec:?}");
+    assert!(iter.next().is_none(), "unexpected second value");
 }
 
 async fn nested_arrays(num_rows: usize) {
