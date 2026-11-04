@@ -374,7 +374,15 @@ impl Int256 {
             all_ones &= b == 0xFF;
         }
 
+        // The narrowed value must keep the sign of the original value, otherwise
+        // the conversion would wrap around (e.g. `128i32` -> `i8` -> `-128`).
+        let narrowed_is_negative = le_bytes[N - 1] & SIGN_BIT != 0;
+
         if all_zeroes {
+            if SIGNED && narrowed_is_negative {
+                return None;
+            }
+
             return Some(*le_bytes);
         }
 
@@ -382,6 +390,10 @@ impl Int256 {
         // The optimizer should be able to statically eliminate this branch
         // and `all_ones` when `SIGNED == false`.
         if SIGNED && all_ones {
+            if !narrowed_is_negative {
+                return None;
+            }
+
             return Some(*le_bytes);
         }
 
@@ -677,5 +689,28 @@ mod tests {
             assert_eq!(int256.to_string(), value.to_string());
             assert_eq!(format!("{int256:?}"), format!("Int256({value:?})"))
         }
+    }
+
+    #[test]
+    fn int_256_narrowing_rejects_out_of_range() {
+        // `128` fits into the low byte, but does not fit into `i8`.
+        assert!(i8::try_from(Int256::from(128i32)).is_err());
+        assert!(i8::try_from(Int256::from(-129i32)).is_err());
+
+        for value in -300i32..=300 {
+            let expected = i8::try_from(value);
+            let actual = i8::try_from(Int256::from(value));
+
+            assert_eq!(actual.is_ok(), expected.is_ok(), "wrong fit for {value}");
+            if let Ok(actual) = actual {
+                assert_eq!(actual, expected.unwrap(), "wrong value for {value}");
+            }
+        }
+
+        assert!(i16::try_from(Int256::from(i16::MAX as i32 + 1)).is_err());
+        assert!(i16::try_from(Int256::from(i16::MIN as i32 - 1)).is_err());
+
+        assert_eq!(u8::try_from(UInt256::from(255u32)).unwrap(), u8::MAX);
+        assert!(u8::try_from(UInt256::from(256u32)).is_err());
     }
 }
