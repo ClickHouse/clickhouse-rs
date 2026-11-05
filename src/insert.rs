@@ -50,7 +50,7 @@ impl<T> Insert<T> {
     where
         T: Row,
     {
-        let fields = row::join_column_names::<T>()
+        let fields = row::join_insert_column_names::<T>()
             .expect("the row type must be a struct or a wrapper around it");
 
         let format = if row_metadata.is_some() {

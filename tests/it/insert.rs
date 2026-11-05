@@ -380,6 +380,73 @@ async fn rename_insert() {
     assert_eq!(rows, vec!(row))
 }
 
+// https://github.com/ClickHouse/clickhouse-rs/issues/360
+#[tokio::test]
+async fn rename_ser_de_insert_and_fetch() {
+    #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]
+    #[serde(rename_all(serialize = "SCREAMING_SNAKE_CASE", deserialize = "camelCase"))]
+    struct RenameRow {
+        id: u64,
+        #[serde(rename(serialize = "value_ser", deserialize = "value_de"))]
+        value: String,
+        some_field: u32,
+    }
+
+    let table_name = "insert_rename_ser_de";
+
+    let client = prepare_database!();
+    client
+        .query(
+            "
+            CREATE TABLE ?(
+              ID UInt64,
+              value_ser String,
+              SOME_FIELD UInt32
+            )
+            ENGINE = MergeTree
+            ORDER BY ID
+            ",
+        )
+        .bind(Identifier(table_name))
+        .execute()
+        .await
+        .unwrap();
+
+    let row = RenameRow {
+        id: 42,
+        value: String::from("foo"),
+        some_field: 7,
+    };
+
+    // INSERT uses serialize names.
+    let mut insert = client.insert::<RenameRow>(table_name).await.unwrap();
+    insert.write(&row).await.unwrap();
+    insert.end().await.unwrap();
+
+    // SELECT uses deserialize names.
+    let rows = client
+        .query("SELECT ID AS id, value_ser AS value_de, SOME_FIELD AS someField FROM ?")
+        .bind(Identifier(table_name))
+        .fetch_all::<RenameRow>()
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![row]);
+
+    // `?fields` uses deserialize names too.
+    let rows = client
+        .query(
+            "SELECT ?fields FROM (
+               SELECT ID AS id, value_ser AS value_de, SOME_FIELD AS someField FROM ?
+             )",
+        )
+        .bind(Identifier(table_name))
+        .fetch_all::<RenameRow>()
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].value, "foo");
+}
+
 #[tokio::test]
 async fn insert_from_cursor() {
     #[derive(Debug, Row, Serialize, Deserialize, PartialEq)]

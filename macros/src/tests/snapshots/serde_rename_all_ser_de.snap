@@ -1,0 +1,21 @@
+---
+source: derive/src/tests/cases.rs
+---
+#[derive(Row)]
+#[serde(rename_all(serialize = "SCREAMING_SNAKE_CASE", deserialize = "camelCase"))]
+struct Sample {
+    field_one: i32,
+    #[serde(rename(deserialize = "explicit_de"))]
+    field_two: u32,
+}
+
+/****** GENERATED ******/
+#[automatically_derived]
+impl clickhouse::Row for Sample {
+    const NAME: &'static str = stringify!(Sample);
+    const COLUMN_NAMES: &'static [&'static str] = &["fieldOne", "explicit_de"];
+    const INSERT_COLUMN_NAMES: &'static [&'static str] = &["FIELD_ONE", "FIELD_TWO"];
+    const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
+    const KIND: clickhouse::_priv::RowKind = clickhouse::_priv::RowKind::Struct;
+    type Value<'__v> = Self;
+}
