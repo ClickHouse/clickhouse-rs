@@ -8,11 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+* `Insert::with_buffer_size()` and `Insert::set_buffer_size()` set the size of the buffer rows are serialized into,
+  and so the size of the chunks sent to the server. The default is still 256 KiB. ([#389])
+
 ### Fixed
 
 * A value that ends like an old-format exception (`Code: … DB::Exception: …))\n`) no longer fails the query on
   servers that send an exception tag (25.11+). ([#503])
 
+[#389]: https://github.com/ClickHouse/clickhouse-rs/issues/389
 [#503]: https://github.com/ClickHouse/clickhouse-rs/pull/503
 
 ## [0.15.3] - 2026-10-07
