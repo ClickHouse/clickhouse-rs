@@ -7,7 +7,7 @@ use crate::{
     query_summary::QuerySummary,
 };
 use bstr::ByteSlice;
-use bytes::{BufMut, Bytes};
+use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::stream::{self, Stream, TryStreamExt};
 use http_body_util::BodyExt as _;
 use hyper::header::CONTENT_ENCODING;
@@ -209,10 +209,7 @@ impl Chunks {
     ) -> Result<Self> {
         let stream = IncomingStream(stream);
         let stream = Decompress::new(stream, headers)?;
-        let stream = DetectDbException {
-            stream,
-            exception_tag,
-        };
+        let stream = DetectDbException::new(stream, exception_tag);
         Ok(Self {
             inner: Some(Box::new(stream)),
         })
@@ -353,7 +350,49 @@ where
 
 struct DetectDbException<S> {
     stream: S,
-    exception_tag: Option<Box<[u8]>>,
+    /// Only used when the server sent an exception tag (25.11+).
+    tagged: Option<Box<TaggedState>>,
+}
+
+/// State used to find a tagged exception block that can be split across several chunks.
+///
+/// Format of the block, see `WriteBufferFromHTTPServerResponse::cancelWithException`:
+/// ```text
+///   \r\n__exception__\r\n<tag>\r\n<message>\n<message length> <tag>\r\n__exception__\r\n
+/// ```
+struct TaggedState {
+    tag: Box<[u8]>,
+    /// `\r\n__exception__\r\n<tag>\r\n`
+    opening: Box<[u8]>,
+    /// `<tag>\r\n__exception__\r\n`
+    closing: Box<[u8]>,
+    /// Bytes held back from previously received chunks: either a tail that can be
+    /// the beginning of the opening marker or, if `in_exception`, the exception block so far.
+    held: BytesMut,
+    /// Network size of the held bytes, reported with the next chunk.
+    held_net_size: usize,
+    /// Whether the opening marker has been found and the rest of the block is being collected.
+    in_exception: bool,
+    /// Whether the inner stream has ended, but the held bytes have been returned.
+    finished: bool,
+}
+
+impl<S> DetectDbException<S> {
+    fn new(stream: S, exception_tag: Option<Box<[u8]>>) -> Self {
+        let tagged = exception_tag.as_deref().map(|tag| {
+            Box::new(TaggedState {
+                tag: tag.into(),
+                opening: [b"\r\n__exception__\r\n", tag, b"\r\n"].concat().into(),
+                closing: [tag, b"\r\n__exception__\r\n"].concat().into(),
+                held: BytesMut::new(),
+                held_net_size: 0,
+                in_exception: false,
+                finished: false,
+            })
+        });
+
+        Self { stream, tagged }
+    }
 }
 
 impl<S> Stream for DetectDbException<S>
@@ -363,17 +402,145 @@ where
     type Item = Result<Chunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let res = Pin::new(&mut self.stream).poll_next(cx);
+        let this = &mut *self;
 
-        if let Poll::Ready(Some(Ok(chunk))) = &res
-            && let Some(err) = extract_exception(&chunk.data, self.exception_tag.as_deref())
-        {
-            err.record_in_current_span("response error");
-            return Poll::Ready(Some(Err(err)));
+        let Some(state) = this.tagged.as_deref_mut() else {
+            // An old server, which writes exceptions without a tag.
+            let res = Pin::new(&mut this.stream).poll_next(cx);
+
+            if let Poll::Ready(Some(Ok(chunk))) = &res
+                && let Some(err) = extract_exception(&chunk.data, None)
+            {
+                err.record_in_current_span("response error");
+                return Poll::Ready(Some(Err(err)));
+            }
+
+            return res;
+        };
+
+        loop {
+            if state.finished {
+                return Poll::Ready(None);
+            }
+
+            let res = match Pin::new(&mut this.stream).poll_next(cx) {
+                Poll::Ready(res) => res,
+                Poll::Pending => return Poll::Pending,
+            };
+
+            let res = match res {
+                Some(Ok(chunk)) => match state.push(chunk) {
+                    Some(res) => res,
+                    None => continue,
+                },
+                // The server doesn't finish the response properly after writing an exception,
+                // so the transport may fail before the closing marker has been received.
+                Some(Err(err)) if !state.in_exception => return Poll::Ready(Some(Err(err))),
+                Some(Err(_)) | None => match state.finish() {
+                    Some(res) => res,
+                    None => return Poll::Ready(None),
+                },
+            };
+
+            if let Err(err) = &res {
+                err.record_in_current_span("response error");
+            }
+
+            return Poll::Ready(Some(res));
+        }
+    }
+}
+
+impl TaggedState {
+    /// Returns `None` if more data is needed.
+    fn push(&mut self, chunk: Chunk) -> Option<Result<Chunk>> {
+        self.held_net_size += chunk.net_size;
+
+        if self.in_exception {
+            self.held.extend_from_slice(&chunk.data);
+            return self.take_complete_exception().map(Err);
         }
 
-        res
+        let data = if self.held.is_empty() {
+            chunk.data
+        } else {
+            self.held.extend_from_slice(&chunk.data);
+            self.held.split().freeze()
+        };
+
+        if let Some(start) = data.find(&self.opening) {
+            self.in_exception = true;
+            self.held.extend_from_slice(&data[start..]);
+
+            if let Some(err) = self.take_complete_exception() {
+                // Like before, data in the same chunk as the exception is discarded.
+                return Some(Err(err));
+            }
+
+            return (start > 0).then(|| Ok(self.make_chunk(data.slice(..start))));
+        }
+
+        // Hold back a tail that can be the beginning of the opening marker.
+        let keep = partial_prefix_len(&data, &self.opening);
+        let rows = data.slice(..data.len() - keep);
+        self.held.extend_from_slice(&data[rows.len()..]);
+
+        (!rows.is_empty()).then(|| Ok(self.make_chunk(rows)))
     }
+
+    /// Called when the stream ended or failed.
+    fn finish(&mut self) -> Option<Result<Chunk>> {
+        self.finished = true;
+
+        if self.in_exception {
+            self.in_exception = false;
+            let block = self.held.split();
+            // The closing marker is missing, return the message we have got.
+            let msg = &block[self.opening.len()..];
+            return Some(Err(Error::BadResponse(
+                String::from_utf8_lossy(msg).trim().into(),
+            )));
+        }
+
+        if self.held.is_empty() {
+            return None;
+        }
+
+        let rest = self.held.split().freeze();
+        Some(Ok(self.make_chunk(rest)))
+    }
+
+    fn take_complete_exception(&mut self) -> Option<Error> {
+        let pos = self.held[self.opening.len()..].find(&self.closing)?;
+        let end = self.opening.len() + pos + self.closing.len();
+        let err = extract_exception_new(&self.held[..end], &self.tag).unwrap_or_else(|| {
+            Error::BadResponse(
+                String::from_utf8_lossy(&self.held[self.opening.len()..end - self.closing.len()])
+                    .trim()
+                    .into(),
+            )
+        });
+
+        self.in_exception = false;
+        self.held.clear();
+        Some(err)
+    }
+
+    fn make_chunk(&mut self, data: Bytes) -> Chunk {
+        Chunk {
+            data,
+            net_size: std::mem::take(&mut self.held_net_size),
+        }
+    }
+}
+
+/// Returns the length of the longest suffix of `data` that is a proper prefix of `marker`.
+fn partial_prefix_len(data: &[u8], marker: &[u8]) -> usize {
+    let tail_start = data.len().saturating_sub(marker.len() - 1);
+
+    (tail_start..data.len())
+        .find(|&i| marker.starts_with(&data[i..]))
+        .map_or(0, |i| data.len() - i)
 }
 
 fn extract_exception(chunk: &[u8], tag: Option<&[u8]>) -> Option<Error> {
@@ -503,4 +670,97 @@ fn it_ignores_old_exception_text_when_tagged() {
 
     assert!(extract_exception(chunk, Some(b"rnywyenlaeqynhmu")).is_none());
     assert!(extract_exception(chunk, None).is_some());
+}
+
+#[cfg(test)]
+fn detect_exception_in_chunks(chunks: &[&[u8]], tag: &[u8]) -> (Vec<u8>, Option<Error>) {
+    let chunks = chunks
+        .iter()
+        .map(|data| {
+            Ok(Chunk {
+                data: Bytes::copy_from_slice(data),
+                net_size: data.len(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut stream = DetectDbException::new(stream::iter(chunks), Some(tag.into()));
+    let mut cx = Context::from_waker(std::task::Waker::noop());
+    let mut data = Vec::new();
+
+    loop {
+        match Pin::new(&mut stream).poll_next(&mut cx) {
+            Poll::Ready(Some(Ok(chunk))) => {
+                assert!(!chunk.data.is_empty());
+                data.extend_from_slice(&chunk.data);
+            }
+            Poll::Ready(Some(Err(err))) => return (data, Some(err)),
+            Poll::Ready(None) => return (data, None),
+            Poll::Pending => unreachable!("`stream::iter` is always ready"),
+        }
+    }
+}
+
+#[test]
+fn it_extracts_exception_new_split_across_chunks() {
+    // https://github.com/ClickHouse/clickhouse-rs/issues/498
+    let tag = b"rnywyenlaeqynhmu";
+    let rows = b"{\"number\":\"0\"}\n{\"number\":\"1\"}\n";
+    let error = "Code: 395. DB::Exception: v 1. (FUNCTION_THROW_IF_VALUE_IS_NON_ZERO) (version 25.12.1.649 (official build))";
+    let block = format!(
+        "\r\n__exception__\r\nrnywyenlaeqynhmu\r\n{error}\n{} rnywyenlaeqynhmu\r\n__exception__\r\n",
+        error.len() + 1
+    );
+    let body = [&rows[..], block.as_bytes()].concat();
+
+    for cut in 0..=body.len() {
+        let (data, err) = detect_exception_in_chunks(&[&body[..cut], &body[cut..]], tag);
+        let err = err.unwrap_or_else(|| panic!("no exception detected, cut at {cut}"));
+        assert_eq!(
+            err.to_string(),
+            format!("bad response: {error}"),
+            "cut at {cut}"
+        );
+        assert!(rows.starts_with(&data), "cut at {cut}");
+    }
+
+    // Byte by byte.
+    let chunks = body.chunks(1).collect::<Vec<_>>();
+    let (data, err) = detect_exception_in_chunks(&chunks, tag);
+    assert_eq!(err.unwrap().to_string(), format!("bad response: {error}"));
+    assert_eq!(data, rows);
+}
+
+#[test]
+fn it_extracts_truncated_exception_new() {
+    // The stream ends before the closing marker.
+    let tag = b"rnywyenlaeqynhmu";
+    let body = b"\x01\x02\r\n__exception__\r\nrnywyenlaeqynhmu\r\nCode: 395. DB::Exception: v 1.\n32 rnywye";
+
+    let (data, err) = detect_exception_in_chunks(&[&body[..10], &body[10..]], tag);
+    assert_eq!(data, b"\x01\x02");
+    assert_eq!(
+        err.unwrap().to_string(),
+        "bad response: Code: 395. DB::Exception: v 1.\n32 rnywye"
+    );
+}
+
+#[test]
+fn it_keeps_data_resembling_exception_marker() {
+    let tag = b"rnywyenlaeqynhmu";
+    // Ends with a prefix of the opening marker, but it's just data.
+    let body = b"\x05hello\r\n__exception__\r\nrnywye";
+
+    for cut in 0..=body.len() {
+        let (data, err) = detect_exception_in_chunks(&[&body[..cut], &body[cut..]], tag);
+        assert!(err.is_none(), "cut at {cut}");
+        assert_eq!(data, body, "cut at {cut}");
+    }
+
+    // Another tag.
+    let body =
+        b"\r\n__exception__\r\nqwertyuiopasdfgh\r\nmsg\n4 qwertyuiopasdfgh\r\n__exception__\r\n";
+    let (data, err) = detect_exception_in_chunks(&[body], tag);
+    assert!(err.is_none());
+    assert_eq!(data, body);
 }
