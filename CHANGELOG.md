@@ -8,12 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+* Added `::vec` submodules to all `serde::chrono` and `serde::time` helpers (e.g. `serde::chrono::date32::vec`)
+  to ser/de `Vec<T>` to/from `Array(Date)`, `Array(Date32)`, `Array(DateTime)`, `Array(DateTime64(_))`,
+  `Array(Time)` and `Array(Time64(_))`. ([#509])
+
 ### Fixed
 
 * A value that ends like an old-format exception (`Code: … DB::Exception: …))\n`) no longer fails the query on
   servers that send an exception tag (25.11+). ([#503])
 
 [#503]: https://github.com/ClickHouse/clickhouse-rs/pull/503
+[#509]: https://github.com/ClickHouse/clickhouse-rs/issues/509
 
 ## [0.15.3] - 2026-10-07
 
