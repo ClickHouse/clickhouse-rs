@@ -320,3 +320,261 @@ fn it_time_serializes_time64_nanos_overflow_fails() {
         "Unexpected error message: {err}"
     );
 }
+
+#[cfg(feature = "chrono")]
+mod chrono_vec {
+    use super::*;
+    use ::chrono::{DateTime, Duration, NaiveDate, Utc};
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct ChronoVecs {
+        #[serde(with = "crate::serde::chrono::date32::vec")]
+        date32: Vec<NaiveDate>,
+        #[serde(with = "crate::serde::chrono::date::vec")]
+        date: Vec<NaiveDate>,
+        #[serde(with = "crate::serde::chrono::datetime::vec")]
+        datetime: Vec<DateTime<Utc>>,
+        #[serde(with = "crate::serde::chrono::datetime64::millis::vec")]
+        datetime64_millis: Vec<DateTime<Utc>>,
+        #[serde(with = "crate::serde::chrono::datetime64::nanos::vec")]
+        datetime64_nanos: Vec<DateTime<Utc>>,
+        #[serde(with = "crate::serde::chrono::time64::micros::vec")]
+        time64_micros: Vec<Duration>,
+    }
+
+    // clickhouse_macros is not working here
+    impl Row for ChronoVecs {
+        const NAME: &'static str = "ChronoVecs";
+        const COLUMN_NAMES: &'static [&'static str] = &[
+            "date32",
+            "date",
+            "datetime",
+            "datetime64_millis",
+            "datetime64_nanos",
+            "time64_micros",
+        ];
+        const COLUMN_COUNT: usize = 6;
+        const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
+
+        type Value<'a> = ChronoVecs;
+    }
+
+    fn sample() -> ChronoVecs {
+        let dt = DateTime::<Utc>::from_timestamp(1_672_617_600, 0).unwrap(); // 2023-01-02
+        ChronoVecs {
+            date32: vec![
+                NaiveDate::from_ymd_opt(2023, 1, 2).unwrap(),
+                NaiveDate::from_ymd_opt(2023, 1, 3).unwrap(),
+            ],
+            date: vec![NaiveDate::from_ymd_opt(2023, 1, 2).unwrap()],
+            datetime: vec![dt, dt + Duration::seconds(1)],
+            datetime64_millis: vec![dt + Duration::milliseconds(123)],
+            datetime64_nanos: vec![dt + Duration::nanoseconds(123_456_789)],
+            time64_micros: vec![Duration::microseconds(42_000_000_123)],
+        }
+    }
+
+    #[test]
+    fn it_serializes_vec_helpers() {
+        let mut actual = Vec::new();
+        super::super::serialize_row_binary(&mut actual, &sample()).unwrap();
+
+        // [Array(Date32)] length 2, then days since 1970-01-01 as i32
+        let mut expected = vec![2];
+        expected.extend_from_slice(&19359_i32.to_le_bytes());
+        expected.extend_from_slice(&19360_i32.to_le_bytes());
+        // [Array(Date)] length 1, then days since 1970-01-01 as u16
+        expected.push(1);
+        expected.extend_from_slice(&19359_u16.to_le_bytes());
+        // [Array(DateTime)] length 2, then seconds as u32
+        expected.push(2);
+        expected.extend_from_slice(&1_672_617_600_u32.to_le_bytes());
+        expected.extend_from_slice(&1_672_617_601_u32.to_le_bytes());
+        // [Array(DateTime64(3))] length 1, then millis as i64
+        expected.push(1);
+        expected.extend_from_slice(&1_672_617_600_123_i64.to_le_bytes());
+        // [Array(DateTime64(9))] length 1, then nanos as i64
+        expected.push(1);
+        expected.extend_from_slice(&1_672_617_600_123_456_789_i64.to_le_bytes());
+        // [Array(Time64(6))] length 1, then micros as i64
+        expected.push(1);
+        expected.extend_from_slice(&42_000_000_123_i64.to_le_bytes());
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn it_round_trips_vec_helpers() {
+        let mut bytes = Vec::new();
+        super::super::serialize_row_binary(&mut bytes, &sample()).unwrap();
+
+        let actual: ChronoVecs =
+            super::super::deserialize_row(&mut bytes.as_slice(), None).unwrap();
+        assert_eq!(actual, sample());
+    }
+
+    #[test]
+    fn it_round_trips_empty_vec_helpers() {
+        let empty = ChronoVecs {
+            date32: vec![],
+            date: vec![],
+            datetime: vec![],
+            datetime64_millis: vec![],
+            datetime64_nanos: vec![],
+            time64_micros: vec![],
+        };
+
+        let mut bytes = Vec::new();
+        super::super::serialize_row_binary(&mut bytes, &empty).unwrap();
+        assert_eq!(bytes, [0; 6]);
+
+        let actual: ChronoVecs =
+            super::super::deserialize_row(&mut bytes.as_slice(), None).unwrap();
+        assert_eq!(actual, empty);
+    }
+
+    #[test]
+    fn it_propagates_vec_element_errors() {
+        let mut row = sample();
+        row.date = vec![
+            NaiveDate::from_ymd_opt(2023, 1, 2).unwrap(),
+            NaiveDate::from_ymd_opt(1960, 1, 1).unwrap(),
+        ];
+
+        let mut bytes = Vec::new();
+        let err = super::super::serialize_row_binary(&mut bytes, &row)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("cannot be represented as Date"),
+            "Unexpected error message: {err}"
+        );
+    }
+}
+
+#[cfg(feature = "time")]
+mod time_vec {
+    use super::*;
+    use ::time::{Date, Duration, Month, OffsetDateTime};
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct TimeVecs {
+        #[serde(with = "crate::serde::time::date32::vec")]
+        date32: Vec<Date>,
+        #[serde(with = "crate::serde::time::date::vec")]
+        date: Vec<Date>,
+        #[serde(with = "crate::serde::time::datetime::vec")]
+        datetime: Vec<OffsetDateTime>,
+        #[serde(with = "crate::serde::time::datetime64::millis::vec")]
+        datetime64_millis: Vec<OffsetDateTime>,
+        #[serde(with = "crate::serde::time::datetime64::nanos::vec")]
+        datetime64_nanos: Vec<OffsetDateTime>,
+        #[serde(with = "crate::serde::time::time64::micros::vec")]
+        time64_micros: Vec<Duration>,
+    }
+
+    // clickhouse_macros is not working here
+    impl Row for TimeVecs {
+        const NAME: &'static str = "TimeVecs";
+        const COLUMN_NAMES: &'static [&'static str] = &[
+            "date32",
+            "date",
+            "datetime",
+            "datetime64_millis",
+            "datetime64_nanos",
+            "time64_micros",
+        ];
+        const COLUMN_COUNT: usize = 6;
+        const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
+
+        type Value<'a> = TimeVecs;
+    }
+
+    fn date(year: i32, month: Month, day: u8) -> Date {
+        Date::from_calendar_date(year, month, day).unwrap()
+    }
+
+    fn sample() -> TimeVecs {
+        let dt = OffsetDateTime::from_unix_timestamp(1_672_617_600).unwrap(); // 2023-01-02
+        TimeVecs {
+            date32: vec![date(2023, Month::January, 2), date(2023, Month::January, 3)],
+            date: vec![date(2023, Month::January, 2)],
+            datetime: vec![dt, dt + Duration::seconds(1)],
+            datetime64_millis: vec![dt + Duration::milliseconds(123)],
+            datetime64_nanos: vec![dt + Duration::nanoseconds(123_456_789)],
+            time64_micros: vec![Duration::microseconds(42_000_000_123)],
+        }
+    }
+
+    #[test]
+    fn it_serializes_vec_helpers() {
+        let mut actual = Vec::new();
+        super::super::serialize_row_binary(&mut actual, &sample()).unwrap();
+
+        // [Array(Date32)] length 2, then days since 1970-01-01 as i32
+        let mut expected = vec![2];
+        expected.extend_from_slice(&19359_i32.to_le_bytes());
+        expected.extend_from_slice(&19360_i32.to_le_bytes());
+        // [Array(Date)] length 1, then days since 1970-01-01 as u16
+        expected.push(1);
+        expected.extend_from_slice(&19359_u16.to_le_bytes());
+        // [Array(DateTime)] length 2, then seconds as u32
+        expected.push(2);
+        expected.extend_from_slice(&1_672_617_600_u32.to_le_bytes());
+        expected.extend_from_slice(&1_672_617_601_u32.to_le_bytes());
+        // [Array(DateTime64(3))] length 1, then millis as i64
+        expected.push(1);
+        expected.extend_from_slice(&1_672_617_600_123_i64.to_le_bytes());
+        // [Array(DateTime64(9))] length 1, then nanos as i64
+        expected.push(1);
+        expected.extend_from_slice(&1_672_617_600_123_456_789_i64.to_le_bytes());
+        // [Array(Time64(6))] length 1, then micros as i64
+        expected.push(1);
+        expected.extend_from_slice(&42_000_000_123_i64.to_le_bytes());
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn it_round_trips_vec_helpers() {
+        let mut bytes = Vec::new();
+        super::super::serialize_row_binary(&mut bytes, &sample()).unwrap();
+
+        let actual: TimeVecs = super::super::deserialize_row(&mut bytes.as_slice(), None).unwrap();
+        assert_eq!(actual, sample());
+    }
+
+    #[test]
+    fn it_round_trips_empty_vec_helpers() {
+        let empty = TimeVecs {
+            date32: vec![],
+            date: vec![],
+            datetime: vec![],
+            datetime64_millis: vec![],
+            datetime64_nanos: vec![],
+            time64_micros: vec![],
+        };
+
+        let mut bytes = Vec::new();
+        super::super::serialize_row_binary(&mut bytes, &empty).unwrap();
+        assert_eq!(bytes, [0; 6]);
+
+        let actual: TimeVecs = super::super::deserialize_row(&mut bytes.as_slice(), None).unwrap();
+        assert_eq!(actual, empty);
+    }
+
+    #[test]
+    fn it_propagates_vec_element_errors() {
+        let mut row = sample();
+        row.date = vec![date(2023, Month::January, 2), date(1960, Month::January, 1)];
+
+        let mut bytes = Vec::new();
+        let err = super::super::serialize_row_binary(&mut bytes, &row)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("cannot be represented as Date"),
+            "Unexpected error message: {err}"
+        );
+    }
+}

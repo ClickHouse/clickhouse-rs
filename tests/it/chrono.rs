@@ -523,3 +523,90 @@ async fn time64_negative_round_trip() {
 
     assert_eq!(fetched, negative_row);
 }
+
+#[tokio::test]
+async fn array_round_trip() {
+    let client = prepare_database!();
+
+    client
+        .query(
+            "
+            CREATE TABLE test_arrays(
+                dates       Array(Date),
+                dates32     Array(Date32),
+                dts         Array(DateTime('UTC')),
+                dts64ms     Array(DateTime64(3, 'UTC')),
+                dts64ns     Array(DateTime64(9, 'UTC')),
+                times64us   Array(Time64(6))
+            ) ENGINE = MergeTree
+            ORDER BY tuple()
+            SETTINGS enable_time_time64_type = 1
+        ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::chrono::date::vec")]
+        dates: Vec<NaiveDate>,
+        #[serde(with = "clickhouse::serde::chrono::date32::vec")]
+        dates32: Vec<NaiveDate>,
+        #[serde(with = "clickhouse::serde::chrono::datetime::vec")]
+        dts: Vec<DateTime<Utc>>,
+        #[serde(with = "clickhouse::serde::chrono::datetime64::millis::vec")]
+        dts64ms: Vec<DateTime<Utc>>,
+        #[serde(with = "clickhouse::serde::chrono::datetime64::nanos::vec")]
+        dts64ns: Vec<DateTime<Utc>>,
+        #[serde(with = "clickhouse::serde::chrono::time64::micros::vec")]
+        times64us: Vec<Duration>,
+    }
+
+    let dt = DateTime::<Utc>::from_timestamp(1_672_617_600, 0).unwrap(); // 2023-01-02
+    let rows = [
+        MyRow {
+            dates: vec![
+                NaiveDate::from_ymd_opt(2023, 1, 2).unwrap(),
+                NaiveDate::from_ymd_opt(2100, 12, 31).unwrap(),
+            ],
+            dates32: vec![
+                NaiveDate::from_ymd_opt(1960, 1, 1).unwrap(),
+                NaiveDate::from_ymd_opt(2023, 1, 2).unwrap(),
+                NaiveDate::from_ymd_opt(2200, 6, 15).unwrap(),
+            ],
+            dts: vec![dt, dt + Duration::seconds(59)],
+            dts64ms: vec![dt + Duration::milliseconds(123)],
+            dts64ns: vec![
+                dt + Duration::nanoseconds(123_456_789),
+                dt + Duration::nanoseconds(987_654_321),
+            ],
+            times64us: vec![
+                Duration::microseconds(45_296_789_123),
+                Duration::microseconds(-1_500_000),
+            ],
+        },
+        MyRow {
+            dates: vec![],
+            dates32: vec![],
+            dts: vec![],
+            dts64ms: vec![],
+            dts64ns: vec![],
+            times64us: vec![],
+        },
+    ];
+
+    let mut insert = client.insert::<MyRow>("test_arrays").await.unwrap();
+    for row in &rows {
+        insert.write(row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let actual = client
+        .query("SELECT ?fields FROM test_arrays ORDER BY length(dates) DESC")
+        .fetch_all::<MyRow>()
+        .await
+        .unwrap();
+
+    assert_eq!(actual, rows);
+}
