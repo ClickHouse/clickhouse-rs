@@ -410,6 +410,12 @@ impl Query {
     /// `{val: Int32}`. `name` must match the supported bare identifier grammar:
     /// `[A-Za-z_][A-Za-z0-9_]*`. An invalid name returns [`Error::InvalidParams`]
     /// during execution.
+    ///
+    /// A query with parameters is sent as a `multipart/form-data` body. The server
+    /// limits each form field to `http_max_field_value_size` bytes (128 KiB by default).
+    /// The SQL text is split across several fields as needed, so the limit applies
+    /// only to each serialized parameter value. The server takes this setting from its
+    /// default settings profile; setting it per query or per user has no effect.
     pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
         let mut param = String::from("");
         if let Err(err) = ser::write_param(&mut param, &value) {
@@ -511,7 +517,9 @@ fn multipart_query_body(query: &str, parameters: &[(&str, &str)]) -> Result<Mult
 
     let suffix = Alphanumeric.sample_string(&mut rand::rng(), 16);
     let boundary = format!("{MULTIPART_BOUNDARY_PREFIX}{suffix}");
-    let fields = std::iter::once(("query", query)).chain(parameters.iter().copied());
+    let fields = query_fields(query)
+        .map(|field| ("query", field))
+        .chain(parameters.iter().copied());
     // Include each field's boundary, header and trailing CRLF, plus the closing boundary.
     let field_overhead =
         boundary.len() + b"--\r\nContent-Disposition: form-data; name=\"\"\r\n\r\n\r\n".len();
@@ -544,6 +552,35 @@ fn multipart_query_body(query: &str, parameters: &[(&str, &str)]) -> Result<Mult
     Ok(MultipartQueryBody {
         body: Bytes::from(body),
         content_type,
+    })
+}
+
+/// The largest `query` field to send: the default of the server's
+/// `http_max_field_value_size`, which limits each form field.
+const MAX_QUERY_FIELD_LEN: usize = 128 * 1024;
+
+/// Splits `query` into fields of at most [`MAX_QUERY_FIELD_LEN`] bytes, never inside
+/// a character. A query that fits produces one field.
+///
+/// The server joins the values of all `query` fields in order, without a separator
+/// (`DynamicQueryHandler::getQuery` in ClickHouse's `src/Server/HTTPHandler.cpp`).
+fn query_fields(query: &str) -> impl Iterator<Item = &str> + Clone {
+    let mut rest = Some(query);
+    std::iter::from_fn(move || {
+        let query = rest?;
+        if query.len() <= MAX_QUERY_FIELD_LEN {
+            rest = None;
+            return Some(query);
+        }
+
+        // A character is at most 4 bytes long, so this steps back at most 3 bytes.
+        let mut end = MAX_QUERY_FIELD_LEN;
+        while !query.is_char_boundary(end) {
+            end -= 1;
+        }
+        let (field, tail) = query.split_at(end);
+        rest = Some(tail);
+        Some(field)
     })
 }
 
@@ -613,6 +650,52 @@ mod multipart_tests {
         );
 
         assert_eq!(multipart.body, expected);
+    }
+
+    #[test]
+    fn post_query_params_large_query_multipart_body() {
+        const MAX: usize = MAX_QUERY_FIELD_LEN;
+        let query = format!("SELECT '{}'", "x".repeat(2 * MAX));
+        let parameters = [("param_a", "first")];
+
+        let multipart = multipart_query_body(&query, &parameters).unwrap();
+        let boundary = boundary(&multipart);
+        let mut expected = String::new();
+        for field in [&query[..MAX], &query[MAX..2 * MAX], &query[2 * MAX..]] {
+            expected.push_str(&format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"query\"\r\n\r\n{field}\r\n"
+            ));
+        }
+        expected.push_str(&format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"param_a\"\r\n\r\nfirst\r\n\
+             --{boundary}--\r\n"
+        ));
+
+        assert_eq!(multipart.body, expected);
+    }
+
+    #[test]
+    fn post_query_params_query_fields() {
+        const MAX: usize = MAX_QUERY_FIELD_LEN;
+        let x = |len| "x".repeat(len);
+        for (query, field_lens) in [
+            (String::new(), vec![0]),
+            ("SELECT 1".to_owned(), vec![8]),
+            (x(MAX), vec![MAX]),
+            (x(MAX + 1), vec![MAX, 1]),
+            (x(3 * MAX), vec![MAX, MAX, MAX]),
+            // A 4-byte character that crosses the limit moves whole to the next field.
+            (format!("{}😀", x(MAX - 4)), vec![MAX]),
+            (format!("{}😀", x(MAX - 3)), vec![MAX - 3, 4]),
+            (format!("{}😀", x(MAX - 2)), vec![MAX - 2, 4]),
+            (format!("{}😀", x(MAX - 1)), vec![MAX - 1, 4]),
+            (format!("{}😀{}", x(MAX - 1), x(MAX)), vec![MAX - 1, MAX, 4]),
+        ] {
+            let fields = query_fields(&query).collect::<Vec<_>>();
+            let lens = fields.iter().map(|field| field.len()).collect::<Vec<_>>();
+            assert_eq!(lens, field_lens, "query of {} bytes", query.len());
+            assert_eq!(fields.concat(), query);
+        }
     }
 
     #[test]
