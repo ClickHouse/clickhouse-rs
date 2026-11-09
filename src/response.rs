@@ -348,6 +348,10 @@ where
 
 // === DetectDbException ===
 
+/// The server limits the whole tagged exception block to this size, see `MAX_EXCEPTION_SIZE` in
+/// `WriteBufferFromHTTPServerResponse.h`.
+const MAX_EXCEPTION_SIZE: usize = 16 * 1024;
+
 struct DetectDbException<S> {
     stream: S,
     /// Only used when the server sent an exception tag (25.11+).
@@ -458,7 +462,7 @@ impl TaggedState {
 
         if self.in_exception {
             self.held.extend_from_slice(&chunk.data);
-            return self.take_complete_exception().map(Err);
+            return self.take_exception().map(Err);
         }
 
         let data = if self.held.is_empty() {
@@ -472,7 +476,7 @@ impl TaggedState {
             self.in_exception = true;
             self.held.extend_from_slice(&data[start..]);
 
-            if let Some(err) = self.take_complete_exception() {
+            if let Some(err) = self.take_exception() {
                 // Like before, data in the same chunk as the exception is discarded.
                 return Some(Err(err));
             }
@@ -493,13 +497,8 @@ impl TaggedState {
         self.finished = true;
 
         if self.in_exception {
-            self.in_exception = false;
-            let block = self.held.split();
             // The closing marker is missing, return the message we have got.
-            let msg = &block[self.opening.len()..];
-            return Some(Err(Error::BadResponse(
-                String::from_utf8_lossy(msg).trim().into(),
-            )));
+            return Some(Err(self.take_incomplete_exception()));
         }
 
         if self.held.is_empty() {
@@ -508,6 +507,34 @@ impl TaggedState {
 
         let rest = self.held.split().freeze();
         Some(Ok(self.make_chunk(rest)))
+    }
+
+    /// Returns the error if the exception block is complete, or if it is larger than the server
+    /// can send. Returns `None` if more data is needed.
+    fn take_exception(&mut self) -> Option<Error> {
+        if let Some(err) = self.take_complete_exception() {
+            return Some(err);
+        }
+
+        if self.held.len() <= MAX_EXCEPTION_SIZE {
+            return None;
+        }
+
+        // There is no closing marker in the maximum block size. The opening marker was a false
+        // match, or the server does not use this format. More data does not help, thus stop the
+        // stream and return the message we have got, as `finish()` does.
+        self.finished = true;
+        Some(self.take_incomplete_exception())
+    }
+
+    /// Returns the error for an exception block without a closing marker. The message is the
+    /// held data after the opening marker, to a maximum block size of `MAX_EXCEPTION_SIZE`.
+    fn take_incomplete_exception(&mut self) -> Error {
+        self.in_exception = false;
+        let block = self.held.split();
+        let end = block.len().min(MAX_EXCEPTION_SIZE);
+        let msg = &block[self.opening.len()..end];
+        Error::BadResponse(String::from_utf8_lossy(msg).trim().into())
     }
 
     fn take_complete_exception(&mut self) -> Option<Error> {
@@ -763,4 +790,64 @@ fn it_keeps_data_resembling_exception_marker() {
     let (data, err) = detect_exception_in_chunks(&[body], tag);
     assert!(err.is_none());
     assert_eq!(data, body);
+}
+
+#[test]
+fn it_extracts_exception_new_of_max_size() {
+    // The server truncates the message so that the whole block is not larger than
+    // `MAX_EXCEPTION_SIZE`, see `WriteBufferFromHTTPServerResponse::cancelWithException`.
+    let tag = b"rnywyenlaeqynhmu";
+    let error = "e".repeat(MAX_EXCEPTION_SIZE - 77);
+    let block = format!(
+        "\r\n__exception__\r\nrnywyenlaeqynhmu\r\n{error}\n{} rnywyenlaeqynhmu\r\n__exception__\r\n",
+        error.len() + 1
+    );
+    assert!(block.len() <= MAX_EXCEPTION_SIZE);
+
+    let chunks = block.as_bytes().chunks(1000).collect::<Vec<_>>();
+    let (data, err) = detect_exception_in_chunks(&chunks, tag);
+    assert_eq!(err.unwrap().to_string(), format!("bad response: {error}"));
+    assert!(data.is_empty());
+}
+
+#[test]
+fn it_stops_holding_exception_new_without_closing_marker() {
+    let tag = b"rnywyenlaeqynhmu";
+    let opening = b"\r\n__exception__\r\nrnywyenlaeqynhmu\r\n";
+    let first = [&b"\x01\x02"[..], opening, &[b'x'; 10_000]].concat();
+    let chunks = [
+        Ok(Chunk {
+            data: Bytes::from(first),
+            net_size: 1,
+        }),
+        Ok(Chunk {
+            data: Bytes::from_static(&[b'x'; 10_000]),
+            net_size: 1,
+        }),
+        Ok(Chunk {
+            data: Bytes::from_static(b"more data"),
+            net_size: 1,
+        }),
+    ];
+
+    // The response does not end, the error must come without more data.
+    let chunks = futures_util::StreamExt::chain(stream::iter(chunks), stream::pending());
+    let mut stream = DetectDbException::new(chunks, Some(tag[..].into()));
+    let mut cx = Context::from_waker(std::task::Waker::noop());
+    let mut poll = || Pin::new(&mut stream).poll_next(&mut cx);
+
+    let Poll::Ready(Some(Ok(chunk))) = poll() else {
+        panic!("expected the data before the exception block");
+    };
+    assert_eq!(chunk.data, &b"\x01\x02"[..]);
+
+    // The second chunk makes the block larger than `MAX_EXCEPTION_SIZE`.
+    let Poll::Ready(Some(Err(err))) = poll() else {
+        panic!("expected an error");
+    };
+    let expected = "x".repeat(MAX_EXCEPTION_SIZE - opening.len());
+    assert_eq!(err.to_string(), format!("bad response: {expected}"));
+
+    // The stream stops, the remaining data is not read.
+    assert!(matches!(poll(), Poll::Ready(None)));
 }
