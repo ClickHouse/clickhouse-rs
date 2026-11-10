@@ -804,10 +804,14 @@ fn it_extracts_exception_new_of_max_size() {
     );
     assert!(block.len() <= MAX_EXCEPTION_SIZE);
 
-    let chunks = block.as_bytes().chunks(1000).collect::<Vec<_>>();
-    let (data, err) = detect_exception_in_chunks(&chunks, tag);
-    assert_eq!(err.unwrap().to_string(), format!("bad response: {error}"));
-    assert!(data.is_empty());
+    let bytes = block.as_bytes();
+    // In the second case, the last chunk is only the last byte of the block.
+    let (head, tail) = bytes.split_at(bytes.len() - 1);
+    for chunks in [bytes.chunks(1000).collect::<Vec<_>>(), vec![head, tail]] {
+        let (data, err) = detect_exception_in_chunks(&chunks, tag);
+        assert_eq!(err.unwrap().to_string(), format!("bad response: {error}"));
+        assert!(data.is_empty());
+    }
 }
 
 #[test]
