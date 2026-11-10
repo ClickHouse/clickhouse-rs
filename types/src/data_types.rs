@@ -622,9 +622,11 @@ fn parse_datetime(input: &str) -> Result<DataTypeNode, TypesError> {
     if input == "DateTime" {
         return Ok(DataTypeNode::DateTime(None));
     }
-    if input.len() >= 12 {
-        let timezone = input[10..input.len() - 2].to_string();
-        return Ok(DataTypeNode::DateTime(Some(timezone)));
+    if let Some(timezone) = input
+        .strip_prefix("DateTime('")
+        .and_then(|rest| rest.strip_suffix("')"))
+    {
+        return Ok(DataTypeNode::DateTime(Some(timezone.to_string())));
     }
     Err(TypesError::TypeParsingError(format!(
         "Invalid DateTime format, expected DateTime('timezone'), got {input}"
@@ -1370,6 +1372,14 @@ mod tests {
             DataTypeNode::DateTime(Some("America/New_York".to_string()))
         );
         assert!(DataTypeNode::new("DateTime()").is_err());
+        // Malformed or unquoted timezones must return an error, not panic.
+        assert!(DataTypeNode::new("DateTime(é)").is_err());
+        assert!(DataTypeNode::new("DateTime(UTC)").is_err());
+        assert!(DataTypeNode::new("DateTime('UTC'").is_err());
+        assert_eq!(
+            DataTypeNode::new("DateTime('Europe/Zürich')").unwrap(),
+            DataTypeNode::DateTime(Some("Europe/Zürich".to_string()))
+        );
     }
 
     #[test]
