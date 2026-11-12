@@ -33,6 +33,7 @@ pub mod sql;
 pub mod test;
 
 pub mod types;
+pub mod udf;
 
 mod bytes_ext;
 mod compression;
