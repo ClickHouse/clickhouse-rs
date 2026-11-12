@@ -267,6 +267,7 @@ mod fetch_native;
 mod https_errors;
 mod insert;
 mod insert_formatted;
+mod insert_metadata_cache;
 mod insert_native;
 #[cfg(feature = "inserter")]
 mod inserter;
