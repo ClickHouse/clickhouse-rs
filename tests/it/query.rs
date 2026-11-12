@@ -150,6 +150,28 @@ async fn server_side_param() {
         .await
         .expect("failed to apply an ordinary setting to a parameterized query");
     assert_eq!(result, 123);
+
+    #[derive(Serialize)]
+    enum Status {
+        #[serde(rename = "active")]
+        Active,
+    }
+
+    let result = client
+        .query("SELECT {val1: String} AS result")
+        .param("val1", Status::Active)
+        .fetch_one::<String>()
+        .await
+        .expect("failed to fetch a unit variant as a string parameter");
+    assert_eq!(result, "active");
+
+    let result = client
+        .query("SELECT toString({val1: Enum8('active' = 1)}) AS result")
+        .param("val1", Status::Active)
+        .fetch_one::<String>()
+        .await
+        .expect("failed to fetch a unit variant as an enum parameter");
+    assert_eq!(result, "active");
 }
 
 #[tokio::test]
