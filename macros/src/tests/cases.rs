@@ -119,7 +119,7 @@ fn serde_rename_all() {
         #[serde(rename_all = "camelCase")]
         struct Sample {
             field_one: i32,
-            #[serde(rename = "explicit")]
+            #[serde(rename = "explicit_name")]
             field_two: u32,
         }
     }

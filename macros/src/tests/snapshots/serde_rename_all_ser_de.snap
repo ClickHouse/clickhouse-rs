@@ -13,7 +13,7 @@ struct Sample {
 #[automatically_derived]
 impl clickhouse::Row for Sample {
     const NAME: &'static str = stringify!(Sample);
-    const COLUMN_NAMES: &'static [&'static str] = &["fieldOne", "explicit_de"];
+    const COLUMN_NAMES: &'static [&'static str] = &["fieldOne", "explicitDe"];
     const INSERT_COLUMN_NAMES: &'static [&'static str] = &["FIELD_ONE", "FIELD_TWO"];
     const COLUMN_COUNT: usize = <Self as clickhouse::Row>::COLUMN_NAMES.len();
     const KIND: clickhouse::_priv::RowKind = clickhouse::_priv::RowKind::Struct;

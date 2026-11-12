@@ -16,10 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-* `#[derive(Row)]` now applies `#[serde(rename_all)]` like serde does: the serialize and deserialize rules are applied
-  to their respective sides, and fields with an explicit `#[serde(rename)]` are not affected by it. ([#360])
-  **This changes the column name** of a field that has both: e.g. `rename = "foo"` with `rename_all = "UPPERCASE"`
-  used to give the column `FOO`, and now gives `foo`, matching what serde itself uses.
+* `#[derive(Row)]` applies the serialize and deserialize rules of `#[serde(rename_all(serialize = "..",
+  deserialize = ".."))]` to their respective sides. As before, the rule is also applied to a name set with
+  `#[serde(rename)]`. ([#360])
 * A value that ends like an old-format exception (`Code: … DB::Exception: …))\n`) no longer fails the query on
   servers that send an exception tag (25.11+). ([#503])
 

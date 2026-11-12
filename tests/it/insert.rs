@@ -392,6 +392,8 @@ async fn rename_ser_de_insert_and_fetch() {
         some_field: u32,
     }
 
+    // `rename_all` is applied on top of `rename`, on each side:
+    // INSERT columns are ID, VALUE_SER, SOME_FIELD; fetched ones are id, valueDe, someField.
     let table_name = "insert_rename_ser_de";
 
     let client = prepare_database!();
@@ -400,7 +402,7 @@ async fn rename_ser_de_insert_and_fetch() {
             "
             CREATE TABLE ?(
               ID UInt64,
-              value_ser String,
+              VALUE_SER String,
               SOME_FIELD UInt32
             )
             ENGINE = MergeTree
@@ -425,7 +427,7 @@ async fn rename_ser_de_insert_and_fetch() {
 
     // SELECT uses deserialize names.
     let rows = client
-        .query("SELECT ID AS id, value_ser AS value_de, SOME_FIELD AS someField FROM ?")
+        .query("SELECT ID AS id, VALUE_SER AS valueDe, SOME_FIELD AS someField FROM ?")
         .bind(Identifier(table_name))
         .fetch_all::<RenameRow>()
         .await
@@ -436,7 +438,7 @@ async fn rename_ser_de_insert_and_fetch() {
     let rows = client
         .query(
             "SELECT ?fields FROM (
-               SELECT ID AS id, value_ser AS value_de, SOME_FIELD AS someField FROM ?
+               SELECT ID AS id, VALUE_SER AS valueDe, SOME_FIELD AS someField FROM ?
              )",
         )
         .bind(Identifier(table_name))

@@ -38,18 +38,23 @@ fn column_names(
                 .named
                 .iter()
                 .enumerate()
-                .map(|(index, field)| {
-                    let mut field = Field::from_ast(cx, index, field, None, &SerdeDefault::None);
-                    // Same as serde: `rename_all` applies only to fields without `rename`,
-                    // and each side (ser/de) uses its own rule.
-                    field.rename_by_rules(rename_rules);
-                    field
-                })
+                .map(|(index, field)| Field::from_ast(cx, index, field, None, &SerdeDefault::None))
                 .filter(|field| !field.skip_serializing() && !field.skip_deserializing())
                 .collect::<Vec<_>>();
 
-            let de_names = fields.iter().map(|field| field.name().deserialize_name());
-            let ser_names = fields.iter().map(|field| field.name().serialize_name());
+            // Each side (ser/de) uses its own name and its own `rename_all` rule.
+            // As before, the rule is also applied to a name given with `rename`,
+            // so existing structs keep the column names they have today.
+            let de_names = fields.iter().map(|field| {
+                rename_rules
+                    .deserialize
+                    .apply_to_field(field.name().deserialize_name())
+            });
+            let ser_names = fields.iter().map(|field| {
+                rename_rules
+                    .serialize
+                    .apply_to_field(field.name().serialize_name())
+            });
 
             (
                 quote! { &[#( #de_names,)*] },
