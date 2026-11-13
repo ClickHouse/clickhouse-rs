@@ -492,6 +492,7 @@ async fn nested_arrays_1000() {
 #[tokio::test]
 async fn fixed_width_tuples() {
     let client = get_client();
+    let query_id = uuid::Uuid::new_v4().to_string();
 
     let mut cursor = client
         .query(
@@ -504,10 +505,15 @@ async fn fixed_width_tuples() {
             FROM system.numbers
             LIMIT 3",
         )
+        .with_setting("query_id", &query_id)
         .fetch_native()
         .unwrap();
 
+    assert!(cursor.query_id().is_none());
+
     let block = cursor.next().await.unwrap().expect("expected one block");
+
+    assert_eq!(cursor.query_id(), Some(query_id.as_str()));
 
     let tuples = block["fixed_tuple"]
         .iter::<(u64, u32)>()

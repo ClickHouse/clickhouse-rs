@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+* Added `RowCursor::query_id()`, `BytesCursor::query_id()` and `NativeCursor::query_id()`, which return the query id from the `X-ClickHouse-Query-Id` response header. ([#522])
+
+[#522]: https://github.com/ClickHouse/clickhouse-rs/issues/522
+
 ### Fixed
 
 * A value that ends like an old-format exception (`Code: … DB::Exception: …))\n`) no longer fails the query on

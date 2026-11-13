@@ -75,6 +75,7 @@ async fn summary_header_absent() {
     while cursor.next().await.unwrap().is_some() {}
 
     assert!(cursor.summary().is_none());
+    assert!(cursor.query_id().is_none());
 }
 
 #[tokio::test]

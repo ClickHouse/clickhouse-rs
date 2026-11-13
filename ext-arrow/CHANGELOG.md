@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased - ReleaseDate
 
+### Added
+
+* Added `ArrowCursor::query_id()`. ([#522])
+
+[#522]: https://github.com/ClickHouse/clickhouse-rs/issues/522
+
 ## 0.2.0 - 2026-09-17
 
 ### Breaking

@@ -22,9 +22,12 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) -> u8 {
         client = client.with_setting("wait_end_of_query", "1")
     }
 
+    let query_id = uuid::Uuid::new_v4().to_string();
+
     // TODO: check different `timeout_overflow_mode`
     let mut cursor = client
         .with_compression(Compression::None)
+        .with_setting("query_id", &query_id)
         // fails on the 4th row
         .with_setting("max_execution_time", "0.1")
         // force streaming one row in a chunk
@@ -47,6 +50,11 @@ async fn max_execution_time(mut client: Client, wait_end_of_query: bool) -> u8 {
         err_s.contains("TIMEOUT_EXCEEDED"),
         "expected TIMEOUT_EXCEEDED in error string, got {err_s:?}; original: {err:?}"
     );
+
+    // The id arrived with the headers, so it survives an error in the body.
+    if !wait_end_of_query {
+        assert_eq!(cursor.query_id(), Some(query_id.as_str()));
+    }
 
     i
 }

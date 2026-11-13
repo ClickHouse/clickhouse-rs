@@ -8,6 +8,7 @@ use std::task::{Context, Poll, ready};
 
 pub struct NativeCursor {
     state: CursorState,
+    query_id: Option<Box<str>>,
     span: tracing::Span,
 }
 
@@ -21,8 +22,17 @@ impl NativeCursor {
     pub(crate) fn new(response: Response, span: tracing::Span) -> Self {
         NativeCursor {
             state: CursorState::Loading(response.into_future()),
+            query_id: None,
             span,
         }
+    }
+
+    /// Returns the id of the query. See [`BytesCursor::query_id()`].
+    ///
+    /// [`BytesCursor::query_id()`]: crate::query::BytesCursor::query_id
+    #[inline]
+    pub fn query_id(&self) -> Option<&str> {
+        self.query_id.as_deref()
     }
 
     pub async fn next(&mut self) -> Result<Option<Block>, Error> {
@@ -37,7 +47,8 @@ impl NativeCursor {
                 CursorState::Loading(fut) => {
                     match ready!(Pin::new(fut).poll(cx)) {
                         // TODO: expose summary
-                        Ok((chunks, _summary)) => {
+                        Ok((chunks, meta)) => {
+                            self.query_id = meta.query_id;
                             self.state = CursorState::Reading(Box::pin(read_block(
                                 BlockReader::new(chunks),
                             )));

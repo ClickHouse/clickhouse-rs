@@ -225,6 +225,14 @@ impl<T> RowCursor<T> {
     pub fn summary(&self) -> Option<&QuerySummary> {
         self.raw.summary()
     }
+
+    /// Returns the id of the query. See [`BytesCursor::query_id()`].
+    ///
+    /// [`BytesCursor::query_id()`]: crate::query::BytesCursor::query_id
+    #[inline]
+    pub fn query_id(&self) -> Option<&str> {
+        self.raw.query_id()
+    }
 }
 
 impl<T> Drop for RowCursor<T> {
