@@ -127,6 +127,43 @@ macro_rules! check_cloud_test_env {
     };
 }
 
+/// Skips the test if the server is older than the given `major.minor` release.
+///
+/// CI runs the suite against every supported server version, so a test that
+/// exercises a server feature introduced in a specific release must declare
+/// that requirement instead of failing on older servers.
+macro_rules! require_server_version {
+    ($major:literal, $minor:literal) => {
+        let version = $crate::server_version().await;
+        if version < ($major, $minor) {
+            eprintln!(
+                "Skipping test: requires ClickHouse {}.{} or newer, but the server is {}.{}",
+                $major, $minor, version.0, version.1
+            );
+            return;
+        }
+    };
+}
+
+/// The `(major, minor)` release of the server under test.
+pub(crate) async fn server_version() -> (u16, u16) {
+    let version = get_client()
+        .query("SELECT version()")
+        .fetch_one::<String>()
+        .await
+        .expect("cannot read the server version");
+
+    let mut parts = version.split('.');
+    let mut part = |name: &str| {
+        parts
+            .next()
+            .and_then(|part| part.parse::<u16>().ok())
+            .unwrap_or_else(|| panic!("cannot read the {name} part of the version {version:?}"))
+    };
+
+    (part("major"), part("minor"))
+}
+
 pub(crate) fn get_client() -> Client {
     let client = Client::default();
 
