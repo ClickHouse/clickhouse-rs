@@ -33,8 +33,15 @@ pub(crate) enum Response {
     Loading(Chunks),
 }
 
+/// Values taken from the response headers of a successful request.
+#[derive(Default)]
+pub(crate) struct ResponseMeta {
+    pub(crate) summary: Option<Box<QuerySummary>>,
+    pub(crate) query_id: Option<Box<str>>,
+}
+
 pub(crate) type ResponseFuture =
-    Pin<Box<dyn Future<Output = Result<(Chunks, Option<Box<QuerySummary>>)>> + Send>>;
+    Pin<Box<dyn Future<Output = Result<(Chunks, ResponseMeta)>> + Send>>;
 
 impl Response {
     pub(crate) fn new(response: HyperResponseFuture) -> Self {
@@ -60,7 +67,7 @@ impl Response {
         let chunks = loop {
             match self {
                 Self::Waiting(future) => {
-                    let (chunks, _summary) = future.await?;
+                    let (chunks, _meta) = future.await?;
                     *self = Self::Loading(chunks);
                 }
                 Self::Loading(chunks) => break chunks,
@@ -72,9 +79,7 @@ impl Response {
     }
 }
 
-async fn collect_response(
-    response: HyperResponseFuture,
-) -> Result<(Chunks, Option<Box<QuerySummary>>)> {
+async fn collect_response(response: HyperResponseFuture) -> Result<(Chunks, ResponseMeta)> {
     let (parts, body) = response.await?.into_parts();
 
     let status = parts.status;
@@ -97,9 +102,21 @@ async fn collect_response(
             .get("X-ClickHouse-Summary")
             .and_then(|v| v.to_str().ok())
             .and_then(QuerySummary::from_header)
-            .map(Box::new); // More likely to be successful, start streaming.
+            .map(Box::new);
+
+        // `HeaderValue::to_str()` only accepts ASCII, but a query id can be any UTF-8 string.
+        let query_id = parts
+            .headers
+            .get("X-ClickHouse-Query-Id")
+            .and_then(|v| str::from_utf8(v.as_bytes()).ok())
+            .map(Box::from);
+
+        // More likely to be successful, start streaming.
         // It still can fail, but we'll handle it in `DetectDbException`.
-        Ok((Chunks::new(body, &parts.headers, tag)?, summary))
+        Ok((
+            Chunks::new(body, &parts.headers, tag)?,
+            ResponseMeta { summary, query_id },
+        ))
     } else {
         // An instantly failed request.
         let error = collect_bad_response(

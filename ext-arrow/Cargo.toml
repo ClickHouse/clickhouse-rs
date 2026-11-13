@@ -22,5 +22,7 @@ tokio = "1"
 tracing = "0.1"
 
 [dependencies.clickhouse]
+# TODO: raise to the first `clickhouse` release that has `BytesCursor::query_id()` before publishing this crate.
+# 0.15.3 does not have it: https://github.com/ClickHouse/clickhouse-rs/issues/522
 version = "0.15.3"
 path = ".."

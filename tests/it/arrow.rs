@@ -237,6 +237,33 @@ async fn insert_custom() {
 }
 
 #[tokio::test]
+async fn query_id() {
+    let client = prepare_database!();
+    let query_id = uuid::Uuid::new_v4().to_string();
+
+    // A statement without a result set still has a query id.
+    let mut cursor = client
+        .query("CREATE TABLE arrow_query_id(foo Int32) ENGINE = MergeTree ORDER BY foo")
+        .with_setting("query_id", &query_id)
+        .fetch_arrow()
+        .unwrap();
+
+    // Not available before headers are received.
+    assert!(cursor.query_id().is_none());
+    assert!(cursor.next().await.unwrap().is_none());
+    assert_eq!(cursor.query_id(), Some(query_id.as_str()));
+
+    // Without a `query_id` setting, the server generates one.
+    let mut cursor = client
+        .query("SELECT number FROM system.numbers LIMIT 10")
+        .fetch_arrow()
+        .unwrap();
+
+    cursor.collect().await.unwrap();
+    assert!(cursor.query_id().is_some_and(|id| !id.is_empty()));
+}
+
+#[tokio::test]
 async fn query_empty_response() {
     let client = get_client();
 

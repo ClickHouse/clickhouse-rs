@@ -11,17 +11,24 @@ async fn summary_with_wait_end_of_query() {
     }
     insert.end().await.unwrap();
 
+    // A query id does not have to be ASCII.
+    let query_id = format!("запрос-{}", uuid::Uuid::new_v4());
+
     let mut cursor = client
         .query("SELECT * FROM test")
         .with_setting("send_progress_in_http_headers", "1")
         .with_setting("wait_end_of_query", "1")
+        .with_setting("query_id", &query_id)
         .fetch::<SimpleRow>()
         .unwrap();
 
-    // Summary is not available before headers are received.
+    // Summary and query id are not available before headers are received.
     assert!(cursor.summary().is_none());
+    assert!(cursor.query_id().is_none());
 
     while cursor.next().await.unwrap().is_some() {}
+
+    assert_eq!(cursor.query_id(), Some(query_id.as_str()));
 
     let summary = cursor.summary().expect("summary should be present");
     assert_eq!(summary.read_rows(), Some(100));
@@ -122,6 +129,9 @@ async fn summary_with_fetch_bytes() {
 
     // Consume all bytes.
     while cursor.next().await.unwrap().is_some() {}
+
+    // Without a `query_id` setting, the server generates one.
+    assert!(cursor.query_id().is_some_and(|id| !id.is_empty()));
 
     let summary = cursor.summary().expect("summary should be present");
     assert_eq!(summary.read_rows(), Some(50));

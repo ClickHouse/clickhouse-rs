@@ -385,6 +385,12 @@ impl ArrowCursor {
         self.decoder.schema()
     }
 
+    /// Returns the id of the query. See [`BytesCursor::query_id()`].
+    #[inline(always)]
+    pub fn query_id(&self) -> Option<&str> {
+        self.cursor.query_id()
+    }
+
     pub(crate) fn poll_next(
         &mut self,
         cx: &mut Context<'_>,
