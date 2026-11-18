@@ -1258,7 +1258,7 @@ async fn struct_and_primitive_in_a_tuple() {
     insert.end().await.unwrap();
 
     let mut cursor = client
-        .query("SELECT ?fields, count() FROM test GROUP BY ?fields")
+        .query("SELECT ?fields, count() FROM test GROUP BY ?fields ORDER BY id")
         .fetch::<(Data, u64)>()
         .unwrap();
 
