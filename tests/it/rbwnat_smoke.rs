@@ -3,6 +3,7 @@ use crate::geo_types::{LineString, MultiLineString, MultiPolygon, Point, Polygon
 use crate::{SimpleRow, create_simple_table, execute_statements, get_client, insert_and_select};
 use clickhouse::Row;
 use clickhouse::sql::Identifier;
+use clickhouse_types::data_types::{DataTypeNode, EnumType};
 use indexmap::IndexMap;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
@@ -502,6 +503,83 @@ async fn enums() {
 
     let result = insert_and_select(&client, table_name, rows.clone()).await;
     assert_eq!(result, rows);
+}
+
+#[tokio::test]
+async fn enum_names_with_escapes() {
+    #[derive(Clone, Debug, PartialEq, Serialize_repr, Deserialize_repr)]
+    #[repr(i8)]
+    enum MyEnum8 {
+        NewLine = 1,
+        Tab = 2,
+        Nul = 3,
+        Backslash = 4,
+        Quote = 5,
+        UnknownEscape = 6,
+        NonAscii = 7,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Row, Serialize, Deserialize)]
+    struct Data {
+        enum8: MyEnum8,
+    }
+
+    // The server writes the type back with other escapes than in `CREATE TABLE`
+    let enum8_type = concat!(
+        r"Enum8('new\x0Aline' = 1, 'tab\x09' = 2, 'nul\0' = 3, 'back\\slash' = 4, ",
+        r"'quote''' = 5, 'unknown\z' = 6, 'caf\xC3\xA9' = 7)",
+    );
+    let names = [
+        "new\nline",
+        "tab\t",
+        "nul\0",
+        r"back\slash",
+        "quote'",
+        r"unknown\z",
+        "café",
+    ];
+    let expected_type = DataTypeNode::Enum(
+        EnumType::Enum8,
+        (1..).zip(names.map(String::from)).collect(),
+    );
+
+    let client = prepare_database!();
+    client
+        .query(&format!(
+            "CREATE OR REPLACE TABLE test (enum8 {enum8_type}) ENGINE MergeTree ORDER BY enum8"
+        ))
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = [
+        MyEnum8::NewLine,
+        MyEnum8::Tab,
+        MyEnum8::Nul,
+        MyEnum8::Backslash,
+        MyEnum8::Quote,
+        MyEnum8::UnknownEscape,
+        MyEnum8::NonAscii,
+    ]
+    .map(|enum8| Data { enum8 });
+
+    let result = insert_and_select(&client, "test", rows.clone()).await;
+    assert_eq!(result, rows);
+
+    let server_names = client
+        .query("SELECT toString(enum8) FROM test ORDER BY enum8")
+        .fetch_all::<String>()
+        .await
+        .unwrap();
+    assert_eq!(server_names, names);
+
+    let server_type = client
+        .query("SELECT toTypeName(enum8) FROM test LIMIT 1")
+        .fetch_one::<String>()
+        .await
+        .unwrap();
+    assert_eq!(DataTypeNode::new(&server_type).unwrap(), expected_type);
+    assert_eq!(DataTypeNode::new(enum8_type).unwrap(), expected_type);
 }
 
 #[tokio::test]
