@@ -12,11 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * A value that ends like an old-format exception (`Code: … DB::Exception: …))\n`) no longer fails the query on
   servers that send an exception tag (25.11+). ([#503])
+* A unit-variant enum passed to `Query::param` is sent as the bare value instead of a quoted SQL literal,
+  so server-side `{name:Type}` parameters receive it correctly and `Enum8` parameters parse. ([#520])
 * `DataTypeNode::new()` now decodes the escapes in `Enum8` and `Enum16` names with the same rules as the server.
   It decodes `\a`, `\e`, `\v`, `\xHH`, `\N` and `''`, and removes the backslash before `"`, `` ` ``, `/`, `=` and
   control characters. Other escapes such as `\z` keep the backslash. ([#529])
 
 [#503]: https://github.com/ClickHouse/clickhouse-rs/pull/503
+[#520]: https://github.com/ClickHouse/clickhouse-rs/pull/520
 [#529]: https://github.com/ClickHouse/clickhouse-rs/pull/529
 
 ## [0.15.3] - 2026-10-07
