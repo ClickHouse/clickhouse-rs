@@ -60,6 +60,10 @@ harness = false
 name = "mocked_select"
 harness = false
 
+[[bench]]
+name = "bind"
+harness = false
+
 [[example]]
 name = "inserter"
 required-features = ["inserter"]

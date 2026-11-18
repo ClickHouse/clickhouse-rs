@@ -25,6 +25,10 @@ perf script > perf.script
 
 Then upload the `perf.script` file to [Firefox Profiler].
 
+## Without a server
+
+* [bind](bind.rs) measures building a query with many `Query::bind()` arguments.
+
 ## With a running ClickHouse server
 
 These benchmarks are run against a real ClickHouse server, so it must be started:
