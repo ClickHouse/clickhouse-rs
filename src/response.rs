@@ -37,7 +37,8 @@ pub(crate) type ResponseFuture =
     Pin<Box<dyn Future<Output = Result<(Chunks, Option<Box<QuerySummary>>)>> + Send>>;
 
 impl Response {
-    pub(crate) fn new(response: HyperResponseFuture) -> Self {
+    /// If `format` is set, the response fails when the server sends the data in another format.
+    pub(crate) fn new(response: HyperResponseFuture, format: Option<&'static str>) -> Self {
         let span = tracing::info_span!(
             "response",
             otel.status_code = tracing::field::Empty,
@@ -46,7 +47,9 @@ impl Response {
             db.response_code = tracing::field::Empty,
         );
 
-        Self::Waiting(Box::pin(collect_response(response).instrument(span)))
+        Self::Waiting(Box::pin(
+            collect_response(response, format).instrument(span),
+        ))
     }
 
     pub(crate) fn into_future(self) -> ResponseFuture {
@@ -74,6 +77,7 @@ impl Response {
 
 async fn collect_response(
     response: HyperResponseFuture,
+    format: Option<&'static str>,
 ) -> Result<(Chunks, Option<Box<QuerySummary>>)> {
     let (parts, body) = response.await?.into_parts();
 
@@ -87,6 +91,10 @@ async fn collect_response(
     );
 
     if status == StatusCode::OK && exception_code.is_none() {
+        if let Some(format) = format {
+            check_format(&parts.headers, format)?;
+        }
+
         let tag = parts
             .headers
             .get("X-ClickHouse-Exception-Tag")
@@ -186,6 +194,30 @@ fn reason(status: StatusCode, exception_code: Option<String>) -> String {
             status.canonical_reason().unwrap_or("<unknown>"),
         )
     })
+}
+
+// A `FORMAT` clause in the query has priority over `default_format`,
+// so the server can send the data in a format that the cursor cannot read.
+fn check_format(headers: &HeaderMap, expected: &str) -> Result<()> {
+    // The server sends no header for a statement without a result, and a proxy can remove it.
+    let Some(format) = headers.get("X-ClickHouse-Format") else {
+        return Ok(());
+    };
+
+    // The server accepts a format name in any case and sends the name as written in the query.
+    if format.as_bytes().eq_ignore_ascii_case(expected.as_bytes()) {
+        return Ok(());
+    }
+
+    let format = String::from_utf8_lossy(format.as_bytes());
+    Err(Error::Other(
+        format!(
+            "the server sent the result in the `{format}` format, but `fetch()` can read only \
+             `{expected}`. Remove the `FORMAT` clause from the query, or use `fetch_bytes()` \
+             to read the raw bytes"
+        )
+        .into(),
+    ))
 }
 
 // === Chunks ===
@@ -470,6 +502,31 @@ fn parse_msg_len(len_bytes: &[u8]) -> Result<usize, Error> {
                 .into(),
         )
     })
+}
+
+#[test]
+fn it_checks_format() {
+    let headers = |format: &'static str| {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-ClickHouse-Format", format.parse().unwrap());
+        headers
+    };
+
+    assert!(check_format(&HeaderMap::new(), "RowBinary").is_ok());
+    assert!(check_format(&headers("RowBinary"), "RowBinary").is_ok());
+    assert!(check_format(&headers("rowbinary"), "RowBinary").is_ok());
+
+    for format in ["JSONEachRow", "Null", "RowBinaryWithNamesAndTypes"] {
+        let err = check_format(&headers(format), "RowBinary").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "the server sent the result in the `{format}` format, but `fetch()` can read \
+                 only `RowBinary`. Remove the `FORMAT` clause from the query, or use \
+                 `fetch_bytes()` to read the raw bytes"
+            )
+        );
+    }
 }
 
 #[test]
