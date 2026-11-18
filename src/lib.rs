@@ -146,8 +146,29 @@ impl std::fmt::Debug for Client {
 
 /// Cache for [`RowMetadata`] to avoid allocating it for the same struct more than once
 /// during the application lifecycle. Key: fully qualified table name (e.g. `database.table`).
+///
+/// The lock on the map is never held during a request. Each table has its own entry,
+/// so `DESCRIBE TABLE` for one table doesn't block inserts into the other tables.
 #[derive(Default)]
-pub(crate) struct InsertMetadataCache(RwLock<HashMap<String, Arc<InsertMetadata>>>);
+pub(crate) struct InsertMetadataCache(RwLock<HashMap<String, Arc<InsertMetadataEntry>>>);
+
+/// `None` until the metadata is fetched. The write lock is held during the fetch,
+/// so concurrent inserts into the same table send only one `DESCRIBE TABLE`.
+type InsertMetadataEntry = RwLock<Option<Arc<InsertMetadata>>>;
+
+impl InsertMetadataCache {
+    async fn entry(&self, raw_table_name: &str) -> Arc<InsertMetadataEntry> {
+        if let Some(entry) = self.0.read().await.get(raw_table_name) {
+            return entry.clone();
+        }
+
+        let mut entries = self.0.write().await;
+        entries
+            .entry(raw_table_name.to_string())
+            .or_default()
+            .clone()
+    }
+}
 
 impl Client {
     /// Creates a new client with a specified underlying HTTP client.
@@ -713,7 +734,9 @@ impl Client {
     /// This applies to all cloned instances of this `Client` (using the same URL and database)
     /// as well.
     ///
-    /// This may need to wait to acquire a lock if a query is concurrently writing into the cache.
+    /// This does not wait for a metadata request that is in progress.
+    /// Inserts that already wait for that request use its result,
+    /// but the result is not put into the cache.
     ///
     /// Cancel-safe.
     pub async fn clear_cached_metadata(&self) {
@@ -790,17 +813,20 @@ impl Client {
             ttl_expression: String,
         }
 
-        {
-            let read_lock = self.insert_metadata_cache.0.read().await;
+        let entry = self.insert_metadata_cache.entry(raw_table_name).await;
 
-            if let Some(metadata) = read_lock.get(raw_table_name) {
-                return Ok(metadata.clone());
-            }
+        if let Some(metadata) = &*entry.read().await {
+            return Ok(metadata.clone());
+        }
+
+        let mut cached = entry.write().await;
+
+        // Another insert can fetch the metadata while this one waits for the write lock.
+        if let Some(metadata) = &*cached {
+            return Ok(metadata.clone());
         }
 
         // TODO: should it be moved to a cold function?
-        let mut write_lock = self.insert_metadata_cache.0.write().await;
-
         let mut columns_cursor = self
             .insert_metadata_query(raw_table_name)
             .fetch::<DescribeColumn>()?;
@@ -832,7 +858,7 @@ impl Client {
             column_lookup,
         });
 
-        write_lock.insert(raw_table_name.to_string(), metadata.clone());
+        *cached = Some(metadata.clone());
         Ok(metadata)
     }
 }
