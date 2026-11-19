@@ -298,7 +298,11 @@ impl<'a> Runner<'a> {
             if header {
                 header = false;
                 if format.names {
-                    write_header(&mut out, columns.iter().map(|c| c.name_bytes().to_vec()));
+                    write_header(
+                        &mut out,
+                        columns.iter().map(|c| c.name_bytes().to_vec()),
+                        format.raw,
+                    );
                 }
                 if format.types {
                     write_header(
@@ -306,6 +310,7 @@ impl<'a> Runner<'a> {
                         columns
                             .iter()
                             .map(|c| c.data_type().to_string().into_bytes()),
+                        format.raw,
                     );
                 }
             }
@@ -400,12 +405,19 @@ impl<'a> Runner<'a> {
     }
 }
 
-fn write_header(out: &mut Vec<u8>, cells: impl Iterator<Item = Vec<u8>>) {
+/// Writes a header line (names or types). A Raw format writes it without
+/// escapes, as its rows (`TabSeparatedRowOutputFormat::writeLine` in
+/// ClickHouse).
+fn write_header(out: &mut Vec<u8>, cells: impl Iterator<Item = Vec<u8>>, raw: bool) {
     for (i, cell) in cells.enumerate() {
         if i > 0 {
             out.push(b'\t');
         }
-        write_string(out, &cell, false);
+        if raw {
+            out.extend_from_slice(&cell);
+        } else {
+            write_string(out, &cell, false);
+        }
     }
     out.push(b'\n');
 }

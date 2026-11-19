@@ -20,6 +20,11 @@ fn live() -> bool {
 
 /// The server's own TabSeparated text for a query.
 fn server_tsv(query: &str) -> Vec<u8> {
+    server_output(query, "TabSeparated")
+}
+
+/// The server's own text for a query without a FORMAT clause, in `format`.
+fn server_output(query: &str, format: &str) -> Vec<u8> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -28,7 +33,7 @@ fn server_tsv(query: &str) -> Vec<u8> {
         let bytes = clickhouse::Client::default()
             .with_url(URL)
             .query_raw(query)
-            .fetch_bytes("TabSeparated")
+            .fetch_bytes(format)
             .unwrap()
             .collect()
             .await
@@ -182,6 +187,38 @@ fn output_formats() {
         err.contains("output format JSONEachRow is not supported"),
         "{err}"
     );
+}
+
+/// The header lines (names, types): a Raw format writes them without
+/// escapes, as its rows. Contrast: TSVWithNames escapes the header.
+#[test]
+fn header_of_format() {
+    if !live() {
+        return;
+    }
+    let select = "SELECT 1 AS `a\\tb\\\\c'd`, 'x' AS `é\\nf`, \
+                  CAST('a' AS Enum8('a\\tb' = 1, 'a' = 2)) AS e";
+    let formats = [
+        "TSVWithNames",
+        "TSVWithNamesAndTypes",
+        "TSVRawWithNames",
+        "TabSeparatedRawWithNamesAndTypes",
+        "RawWithNames",
+    ];
+    let mut failures = Vec::new();
+    for format in formats {
+        let query = format!("{select} FORMAT {format}");
+        let want = server_output(select, format);
+        let (got, err, code) = shim_bytes(&query);
+        if code != 0 || got != want {
+            failures.push(format!(
+                "{format}\n  server: {:?}\n  shim:   {:?} (exit code {code}, stderr {err:?})",
+                String::from_utf8_lossy(&want),
+                String::from_utf8_lossy(&got),
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// `SET`, `USE` and temporary tables last for the whole invocation, also

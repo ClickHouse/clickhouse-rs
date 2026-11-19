@@ -228,7 +228,8 @@ fn format_after_select_from(head: &str) -> bool {
     !after_select || saw_from
 }
 
-/// Returns the words of `sql` outside quotes, comments and parentheses.
+/// Returns the words of `sql` outside quotes, heredocs, comments and
+/// parentheses.
 fn top_level_words(sql: &str) -> Vec<&str> {
     let b = sql.as_bytes();
     let mut words = Vec::new();
@@ -240,6 +241,7 @@ fn top_level_words(sql: &str) -> Vec<&str> {
             b'\'' | b'"' | b'`' => i = skip_quoted(b, i),
             _ if starts_line_comment(&b[i..]) => i = skip_line_comment(b, i),
             _ if b[i..].starts_with(b"/*") => i = skip_block_comment(b, i),
+            b'$' => i = heredoc_end(b, i).unwrap_or(i + 1),
             b'(' | b'[' => {
                 depth += 1;
                 i += 1;
@@ -612,6 +614,14 @@ mod tests {
                 &["INSERT INTO t SELECT format DIV 2 FROM s;", "SELECT 1;"],
             ),
             (
+                "insert select with FROM in a heredoc before format",
+                "INSERT INTO t SELECT $$ FROM $$, format x FROM s;\nSELECT 1;",
+                &[
+                    "INSERT INTO t SELECT $$ FROM $$, format x FROM s;",
+                    "SELECT 1;",
+                ],
+            ),
+            (
                 "insert select with format GLOBAL IN after FROM",
                 "INSERT INTO t SELECT x FROM s WHERE format GLOBAL IN (1);\nSELECT 1;",
                 &[
@@ -655,6 +665,30 @@ mod tests {
         ];
         for (name, input, want) in cases {
             assert_eq!(sqls(input), *want, "{name}");
+        }
+    }
+
+    #[test]
+    fn top_level_words_skip_literals_and_comments() {
+        let cases: &[(&str, &str, &[&str])] = &[
+            (
+                "literals, heredocs, comments and parentheses",
+                "SELECT a, 'b c', `d`, \"e\", $$f g$$, $t$h$t$ -- i\nFROM (SELECT j) /* k */",
+                &["SELECT", "a", "FROM"],
+            ),
+            (
+                "FROM in a heredoc",
+                "INSERT INTO t SELECT $$x FROM y$$ FROM (SELECT z)",
+                &["INSERT", "INTO", "t", "SELECT", "FROM"],
+            ),
+            (
+                "a dollar sign in an identifier does not start a heredoc",
+                "SELECT 1 AS $a$b$ FROM t",
+                &["SELECT", "1", "AS", "a", "b", "FROM", "t"],
+            ),
+        ];
+        for (name, input, want) in cases {
+            assert_eq!(top_level_words(input), *want, "{name}");
         }
     }
 

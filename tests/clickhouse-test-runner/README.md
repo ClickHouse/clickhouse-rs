@@ -294,7 +294,8 @@ tests read their own queries from `system.query_log`.
   `FORMAT Null` (the server sends no rows; for `EXPLAIN` the server still
   sends the plan, and the program writes it), and it keeps the clause in
   another language than SQL. The type line of `...WithNamesAndTypes` is the
-  `DataTypeNode` of the client.
+  `DataTypeNode` of the client. The `TSVRaw...` formats write the header
+  lines without escapes, as their rows.
 - **Settings.** Of the settings on the command line, only `log_comment`,
   `max_insert_threads`, `max_threads` and `send_logs_level` go to the server,
   with each query (`Query::with_setting`), as in `clickhouse-client`. A `SET`
@@ -352,7 +353,8 @@ requests that change this directory or the workflow.
   `CLICKHOUSE_SKIP_USER_SETUP=1`, as in step 1 of
   [Run the tests locally](#run-the-tests-locally).
 - CI does not run failed tests again (`RETRY_FAILED` is not set): no known
-  client bug makes random tests fail.
+  client bug makes random tests fail. The script also turns off the runner's
+  own retries (`--dont_retry_failures`).
 - On a failure, the job uploads the `.stdout`, `.stderr` and `.diff` files
   of the failed tests and the log of the program as an artifact.
 - The server version and the upstream tests are pinned together in
