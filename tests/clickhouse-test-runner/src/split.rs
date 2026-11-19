@@ -463,7 +463,20 @@ fn has_significant_token(b: &[u8]) -> bool {
 /// Returns the first word of a statement in upper case, after comments,
 /// whitespace and opening parentheses.
 pub(crate) fn leading_keyword(sql: &str) -> String {
+    let (i, j) = leading_word(sql.as_bytes());
+    sql[i..j].to_ascii_uppercase()
+}
+
+/// Tells if the first word of a statement is the name of a function call, as
+/// `replace` in `replace('a', 'a', 'b')`.
+pub(crate) fn leading_word_is_call(sql: &str) -> bool {
     let b = sql.as_bytes();
+    let (i, j) = leading_word(b);
+    i < j && b.get(skip_whitespace_and_comments(b, j)) == Some(&b'(')
+}
+
+/// Returns the start and the end of the first word of a statement.
+fn leading_word(b: &[u8]) -> (usize, usize) {
     let mut i = skip_whitespace_and_comments(b, 0);
     while i < b.len() && b[i] == b'(' {
         i = skip_whitespace_and_comments(b, i + 1);
@@ -472,7 +485,7 @@ pub(crate) fn leading_keyword(sql: &str) -> String {
     while j < b.len() && is_word_byte(b[j]) {
         j += 1;
     }
-    sql[i..j].to_ascii_uppercase()
+    (i, j)
 }
 
 pub(crate) fn is_word_byte(c: u8) -> bool {

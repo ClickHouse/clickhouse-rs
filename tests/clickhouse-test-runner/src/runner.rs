@@ -12,7 +12,8 @@ use crate::format::{OutputFormat, returns_rows, split_output_format, unquote_ide
 use crate::log::InvocationLog;
 use crate::render::{Context, render_cell, write_string};
 use crate::split::{
-    Statement, is_word_byte, leading_keyword, skip_quoted, skip_whitespace_and_comments,
+    Statement, is_word_byte, leading_keyword, leading_word_is_call, skip_quoted,
+    skip_whitespace_and_comments,
 };
 use crate::value::decode_column;
 use clickhouse::Client;
@@ -410,33 +411,36 @@ fn write_header(out: &mut Vec<u8>, cells: impl Iterator<Item = Vec<u8>>) {
 }
 
 /// Tells if the statement starts with the keyword of a DDL, DML or other
-/// command, which `SET implicit_select = 1` does not make a query.
+/// command, which `SET implicit_select = 1` does not make a query. A first
+/// word that a `(` follows is a function call (`replace('a', 'a', 'b')`), not
+/// a keyword.
 fn is_command(sql: &str) -> bool {
-    matches!(
-        leading_keyword(sql).as_str(),
-        "INSERT"
-            | "DELETE"
-            | "UPDATE"
-            | "REPLACE"
-            | "CREATE"
-            | "DROP"
-            | "ALTER"
-            | "SET"
-            | "USE"
-            | "TRUNCATE"
-            | "RENAME"
-            | "OPTIMIZE"
-            | "SYSTEM"
-            | "GRANT"
-            | "REVOKE"
-            | "ATTACH"
-            | "DETACH"
-            | "KILL"
-            | "EXCHANGE"
-            | "UNDROP"
-            | "BACKUP"
-            | "RESTORE"
-    )
+    !leading_word_is_call(sql)
+        && matches!(
+            leading_keyword(sql).as_str(),
+            "INSERT"
+                | "DELETE"
+                | "UPDATE"
+                | "REPLACE"
+                | "CREATE"
+                | "DROP"
+                | "ALTER"
+                | "SET"
+                | "USE"
+                | "TRUNCATE"
+                | "RENAME"
+                | "OPTIMIZE"
+                | "SYSTEM"
+                | "GRANT"
+                | "REVOKE"
+                | "ATTACH"
+                | "DETACH"
+                | "KILL"
+                | "EXCHANGE"
+                | "UNDROP"
+                | "BACKUP"
+                | "RESTORE"
+        )
 }
 
 fn new_session_id() -> String {
@@ -618,7 +622,15 @@ mod tests {
         ] {
             assert!(is_command(sql), "{sql}");
         }
-        for sql in ["1 + 1", "'a'", "SELECT 1", "now() > 0"] {
+        for sql in [
+            "1 + 1",
+            "'a'",
+            "SELECT 1",
+            "now() > 0",
+            "replace('abc', 'b', 'x')",
+            "REPLACE ('a', 'a', 'b')",
+            "(replace('a', 'a', 'b'))",
+        ] {
             assert!(!is_command(sql), "{sql}");
         }
     }
