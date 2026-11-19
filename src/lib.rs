@@ -14,6 +14,7 @@ pub use clickhouse_macros::Row;
 use clickhouse_types::{Column, DataTypeNode};
 
 use crate::error::Error;
+use indexmap::IndexMap;
 use std::collections::HashSet;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
@@ -64,7 +65,8 @@ pub struct Client {
     authentication: Authentication,
     compression: Compression,
     roles: HashSet<String>,
-    settings: HashMap<String, String>,
+    // `IndexMap` keeps insertion order: some settings (e.g. `readonly`) depend on order.
+    settings: IndexMap<String, String>,
     headers: HashMap<String, String>,
     // Separate product info added by the user from product info added by the stack
     // (e.g. `clickhouse-ext-arrow`) so it appears in the right order in logs.
@@ -161,7 +163,7 @@ impl Client {
             authentication: Authentication::default(),
             compression: Compression::default(),
             roles: HashSet::new(),
-            settings: HashMap::new(),
+            settings: IndexMap::new(),
             headers: HashMap::new(),
             app_product_info: Vec::default(),
             stack_product_info: Vec::default(),
@@ -739,7 +741,7 @@ impl Client {
     #[inline]
     pub(crate) fn clear_roles(&mut self) {
         // Make sure we overwrite any role manually set by the user via `with_setting()`.
-        self.settings.remove(settings::ROLE);
+        self.settings.shift_remove(settings::ROLE);
         self.roles.clear();
     }
 

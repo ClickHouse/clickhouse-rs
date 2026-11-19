@@ -1070,4 +1070,36 @@ mod transport_tests {
             ]
         );
     }
+
+    #[tokio::test]
+    async fn settings_keep_insertion_order() {
+        // ClickHouse applies settings in order. For example, `readonly` must come
+        // after the settings it would otherwise block.
+        const NAMES: [&str; 8] = [
+            "max_threads",
+            "max_block_size",
+            "async_insert",
+            "wait_for_async_insert",
+            "max_execution_time",
+            "max_memory_usage",
+            "join_use_nulls",
+            "readonly",
+        ];
+
+        let mock = test::Mock::new();
+        let record = mock.add(test::handlers::record_request());
+        let mut client = Client::default().with_mock(&mock);
+        for name in NAMES {
+            client = client.with_setting(name, "1");
+        }
+
+        client.query("SELECT 1").execute().await.unwrap();
+
+        let request = record.request().await;
+        let names = url::form_urlencoded::parse(request.uri().query().unwrap().as_bytes())
+            .map(|(name, _)| name.into_owned())
+            .filter(|name| NAMES.contains(&name.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(names, NAMES);
+    }
 }
