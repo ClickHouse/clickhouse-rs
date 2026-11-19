@@ -23,3 +23,7 @@ Example:
 
 [#485]: https://github.com/ClickHouse/clickhouse-rs/pull/485
 ~~~
+
+# Upstream SQL test harness
+
+- For work in `tests/clickhouse-test-runner/`, read [`tests/clickhouse-test-runner/AGENTS.md`](tests/clickhouse-test-runner/AGENTS.md).
