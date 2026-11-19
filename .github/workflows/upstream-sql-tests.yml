@@ -110,11 +110,16 @@ jobs:
       # management and named-collection control (tests create users, roles
       # and named collections). Without it, the image allows the user without
       # a password only from localhost in the container.
+      #
+      # The server gets the host name of the runner: tests/clickhouse-test
+      # replaces its own host name with `localhost` in the output of each
+      # test, and some `.reference` files have `localhost` for hostName().
       - name: Start ClickHouse ${{ steps.version.outputs.version }}
         env:
           CLICKHOUSE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           docker run -d --name clickhouse -p 8123:8123 -p 9000:9000 \
+            --hostname "$(hostname)" \
             --ulimit nofile=262144:262144 -e CLICKHOUSE_SKIP_USER_SETUP=1 \
             "clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}"
           for _ in $(seq 1 60); do

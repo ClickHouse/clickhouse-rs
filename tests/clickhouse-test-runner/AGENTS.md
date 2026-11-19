@@ -129,6 +129,12 @@ these:
   allowlist, because a CI runner has only 4 vCPUs.
 - Memory limits of the server, when the test also fails through the real
   `clickhouse-client`.
+- The host name of the server. `tests/clickhouse-test` replaces its own host
+  name with `localhost` in the output of a test, so a `hostName()` value
+  differs when the server has another host name
+  (`03217_datetime64_constant_to_ast`). CI and step 1 of the README give the
+  server container the host name of the runner (`--hostname "$(hostname)"`).
+  Do not remove such a test from the allowlist: fix the server setup.
 
 These are **not** environment causes. Find the bug:
 

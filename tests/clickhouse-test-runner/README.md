@@ -41,9 +41,15 @@ You need Rust, Python 3 with `jinja2`, Docker, `git` and `curl`.
 
    ```bash
    docker run -d --name clickhouse-rs-clickhouse-server -p 8123:8123 -p 9000:9000 \
+     --hostname "$(hostname)" \
      --ulimit nofile=262144:262144 -e CLICKHOUSE_SKIP_USER_SETUP=1 \
      "clickhouse/clickhouse-server:$(tests/clickhouse-test-runner/scripts/pinned-version.sh)"
    ```
+
+   The server gets the host name of the machine that runs the tests:
+   `tests/clickhouse-test` replaces its own host name with `localhost` in
+   the output of each test, and some `.reference` files have `localhost` for
+   `hostName()`.
 
    This is the stock server configuration, as in CI. With
    `CLICKHOUSE_SKIP_USER_SETUP=1`, the `default` user of the image's
