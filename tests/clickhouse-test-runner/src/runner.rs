@@ -364,31 +364,7 @@ impl<'a> Runner<'a> {
     /// Tells if the statement is an expression alone, which
     /// `SET implicit_select = 1` makes a query.
     fn implicit_select(&self, sql: &str) -> bool {
-        if !self.implicit {
-            return false;
-        }
-        !matches!(
-            leading_keyword(sql).as_str(),
-            "INSERT"
-                | "CREATE"
-                | "DROP"
-                | "ALTER"
-                | "SET"
-                | "USE"
-                | "TRUNCATE"
-                | "RENAME"
-                | "OPTIMIZE"
-                | "SYSTEM"
-                | "GRANT"
-                | "REVOKE"
-                | "ATTACH"
-                | "DETACH"
-                | "KILL"
-                | "EXCHANGE"
-                | "UNDROP"
-                | "BACKUP"
-                | "RESTORE"
-        )
+        self.implicit && !is_command(sql)
     }
 
     /// Updates the session state after a `USE` or `SET` statement.
@@ -431,6 +407,36 @@ fn write_header(out: &mut Vec<u8>, cells: impl Iterator<Item = Vec<u8>>) {
         write_string(out, &cell, false);
     }
     out.push(b'\n');
+}
+
+/// Tells if the statement starts with the keyword of a DDL, DML or other
+/// command, which `SET implicit_select = 1` does not make a query.
+fn is_command(sql: &str) -> bool {
+    matches!(
+        leading_keyword(sql).as_str(),
+        "INSERT"
+            | "DELETE"
+            | "UPDATE"
+            | "REPLACE"
+            | "CREATE"
+            | "DROP"
+            | "ALTER"
+            | "SET"
+            | "USE"
+            | "TRUNCATE"
+            | "RENAME"
+            | "OPTIMIZE"
+            | "SYSTEM"
+            | "GRANT"
+            | "REVOKE"
+            | "ATTACH"
+            | "DETACH"
+            | "KILL"
+            | "EXCHANGE"
+            | "UNDROP"
+            | "BACKUP"
+            | "RESTORE"
+    )
 }
 
 fn new_session_id() -> String {
@@ -597,6 +603,24 @@ mod tests {
             error_chain(&io),
             "not enough data, probably a row type mismatches a database schema"
         );
+    }
+
+    #[test]
+    fn commands_are_not_implicit_selects() {
+        for sql in [
+            "INSERT INTO t VALUES (1)",
+            "DELETE FROM t WHERE x = 1",
+            "update t SET x = 2 WHERE x = 1",
+            "REPLACE TABLE t AS SELECT 1",
+            "CREATE TABLE t (x UInt8) ENGINE = Memory",
+            "-- c\nALTER TABLE t DELETE WHERE 1",
+            "SET implicit_select = 0",
+        ] {
+            assert!(is_command(sql), "{sql}");
+        }
+        for sql in ["1 + 1", "'a'", "SELECT 1", "now() > 0"] {
+            assert!(!is_command(sql), "{sql}");
+        }
     }
 
     #[test]

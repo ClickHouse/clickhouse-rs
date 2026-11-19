@@ -30,7 +30,11 @@ harnesses.
 
 The program is a Cargo package of its own (with its own workspace, lock file
 and `target/` directory). It is not a member of the root workspace and not
-part of the published `clickhouse` crate.
+part of the published `clickhouse` crate. Its `Cargo.lock` is in git, so CI
+and local runs use the same dependency versions (for example `chrono-tz`,
+whose time zone data changes the rendering of `DateTime` values). To update
+the dependencies, run `cargo update` in this directory and commit the lock
+file.
 
 ## Run the tests locally
 

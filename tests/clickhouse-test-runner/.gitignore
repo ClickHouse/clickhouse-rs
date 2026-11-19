@@ -2,3 +2,6 @@
 /.bin-real-client/
 /.upstream/
 /target/
+# The root .gitignore ignores Cargo.lock (a library). This program commits its
+# lock file, so CI and local runs use the same dependency versions.
+!/Cargo.lock
