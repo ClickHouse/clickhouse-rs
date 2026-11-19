@@ -130,7 +130,7 @@ Relative paths in this table are relative to `tests/clickhouse-test-runner/`.
 | `SHARD_INDEX`, `SHARD_TOTAL` | `1`, `1` | Run only shard `SHARD_INDEX` of `SHARD_TOTAL` round-robin shards of the list. |
 | `KNOWN_FAILURES` | (none) | Run the known failures of these groups (comma-separated IDs, or `all`) instead of the allowlist. |
 | `RETRY_FAILED` | `0` | Run the failed tests again, at most this many times. A test that passes on a retry is a warning. Do not use it to grow or check the allowlist. |
-| `CLICKHOUSE_CLIENT_CLI_LOG` | (none) | A file. Each invocation of the program adds its arguments, statements and errors to it. |
+| `CLICKHOUSE_CLIENT_CLI_LOG` | (none) | A file. Each invocation of the program adds its arguments (the `--password` value hidden), statements and errors to it. |
 | `CLICKHOUSE_HOST` | `localhost` | The server host, for the runner and for the version check. |
 | `CLICKHOUSE_PORT_TCP`, `CLICKHOUSE_PORT_HTTP` | `9000`, `8123` | The ports of the server. The runner gives `--port=$CLICKHOUSE_PORT_TCP`; the program uses `CLICKHOUSE_PORT_HTTP` for it. |
 | `CLICKHOUSE_PORT_TCP_SECURE`, `CLICKHOUSE_PORT_HTTPS` | `9440`, `8443` | The same with `--secure`. |

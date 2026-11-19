@@ -19,7 +19,7 @@ mod runner;
 mod split;
 mod value;
 
-use crate::args::{USAGE, parse_args};
+use crate::args::{USAGE, parse_args, redact_password};
 use crate::hint::error_name;
 use crate::log::{InvocationLog, LOG_PATH_ENV};
 use crate::runner::{Failure, Runner};
@@ -43,12 +43,31 @@ pub(crate) fn run(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> i32 {
+    run_with_log(
+        argv,
+        std::env::var(LOG_PATH_ENV).ok(),
+        stdin,
+        stdout,
+        stderr,
+    )
+}
+
+/// `run` with the path of the invocation log (`None`: no log). The tests give
+/// the path here, because to set the environment variable is not safe while
+/// other tests run.
+pub(crate) fn run_with_log(
+    argv: &[String],
+    log_path: Option<String>,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
     if argv.first().map(String::as_str) == Some("extract-from-config") {
         return extract_from_config(&argv[1..], stdout);
     }
 
-    let mut log = InvocationLog::new(std::env::var(LOG_PATH_ENV).ok());
-    log.add("argv", &argv.join(" "));
+    let mut log = InvocationLog::new(log_path);
+    log.add("argv", &redact_password(argv).join(" "));
 
     let opts = match parse_args(argv) {
         Ok(opts) => opts,

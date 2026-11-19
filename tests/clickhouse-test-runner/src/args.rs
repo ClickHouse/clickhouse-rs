@@ -241,6 +241,26 @@ pub(crate) fn parse_args(argv: &[String]) -> Result<Options, String> {
     Ok(opts)
 }
 
+/// Returns the arguments with the password replaced by `***`, for the
+/// invocation log: CI keeps the log file as an artifact. `parse_args` takes
+/// the argument after `--password` as the password, whatever it is, so each
+/// argument after a `--password` is hidden. A last `--password` stays as it
+/// is.
+pub(crate) fn redact_password(argv: &[String]) -> Vec<String> {
+    argv.iter()
+        .enumerate()
+        .map(|(i, arg)| {
+            if i > 0 && argv[i - 1] == "--password" {
+                "***".to_owned()
+            } else if arg.starts_with("--password=") {
+                "--password=***".to_owned()
+            } else {
+                arg.clone()
+            }
+        })
+        .collect()
+}
+
 pub(crate) const USAGE: &str = "\
 usage: clickhouse-client [options]
 
@@ -384,6 +404,40 @@ mod tests {
     fn errors() {
         assert!(parse_args(&args(&["--port=abc"])).is_err());
         assert!(parse_args(&args(&["--query"])).is_err());
+    }
+
+    #[test]
+    fn redact_password_hides_the_password_only() {
+        assert_eq!(
+            redact_password(&args(&[
+                "--user",
+                "u",
+                "--password",
+                "secret",
+                "--password=secret2",
+                "--query",
+                "SELECT 1",
+                "--password",
+            ])),
+            args(&[
+                "--user",
+                "u",
+                "--password",
+                "***",
+                "--password=***",
+                "--query",
+                "SELECT 1",
+                "--password",
+            ])
+        );
+        // `--user` takes the first `--password` as its value, and the parser
+        // takes `x` as the password.
+        let argv = args(&["--user", "--password", "--password", "x"]);
+        assert_eq!(parse_args(&argv).unwrap().password, "x");
+        assert_eq!(
+            redact_password(&argv),
+            args(&["--user", "--password", "***", "***"])
+        );
     }
 
     #[test]

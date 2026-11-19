@@ -3,7 +3,7 @@
 //! `CLICKHOUSE_TEST_RUNNER_LIVE=1` to run them; without it they pass without
 //! doing anything.
 
-use crate::run;
+use crate::{run, run_with_log};
 
 const LIVE_ENV: &str = "CLICKHOUSE_TEST_RUNNER_LIVE";
 const URL: &str = "http://localhost:8123";
@@ -349,4 +349,49 @@ fn other_dialect() {
     let script = "SET allow_experimental_kusto_dialect = 1;\nSET dialect = 'kusto';\nprint x = 1 + 2;\nSET dialect = 'clickhouse';\nSELECT 4;";
     let (got, err, code) = shim(script);
     assert_eq!((got.as_str(), code), ("3\n4\n", 0), "{err}");
+}
+
+/// The invocation log must not hold the password, because CI keeps the log as
+/// an artifact. Only the log is checked: the server can refuse the password.
+#[test]
+fn log_hides_the_password() {
+    if !live() {
+        return;
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let secret = format!("pw{}x{nanos}", std::process::id());
+    let path = std::env::temp_dir().join(format!("shim-live-{}-{nanos}.log", std::process::id()));
+    let forms = [
+        (
+            vec!["--password".to_owned(), secret.clone()],
+            "--password ***",
+        ),
+        (vec![format!("--password={secret}")], "--password=***"),
+    ];
+    for (password, shown) in forms {
+        let mut argv = vec!["--host".to_owned(), "localhost".to_owned()];
+        argv.extend(password);
+        argv.extend(["--query".to_owned(), "SELECT 1".to_owned()]);
+        run_with_log(
+            &argv,
+            Some(path.to_str().unwrap().to_owned()),
+            &mut std::io::empty(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+        );
+        let log = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(!log.contains(&secret), "{log}");
+        assert!(
+            log.contains(&format!("argv=--host localhost {shown} --query SELECT 1\n")),
+            "{log}"
+        );
+        // The run got past the arguments, so the log also has the records of
+        // the runner (the URL, the query, and an error when the server
+        // refuses the password).
+        assert!(log.contains("\nquery=SELECT 1\n"), "{log}");
+    }
 }
