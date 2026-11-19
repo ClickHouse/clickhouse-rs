@@ -1,0 +1,4 @@
+/.bin/
+/.bin-real-client/
+/.upstream/
+/target/
