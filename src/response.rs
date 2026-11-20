@@ -38,7 +38,7 @@ pub(crate) type ResponseFuture =
 
 impl Response {
     /// If `format` is set, the response fails when the server sends the data in another format.
-    pub(crate) fn new(response: HyperResponseFuture, format: Option<&'static str>) -> Self {
+    pub(crate) fn new(response: HyperResponseFuture, format: Option<ExpectedFormat>) -> Self {
         let span = tracing::info_span!(
             "response",
             otel.status_code = tracing::field::Empty,
@@ -77,7 +77,7 @@ impl Response {
 
 async fn collect_response(
     response: HyperResponseFuture,
-    format: Option<&'static str>,
+    format: Option<ExpectedFormat>,
 ) -> Result<(Chunks, Option<Box<QuerySummary>>)> {
     let (parts, body) = response.await?.into_parts();
 
@@ -196,25 +196,40 @@ fn reason(status: StatusCode, exception_code: Option<String>) -> String {
     })
 }
 
-// A `FORMAT` clause in the query has priority over `default_format`,
-// so the server can send the data in a format that the cursor cannot read.
-fn check_format(headers: &HeaderMap, expected: &str) -> Result<()> {
+/// The format that a cursor can read, and the method that created the cursor.
+#[derive(Clone, Copy)]
+pub(crate) struct ExpectedFormat {
+    pub(crate) method: &'static str,
+    pub(crate) format: &'static str,
+}
+
+// A `FORMAT` clause in the query has priority over `default_format`, and a `default_format`
+// setting from the user replaces the one that the cursor asks for. Either way the server can
+// send the data in a format that the cursor cannot read.
+fn check_format(headers: &HeaderMap, expected: ExpectedFormat) -> Result<()> {
     // The server sends no header for a statement without a result, and a proxy can remove it.
     let Some(format) = headers.get("X-ClickHouse-Format") else {
         return Ok(());
     };
 
     // The server accepts a format name in any case and sends the name as written in the query.
-    if format.as_bytes().eq_ignore_ascii_case(expected.as_bytes()) {
+    if format
+        .as_bytes()
+        .eq_ignore_ascii_case(expected.format.as_bytes())
+    {
         return Ok(());
     }
 
     let format = String::from_utf8_lossy(format.as_bytes());
+    let ExpectedFormat {
+        method,
+        format: expected,
+    } = expected;
     Err(Error::Other(
         format!(
-            "the server sent the result in the `{format}` format, but `fetch()` can read only \
-             `{expected}`. Remove the `FORMAT` clause from the query, or use `fetch_bytes()` \
-             to read the raw bytes"
+            "the server sent the result in the `{format}` format, but `{method}` can read only \
+             `{expected}`. Remove the `FORMAT` clause or the `default_format` setting, or use \
+             `fetch_bytes()` to read the raw bytes"
         )
         .into(),
     ))
@@ -512,18 +527,35 @@ fn it_checks_format() {
         headers
     };
 
-    assert!(check_format(&HeaderMap::new(), "RowBinary").is_ok());
-    assert!(check_format(&headers("RowBinary"), "RowBinary").is_ok());
-    assert!(check_format(&headers("rowbinary"), "RowBinary").is_ok());
+    let row_binary = ExpectedFormat {
+        method: "fetch()",
+        format: "RowBinary",
+    };
+    let native = ExpectedFormat {
+        method: "fetch_native()",
+        format: "Native",
+    };
 
-    for format in ["JSONEachRow", "Null", "RowBinaryWithNamesAndTypes"] {
-        let err = check_format(&headers(format), "RowBinary").unwrap_err();
+    assert!(check_format(&HeaderMap::new(), row_binary).is_ok());
+    assert!(check_format(&headers("RowBinary"), row_binary).is_ok());
+    assert!(check_format(&headers("rowbinary"), row_binary).is_ok());
+    assert!(check_format(&headers("Native"), native).is_ok());
+
+    for (format, expected) in [
+        ("JSONEachRow", row_binary),
+        ("Null", row_binary),
+        ("RowBinaryWithNamesAndTypes", row_binary),
+        ("JSONEachRow", native),
+        ("RowBinary", native),
+    ] {
+        let err = check_format(&headers(format), expected).unwrap_err();
         assert_eq!(
             err.to_string(),
             format!(
-                "the server sent the result in the `{format}` format, but `fetch()` can read \
-                 only `RowBinary`. Remove the `FORMAT` clause from the query, or use \
-                 `fetch_bytes()` to read the raw bytes"
+                "the server sent the result in the `{format}` format, but `{}` can read only \
+                 `{}`. Remove the `FORMAT` clause or the `default_format` setting, or use \
+                 `fetch_bytes()` to read the raw bytes",
+                expected.method, expected.format
             )
         );
     }

@@ -235,3 +235,62 @@ async fn queries_after_format_clause_error() {
         );
     }
 }
+
+#[tokio::test]
+async fn fetch_with_default_format_setting() {
+    let client = prepare_database!();
+
+    for validation in [true, false] {
+        let client = client.clone().with_validation(validation);
+
+        let result = client
+            .clone()
+            .with_setting("default_format", "JSONEachRow")
+            .query(FORMAT_QUERY)
+            .fetch_all::<FormatRow>()
+            .await;
+        assert_format_error(result, FORMAT_QUERY, "JSONEachRow", validation);
+
+        let query = format!("{FORMAT_QUERY} SETTINGS default_format = 'JSONEachRow'");
+        let result = client.query(&query).fetch_all::<FormatRow>().await;
+        assert_format_error(result, &query, "JSONEachRow", validation);
+    }
+}
+
+#[tokio::test]
+async fn fetch_native_with_other_format() {
+    let client = prepare_database!();
+    let expected = "the server sent the result in the `JSONEachRow` format, but `fetch_native()` \
+                    can read only `Native`. Remove the `FORMAT` clause or the `default_format` \
+                    setting, or use `fetch_bytes()` to read the raw bytes";
+
+    let query = format!("{FORMAT_QUERY} FORMAT JSONEachRow");
+    let mut cursor = client.query(&query).fetch_native().unwrap();
+    let Err(err) = cursor.next().await else {
+        panic!("{query}: expected an error");
+    };
+    assert_eq!(err.to_string(), expected, "{query}");
+
+    let mut cursor = client
+        .clone()
+        .with_setting("default_format", "JSONEachRow")
+        .query(FORMAT_QUERY)
+        .fetch_native()
+        .unwrap();
+    let Err(err) = cursor.next().await else {
+        panic!("{FORMAT_QUERY}: expected an error");
+    };
+    assert_eq!(err.to_string(), expected, "{FORMAT_QUERY}");
+
+    // The same client still runs queries after the error.
+    // A `FORMAT Native` clause, in any case, is not an error.
+    for query in [
+        FORMAT_QUERY.to_string(),
+        format!("{FORMAT_QUERY} FORMAT Native"),
+        format!("{FORMAT_QUERY} FORMAT native"),
+    ] {
+        let mut cursor = client.query(&query).fetch_native().unwrap();
+        let block = cursor.next().await.unwrap().expect(&query);
+        assert_eq!(block.num_rows(), 3, "{query}");
+    }
+}
