@@ -19,6 +19,10 @@ Official pure Rust typed client for ClickHouse DB.
 [codecov-badge]: https://codecov.io/gh/ClickHouse/clickhouse-rs/graph/badge.svg?token=3MBXXYL53L
 [codecov-url]: https://codecov.io/gh/ClickHouse/clickhouse-rs
 
+The client works with both ClickHouse Cloud and self-hosted ClickHouse. You can [start a free Cloud trial](https://console.clickhouse.cloud/signUp?utm_medium=referral&utm_source=github&utm_campaign=readme&utm_content=clickhouse-rs) or [install ClickHouse](https://clickhouse.com/docs/get-started/setup/install) locally.
+
+**Features:**
+
 * Uses `serde` for encoding/decoding rows.
 * Supports `serde` attributes: `skip_serializing`, `skip_deserializing`, `rename`.
 * Uses `RowBinaryWithNamesAndTypes` or `RowBinary` formats over HTTP transport.
