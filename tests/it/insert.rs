@@ -201,6 +201,38 @@ async fn empty_insert() {
 }
 
 #[tokio::test]
+async fn insert_with_buffer_size() {
+    // https://github.com/ClickHouse/clickhouse-rs/issues/389
+
+    let client = prepare_database!();
+
+    // `0` sends every row as a separate chunk, `64` sends a chunk every few rows,
+    // and 1 MiB holds every row until `end()`.
+    for (i, buffer_size) in [0, 64, 1024 * 1024].into_iter().enumerate() {
+        let table_name = format!("insert_with_buffer_size_{i}");
+        create_simple_table(&client, &table_name).await;
+
+        let expected: Vec<_> = (0..1000)
+            .map(|id| SimpleRow::new(id, format!("row {id}")))
+            .collect();
+
+        let mut insert = client
+            .insert::<SimpleRow>(&table_name)
+            .await
+            .unwrap()
+            .with_buffer_size(buffer_size);
+
+        for row in &expected {
+            insert.write(row).await.unwrap();
+        }
+        insert.end().await.unwrap();
+
+        let rows = fetch_rows::<SimpleRow>(&client, &table_name).await;
+        assert_eq!(rows, expected, "buffer size {buffer_size}");
+    }
+}
+
+#[tokio::test]
 async fn insert_with_json_hint() {
     #[derive(Serialize, Deserialize, Row, PartialEq)]
     struct JSONTestRow {
