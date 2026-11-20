@@ -670,13 +670,14 @@ fn parse_decimal(input: &str) -> Result<DataTypeNode, TypesError> {
 
 fn parse_datetime64(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 13 {
-        let mut chars = input[11..input.len() - 1].chars();
-        let precision_char = chars.next().ok_or(TypesError::TypeParsingError(format!(
-            "Invalid DateTime64 precision, expected a positive number. Input: {input}"
-        )))?;
-        let precision = DateTimePrecision::new(precision_char)?;
-        let maybe_tz = match chars.as_str() {
-            str if str.len() > 2 => Some(str[3..str.len() - 1].to_string()),
+        let params = &input[11..input.len() - 1];
+        let (precision_str, maybe_tz) = match params.split_once(',') {
+            Some((precision_str, tz)) => (precision_str, Some(tz)),
+            None => (params, None),
+        };
+        let precision = parse_precision(precision_str, "DateTime64", input)?;
+        let maybe_tz = match maybe_tz {
+            Some(str) if str.len() > 2 => Some(str[2..str.len() - 1].to_string()),
             _ => None,
         };
         return Ok(DataTypeNode::DateTime64(precision, maybe_tz));
@@ -688,17 +689,32 @@ fn parse_datetime64(input: &str) -> Result<DataTypeNode, TypesError> {
 
 fn parse_time64(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() >= 8 {
-        let mut chars = input[7..input.len() - 1].chars();
-        let precision_char = chars.next().ok_or(TypesError::TypeParsingError(format!(
-            "Invalid Time64 precision, expected a positive number. Input: {input}"
-        )))?;
-        let precision = DateTimePrecision::new(precision_char)?;
+        let params = &input[7..input.len() - 1];
+        let precision_str = params.split_once(',').map_or(params, |(p, _)| p);
+        let precision = parse_precision(precision_str, "Time64", input)?;
 
         return Ok(DataTypeNode::Time64(precision));
     }
     Err(TypesError::TypeParsingError(format!(
         "Invalid Time64 format, expected Time64(precision, 'timezone'), got {input}"
     )))
+}
+
+/// Parses the precision parameter of `DateTime64` and `Time64`.
+/// The parameter must be one digit, so `DateTime64(10)` is an error
+/// and is not read as `DateTime64(1)`.
+fn parse_precision(
+    precision_str: &str,
+    type_name: &str,
+    input: &str,
+) -> Result<DateTimePrecision, TypesError> {
+    let mut chars = precision_str.chars();
+    match (chars.next(), chars.next()) {
+        (Some(precision_char), None) => DateTimePrecision::new(precision_char),
+        _ => Err(TypesError::TypeParsingError(format!(
+            "Invalid {type_name} precision, expected one digit within [0, 9] interval. Input: {input}"
+        ))),
+    }
 }
 
 fn parse_low_cardinality(input: &str) -> Result<DataTypeNode, TypesError> {
@@ -1441,6 +1457,9 @@ mod tests {
         );
         assert!(DataTypeNode::new("DateTime64()").is_err());
         assert!(DataTypeNode::new("DateTime64(x)").is_err());
+        assert!(DataTypeNode::new("DateTime64(10)").is_err());
+        assert!(DataTypeNode::new("DateTime64(31)").is_err());
+        assert!(DataTypeNode::new("DateTime64(10, 'UTC')").is_err());
     }
 
     #[test]
@@ -1517,6 +1536,7 @@ mod tests {
         );
         assert!(DataTypeNode::new("Time64()").is_err());
         assert!(DataTypeNode::new("Time64(x)").is_err());
+        assert!(DataTypeNode::new("Time64(10)").is_err());
     }
 
     #[test]
