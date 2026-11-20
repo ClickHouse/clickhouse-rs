@@ -125,3 +125,172 @@ async fn data_resembling_old_exception() {
         .unwrap();
     assert_eq!(fetched, text);
 }
+
+#[derive(Debug, PartialEq, serde::Deserialize, clickhouse::Row)]
+struct FormatRow {
+    id: u64,
+    version: u64,
+}
+
+const FORMAT_QUERY: &str = "SELECT number AS id, number * 10 AS version FROM numbers(3)";
+
+// The format that `fetch()` asks for.
+fn fetch_format(validation: bool) -> &'static str {
+    if validation {
+        "RowBinaryWithNamesAndTypes"
+    } else {
+        "RowBinary"
+    }
+}
+
+#[track_caller]
+fn assert_format_error<T: std::fmt::Debug>(
+    result: clickhouse::error::Result<T>,
+    query: &str,
+    format: &str,
+    validation: bool,
+) {
+    let err = result.expect_err(query).to_string();
+    let expected = format!(
+        "the server sent the result in the `{format}` format, but `fetch()` can read only `{}`",
+        fetch_format(validation)
+    );
+    assert!(err.starts_with(&expected), "{query}: {err}");
+}
+
+#[tokio::test]
+async fn fetch_with_format_clause() {
+    let client = prepare_database!();
+
+    for validation in [true, false] {
+        let client = client.clone().with_validation(validation);
+        let other = fetch_format(!validation);
+        let other_clause = format!("FORMAT {other}");
+
+        for (clause, format) in [
+            ("FORMAT JSONEachRow", "JSONEachRow"),
+            ("FORMAT CSV", "CSV"),
+            ("FORMAT jsoneachrow", "jsoneachrow"),
+            ("FORMAT JSONEachRow SETTINGS max_threads = 1", "JSONEachRow"),
+            ("FORMAT Null", "Null"),
+            (&other_clause, other),
+        ] {
+            let query = format!("{FORMAT_QUERY} {clause}");
+
+            let result = client.query(&query).fetch_all::<FormatRow>().await;
+            assert_format_error(result, &query, format, validation);
+
+            let result = client.query(&query).fetch_one::<FormatRow>().await;
+            assert_format_error(result, &query, format, validation);
+
+            let result = client.query(&query).fetch_optional::<FormatRow>().await;
+            assert_format_error(result, &query, format, validation);
+
+            let mut cursor = client.query(&query).fetch::<FormatRow>().unwrap();
+            assert_format_error(cursor.next().await, &query, format, validation);
+        }
+    }
+}
+
+#[tokio::test]
+async fn queries_after_format_clause_error() {
+    let client = prepare_database!();
+    let expected = (0..3)
+        .map(|id| FormatRow {
+            id,
+            version: id * 10,
+        })
+        .collect::<Vec<_>>();
+
+    for validation in [true, false] {
+        let client = client.clone().with_validation(validation);
+        let format = fetch_format(validation);
+
+        let query = format!("{FORMAT_QUERY} FORMAT JSONEachRow");
+        let result = client.query(&query).fetch_all::<FormatRow>().await;
+        assert_format_error(result, &query, "JSONEachRow", validation);
+
+        // The same client still runs queries after the error.
+        // A `FORMAT` clause with the format that `fetch()` asks for, in any case, is not an error.
+        for query in [
+            FORMAT_QUERY.to_string(),
+            format!("{FORMAT_QUERY} FORMAT {format}"),
+            format!("{FORMAT_QUERY} FORMAT {}", format.to_lowercase()),
+        ] {
+            let rows = client.query(&query).fetch_all::<FormatRow>().await;
+            assert_eq!(rows.unwrap(), expected, "{query}");
+        }
+
+        // `fetch_bytes()` returns the data in the format that the query sets.
+        let bytes = client
+            .query(&query)
+            .fetch_bytes(format)
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            bytes,
+            "{\"id\":0,\"version\":0}\n{\"id\":1,\"version\":10}\n{\"id\":2,\"version\":20}\n"
+        );
+    }
+}
+
+#[tokio::test]
+async fn fetch_with_default_format_setting() {
+    let client = prepare_database!();
+
+    for validation in [true, false] {
+        let client = client.clone().with_validation(validation);
+
+        let result = client
+            .clone()
+            .with_setting("default_format", "JSONEachRow")
+            .query(FORMAT_QUERY)
+            .fetch_all::<FormatRow>()
+            .await;
+        assert_format_error(result, FORMAT_QUERY, "JSONEachRow", validation);
+
+        let query = format!("{FORMAT_QUERY} SETTINGS default_format = 'JSONEachRow'");
+        let result = client.query(&query).fetch_all::<FormatRow>().await;
+        assert_format_error(result, &query, "JSONEachRow", validation);
+    }
+}
+
+#[tokio::test]
+async fn fetch_native_with_other_format() {
+    let client = prepare_database!();
+    let expected = "the server sent the result in the `JSONEachRow` format, but `fetch_native()` \
+                    can read only `Native`. Remove the `FORMAT` clause or the `default_format` \
+                    setting, or use `fetch_bytes()` to read the raw bytes";
+
+    let query = format!("{FORMAT_QUERY} FORMAT JSONEachRow");
+    let mut cursor = client.query(&query).fetch_native().unwrap();
+    let Err(err) = cursor.next().await else {
+        panic!("{query}: expected an error");
+    };
+    assert_eq!(err.to_string(), expected, "{query}");
+
+    let mut cursor = client
+        .clone()
+        .with_setting("default_format", "JSONEachRow")
+        .query(FORMAT_QUERY)
+        .fetch_native()
+        .unwrap();
+    let Err(err) = cursor.next().await else {
+        panic!("{FORMAT_QUERY}: expected an error");
+    };
+    assert_eq!(err.to_string(), expected, "{FORMAT_QUERY}");
+
+    // The same client still runs queries after the error.
+    // A `FORMAT Native` clause, in any case, is not an error.
+    for query in [
+        FORMAT_QUERY.to_string(),
+        format!("{FORMAT_QUERY} FORMAT Native"),
+        format!("{FORMAT_QUERY} FORMAT native"),
+    ] {
+        let mut cursor = client.query(&query).fetch_native().unwrap();
+        let block = cursor.next().await.unwrap().expect(&query);
+        assert_eq!(block.num_rows(), 3, "{query}");
+    }
+}
