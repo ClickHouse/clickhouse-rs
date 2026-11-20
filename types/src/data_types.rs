@@ -1966,6 +1966,7 @@ mod tests {
             ("a\\\0b", "a\0b"),
             ("a\\\x1fb", "a\x1fb"),
             ("a\\\x7fb", "a\\\x7fb"),
+            (r"a\ b", r"a\ b"),
             (r"a\zb", r"a\zb"),
             (r"a\%b", r"a\%b"),
             (r"a\éb", r"a\éb"),
