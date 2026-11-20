@@ -29,9 +29,15 @@ pub trait Row {
 
     #[doc(hidden)]
     const NAME: &'static str;
-    // TODO: different list for SELECT/INSERT (de/ser)
+    /// Column names used to fetch rows (`SELECT`), taken from deserialize names.
     #[doc(hidden)]
     const COLUMN_NAMES: &'static [&'static str];
+    /// Column names used to insert rows (`INSERT`), taken from serialize names.
+    ///
+    /// Differs from `COLUMN_NAMES` only if serde renames a field differently
+    /// for serialization and deserialization.
+    #[doc(hidden)]
+    const INSERT_COLUMN_NAMES: &'static [&'static str] = Self::COLUMN_NAMES;
     #[doc(hidden)]
     const COLUMN_COUNT: usize;
     #[doc(hidden)]
@@ -242,6 +248,7 @@ macro_rules! impl_row_for_tuple {
         impl<$i: Row, $($other: Primitive),+> Row for ($i, $($other),+) {
             const NAME: &'static str = $i::NAME;
             const COLUMN_NAMES: &'static [&'static str] = $i::COLUMN_NAMES;
+            const INSERT_COLUMN_NAMES: &'static [&'static str] = $i::INSERT_COLUMN_NAMES;
             const COLUMN_COUNT: usize = $i::COLUMN_COUNT + count_tokens!($($other)*);
             const KIND: RowKind = RowKind::Tuple;
 
@@ -276,13 +283,22 @@ impl<T> Row for Vec<T> {
     type Value<'a> = Self;
 }
 
-/// Collects all field names in depth and joins them with comma.
+/// Collects all field names used for fetching (`SELECT`) and joins them with comma.
 pub(crate) fn join_column_names<R: Row>() -> Option<String> {
-    if R::COLUMN_NAMES.is_empty() {
+    join_names(R::COLUMN_NAMES)
+}
+
+/// Collects all field names used for inserting (`INSERT`) and joins them with comma.
+pub(crate) fn join_insert_column_names<R: Row>() -> Option<String> {
+    join_names(R::INSERT_COLUMN_NAMES)
+}
+
+fn join_names(names: &[&str]) -> Option<String> {
+    if names.is_empty() {
         return None;
     }
 
-    let out = R::COLUMN_NAMES
+    let out = names
         .iter()
         .enumerate()
         .fold(String::new(), |mut res, (idx, name)| {
