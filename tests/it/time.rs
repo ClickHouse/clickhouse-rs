@@ -536,3 +536,63 @@ async fn array_roundtrip() {
 
     assert_eq!(actual, rows);
 }
+
+#[tokio::test]
+async fn nullable_array_round_trip() {
+    let client = prepare_database!();
+
+    client
+        .query(
+            "
+            CREATE TABLE test_nullable_arrays(
+                dates32     Array(Nullable(Date32)),
+                dts64ms     Array(Nullable(DateTime64(3, 'UTC')))
+            ) ENGINE = MergeTree
+            ORDER BY tuple()
+        ",
+        )
+        .execute()
+        .await
+        .unwrap();
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Row)]
+    struct MyRow {
+        #[serde(with = "clickhouse::serde::time::date32::vec::option")]
+        dates32: Vec<Option<Date>>,
+        #[serde(with = "clickhouse::serde::time::datetime64::millis::vec::option")]
+        dts64ms: Vec<Option<OffsetDateTime>>,
+    }
+
+    let dt = OffsetDateTime::from_unix_timestamp(1_672_617_600).unwrap(); // 2023-01-02
+    let rows = [
+        MyRow {
+            dates32: vec![
+                Some(time::macros::date!(1960 - 01 - 01)),
+                None,
+                Some(time::macros::date!(2200 - 06 - 15)),
+            ],
+            dts64ms: vec![None, Some(dt + time::Duration::milliseconds(123))],
+        },
+        MyRow {
+            dates32: vec![],
+            dts64ms: vec![],
+        },
+    ];
+
+    let mut insert = client
+        .insert::<MyRow>("test_nullable_arrays")
+        .await
+        .unwrap();
+    for row in &rows {
+        insert.write(row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let actual = client
+        .query("SELECT ?fields FROM test_nullable_arrays ORDER BY length(dates32) DESC")
+        .fetch_all::<MyRow>()
+        .await
+        .unwrap();
+
+    assert_eq!(actual, rows);
+}

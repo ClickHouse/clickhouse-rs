@@ -578,3 +578,122 @@ mod time_vec {
         );
     }
 }
+
+#[cfg(feature = "chrono")]
+mod chrono_vec_option {
+    use super::*;
+    use ::chrono::{DateTime, Duration, NaiveDate, Utc};
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct ChronoNullableVecs {
+        #[serde(with = "crate::serde::chrono::date32::vec::option")]
+        date32: Vec<Option<NaiveDate>>,
+        #[serde(with = "crate::serde::chrono::datetime64::millis::vec::option")]
+        datetime64_millis: Vec<Option<DateTime<Utc>>>,
+    }
+
+    // clickhouse_macros is not working here
+    impl Row for ChronoNullableVecs {
+        const NAME: &'static str = "ChronoNullableVecs";
+        const COLUMN_NAMES: &'static [&'static str] = &["date32", "datetime64_millis"];
+        const COLUMN_COUNT: usize = 2;
+        const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
+
+        type Value<'a> = ChronoNullableVecs;
+    }
+
+    fn sample() -> ChronoNullableVecs {
+        let dt = DateTime::<Utc>::from_timestamp(1_672_617_600, 0).unwrap(); // 2023-01-02
+        ChronoNullableVecs {
+            date32: vec![NaiveDate::from_ymd_opt(2023, 1, 2), None],
+            datetime64_millis: vec![None, Some(dt + Duration::milliseconds(123))],
+        }
+    }
+
+    #[test]
+    fn it_serializes_vec_option_helpers() {
+        let mut actual = Vec::new();
+        super::super::serialize_row_binary(&mut actual, &sample()).unwrap();
+
+        // [Array(Nullable(Date32))] length 2, a value as i32 days, then NULL
+        let mut expected = vec![2, 0];
+        expected.extend_from_slice(&19359_i32.to_le_bytes());
+        expected.push(1);
+        // [Array(Nullable(DateTime64(3)))] length 2, NULL, then millis as i64
+        expected.extend_from_slice(&[2, 1, 0]);
+        expected.extend_from_slice(&1_672_617_600_123_i64.to_le_bytes());
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn it_round_trips_vec_option_helpers() {
+        let mut bytes = Vec::new();
+        super::super::serialize_row_binary(&mut bytes, &sample()).unwrap();
+
+        let actual: ChronoNullableVecs =
+            super::super::deserialize_row(&mut bytes.as_slice(), None).unwrap();
+        assert_eq!(actual, sample());
+    }
+}
+
+#[cfg(feature = "time")]
+mod time_vec_option {
+    use super::*;
+    use ::time::{Date, Duration, Month, OffsetDateTime};
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct TimeNullableVecs {
+        #[serde(with = "crate::serde::time::date32::vec::option")]
+        date32: Vec<Option<Date>>,
+        #[serde(with = "crate::serde::time::datetime64::millis::vec::option")]
+        datetime64_millis: Vec<Option<OffsetDateTime>>,
+    }
+
+    // clickhouse_macros is not working here
+    impl Row for TimeNullableVecs {
+        const NAME: &'static str = "TimeNullableVecs";
+        const COLUMN_NAMES: &'static [&'static str] = &["date32", "datetime64_millis"];
+        const COLUMN_COUNT: usize = 2;
+        const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
+
+        type Value<'a> = TimeNullableVecs;
+    }
+
+    fn sample() -> TimeNullableVecs {
+        let dt = OffsetDateTime::from_unix_timestamp(1_672_617_600).unwrap(); // 2023-01-02
+        TimeNullableVecs {
+            date32: vec![
+                Some(Date::from_calendar_date(2023, Month::January, 2).unwrap()),
+                None,
+            ],
+            datetime64_millis: vec![None, Some(dt + Duration::milliseconds(123))],
+        }
+    }
+
+    #[test]
+    fn it_serializes_vec_option_helpers() {
+        let mut actual = Vec::new();
+        super::super::serialize_row_binary(&mut actual, &sample()).unwrap();
+
+        // [Array(Nullable(Date32))] length 2, a value as i32 days, then NULL
+        let mut expected = vec![2, 0];
+        expected.extend_from_slice(&19359_i32.to_le_bytes());
+        expected.push(1);
+        // [Array(Nullable(DateTime64(3)))] length 2, NULL, then millis as i64
+        expected.extend_from_slice(&[2, 1, 0]);
+        expected.extend_from_slice(&1_672_617_600_123_i64.to_le_bytes());
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn it_round_trips_vec_option_helpers() {
+        let mut bytes = Vec::new();
+        super::super::serialize_row_binary(&mut bytes, &sample()).unwrap();
+
+        let actual: TimeNullableVecs =
+            super::super::deserialize_row(&mut bytes.as_slice(), None).unwrap();
+        assert_eq!(actual, sample());
+    }
+}

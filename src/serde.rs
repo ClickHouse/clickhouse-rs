@@ -82,6 +82,50 @@ macro_rules! array {
                 let v: Vec<ElemOwned> = Deserialize::deserialize(deserializer)?;
                 Ok(v.into_iter().map(|e| e.0).collect())
             }
+
+            /// Ser/de `Vec<Option<_>>` to/from `Array(Nullable(_))`, using the
+            /// same element type as the parent module.
+            pub mod option {
+                use super::*;
+
+                struct Elem<'a>(&'a Option<super::super::$name>);
+
+                impl Serialize for Elem<'_> {
+                    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                        super::super::option::serialize(self.0, serializer)
+                    }
+                }
+
+                struct ElemOwned(Option<super::super::$name>);
+
+                impl<'de> Deserialize<'de> for ElemOwned {
+                    fn deserialize<D: Deserializer<'de>>(
+                        deserializer: D,
+                    ) -> Result<Self, D::Error> {
+                        super::super::option::deserialize(deserializer).map(ElemOwned)
+                    }
+                }
+
+                pub fn serialize<S>(
+                    v: &[Option<super::super::$name>],
+                    serializer: S,
+                ) -> Result<S::Ok, S::Error>
+                where
+                    S: Serializer,
+                {
+                    serializer.collect_seq(v.iter().map(Elem))
+                }
+
+                pub fn deserialize<'de, D>(
+                    deserializer: D,
+                ) -> Result<Vec<Option<super::super::$name>>, D::Error>
+                where
+                    D: Deserializer<'de>,
+                {
+                    let v: Vec<ElemOwned> = Deserialize::deserialize(deserializer)?;
+                    Ok(v.into_iter().map(|e| e.0).collect())
+                }
+            }
         }
     };
 }

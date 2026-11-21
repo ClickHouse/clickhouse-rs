@@ -150,6 +150,28 @@ async fn server_side_param() {
         .await
         .expect("failed to apply an ordinary setting to a parameterized query");
     assert_eq!(result, 123);
+
+    #[derive(Serialize)]
+    enum Status {
+        #[serde(rename = "active")]
+        Active,
+    }
+
+    let result = client
+        .query("SELECT {val1: String} AS result")
+        .param("val1", Status::Active)
+        .fetch_one::<String>()
+        .await
+        .expect("failed to fetch a unit variant as a string parameter");
+    assert_eq!(result, "active");
+
+    let result = client
+        .query("SELECT toString({val1: Enum8('active' = 1)}) AS result")
+        .param("val1", Status::Active)
+        .fetch_one::<String>()
+        .await
+        .expect("failed to fetch a unit variant as an enum parameter");
+    assert_eq!(result, "active");
 }
 
 #[tokio::test]
@@ -169,6 +191,27 @@ async fn post_query_params_large_array() {
         .expect("failed to execute query with a large parameter");
 
     assert_eq!(length, 120);
+}
+
+// See #501.
+#[tokio::test]
+async fn post_query_params_large_query() {
+    let client = prepare_database!();
+    // With a parameter, the SQL text is sent in the multipart body. Make it larger than
+    // ClickHouse's default 128 KiB `http_max_field_value_size` (but within the default
+    // 256 KiB `max_query_size`). With this prefix, 3-byte characters put the 128 KiB mark
+    // inside a character.
+    let literal = "雪".repeat(60_000);
+
+    let (value, got) = client
+        .query(&format!("SELECT {{value: UInt8}}, '{literal}'"))
+        .param("value", 42)
+        .fetch_one::<(u8, String)>()
+        .await
+        .expect("failed to execute a parameterized query over 128 KiB");
+
+    assert_eq!(value, 42);
+    assert_eq!(got, literal);
 }
 
 // See #19.

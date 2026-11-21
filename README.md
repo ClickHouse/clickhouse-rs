@@ -512,7 +512,8 @@ Usage of all mentioned data types are covered in the following examples:
     </details>
 * `Tuple(A, B, ...)` maps to/from `(A, B, ...)` or a newtype around it.
 * `Array(_)` maps to/from any slice, e.g. `Vec<_>`, `&[_]`, and `UUID` (using `serde::uuid_vec`). Newtypes are also supported.
-  For `clickhouse::serde::{chrono,time}::*` helpers (e.g. `Date32` or `DateTime64(_)`) add `::vec` to map `Array(_)` to/from `Vec<_>`.
+  For `clickhouse::serde::{chrono,time}::*` helpers (e.g. `Date32` or `DateTime64(_)`) add `::vec` to map `Array(_)` to/from `Vec<_>`,
+  or `::vec::option` to map `Array(Nullable(_))` to/from `Vec<Option<_>>`.
     <details>
     <summary>Example</summary>
 
