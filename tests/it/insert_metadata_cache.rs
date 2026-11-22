@@ -114,9 +114,10 @@ async fn serve(mut stream: TcpStream, state: Arc<State>) {
         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    stream.write_all(head.as_bytes()).await.unwrap();
-    stream.write_all(&body).await.unwrap();
-    stream.shutdown().await.unwrap();
+    // A cancelled insert closes the connection before the response is written.
+    let _ = stream.write_all(head.as_bytes()).await;
+    let _ = stream.write_all(&body).await;
+    let _ = stream.shutdown().await;
 }
 
 /// Reads one HTTP request and returns its body, which is the SQL query.
@@ -273,5 +274,35 @@ async fn cancelled_describe_is_sent_again() {
         .await
         .expect("an insert waited for a cancelled DESCRIBE TABLE")
         .unwrap();
+    assert_eq!(server.describe_count(HELD_TABLE), 2);
+}
+
+#[tokio::test]
+async fn waiters_of_a_cancelled_describe_send_it_once() {
+    let server = DescribeServer::start().await;
+    let client = server.client();
+
+    let held = tokio::spawn({
+        let client = client.clone();
+        async move { client.insert::<Data>(HELD_TABLE).await.map(drop) }
+    });
+    server.wait_for_describe(HELD_TABLE).await;
+
+    let waiters: Vec<_> = (0..2)
+        .map(|_| {
+            let client = client.clone();
+            tokio::spawn(async move { client.insert::<Data>(HELD_TABLE).await.map(drop) })
+        })
+        .collect();
+    // Let both waiters queue up behind the request in flight.
+    tokio::task::yield_now().await;
+
+    held.abort();
+    assert!(held.await.unwrap_err().is_cancelled());
+    server.release();
+
+    for waiter in waiters {
+        timeout(TIMEOUT, waiter).await.unwrap().unwrap().unwrap();
+    }
     assert_eq!(server.describe_count(HELD_TABLE), 2);
 }
