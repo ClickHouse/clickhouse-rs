@@ -436,8 +436,7 @@ impl<'a, W: Write> Serializer for ParamSerializer<'a, W> {
         _variant_index: u32,
         variant: &'static str,
     ) -> Result {
-        escape::string(variant, self.writer)?;
-        Ok(())
+        Ok(escape::escape(variant, self.writer)?)
     }
 
     #[inline]
@@ -603,6 +602,18 @@ mod tests {
             A,
         }
         assert_eq!(check(Enum::A), "'A'");
+    }
+
+    #[test]
+    fn it_writes_param_unit_variants() {
+        #[derive(Serialize)]
+        enum Enum {
+            A,
+        }
+
+        assert_eq!(check_param(Enum::A), "A");
+        assert_eq!(check_param(vec![Enum::A]), "['A']");
+        assert_eq!(check_param("A"), "A");
     }
 
     #[test]
