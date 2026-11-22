@@ -2,7 +2,7 @@ use crate::Row;
 use crate::error::Error::SequenceMustHaveLength;
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
-use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
+use crate::rowbinary::validation::{DataTypeValidator, NullEncoding, SchemaValidator, SerdeType};
 use crate::types::bf16;
 use crate::types::int256;
 use bytes::BufMut;
@@ -145,16 +145,26 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
 
     #[inline]
     fn serialize_none(self) -> Result<()> {
+        // Read the NULL encoding before `validate` moves the validator to the next position.
+        let null_encoding = self.validator.null_encoding();
         self.validator.validate(SerdeType::Option)?;
-        self.buffer.put_u8(1);
+        match null_encoding {
+            // `Variant` has no marker byte. NULL is the discriminator 0xFF.
+            Some(NullEncoding::Discriminator) => self.buffer.put_u8(0xFF),
+            _ => self.buffer.put_u8(1),
+        }
         Ok(())
     }
 
     #[inline]
     fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<()> {
+        let null_encoding = self.validator.null_encoding();
         let opt_validator = self.validator.validate(SerdeType::Option)?;
         let mut inner = RowBinarySerializer::new(&mut self.buffer, opt_validator);
-        inner.buffer.put_u8(0);
+        // `Variant` has no marker byte. The value writes its discriminator.
+        if null_encoding != Some(NullEncoding::Discriminator) {
+            inner.buffer.put_u8(0);
+        }
         value.serialize(&mut inner)
     }
 

@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use clickhouse::Row;
+use clickhouse::{Client, Row};
 
 #[tokio::test]
 async fn variant_null_values() {
@@ -230,4 +230,247 @@ async fn variant_null_in_tuple() {
             },
         ]
     );
+}
+
+// The tests below write `Option<T>` to `Variant` columns with `Client::insert`.
+// A `Variant` column has no Nullable marker byte. NULL is the discriminator 0xFF.
+// Each test reads the data back and also asks the server how it parsed the data,
+// so that a defect on both the write path and the read path cannot hide.
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+enum InsertVariant {
+    String(String),
+    UInt64(u64),
+}
+
+#[derive(Debug, PartialEq, Row, Serialize, Deserialize)]
+struct InsertVariantRow {
+    id: u32,
+    var: Option<InsertVariant>,
+}
+
+async fn insert_and_read_back(client: &Client, rows: &[InsertVariantRow]) {
+    client
+        .query(
+            "
+            CREATE OR REPLACE TABLE test_var_null_insert
+            (
+                `id` UInt32,
+                `var` Variant(String, UInt64)
+            )
+            ENGINE = MergeTree
+            ORDER BY id",
+        )
+        .with_setting("allow_experimental_variant_type", "1")
+        .execute()
+        .await
+        .unwrap();
+
+    let mut insert = client
+        .insert::<InsertVariantRow>("test_var_null_insert")
+        .await
+        .unwrap();
+    for row in rows {
+        insert.write(row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let fetched = client
+        .query("SELECT ?fields FROM test_var_null_insert ORDER BY id")
+        .fetch_all::<InsertVariantRow>()
+        .await
+        .unwrap();
+    assert_eq!(fetched, rows);
+}
+
+async fn variant_types_on_server(client: &Client) -> Vec<String> {
+    client
+        .query("SELECT toString(variantType(var)) FROM test_var_null_insert ORDER BY id")
+        .fetch_all::<String>()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn variant_null_insert_some() {
+    let client = prepare_database!();
+    let rows = [
+        InsertVariantRow {
+            id: 1,
+            var: Some(InsertVariant::String("hello".to_string())),
+        },
+        InsertVariantRow {
+            id: 2,
+            var: Some(InsertVariant::UInt64(42)),
+        },
+    ];
+
+    insert_and_read_back(&client, &rows).await;
+    assert_eq!(variant_types_on_server(&client).await, ["String", "UInt64"]);
+}
+
+#[tokio::test]
+async fn variant_null_insert_none() {
+    let client = prepare_database!();
+    let rows = [
+        InsertVariantRow { id: 1, var: None },
+        InsertVariantRow { id: 2, var: None },
+    ];
+
+    insert_and_read_back(&client, &rows).await;
+    assert_eq!(variant_types_on_server(&client).await, ["None", "None"]);
+}
+
+#[tokio::test]
+async fn variant_null_insert_mixed() {
+    let client = prepare_database!();
+    let rows = [
+        InsertVariantRow {
+            id: 1,
+            var: Some(InsertVariant::String("hello".to_string())),
+        },
+        InsertVariantRow { id: 2, var: None },
+        InsertVariantRow {
+            id: 3,
+            var: Some(InsertVariant::UInt64(42)),
+        },
+        InsertVariantRow { id: 4, var: None },
+    ];
+
+    insert_and_read_back(&client, &rows).await;
+    assert_eq!(
+        variant_types_on_server(&client).await,
+        ["String", "None", "UInt64", "None"]
+    );
+}
+
+#[tokio::test]
+async fn variant_null_insert_in_array() {
+    let client = prepare_database!();
+
+    #[derive(Debug, PartialEq, Row, Serialize, Deserialize)]
+    struct MyRow {
+        id: u32,
+        vars: Vec<Option<InsertVariant>>,
+    }
+
+    client
+        .query(
+            "
+            CREATE OR REPLACE TABLE test_var_null_insert_array
+            (
+                `id` UInt32,
+                `vars` Array(Variant(String, UInt64))
+            )
+            ENGINE = MergeTree
+            ORDER BY id",
+        )
+        .with_setting("allow_experimental_variant_type", "1")
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = [
+        MyRow {
+            id: 1,
+            vars: vec![
+                Some(InsertVariant::String("hello".to_string())),
+                None,
+                Some(InsertVariant::UInt64(42)),
+                None,
+            ],
+        },
+        MyRow {
+            id: 2,
+            vars: vec![None],
+        },
+    ];
+
+    let mut insert = client
+        .insert::<MyRow>("test_var_null_insert_array")
+        .await
+        .unwrap();
+    for row in &rows {
+        insert.write(row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let on_server = client
+        .query("SELECT toString(vars) FROM test_var_null_insert_array ORDER BY id")
+        .fetch_all::<String>()
+        .await
+        .unwrap();
+    assert_eq!(on_server, ["['hello',NULL,42,NULL]", "[NULL]"]);
+
+    let fetched = client
+        .query("SELECT ?fields FROM test_var_null_insert_array ORDER BY id")
+        .fetch_all::<MyRow>()
+        .await
+        .unwrap();
+    assert_eq!(fetched, rows);
+}
+
+#[tokio::test]
+async fn variant_null_insert_in_tuple() {
+    let client = prepare_database!();
+
+    #[derive(Debug, PartialEq, Row, Serialize, Deserialize)]
+    struct MyRow {
+        id: u32,
+        pair: (u32, Option<InsertVariant>),
+    }
+
+    client
+        .query(
+            "
+            CREATE OR REPLACE TABLE test_var_null_insert_tuple
+            (
+                `id` UInt32,
+                `pair` Tuple(UInt32, Variant(String, UInt64))
+            )
+            ENGINE = MergeTree
+            ORDER BY id",
+        )
+        .with_setting("allow_experimental_variant_type", "1")
+        .execute()
+        .await
+        .unwrap();
+
+    let rows = [
+        MyRow {
+            id: 1,
+            pair: (10, Some(InsertVariant::String("hello".to_string()))),
+        },
+        MyRow {
+            id: 2,
+            pair: (20, None),
+        },
+        MyRow {
+            id: 3,
+            pair: (30, Some(InsertVariant::UInt64(42))),
+        },
+    ];
+
+    let mut insert = client
+        .insert::<MyRow>("test_var_null_insert_tuple")
+        .await
+        .unwrap();
+    for row in &rows {
+        insert.write(row).await.unwrap();
+    }
+    insert.end().await.unwrap();
+
+    let on_server = client
+        .query("SELECT toString(pair) FROM test_var_null_insert_tuple ORDER BY id")
+        .fetch_all::<String>()
+        .await
+        .unwrap();
+    assert_eq!(on_server, ["(10,'hello')", "(20,NULL)", "(30,42)"]);
+
+    let fetched = client
+        .query("SELECT ?fields FROM test_var_null_insert_tuple ORDER BY id")
+        .fetch_all::<MyRow>()
+        .await
+        .unwrap();
+    assert_eq!(fetched, rows);
 }

@@ -1,6 +1,9 @@
 use crate::Row;
 use crate::row::Primitive;
+use crate::row_metadata::{AccessType, RowMetadata};
+use clickhouse_types::{Column, DataTypeNode};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Timestamp32(u32);
@@ -178,6 +181,107 @@ fn it_deserializes() {
         let actual: Sample<'_> = super::deserialize_row(&mut input.as_slice(), None).unwrap();
         assert_eq!(actual, sample());
     }
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+enum SimpleVariant {
+    String(String),
+    UInt64(u64),
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct OptionalValues {
+    nullable: Option<u32>,
+    var: Option<SimpleVariant>,
+    vars: Vec<Option<SimpleVariant>>,
+    pair: (u32, Option<SimpleVariant>),
+    map: BTreeMap<String, Option<SimpleVariant>>,
+}
+
+impl Row for OptionalValues {
+    const NAME: &'static str = "OptionalValues";
+    const COLUMN_NAMES: &'static [&'static str] = &["nullable", "var", "vars", "pair", "map"];
+    const COLUMN_COUNT: usize = 5;
+    const KIND: crate::row::RowKind = crate::row::RowKind::Struct;
+
+    type Value<'a> = OptionalValues;
+}
+
+fn optional_values_metadata() -> RowMetadata {
+    let column = |name: &str, data_type: &str| {
+        Column::new(name.to_string(), DataTypeNode::new(data_type).unwrap())
+    };
+    RowMetadata {
+        columns: vec![
+            column("nullable", "Nullable(UInt32)"),
+            column("var", "Variant(String, UInt64)"),
+            column("vars", "Array(Variant(String, UInt64))"),
+            column("pair", "Tuple(UInt32, Variant(String, UInt64))"),
+            column("map", "Map(String, Variant(String, UInt64))"),
+        ],
+        access_type: AccessType::WithSeqAccess,
+    }
+}
+
+// `Nullable(T)` writes a marker byte before the value, 0 for a value and 1 for NULL.
+// `Variant` has no marker byte. NULL is the discriminator 0xFF.
+#[test]
+fn it_serializes_option_for_nullable_and_variant() {
+    let metadata = optional_values_metadata();
+
+    let first = OptionalValues {
+        nullable: Some(7),
+        var: Some(SimpleVariant::String("ab".to_string())),
+        vars: vec![Some(SimpleVariant::UInt64(1)), None],
+        pair: (3, None),
+        map: BTreeMap::from([("k".to_string(), None)]),
+    };
+    let mut actual = Vec::new();
+    super::serialize_with_validation(&mut actual, &first, &metadata).unwrap();
+    let expected = vec![
+        // [Nullable(UInt32)] 7
+        0x00, 0x07, 0x00, 0x00, 0x00, //
+        // [Variant(String, UInt64)] String "ab"
+        0x00, 0x02, b'a', b'b', //
+        // [Array(Variant(String, UInt64))] [UInt64 1, NULL]
+        0x02, //
+        0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+        0xFF, //
+        // [Tuple(UInt32, Variant(String, UInt64))] (3, NULL)
+        0x03, 0x00, 0x00, 0x00, //
+        0xFF, //
+        // [Map(String, Variant(String, UInt64))] {"k": NULL}
+        0x01, //
+        0x01, b'k', //
+        0xFF, //
+    ];
+    assert_eq!(actual, expected);
+
+    let second = OptionalValues {
+        nullable: None,
+        var: None,
+        vars: vec![],
+        pair: (4, Some(SimpleVariant::String("c".to_string()))),
+        map: BTreeMap::from([("k".to_string(), Some(SimpleVariant::UInt64(2)))]),
+    };
+    let mut actual = Vec::new();
+    super::serialize_with_validation(&mut actual, &second, &metadata).unwrap();
+    let expected = vec![
+        // [Nullable(UInt32)] NULL
+        0x01, //
+        // [Variant(String, UInt64)] NULL
+        0xFF, //
+        // [Array(Variant(String, UInt64))] []
+        0x00, //
+        // [Tuple(UInt32, Variant(String, UInt64))] (4, String "c")
+        0x04, 0x00, 0x00, 0x00, //
+        0x00, 0x01, b'c', //
+        // [Map(String, Variant(String, UInt64))] {"k": UInt64 2}
+        0x01, //
+        0x01, b'k', //
+        0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
+    ];
+    assert_eq!(actual, expected);
 }
 
 #[test]
