@@ -199,13 +199,19 @@ pub(crate) struct Chunk {
 // * Uses `Box<_>` in order to reduce the size of cursors.
 pub(crate) struct Chunks {
     inner: Option<ChunksInner>,
+    /// The summary at the end of the response of the native TCP transport.
+    #[cfg(feature = "tcp")]
+    final_summary: Option<Box<QuerySummary>>,
 }
 
 enum ChunksInner {
     Http(Box<DetectDbException<Decompress<IncomingStream>>>),
     /// Chunks converted from the blocks of the native TCP transport.
     #[cfg(feature = "tcp")]
-    Tcp(tokio::sync::mpsc::Receiver<Result<Chunk>>),
+    Tcp {
+        receiver: tokio::sync::mpsc::Receiver<Result<Chunk>>,
+        final_summary: tokio::sync::oneshot::Receiver<QuerySummary>,
+    },
 }
 
 impl Chunks {
@@ -222,18 +228,37 @@ impl Chunks {
         };
         Ok(Self {
             inner: Some(ChunksInner::Http(Box::new(stream))),
+            #[cfg(feature = "tcp")]
+            final_summary: None,
         })
     }
 
     #[cfg(feature = "tcp")]
-    pub(crate) fn from_receiver(receiver: tokio::sync::mpsc::Receiver<Result<Chunk>>) -> Self {
+    pub(crate) fn from_receiver(
+        receiver: tokio::sync::mpsc::Receiver<Result<Chunk>>,
+        final_summary: tokio::sync::oneshot::Receiver<QuerySummary>,
+    ) -> Self {
         Self {
-            inner: Some(ChunksInner::Tcp(receiver)),
+            inner: Some(ChunksInner::Tcp {
+                receiver,
+                final_summary,
+            }),
+            final_summary: None,
         }
     }
 
+    /// The summary at the end of the response, once the response is read.
+    #[cfg(feature = "tcp")]
+    pub(crate) fn take_final_summary(&mut self) -> Option<Box<QuerySummary>> {
+        self.final_summary.take()
+    }
+
     pub(crate) fn empty() -> Self {
-        Self { inner: None }
+        Self {
+            inner: None,
+            #[cfg(feature = "tcp")]
+            final_summary: None,
+        }
     }
 
     #[cfg(feature = "futures03")]
@@ -251,7 +276,19 @@ impl Stream for Chunks {
             let res = match &mut stream {
                 ChunksInner::Http(stream) => Pin::new(stream).poll_next(cx),
                 #[cfg(feature = "tcp")]
-                ChunksInner::Tcp(receiver) => receiver.poll_recv(cx),
+                ChunksInner::Tcp {
+                    receiver,
+                    final_summary,
+                } => {
+                    let res = receiver.poll_recv(cx);
+
+                    if let Poll::Ready(None) = res {
+                        // Sent before the end of the data.
+                        self.final_summary = final_summary.try_recv().ok().map(Box::new);
+                    }
+
+                    res
+                }
             };
 
             if matches!(res, Poll::Pending | Poll::Ready(Some(Ok(_)))) {

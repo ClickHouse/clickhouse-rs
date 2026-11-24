@@ -5,13 +5,18 @@ use crate::native::reader::WireFormat;
 use crate::native::{Block, block_encoder, to_row_binary};
 use crate::query_summary::QuerySummary;
 use crate::response::{Chunk, Chunks, Response};
-use crate::tcp::connection::{Connection, ProfileInfo, Progress, QueryPacket, ServerPacket};
+use crate::tcp::connection::{
+    Connection, ProfileInfo, Progress, QueryPacket, ServerCompression, ServerPacket,
+};
 use crate::tcp::pool::{Pool, PooledConnection};
+use crate::tcp::profile_events::ProfileEvents;
 use crate::tcp::protocol::ClientInfo;
-use crate::tcp::{Request, changes_session, leading_words, params, trailing_format};
+use crate::tcp::{Request, RowFormat, changes_session, leading_words, params, trailing_format};
 use crate::{Client, Compression};
 use bytes::BytesMut;
 use std::borrow::Cow;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -41,28 +46,17 @@ impl Output {
         };
 
         // Like the HTTP interface, a `FORMAT` clause overrides the default format.
-        Ok(match trailing_format(sql).unwrap_or(format) {
-            "RowBinary" => Self::RowBinary {
-                names: false,
-                types: false,
-            },
-            "RowBinaryWithNames" => Self::RowBinary {
-                names: true,
-                types: false,
-            },
-            "RowBinaryWithNamesAndTypes" => Self::RowBinary {
-                names: true,
-                types: true,
-            },
-            "Native" => Self::Native,
-            other => {
-                return Err(Error::Unsupported(format!(
-                    "format {other} is not supported by the native TCP transport; \
-                     supported formats: Native, RowBinary, RowBinaryWithNames, \
-                     RowBinaryWithNamesAndTypes"
-                )));
-            }
-        })
+        let name = trailing_format(sql).unwrap_or(format);
+
+        match RowFormat::from_name(name) {
+            Some(RowFormat::RowBinary { names, types }) => Ok(Self::RowBinary { names, types }),
+            Some(RowFormat::Native) => Ok(Self::Native),
+            None => Err(Error::Unsupported(format!(
+                "format {name} is not supported by the native TCP transport; \
+                 supported formats: Native, RowBinary, RowBinaryWithNames, \
+                 RowBinaryWithNamesAndTypes"
+            ))),
+        }
     }
 
     fn write_header(self, block: &Block, out: &mut BytesMut) -> Result<()> {
@@ -116,46 +110,140 @@ pub(crate) fn query(client: &Client, sql: String, format: Option<&str>) -> Resul
         request.add_setting("output_format_native_write_json_as_string", "1");
     }
 
+    let (final_summary_tx, final_summary_rx) = oneshot::channel();
+    let started = start(
+        client,
+        request,
+        sql,
+        BytesConverter {
+            output,
+            received_header: false,
+            capacity: 0,
+        },
+        Some(final_summary_tx),
+    );
+
+    Ok(Response::Waiting(Box::pin(async move {
+        let (receiver, summary) = started.await?;
+        Ok((Chunks::from_receiver(receiver, final_summary_rx), summary))
+    })))
+}
+
+/// The blocks of a query result, once the query has started.
+pub(crate) type BlocksFuture =
+    Pin<Box<dyn Future<Output = Result<mpsc::Receiver<Result<Block>>>> + Send>>;
+
+/// Execute a query, returning the blocks of the result (`Query::fetch_native()`).
+pub(crate) fn query_blocks(client: &Client, sql: String) -> Result<BlocksFuture> {
+    let started = start(client, Request::new(client)?, sql, BlockConverter, None);
+    Ok(Box::pin(async move { Ok(started.await?.0) }))
+}
+
+/// Run the query in a task when the returned future is polled; the future completes
+/// when the result starts.
+fn start<C: Converter>(
+    client: &Client,
+    request: Request,
+    sql: String,
+    converter: C,
+    final_summary_tx: Option<oneshot::Sender<QuerySummary>>,
+) -> impl Future<Output = Result<(mpsc::Receiver<Result<C::Item>>, HeaderSummary)>> + Send + use<C>
+{
     let pool = client.tcp.clone();
     let (header_tx, header_rx) = oneshot::channel();
-    let (chunk_tx, chunk_rx) = mpsc::channel(CHANNEL_CAPACITY);
+    let (item_tx, item_rx) = mpsc::channel(CHANNEL_CAPACITY);
 
-    let future = async move {
-        tokio::spawn(run(
-            pool,
-            request,
-            sql,
-            output,
-            Sink::new(header_tx, chunk_tx),
-        ));
+    async move {
+        let mut sink = Sink::new(header_tx, item_tx);
+        sink.final_summary_tx = final_summary_tx;
+        tokio::spawn(run(pool, request, sql, converter, sink));
 
         match header_rx.await {
-            Ok(Ok(summary)) => Ok((Chunks::from_receiver(chunk_rx), summary)),
+            Ok(Ok(summary)) => Ok((item_rx, summary)),
             Ok(Err(e)) => Err(e),
             Err(_) => Err(Error::Network("the query task stopped unexpectedly".into())),
         }
-    };
-
-    Ok(Response::Waiting(Box::pin(future)))
+    }
 }
 
-type HeaderResult = Result<Option<Box<QuerySummary>>>;
+/// Converts the blocks of the result to the items that the cursor reads.
+trait Converter: Send + 'static {
+    type Item: Send + 'static;
+
+    /// Convert a block; `None` if there is nothing to send.
+    fn convert(
+        &mut self,
+        block: Block,
+        conn: &Connection,
+        net_size: usize,
+    ) -> Result<Option<Self::Item>>;
+}
+
+/// Converts blocks to bytes in the format that the cursor reads.
+struct BytesConverter {
+    output: Output,
+    received_header: bool,
+    /// The size of the previous chunk, to allocate the next one.
+    capacity: usize,
+}
+
+impl Converter for BytesConverter {
+    type Item = Chunk;
+
+    fn convert(
+        &mut self,
+        block: Block,
+        conn: &Connection,
+        net_size: usize,
+    ) -> Result<Option<Chunk>> {
+        let mut data = BytesMut::with_capacity(self.capacity);
+
+        if !std::mem::replace(&mut self.received_header, true) {
+            self.output.write_header(&block, &mut data)?;
+        }
+
+        self.output
+            .write_rows(&block, conn.wire_format(), &mut data)?;
+        self.capacity = data.len();
+
+        Ok((!data.is_empty()).then(|| Chunk {
+            data: data.freeze(),
+            net_size,
+        }))
+    }
+}
+
+/// Passes blocks with rows to the cursor.
+struct BlockConverter;
+
+impl Converter for BlockConverter {
+    type Item = Block;
+
+    fn convert(&mut self, block: Block, _: &Connection, _: usize) -> Result<Option<Block>> {
+        Ok((block.num_rows() > 0).then_some(block))
+    }
+}
+
+type HeaderSummary = Option<Box<QuerySummary>>;
 
 /// Delivers the response to the cursor.
-struct Sink {
-    header_tx: Option<oneshot::Sender<HeaderResult>>,
-    chunk_tx: mpsc::Sender<Result<Chunk>>,
+struct Sink<T> {
+    header_tx: Option<oneshot::Sender<Result<HeaderSummary>>>,
+    /// Receives the summary at the end of a successful response.
+    final_summary_tx: Option<oneshot::Sender<QuerySummary>>,
+    chunk_tx: mpsc::Sender<Result<T>>,
     /// The response is collected before it is sent (`wait_end_of_query = 1`).
-    buffer: Option<Vec<Chunk>>,
+    buffer: Option<Vec<T>>,
 }
 
-impl Sink {
+impl<T> Sink<T> {
     fn new(
-        header_tx: oneshot::Sender<HeaderResult>,
-        chunk_tx: mpsc::Sender<Result<Chunk>>,
+        header_tx: oneshot::Sender<Result<HeaderSummary>>,
+        chunk_tx: mpsc::Sender<Result<T>>,
     ) -> Self {
         Self {
             header_tx: Some(header_tx),
+            final_summary_tx: None,
             chunk_tx,
             buffer: None,
         }
@@ -172,11 +260,7 @@ impl Sink {
     }
 
     /// Returns `false` if the cursor is dropped.
-    async fn send(&mut self, chunk: Chunk) -> bool {
-        if chunk.data.is_empty() {
-            return true;
-        }
-
+    async fn send(&mut self, chunk: T) -> bool {
         match &mut self.buffer {
             Some(buffer) => {
                 buffer.push(chunk);
@@ -188,6 +272,11 @@ impl Sink {
 
     /// Send the end of a successful response.
     async fn finish(mut self, summary: QuerySummary) {
+        if let Some(final_summary_tx) = self.final_summary_tx.take() {
+            // Before the end of the data, so that the cursor has it at the end.
+            let _ = final_summary_tx.send(summary.clone());
+        }
+
         let buffer = self.buffer.take();
         self.start(summary);
 
@@ -227,15 +316,30 @@ pub(crate) struct Failure {
 }
 
 impl Failure {
+    /// An error after which the connection is in an unknown state.
     pub(crate) fn broken(error: Error) -> Self {
         Self {
             error,
             reusable: false,
         }
     }
+
+    /// An error after which the connection can be used again, e.g. an exception of the server.
+    pub(crate) fn reusable(error: Error) -> Self {
+        Self {
+            error,
+            reusable: true,
+        }
+    }
 }
 
-async fn run(pool: Arc<Pool>, request: Request, sql: String, output: Output, mut sink: Sink) {
+async fn run<C: Converter>(
+    pool: Arc<Pool>,
+    request: Request,
+    sql: String,
+    mut converter: C,
+    mut sink: Sink<C::Item>,
+) {
     if request.wait_end_of_query {
         sink.buffer = Some(Vec::new());
     }
@@ -246,7 +350,7 @@ async fn run(pool: Arc<Pool>, request: Request, sql: String, output: Output, mut
     };
 
     let result = match pooled.conn() {
-        Ok(conn) => execute(conn, &request, sql.as_bytes(), output, &mut sink).await,
+        Ok(conn) => execute(conn, &request, sql.as_bytes(), &mut converter, &mut sink).await,
         Err(e) => Err(Failure::broken(e)),
     };
 
@@ -277,49 +381,80 @@ pub(crate) async fn send_query(
     request: &Request,
     sql: &[u8],
 ) -> Result<Compression, Failure> {
-    set_roles(conn, request).await?;
+    set_roles(conn, &request.roles).await?;
 
-    let mut settings: Vec<(&str, &str)> = request
+    let (compression, compression_settings) = negotiate_compression(conn, request).await?;
+
+    let settings: Vec<(&str, &str)> = request
         .settings
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))
+        .chain(
+            compression_settings
+                .iter()
+                .map(|(name, value)| (*name, value.as_str())),
+        )
         .collect();
 
-    let (compression, compression_settings) = negotiate_compression(conn, request).await?;
-    settings.extend(
-        compression_settings
-            .iter()
-            .map(|(name, value)| (*name, value.as_str())),
-    );
     let (sql, renamed) = parameters(conn, request, sql);
     let parameters: Vec<(&str, &str)> = renamed
         .iter()
         .map(|(name, value)| (name.as_ref(), *value))
         .collect();
 
-    conn.write_query(&QueryPacket {
-        query_id: &request.query_id,
-        client_info: ClientInfo {
-            client_name: &request.key.client_name,
-            quota_key: &request.key.quota_key,
-            #[cfg(feature = "opentelemetry")]
-            trace_context: request.trace_context.clone(),
+    write_query(
+        conn,
+        &QueryPacket {
+            query_id: &request.query_id,
+            client_info: ClientInfo {
+                client_name: &request.key.client_name,
+                quota_key: &request.key.quota_key,
+                #[cfg(feature = "opentelemetry")]
+                trace_context: request.trace_context.clone(),
+            },
+            settings: &settings,
+            query: &sql,
+            parameters: &parameters,
+            compression,
         },
-        settings: &settings,
-        query: &sql,
-        parameters: &parameters,
-        compression,
-    })
-    // Nothing was sent yet.
-    .map_err(|error| Failure {
-        error,
-        reusable: true,
-    })?;
+    )
+    .await?;
 
+    Ok(compression)
+}
+
+/// Write a `Query` packet and the empty block of external tables, and flush.
+async fn write_query(conn: &mut Connection, packet: &QueryPacket<'_>) -> Result<(), Failure> {
+    // Nothing was sent yet if the packet is invalid.
+    conn.write_query(packet).map_err(Failure::reusable)?;
+    send_end_of_data(conn, packet.compression).await
+}
+
+/// Send the empty block that ends the data.
+pub(crate) async fn send_end_of_data(
+    conn: &mut Connection,
+    compression: Compression,
+) -> Result<(), Failure> {
     conn.write_data(None, compression)
         .map_err(Failure::broken)?;
-    conn.flush().await.map_err(Failure::broken)?;
-    Ok(compression)
+    conn.flush().await.map_err(Failure::broken)
+}
+
+/// A query without settings, parameters and compression for the internal queries of the client.
+fn internal_query(sql: &str) -> QueryPacket<'_> {
+    QueryPacket {
+        query_id: "",
+        client_info: ClientInfo {
+            client_name: "",
+            quota_key: "",
+            #[cfg(feature = "opentelemetry")]
+            trace_context: None,
+        },
+        settings: &[],
+        query: sql.as_bytes(),
+        parameters: &[],
+        compression: Compression::None,
+    }
 }
 
 /// Query parameters as `(name, value)` pairs.
@@ -334,9 +469,7 @@ fn parameters<'a>(
     request: &'a Request,
     sql: &'a [u8],
 ) -> (Cow<'a, [u8]>, Parameters<'a>) {
-    let server = conn.server();
-
-    if request.parameters.is_empty() || (server.version_major, server.version_minor) >= (26, 7) {
+    if request.parameters.is_empty() || conn.server().version_at_least(26, 7) {
         let parameters = request
             .parameters
             .iter()
@@ -367,37 +500,28 @@ fn parameters<'a>(
     )
 }
 
-/// A compression method of the native protocol: the name and the ZSTD level.
-type Method = (&'static str, Option<i32>);
-
-/// The method of `compression`, or `None` if compression is disabled.
-fn method(compression: Compression) -> Option<Method> {
+/// The method of `compression`: the name and the ZSTD level, or `None` if compression is disabled.
+fn method(compression: Compression) -> Option<(&'static str, Option<i64>)> {
     match compression {
         Compression::None => None,
         #[cfg(feature = "lz4")]
         #[allow(deprecated)]
         Compression::Lz4 | Compression::Lz4Hc(_) => Some(("LZ4", None)),
         #[cfg(feature = "zstd")]
-        Compression::Zstd(level) => Some(("ZSTD", Some(level))),
+        Compression::Zstd(level) => Some(("ZSTD", Some(i64::from(level)))),
     }
-}
-
-/// Returns `true` if this build can decompress data compressed with `method`.
-fn can_decompress(method: Method) -> bool {
-    (method.0 == "LZ4" && cfg!(feature = "lz4")) || (method.0 == "ZSTD" && cfg!(feature = "zstd"))
 }
 
 /// Select the compression of a query and the settings that request it.
 ///
-/// The server compresses data with `network_compression_method`: `LZ4` by default,
-/// `ZSTD(3)` since 26.9. If the method of the client is different, it is requested.
-/// A user with `readonly = 1` cannot change settings: then the default method of the server is
-/// used if this build can decompress it, else the query is not compressed.
+/// The server compresses data with its `network_compression_method`. If the method of the client
+/// is different, it is requested. A user with `readonly = 1` cannot change settings: then the method
+/// of the server is used if this build can decompress it, else the query is not compressed.
 async fn negotiate_compression(
     conn: &mut Connection,
     request: &Request,
 ) -> Result<(Compression, Vec<(&'static str, String)>), Failure> {
-    let Some(desired) = method(request.compression) else {
+    let Some((method, level)) = method(request.compression) else {
         return Ok((Compression::None, Vec::new()));
     };
 
@@ -406,102 +530,85 @@ async fn negotiate_compression(
         return Ok((request.compression, Vec::new()));
     }
 
-    let server = conn.server();
-    let server_default: Method = if (server.version_major, server.version_minor) >= (26, 9) {
-        ("ZSTD", Some(3))
-    } else {
-        ("LZ4", None)
-    };
+    let server = server_compression(conn).await?;
 
-    let same_method =
-        desired.0 == server_default.0 && (desired.0 != "ZSTD" || desired.1 == server_default.1);
+    let same_method = server.method.eq_ignore_ascii_case(method)
+        && (level.is_none() || level == Some(server.zstd_level));
 
     if same_method {
         return Ok((request.compression, Vec::new()));
     }
 
-    if can_change_compression(conn).await? {
-        let mut settings = vec![("network_compression_method", desired.0.to_owned())];
+    if !server.readonly {
+        let mut settings = vec![("network_compression_method", method.to_owned())];
 
-        if let Some(level) = desired.1 {
+        if let Some(level) = level {
             settings.push(("network_zstd_compression_level", level.to_string()));
         }
 
         return Ok((request.compression, settings));
     }
 
-    if can_decompress(server_default) {
+    if server.can_decompress() {
         Ok((request.compression, Vec::new()))
     } else {
         Ok((Compression::None, Vec::new()))
     }
 }
 
-/// Returns `true` if the user can change settings: `readonly` is not `1`.
+/// Get the compression settings of the server for the user of the connection.
 ///
-/// The result is remembered for the connection.
-async fn can_change_compression(conn: &mut Connection) -> Result<bool, Failure> {
-    if let Some(known) = conn.can_change_compression {
-        return Ok(known);
+/// The pool keeps the result for the server and the user.
+async fn server_compression(conn: &mut Connection) -> Result<ServerCompression, Failure> {
+    if let Some(known) = &conn.server_compression {
+        return Ok(known.clone());
     }
 
-    let probe = QueryPacket {
-        query_id: "",
-        client_info: ClientInfo {
-            client_name: "",
-            quota_key: "",
-            #[cfg(feature = "opentelemetry")]
-            trace_context: None,
-        },
-        settings: &[],
-        query: b"SELECT toUInt64(getSetting('readonly'))",
-        parameters: &[],
-        compression: Compression::None,
-    };
+    write_query(
+        conn,
+        &internal_query(
+            "SELECT toUInt64(getSetting('readonly')), \
+             toString(getSetting('network_compression_method')), \
+             toInt64(getSetting('network_zstd_compression_level'))",
+        ),
+    )
+    .await?;
 
-    conn.write_query(&probe).map_err(Failure::broken)?;
-    conn.write_data(None, Compression::None)
-        .map_err(Failure::broken)?;
-    conn.flush().await.map_err(Failure::broken)?;
-
-    let mut readonly = None;
+    let mut result = None;
 
     loop {
         match conn.read_packet(false).await.map_err(Failure::broken)? {
             ServerPacket::Data(block) if block.num_rows() > 0 => {
-                readonly = block
-                    .columns()
-                    .first()
-                    .and_then(|column| column.iter::<u64>().ok()?.next()?.ok());
+                result = ServerCompression::from_block(&block);
             }
             ServerPacket::EndOfStream => break,
-            ServerPacket::Exception(error) => {
-                return Err(Failure {
-                    error,
-                    reusable: true,
-                });
-            }
+            ServerPacket::Exception(error) => return Err(Failure::reusable(error)),
             _ => {}
         }
     }
 
-    let known = readonly != Some(1);
-    conn.can_change_compression = Some(known);
+    let known = result.ok_or_else(|| {
+        Failure::broken(Error::BadResponse(
+            "the server did not return its compression settings".into(),
+        ))
+    })?;
+
+    conn.server_compression = Some(known.clone());
     Ok(known)
 }
 
-/// Make the roles of the session of `conn` match the roles of the request.
-async fn set_roles(conn: &mut Connection, request: &Request) -> Result<(), Failure> {
-    if conn.roles == request.roles {
+/// Make the roles of the session of `conn` match `roles`.
+async fn set_roles(conn: &mut Connection, roles: &[String]) -> Result<(), Failure> {
+    if conn.roles == roles {
         return Ok(());
     }
 
     let mut sql = String::from("SET ROLE ");
 
-    if request.roles.is_empty() {
+    if roles.is_empty() {
         sql.push_str("DEFAULT");
     } else {
-        for (index, role) in request.roles.iter().enumerate() {
+        for (index, role) in roles.iter().enumerate() {
             if index > 0 {
                 sql.push_str(", ");
             }
@@ -511,24 +618,10 @@ async fn set_roles(conn: &mut Connection, request: &Request) -> Result<(), Failu
         }
     }
 
-    let set_roles = Request {
-        roles: conn.roles.clone(),
-        settings: Vec::new(),
-        parameters: Vec::new(),
-        query_id: String::new(),
-        session: None,
-        key: request.key.clone(),
-        compression: request.compression,
-        wait_end_of_query: false,
-        #[cfg(feature = "opentelemetry")]
-        trace_context: None,
-    };
+    write_query(conn, &internal_query(&sql)).await?;
+    drain(conn, Compression::None, None).await?;
 
-    // `set_roles` has the roles of the connection, so `send_query()` does not recurse.
-    let compression = Box::pin(send_query(conn, &set_roles, sql.as_bytes())).await?;
-    drain(conn, compression, None).await?;
-
-    conn.roles.clone_from(&request.roles);
+    conn.roles = roles.to_vec();
     Ok(())
 }
 
@@ -553,14 +646,12 @@ impl DataRequest {
                 false
             }
             ServerPacket::Data(_) if !self.answered => {
-                let server = conn.server();
                 let is_insert = leading_words(sql, 1)
                     .first()
                     .is_some_and(|word| word.eq_ignore_ascii_case(b"INSERT"));
 
                 self.answered = true;
-                self.table_columns
-                    || (is_insert && (server.version_major, server.version_minor) >= (22, 8))
+                self.table_columns || (is_insert && conn.server().version_at_least(22, 8))
             }
             _ => false,
         }
@@ -587,19 +678,14 @@ pub(crate) async fn drain(
         if let Some(sql) = sql
             && data_request.check(&packet, conn, sql)
         {
-            conn.write_data(None, compression)
-                .map_err(Failure::broken)?;
-            conn.flush().await.map_err(Failure::broken)?;
+            send_end_of_data(conn, compression).await?;
             continue;
         }
 
         match packet {
             ServerPacket::EndOfStream => return Ok(progress),
             ServerPacket::Exception(error) => {
-                return Err(Failure {
-                    error,
-                    reusable: true,
-                });
+                return Err(Failure::reusable(error));
             }
             ServerPacket::Progress(increment) => progress.add(&increment),
             _ => {}
@@ -607,12 +693,12 @@ pub(crate) async fn drain(
     }
 }
 
-async fn execute(
+async fn execute<C: Converter>(
     conn: &mut Connection,
     request: &Request,
     sql: &[u8],
-    output: Output,
-    sink: &mut Sink,
+    converter: &mut C,
+    sink: &mut Sink<C::Item>,
 ) -> Result<Outcome, Failure> {
     let compression = send_query(conn, request, sql).await?;
 
@@ -621,6 +707,7 @@ async fn execute(
 
     let mut progress = Progress::default();
     let mut profile: Option<ProfileInfo> = None;
+    let mut events = ProfileEvents::default();
     let mut received_header = false;
     let mut received_bytes = conn.received_bytes();
 
@@ -632,9 +719,7 @@ async fn execute(
 
         if data_request.check(&packet, conn, sql) {
             // The HTTP interface inserts the empty request body.
-            conn.write_data(None, compression)
-                .map_err(Failure::broken)?;
-            conn.flush().await.map_err(Failure::broken)?;
+            send_end_of_data(conn, compression).await?;
             continue;
         }
 
@@ -648,44 +733,39 @@ async fn execute(
                 profile = Some(info);
                 continue;
             }
+            ServerPacket::ProfileEvents(block) => {
+                events.add(&block);
+                continue;
+            }
             ServerPacket::EndOfStream => {
                 return Ok(Outcome::Completed {
-                    summary: progress.to_summary(profile.as_ref()),
+                    summary: progress.to_summary(profile.as_ref(), &events),
                 });
             }
             ServerPacket::Exception(error) => {
-                return Err(Failure {
-                    error,
-                    reusable: true,
-                });
+                return Err(Failure::reusable(error));
             }
             ServerPacket::Pong | ServerPacket::Other | ServerPacket::TableColumns => continue,
         };
 
-        let mut data = BytesMut::new();
-
         if !received_header {
             received_header = true;
-
-            output
-                .write_header(&block, &mut data)
-                .map_err(Failure::broken)?;
-            sink.start(progress.to_summary(profile.as_ref()));
+            sink.start(progress.to_summary(profile.as_ref(), &events));
         }
 
-        output
-            .write_rows(&block, conn.wire_format(), &mut data)
-            .map_err(Failure::broken)?;
-
         let total_received = conn.received_bytes();
-        let chunk = Chunk {
-            data: data.freeze(),
-            net_size: usize::try_from(total_received.saturating_sub(received_bytes))
-                .unwrap_or(usize::MAX),
-        };
+        let net_size =
+            usize::try_from(total_received.saturating_sub(received_bytes)).unwrap_or(usize::MAX);
         received_bytes = total_received;
 
-        if !sink.send(chunk).await {
+        let Some(item) = converter
+            .convert(block, conn, net_size)
+            .map_err(Failure::broken)?
+        else {
+            continue;
+        };
+
+        if !sink.send(item).await {
             return Ok(Outcome::Canceled { compression });
         }
     }

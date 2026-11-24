@@ -1,7 +1,9 @@
 //! Synchronous encoding of [`Block`]s for the native TCP protocol and the `Native` format.
 
 use crate::error::Error;
-use crate::native::reader::{REVISION_WITH_CUSTOM_SERIALIZATION, WireFormat, wire_type};
+use crate::native::reader::{
+    REVISION_WITH_CUSTOM_SERIALIZATION, WireFormat, lc_dict_type, variant_counts, wire_type,
+};
 use crate::native::varuint;
 use crate::native::{Block, Layout, LayoutKind, LayoutLowCardinality};
 use bytes::{BufMut, BytesMut};
@@ -20,8 +22,8 @@ pub(crate) fn write_block(
     varuint::write(&mut *out, block.num_rows);
 
     for column in &block.columns {
-        write_string(column.name.as_bytes(), out);
-        write_string(type_name(column.type_name.as_bytes(), revision), out);
+        varuint::write_bytes(&mut *out, column.name.as_bytes());
+        varuint::write_bytes(&mut *out, type_name(&column.type_name(), revision));
 
         if revision >= REVISION_WITH_CUSTOM_SERIALIZATION {
             // Default serialization
@@ -65,6 +67,7 @@ fn type_name(name: &[u8], revision: u64) -> &[u8] {
 }
 
 /// Write a block without columns and rows: the end of data for the native TCP protocol.
+#[cfg(feature = "tcp")]
 pub(crate) fn write_empty_block(revision: u64, out: &mut BytesMut) {
     write_block_info(revision, out);
     // No columns, no rows
@@ -84,11 +87,6 @@ fn write_block_info(revision: u64, out: &mut BytesMut) {
     out.put_i32_le(-1);
     // End of fields
     varuint::write(&mut *out, 0);
-}
-
-fn write_string(bytes: &[u8], out: &mut BytesMut) {
-    varuint::write(&mut *out, bytes.len());
-    out.put_slice(bytes);
 }
 
 fn invalid(message: impl Into<String>) -> Error {
@@ -196,7 +194,7 @@ fn write_kind(
                 let value = data
                     .get(start..end)
                     .ok_or_else(|| invalid("string offsets are out of range"))?;
-                write_string(value, out);
+                varuint::write_bytes(&mut *out, value);
                 start = end;
             }
         }
@@ -241,11 +239,9 @@ fn write_kind(
         ) if types.len() == variants.len() && discriminators.len() == num_values => {
             out.put_slice(discriminators);
 
-            for (index, (ty, layout)) in types.iter().zip(variants.iter()).enumerate() {
-                let count = discriminators
-                    .iter()
-                    .filter(|&&discriminator| usize::from(discriminator) == index)
-                    .count();
+            let counts = variant_counts(discriminators, types.len())?;
+
+            for ((ty, layout), count) in types.iter().zip(variants.iter()).zip(counts) {
                 write_data(ty, layout, count, out)?;
             }
         }
@@ -300,10 +296,7 @@ fn write_low_cardinality(
         return Err(invalid("wrong number of LowCardinality keys"));
     }
 
-    let dict_type = match inner {
-        DataTypeNode::Nullable(inner) => &**inner,
-        other => other,
-    };
+    let (dict_type, _) = lc_dict_type(inner);
 
     let dict_len = lc.dict.num_values;
 

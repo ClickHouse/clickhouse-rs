@@ -5,15 +5,16 @@ use crate::error::{Error, Result};
 use crate::native::Block;
 use crate::native::block_encoder;
 use crate::native::reader::{BlockReader, ChunkSource, WireFormat};
-use crate::native::varuint::ParseVarUInt;
+use crate::native::varuint::{self, ParseVarUInt};
 use crate::query_summary::QuerySummary;
+use crate::tcp::profile_events::ProfileEvents;
 use crate::tcp::protocol::{
     self, ClientInfo, REVISION_WITH_ADDENDUM, REVISION_WITH_CLIENT_INFO,
     REVISION_WITH_CLIENT_WRITE_INFO, REVISION_WITH_INTERSERVER_SECRET, REVISION_WITH_PARAMETERS,
     REVISION_WITH_QUOTA_KEY, REVISION_WITH_SERVER_DISPLAY_NAME,
     REVISION_WITH_SERVER_QUERY_TIME_IN_PROGRESS, REVISION_WITH_SERVER_TIMEZONE,
     REVISION_WITH_SETTINGS_SERIALIZED_AS_STRINGS, REVISION_WITH_VERSION_PATCH, client, server,
-    write_str, write_varuint,
+    write_str,
 };
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::collections::HashMap;
@@ -50,6 +51,47 @@ pub(crate) struct ServerInfo {
     pub(crate) display_name: Option<String>,
 }
 
+impl ServerInfo {
+    pub(crate) fn version_at_least(&self, major: u64, minor: u64) -> bool {
+        (self.version_major, self.version_minor) >= (major, minor)
+    }
+}
+
+/// The compression settings of the server for a user.
+#[derive(Debug, Clone)]
+pub(crate) struct ServerCompression {
+    /// `network_compression_method`
+    pub(crate) method: String,
+    /// `network_zstd_compression_level`
+    pub(crate) zstd_level: i64,
+    /// The user cannot change settings (`readonly = 1`).
+    pub(crate) readonly: bool,
+}
+
+impl ServerCompression {
+    /// Read the result of `SELECT readonly, network_compression_method, network_zstd_compression_level`.
+    pub(crate) fn from_block(block: &Block) -> Option<Self> {
+        let [readonly, method, zstd_level] = block.columns() else {
+            return None;
+        };
+
+        Some(Self {
+            readonly: readonly.iter::<u64>().ok()?.next()?.ok()? == 1,
+            method: method.iter::<String>().ok()?.next()?.ok()?,
+            zstd_level: zstd_level.iter::<i64>().ok()?.next()?.ok()?,
+        })
+    }
+
+    /// Returns `true` if this build can decompress data compressed with this method.
+    pub(crate) fn can_decompress(&self) -> bool {
+        let method = self.method.to_ascii_uppercase();
+
+        method == "NONE"
+            || (cfg!(feature = "lz4") && (method == "LZ4" || method == "LZ4HC"))
+            || (cfg!(feature = "zstd") && method == "ZSTD")
+    }
+}
+
 /// Credentials and options sent in the `Hello` packet.
 pub(crate) struct Hello<'a> {
     pub(crate) client_name: &'a str,
@@ -82,6 +124,8 @@ pub(crate) enum ServerPacket {
     Pong,
     /// The server failed to execute the query. The connection can be used again.
     Exception(Error),
+    /// Counters of the query.
+    ProfileEvents(Block),
     /// The description of the columns of the table of an `INSERT`.
     ///
     /// The server sends it before the structure of the table when it waits for the data.
@@ -113,8 +157,13 @@ impl Progress {
         self.elapsed_ns = self.elapsed_ns.saturating_add(other.elapsed_ns);
     }
 
-    /// The equivalent of the `X-ClickHouse-Summary` header of the HTTP interface.
-    pub(crate) fn to_summary(self, profile: Option<&ProfileInfo>) -> QuerySummary {
+    /// The equivalent of the `X-ClickHouse-Summary` header of the HTTP interface,
+    /// with the profile events of the query.
+    pub(crate) fn to_summary(
+        self,
+        profile: Option<&ProfileInfo>,
+        events: &ProfileEvents,
+    ) -> QuerySummary {
         let mut fields = HashMap::from([
             ("read_rows".to_owned(), self.read_rows.to_string()),
             ("read_bytes".to_owned(), self.read_bytes.to_string()),
@@ -130,6 +179,12 @@ impl Progress {
         if let Some(profile) = profile {
             fields.insert("result_rows".to_owned(), profile.rows.to_string());
             fields.insert("result_bytes".to_owned(), profile.bytes.to_string());
+        }
+
+        for (name, value) in events.values() {
+            fields
+                .entry(name.to_owned())
+                .or_insert_with(|| value.to_string());
         }
 
         QuerySummary::from_fields(fields)
@@ -154,8 +209,8 @@ pub(crate) struct Connection {
     received_bytes: u64,
     /// The roles set with `SET ROLE` in the session of this connection.
     pub(crate) roles: Vec<String>,
-    /// Whether the user can change `network_compression_method`, once it is known.
-    pub(crate) can_change_compression: Option<bool>,
+    /// The compression settings of the server for the user, once they are known.
+    pub(crate) server_compression: Option<ServerCompression>,
 }
 
 fn protocol_error(message: impl Into<String>) -> Error {
@@ -188,7 +243,7 @@ impl Connection {
             },
             received_bytes: 0,
             roles: Vec::new(),
-            can_change_compression: None,
+            server_compression: None,
         };
 
         let (user, password) = match hello.auth {
@@ -198,11 +253,11 @@ impl Connection {
 
         let (major, minor, _) = protocol::crate_version();
         let out = &mut conn.write_buf;
-        write_varuint(out, protocol::revision_varuint(client::HELLO));
+        varuint::write(&mut *out, client::HELLO);
         write_str(out, hello.client_name);
-        write_varuint(out, major);
-        write_varuint(out, minor);
-        write_varuint(out, protocol::revision_varuint(protocol::CLIENT_REVISION));
+        varuint::write(&mut *out, major);
+        varuint::write(&mut *out, minor);
+        varuint::write(&mut *out, protocol::CLIENT_REVISION_VARUINT);
         write_str(out, hello.database);
         write_str(out, user);
         write_str(out, password);
@@ -266,7 +321,7 @@ impl Connection {
     pub(crate) fn wire_format(&self) -> WireFormat {
         WireFormat {
             revision: self.revision,
-            variant_mode_prefix: (self.server.version_major, self.server.version_minor) >= (24, 7),
+            variant_mode_prefix: self.server.version_at_least(24, 7),
         }
     }
 
@@ -316,7 +371,7 @@ impl Connection {
 
         let revision = self.revision;
         let out = &mut self.write_buf;
-        write_varuint(out, protocol::revision_varuint(client::QUERY));
+        varuint::write(&mut *out, client::QUERY);
         write_str(out, query.query_id);
         query.client_info.write(revision, out);
         protocol::write_settings(out, query.settings.iter().copied());
@@ -325,8 +380,8 @@ impl Connection {
             write_str(out, "");
         }
 
-        write_varuint(out, protocol::revision_varuint(protocol::STAGE_COMPLETE));
-        write_varuint(out, usize::from(query.compression.is_enabled()));
+        varuint::write(&mut *out, protocol::STAGE_COMPLETE);
+        varuint::write(&mut *out, usize::from(query.compression.is_enabled()));
         write_str(out, query.query);
 
         if revision >= REVISION_WITH_PARAMETERS {
@@ -342,23 +397,25 @@ impl Connection {
         block: Option<&Block>,
         compression: Compression,
     ) -> Result<()> {
-        write_varuint(
-            &mut self.write_buf,
-            protocol::revision_varuint(client::DATA),
-        );
+        varuint::write(&mut self.write_buf, client::DATA);
         // The name of a temporary table; empty for the main data
         write_str(&mut self.write_buf, "");
 
-        let mut data = BytesMut::new();
-        match block {
-            Some(block) => block_encoder::write_block(block, self.wire_format(), &mut data)?,
-            None => block_encoder::write_empty_block(self.revision, &mut data),
-        }
+        let format = self.wire_format();
+        let encode = |out: &mut BytesMut| match block {
+            Some(block) => block_encoder::write_block(block, format, out),
+            None => {
+                block_encoder::write_empty_block(format.revision, out);
+                Ok(())
+            }
+        };
 
         if !compression.is_enabled() {
-            self.write_buf.unsplit(data);
-            return Ok(());
+            return encode(&mut self.write_buf);
         }
+
+        let mut data = BytesMut::new();
+        encode(&mut data)?;
 
         #[cfg(any(feature = "lz4", feature = "zstd"))]
         for chunk in data.chunks(MAX_FRAME_DATA_SIZE) {
@@ -370,10 +427,7 @@ impl Connection {
     }
 
     pub(crate) fn write_cancel(&mut self) {
-        write_varuint(
-            &mut self.write_buf,
-            protocol::revision_varuint(client::CANCEL),
-        );
+        varuint::write(&mut self.write_buf, client::CANCEL);
     }
 
     pub(crate) async fn flush(&mut self) -> Result<()> {
@@ -410,9 +464,12 @@ impl Connection {
             server::END_OF_STREAM => ServerPacket::EndOfStream,
             server::PROFILE_INFO => ServerPacket::ProfileInfo(self.read_profile_info().await?),
             // Logs and profile events are never compressed at this revision.
-            server::LOG | server::PROFILE_EVENTS => {
+            server::LOG => {
                 self.read_data_packet(false).await?;
                 ServerPacket::Other
+            }
+            server::PROFILE_EVENTS => {
+                ServerPacket::ProfileEvents(self.read_data_packet(false).await?)
             }
             server::TABLE_COLUMNS => {
                 // Table name and the description of columns
@@ -457,10 +514,12 @@ impl Connection {
                 return Err(protocol_error("compressed block has trailing data"));
             }
 
-            // Put back the data that follows the block.
-            let mut read_buf = BytesMut::with_capacity(leftover.len() + self.read_buf.len());
-            read_buf.put_slice(&leftover);
-            read_buf.put_slice(&self.read_buf);
+            // Put back the data that follows the block. `PacketSource` takes the whole buffer,
+            // so the buffer is empty here, and the leftover is usually not shared.
+            let mut read_buf = leftover
+                .try_into_mut()
+                .unwrap_or_else(|leftover| BytesMut::from(&leftover[..]));
+            read_buf.unsplit(std::mem::take(&mut self.read_buf));
             self.read_buf = read_buf;
         }
 
@@ -601,19 +660,16 @@ impl Connection {
     /// Read one complete compressed frame and decompress it.
     #[cfg(any(feature = "lz4", feature = "zstd"))]
     async fn read_frame(&mut self) -> Result<Bytes> {
-        use crate::compression::native_framing::{META_SIZE, decompress_frame, frame_size};
+        use crate::compression::native_framing::{decompress_frame, frame_len};
 
-        self.ensure(META_SIZE).await?;
+        loop {
+            if let Some(len) = frame_len(&self.read_buf)? {
+                let frame = self.read_bytes(len).await?;
+                return decompress_frame(&frame);
+            }
 
-        let meta = self
-            .read_buf
-            .get(..META_SIZE)
-            .and_then(|meta| <&[u8; META_SIZE]>::try_from(meta).ok())
-            .ok_or_else(|| protocol_error("compressed frame is too short"))?;
-        let size = frame_size(meta)?;
-
-        let frame = self.read_bytes(size).await?;
-        decompress_frame(&frame)
+            self.read_more().await?;
+        }
     }
 
     #[cfg(not(any(feature = "lz4", feature = "zstd")))]

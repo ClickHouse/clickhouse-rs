@@ -957,7 +957,13 @@ mod compression {
             if self.tcp {
                 let data_size = data.original_size;
                 return self
-                    .send_inner(decompress_frames(&data.compressed)?, data_size)
+                    .send_inner(
+                        decompress_frames(
+                            &data.compressed,
+                            usize::try_from(data_size).unwrap_or(0),
+                        )?,
+                        data_size,
+                    )
                     .await;
             }
 
@@ -967,18 +973,14 @@ mod compression {
 
     /// Decompress concatenated frames of ClickHouse's native compression.
     #[cfg(feature = "tcp")]
-    fn decompress_frames(mut data: &[u8]) -> Result<Bytes> {
-        use crate::compression::native_framing::{META_SIZE, decompress_frame, frame_size};
+    fn decompress_frames(mut data: &[u8], original_size: usize) -> Result<Bytes> {
+        use crate::compression::native_framing::{decompress_frame, frame_len};
 
-        let mut decompressed = bytes::BytesMut::new();
+        let mut decompressed = bytes::BytesMut::with_capacity(original_size);
 
         while !data.is_empty() {
-            let meta = data
-                .get(..META_SIZE)
-                .and_then(|meta| <&[u8; META_SIZE]>::try_from(meta).ok())
-                .ok_or_else(|| Error::decompression("compressed frame is too short"))?;
-            let (frame, rest) = data
-                .split_at_checked(frame_size(meta)?)
+            let (frame, rest) = frame_len(data)?
+                .and_then(|len| data.split_at_checked(len))
                 .ok_or_else(|| Error::decompression("compressed frame is too short"))?;
 
             decompressed.extend_from_slice(&decompress_frame(frame)?);

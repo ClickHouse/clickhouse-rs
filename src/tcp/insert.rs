@@ -5,6 +5,7 @@
 //! formats from the native protocol, so it is collected and sent after the query text,
 //! as inline data of the `INSERT` statement.
 
+use crate::bytes_ext::BytesExt;
 use crate::error::{Error, Result};
 use crate::native::Block;
 use crate::native::from_row_binary::RowBinaryColumns;
@@ -14,10 +15,10 @@ use crate::native::varuint::ParseVarUInt;
 use crate::request_body::RequestBody;
 use crate::tcp::connection::{Connection, ServerPacket};
 use crate::tcp::pool::Pool;
-use crate::tcp::query::{Failure, drain, send_query};
-use crate::tcp::{Request, trailing_format};
+use crate::tcp::query::{Failure, drain, send_end_of_data, send_query};
+use crate::tcp::{Request, RowFormat, trailing_format};
 use crate::{Client, Compression};
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use clickhouse_types::error::TypesError;
 use http_body_util::BodyExt;
 use std::ops::ControlFlow;
@@ -41,21 +42,10 @@ enum Input {
 
 impl Input {
     fn new(sql: &str) -> Self {
-        match trailing_format(sql) {
-            Some("RowBinary") => Self::RowBinary {
-                names: false,
-                types: false,
-            },
-            Some("RowBinaryWithNames") => Self::RowBinary {
-                names: true,
-                types: false,
-            },
-            Some("RowBinaryWithNamesAndTypes") => Self::RowBinary {
-                names: true,
-                types: true,
-            },
-            Some("Native") => Self::Native,
-            _ => Self::Inline,
+        match trailing_format(sql).and_then(RowFormat::from_name) {
+            Some(RowFormat::RowBinary { names, types }) => Self::RowBinary { names, types },
+            Some(RowFormat::Native) => Self::Native,
+            None => Self::Inline,
         }
     }
 }
@@ -131,18 +121,12 @@ async fn execute(
         {
             ServerPacket::Data(block) => break block,
             ServerPacket::Exception(error) => {
-                return Err(Failure {
-                    error,
-                    reusable: true,
-                });
+                return Err(Failure::reusable(error));
             }
             ServerPacket::EndOfStream => {
-                return Err(Failure {
-                    error: Error::BadResponse(
-                        "the server did not request data for the INSERT statement".into(),
-                    ),
-                    reusable: true,
-                });
+                return Err(Failure::reusable(Error::BadResponse(
+                    "the server did not request data for the INSERT statement".into(),
+                )));
             }
             _ => {}
         }
@@ -155,7 +139,7 @@ async fn execute(
                 RowBinaryInput::new(&header, names, types).map_err(Failure::broken)?;
 
             while let Some(chunk) = next_chunk(body).await.map_err(Failure::broken)? {
-                decoder.push(&chunk);
+                decoder.push(chunk);
 
                 while let Some(block) = decoder.next_block(false).map_err(Failure::broken)? {
                     send_block(conn, compression, &block).await?;
@@ -176,10 +160,7 @@ async fn execute(
         Input::Inline => {}
     }
 
-    conn.write_data(None, compression)
-        .map_err(Failure::broken)?;
-    conn.flush().await.map_err(Failure::broken)?;
-
+    send_end_of_data(conn, compression).await?;
     drain(conn, compression, None).await?;
     Ok(())
 }
@@ -229,7 +210,8 @@ struct RowBinaryInput {
     /// The names of the columns that the server expects.
     names: Vec<MaybeUtf8>,
     header: HeaderState,
-    pending: BytesMut,
+    /// The data that is not read yet.
+    pending: BytesExt,
     /// The size of the rows in the current block.
     block_size: usize,
 }
@@ -254,13 +236,13 @@ impl RowBinaryInput {
             } else {
                 HeaderState::Done
             },
-            pending: BytesMut::new(),
+            pending: BytesExt::default(),
             block_size: 0,
         })
     }
 
-    fn push(&mut self, chunk: &[u8]) {
-        self.pending.extend_from_slice(chunk);
+    fn push(&mut self, chunk: Bytes) {
+        self.pending.extend(chunk);
     }
 
     /// Read rows from the pending data and return a block when it is large enough,
@@ -276,7 +258,7 @@ impl RowBinaryInput {
             }
         }
 
-        let mut input = &self.pending[..];
+        let mut input = self.pending.slice();
 
         while self.block_size < BLOCK_SIZE {
             let before = input.len();
@@ -288,14 +270,13 @@ impl RowBinaryInput {
             self.block_size += before - input.len();
         }
 
-        let consumed = self.pending.len() - input.len();
-        self.pending.advance(consumed);
+        self.pending.set_remaining(input.len());
 
-        if end && !self.pending.is_empty() && self.block_size < BLOCK_SIZE {
+        if end && self.pending.remaining() > 0 && self.block_size < BLOCK_SIZE {
             return Err(Error::DataFormat(
                 format!(
                     "{} bytes of RowBinary data at the end do not form a complete row",
-                    self.pending.len()
+                    self.pending.remaining()
                 )
                 .into(),
             ));
@@ -311,7 +292,7 @@ impl RowBinaryInput {
 
     /// Read the `RowBinaryWithNames[AndTypes]` header and check the column names.
     fn read_header(&mut self, types: bool) -> Result<ControlFlow<()>> {
-        let mut input = &self.pending[..];
+        let mut input = self.pending.slice();
 
         let names = if types {
             match clickhouse_types::parse_rbwnat_columns_header(&mut input) {
@@ -340,8 +321,7 @@ impl RowBinaryInput {
             )));
         }
 
-        let consumed = self.pending.len() - input.len();
-        self.pending.advance(consumed);
+        self.pending.set_remaining(input.len());
         Ok(ControlFlow::Continue(()))
     }
 }

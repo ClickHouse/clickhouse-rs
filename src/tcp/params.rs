@@ -19,9 +19,7 @@ pub(crate) fn rename_parameters(sql: &[u8], names: &[&str]) -> Vec<u8> {
 
         let skip = match byte {
             b'\'' | b'"' | b'`' => quoted_len(rest, byte),
-            b'-' if rest.starts_with(b"--") => line_comment_len(rest),
-            b'#' if rest.starts_with(b"# ") || rest.starts_with(b"#!") => line_comment_len(rest),
-            b'/' if rest.starts_with(b"/*") => block_comment_len(rest),
+            b'-' | b'#' | b'/' if comment_len(rest) > 0 => comment_len(rest),
             b'$' => heredoc_len(rest),
             b'{' => {
                 if let Some((name_start, name_end)) = substitution_name(rest)
@@ -67,6 +65,17 @@ fn quoted_len(input: &[u8], quote: u8) -> usize {
     }
 
     input.len()
+}
+
+/// The length of the comment at the start of `input`, or `0` if `input` does not start with one.
+pub(crate) fn comment_len(input: &[u8]) -> usize {
+    if input.starts_with(b"--") || input.starts_with(b"# ") || input.starts_with(b"#!") {
+        line_comment_len(input)
+    } else if input.starts_with(b"/*") {
+        block_comment_len(input)
+    } else {
+        0
+    }
 }
 
 fn line_comment_len(input: &[u8]) -> usize {

@@ -208,10 +208,16 @@ impl Query {
             ).into()));
         }
 
-        // FIXME: use HTTP body compression instead of block-level compression
-        if !self.client.uses_tcp() {
-            self.client = self.client.with_compression(Compression::None);
+        // The native TCP transport gives the blocks to the cursor without encoding them.
+        #[cfg(feature = "tcp")]
+        if self.client.uses_tcp() {
+            let sql = self.sql.finish()?;
+            let blocks = crate::tcp::query_blocks(&self.client, sql)?;
+            return Ok(NativeCursor::from_blocks(blocks, span.exit()));
         }
+
+        // FIXME: use HTTP body compression instead of block-level compression
+        self.client = self.client.with_compression(Compression::None);
 
         let response = self.do_execute(Some("Native"))?;
 

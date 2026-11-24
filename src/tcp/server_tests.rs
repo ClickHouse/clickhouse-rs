@@ -6,7 +6,7 @@ use crate::native::from_row_binary::RowBinaryColumns;
 use crate::native::reader::WireFormat;
 use crate::native::{Block, block_encoder, to_row_binary, varuint};
 use crate::tcp::connection::{Connection, Hello, HelloAuth, QueryPacket, ServerPacket};
-use crate::tcp::protocol::{CLIENT_REVISION, ClientInfo};
+use crate::tcp::protocol::{self, CLIENT_REVISION, ClientInfo};
 use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
@@ -107,18 +107,18 @@ async fn connect(server_revision: u64) -> (Connection, Server) {
         varuint(&mut hello, 26);
         varuint(&mut hello, 10);
         varuint(&mut hello, usize::try_from(server_revision).unwrap());
-        if revision >= 54058 {
+        if revision >= protocol::REVISION_WITH_SERVER_TIMEZONE {
             string(&mut hello, "UTC");
         }
-        if revision >= 54372 {
+        if revision >= protocol::REVISION_WITH_SERVER_DISPLAY_NAME {
             string(&mut hello, "display name");
         }
-        if revision >= 54401 {
+        if revision >= protocol::REVISION_WITH_VERSION_PATCH {
             varuint(&mut hello, 4);
         }
         server.write(&hello).await;
 
-        if revision >= 54458 {
+        if revision >= protocol::REVISION_WITH_ADDENDUM {
             assert_eq!(server.string().await, "quota", "quota key in the addendum");
         }
     };
@@ -166,7 +166,11 @@ async fn handshake_with_old_and_new_servers() {
         assert_eq!(conn.server().revision, revision);
         assert_eq!(
             conn.server().version_patch,
-            if revision >= 54401 { 4 } else { revision }
+            if revision >= protocol::REVISION_WITH_VERSION_PATCH {
+                4
+            } else {
+                revision
+            }
         );
         assert_eq!(conn.server().timezone.as_deref(), Some("UTC"));
     }
@@ -305,7 +309,7 @@ async fn all_packet_types_with(revision: u64, compressed: bool) {
     for value in [10, 100, 1000, 1, 2] {
         varuint(&mut response, value);
     }
-    if revision >= 54460 {
+    if revision >= protocol::REVISION_WITH_SERVER_QUERY_TIME_IN_PROGRESS {
         // Elapsed time
         varuint(&mut response, 5);
     }
@@ -347,7 +351,9 @@ async fn all_packet_types_with(revision: u64, compressed: bool) {
             ServerPacket::Data(block) => data.push(block),
             ServerPacket::Progress(value) => progress = Some(value),
             ServerPacket::ProfileInfo(value) => profile = Some(value),
-            ServerPacket::Other | ServerPacket::TableColumns => others += 1,
+            ServerPacket::Other | ServerPacket::TableColumns | ServerPacket::ProfileEvents(_) => {
+                others += 1;
+            }
             ServerPacket::EndOfStream => {}
             ServerPacket::Pong | ServerPacket::Exception(_) => panic!("unexpected packet"),
         }
@@ -376,7 +382,14 @@ async fn all_packet_types_with(revision: u64, compressed: bool) {
         (10, 100, 1000)
     );
     assert_eq!((progress.written_rows, progress.written_bytes), (1, 2));
-    assert_eq!(progress.elapsed_ns, if revision >= 54460 { 5 } else { 0 });
+    assert_eq!(
+        progress.elapsed_ns,
+        if revision >= protocol::REVISION_WITH_SERVER_QUERY_TIME_IN_PROGRESS {
+            5
+        } else {
+            0
+        }
+    );
     let profile = profile.unwrap();
     assert_eq!((profile.rows, profile.bytes), (2, 17));
 }
@@ -472,4 +485,58 @@ async fn corrupted_frame_checksum() {
         panic!("expected a decompression error");
     };
     assert!(error.to_string().contains("checksum"), "{error}");
+}
+
+fn profile_events_block(rows: &[(&str, u64, i8, &str, i64)]) -> Block {
+    let mut data = Vec::new();
+
+    for &(host, thread, kind, name, value) in rows {
+        string(&mut data, host);
+        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&thread.to_le_bytes());
+        data.extend_from_slice(&kind.to_le_bytes());
+        string(&mut data, name);
+        data.extend_from_slice(&value.to_le_bytes());
+    }
+
+    block(
+        &[
+            ("host_name", "String"),
+            ("current_time", "DateTime"),
+            ("thread_id", "UInt64"),
+            ("type", "Enum8('increment' = 1, 'gauge' = 2)"),
+            ("name", "LowCardinality(String)"),
+            ("value", "Int64"),
+        ],
+        &data,
+    )
+}
+
+#[test]
+fn profile_events_are_aggregated() {
+    use crate::tcp::profile_events::ProfileEvents;
+
+    let mut events = ProfileEvents::default();
+
+    events.add(&profile_events_block(&[
+        ("a", 0, 1, "ReadCompressedBytes", 100),
+        // Rows of threads repeat the values of the query (older servers).
+        ("a", 7, 1, "ReadCompressedBytes", 100),
+        ("a", 0, 2, "MemoryTrackerPeakUsage", 50),
+        ("b", 0, 2, "MemoryTrackerPeakUsage", 5),
+    ]));
+    events.add(&profile_events_block(&[
+        ("a", 0, 1, "ReadCompressedBytes", 23),
+        ("b", 0, 1, "SelectedRows", 3),
+        ("a", 0, 2, "MemoryTrackerPeakUsage", 70),
+    ]));
+    // A block with other columns is ignored.
+    events.add(&block(&[("text", "String")], &[1, b'x']));
+
+    let values = events.values();
+    assert_eq!(values.get("ReadCompressedBytes"), Some(&123));
+    assert_eq!(values.get("SelectedRows"), Some(&3));
+    // The last value of each host, summed over hosts.
+    assert_eq!(values.get("MemoryTrackerPeakUsage"), Some(&75));
+    assert_eq!(values.len(), 3);
 }

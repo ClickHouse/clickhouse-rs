@@ -66,7 +66,7 @@ where
     }
 }
 
-const LZ4_MAGIC: u8 = 0x82;
+pub(crate) const LZ4_MAGIC: u8 = 0x82;
 
 pub(crate) fn compress(uncompressed: &[u8]) -> Result<Bytes> {
     let max_compressed_size = block::get_maximum_output_size(uncompressed.len());

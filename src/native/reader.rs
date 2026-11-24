@@ -195,15 +195,7 @@ impl<S: ChunkSource> BlockReader<S> {
             .filter(|&n| n <= SAFE_ALLOCATION_LIMIT)
             .ok_or_else(|| read_error!("number of rows in block is out of range: {num_rows}"))?;
 
-        let mut columns = Vec::with_capacity(cmp::min(num_columns, 1024));
-
-        for col in 0..num_columns {
-            columns.push(self.read_column(num_rows).await.inspect_err(|e| {
-                tracing::debug!(col, "error reading column: {e:?}");
-            })?);
-        }
-
-        Ok(Block::from_columns(columns, num_rows))
+        self.read_columns(num_columns, num_rows).await
     }
 
     /// Skip the `BlockInfo` structure: a list of `(field number, value)` pairs ending with `0`.
@@ -252,11 +244,22 @@ impl<S: ChunkSource> BlockReader<S> {
             .into());
         }
 
+        let num_columns = usize::try_from(num_columns)
+            .ok()
+            .filter(|&n| n <= SAFE_ALLOCATION_LIMIT)
+            .ok_or_else(|| {
+                read_error!("number of columns in block is out of range: {num_columns}")
+            })?;
+
         if num_columns == 0 {
             return Ok(None);
         }
 
-        let mut columns = Vec::new();
+        self.read_columns(num_columns, num_rows).await.map(Some)
+    }
+
+    async fn read_columns(&mut self, num_columns: usize, num_rows: usize) -> Result<Block, Error> {
+        let mut columns = Vec::with_capacity(cmp::min(num_columns, 1024));
 
         for col in 0..num_columns {
             columns.push(self.read_column(num_rows).await.inspect_err(|e| {
@@ -264,7 +267,21 @@ impl<S: ChunkSource> BlockReader<S> {
             })?);
         }
 
-        Ok(Some(Block::from_columns(columns, num_rows)))
+        Ok(Block::from_columns(columns, num_rows))
+    }
+
+    /// Take the next state prefix, which `expected` must accept.
+    fn pop_prefix<T>(
+        &mut self,
+        data_type: &DataTypeNode,
+        expected: impl FnOnce(&StatePrefix) -> Option<T>,
+    ) -> Result<T, Error> {
+        let prefix = self.prefix_queue.pop_front();
+
+        prefix.as_ref().and_then(expected).ok_or_else(|| {
+            read_error!("error reading (sub)type {data_type}: unexpected state prefix {prefix:?}")
+                .into()
+        })
     }
 
     async fn read_column(&mut self, num_rows: usize) -> Result<Column, Error> {
@@ -314,7 +331,7 @@ impl<S: ChunkSource> BlockReader<S> {
         Ok(Column {
             name,
             data_type,
-            type_name,
+            type_name: Some(type_name),
             layout,
         })
     }
@@ -628,7 +645,7 @@ impl<S: ChunkSource> BlockReader<S> {
             });
         }
 
-        match data_type.remove_simple_aggregate_function() {
+        match data_type {
             DataTypeNode::String => Ok(Layout {
                 kind: self.inner.read_strings(num_values).await?,
                 nulls,
@@ -636,16 +653,9 @@ impl<S: ChunkSource> BlockReader<S> {
             }),
             DataTypeNode::JSON | DataTypeNode::JsonWithHint(_) => {
                 if block_nonempty {
-                    match self.prefix_queue.pop_front() {
-                        Some(StatePrefix::JsonString) => (),
-                        other => {
-                            return Err(read_error!(
-                                "error reading (sub)type {data_type}: \
-                                 expected JSON state prefix, got {other:?}"
-                            )
-                            .into());
-                        }
-                    }
+                    self.pop_prefix(data_type, |prefix| {
+                        matches!(prefix, StatePrefix::JsonString).then_some(())
+                    })?;
                 }
 
                 Ok(Layout {
@@ -656,38 +666,16 @@ impl<S: ChunkSource> BlockReader<S> {
             }
             DataTypeNode::Variant(types) => {
                 let mode = if block_nonempty {
-                    match self.prefix_queue.pop_front() {
-                        Some(StatePrefix::Variant(mode)) => mode,
-                        other => {
-                            return Err(read_error!(
-                                "error reading (sub)type {data_type}: \
-                                 expected Variant state prefix, got {other:?}"
-                            )
-                            .into());
-                        }
-                    }
+                    self.pop_prefix(data_type, |prefix| match prefix {
+                        StatePrefix::Variant(mode) => Some(*mode),
+                        _ => None,
+                    })?
                 } else {
                     VariantMode::Basic
                 };
 
                 let discriminators = self.read_variant_discriminators(mode, num_values).await?;
-
-                let mut counts = vec![0usize; types.len()];
-
-                for &discriminator in discriminators.iter() {
-                    if discriminator == VARIANT_NULL_DISCRIMINATOR {
-                        continue;
-                    }
-
-                    let count = counts.get_mut(usize::from(discriminator)).ok_or_else(|| {
-                        read_error!(
-                            "Variant discriminator {discriminator} is out of range \
-                             for {} variant types",
-                            types.len()
-                        )
-                    })?;
-                    *count += 1;
-                }
+                let counts = variant_counts(&discriminators, types.len())?;
 
                 let mut variants = Vec::with_capacity(types.len());
 
@@ -843,25 +831,14 @@ impl<S: ChunkSource> BlockReader<S> {
         const VALID_FLAG_BITS: u64 = HAS_ADDITIONAL_KEYS_BIT | NEEDS_UPDATE_DICTIONARY_BIT;
 
         // `LowCardinality(Nullable)` doesn't emit a null map, instead `dict[0]` is the null value
-        let (non_nullable, is_nullable) = if let DataTypeNode::Nullable(inner) = inner_type {
-            (&**inner, true)
-        } else {
-            (inner_type, false)
-        };
+        let (non_nullable, is_nullable) = lc_dict_type(inner_type);
 
         // Array(LowCardinality(...)) still emits a prefix even if the array itself is empty
         if block_nonempty {
             // Ensure that we read our version prefix even if it doesn't tell us anything
-            match self.prefix_queue.pop_front() {
-                Some(StatePrefix::LowCardinality) => (),
-                other => {
-                    return Err(read_error!(
-                        "error reading (sub)type LowCardinality({inner_type}): \
-                         expected state prefix 0x01, got {other:?}"
-                    )
-                    .into());
-                }
-            }
+            self.pop_prefix(inner_type, |prefix| {
+                matches!(prefix, StatePrefix::LowCardinality).then_some(())
+            })?;
         }
 
         if num_rows == 0 {
@@ -1211,6 +1188,34 @@ impl LcKeyType {
             LcKeyType::UInt32 => 4,
             LcKeyType::UInt64 => 8,
         }
+    }
+}
+
+/// The number of values of each type of a `Variant` with `num_types` types.
+pub(crate) fn variant_counts(discriminators: &[u8], num_types: usize) -> Result<Vec<usize>, Error> {
+    let mut counts = vec![0usize; num_types];
+
+    for &discriminator in discriminators {
+        if discriminator == VARIANT_NULL_DISCRIMINATOR {
+            continue;
+        }
+
+        let count = counts.get_mut(usize::from(discriminator)).ok_or_else(|| {
+            read_error!(
+                "Variant discriminator {discriminator} is out of range for {num_types} types"
+            )
+        })?;
+        *count += 1;
+    }
+
+    Ok(counts)
+}
+
+/// The type of the dictionary of `LowCardinality(inner)`, and whether key `0` is `NULL`.
+pub(crate) fn lc_dict_type(inner: &DataTypeNode) -> (&DataTypeNode, bool) {
+    match inner {
+        DataTypeNode::Nullable(inner) => (inner, true),
+        other => (other, false),
     }
 }
 

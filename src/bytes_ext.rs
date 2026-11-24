@@ -46,7 +46,7 @@ impl BytesExt {
     /// Adds the provided chunk into available bytes.
     #[inline(always)]
     pub(crate) fn extend(&mut self, chunk: Bytes) {
-        if self.bytes.is_empty() {
+        if self.remaining() == 0 {
             self.bytes = chunk;
             self.cursor.set(0);
         } else {

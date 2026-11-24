@@ -163,12 +163,6 @@ pub(crate) fn expect_role_insert<T: std::fmt::Debug, E: std::fmt::Debug>(result:
     }
 }
 
-/// Quote a string literal for SQL.
-#[cfg(feature = "tcp")]
-pub(crate) fn tcp_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
-}
-
 pub(crate) fn get_client() -> Client {
     let client = Client::default();
 

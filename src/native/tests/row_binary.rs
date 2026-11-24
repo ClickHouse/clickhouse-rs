@@ -303,7 +303,7 @@ fn corrupted_layouts_are_errors() {
     let column = Column {
         name: MaybeUtf8::from_string("s".to_owned()),
         data_type: DataTypeNode::String,
-        type_name: MaybeUtf8::from_string("String".to_owned()),
+        type_name: None,
         layout: Layout {
             kind: LayoutKind::Variable {
                 end_offsets: vec![5, 3].into(),

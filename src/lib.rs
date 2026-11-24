@@ -729,21 +729,12 @@ impl Client {
 
     /// Returns `true` if the URL selects the native TCP transport (`tcp://` or `tcps://`).
     pub(crate) fn uses_tcp(&self) -> bool {
-        #[cfg(feature = "tcp")]
-        return tcp::is_tcp_url(&self.url);
-
-        #[cfg(not(feature = "tcp"))]
-        false
+        cfg!(feature = "tcp") && is_tcp_url(&self.url)
     }
 
     /// Return an error if the URL selects the native TCP transport but it is not enabled.
     pub(crate) fn check_transport(&self) -> Result<()> {
-        let scheme = self.url.split_once("://").map(|(scheme, _)| scheme);
-
-        if !cfg!(feature = "tcp")
-            && scheme
-                .is_some_and(|s| s.eq_ignore_ascii_case("tcp") || s.eq_ignore_ascii_case("tcps"))
-        {
+        if !cfg!(feature = "tcp") && is_tcp_url(&self.url) {
             return Err(Error::Unsupported(
                 "`tcp://` and `tcps://` URLs require the `tcp` feature".into(),
             ));
@@ -867,6 +858,13 @@ impl Client {
         write_lock.insert(raw_table_name.to_string(), metadata.clone());
         Ok(metadata)
     }
+}
+
+/// Returns `true` if `url` selects the native TCP transport: `tcp://` or `tcps://`.
+fn is_tcp_url(url: &str) -> bool {
+    url.split_once("://").is_some_and(|(scheme, _)| {
+        scheme.eq_ignore_ascii_case("tcp") || scheme.eq_ignore_ascii_case("tcps")
+    })
 }
 
 /// Extracts the last non-empty `database` query parameter from the URL, if any.

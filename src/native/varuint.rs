@@ -13,6 +13,12 @@ pub(crate) fn write(mut buf: impl BufMut, mut uint: usize) {
     buf.put_u8(uint as u8);
 }
 
+/// Write `bytes` prefixed with their length as a `VarUInt` (the binary encoding of `String`).
+pub(crate) fn write_bytes(mut buf: impl BufMut, bytes: &[u8]) {
+    write(&mut buf, bytes.len());
+    buf.put_slice(bytes);
+}
+
 #[derive(Default)]
 pub(crate) struct ParseVarUInt {
     accumulator: u64,

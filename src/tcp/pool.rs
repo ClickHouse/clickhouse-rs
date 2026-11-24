@@ -7,7 +7,7 @@
 
 use crate::error::{Error, Result};
 use crate::tcp::Address;
-use crate::tcp::connection::{Connection, Hello, HelloAuth};
+use crate::tcp::connection::{Connection, Hello, HelloAuth, ServerCompression};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -48,6 +48,8 @@ pub(crate) struct Pool {
 struct PoolState {
     idle: HashMap<PoolKey, Vec<IdleConnection>>,
     sessions: HashMap<(PoolKey, String), Session>,
+    /// The compression settings of the server for each user, to probe them once.
+    server_compression: HashMap<PoolKey, ServerCompression>,
 }
 
 struct IdleConnection {
@@ -102,7 +104,11 @@ impl Pool {
 
         let conn = match reused {
             Some(conn) => conn,
-            None => connect(key).await?,
+            None => {
+                let mut conn = connect(key).await?;
+                conn.server_compression = self.lock().server_compression.get(key).cloned();
+                conn
+            }
         };
 
         Ok(PooledConnection {
@@ -220,6 +226,13 @@ impl PooledConnection {
         };
 
         let mut state = self.pool.lock();
+
+        if let Some(known) = &conn.server_compression {
+            state
+                .server_compression
+                .entry(self.key.clone())
+                .or_insert_with(|| known.clone());
+        }
 
         match self.session.take() {
             Some(session) => {

@@ -305,8 +305,10 @@ These items are different from the HTTP interface:
 * Without a session, a statement that changes the session (`SET`, `USE`, temporary tables, transactions)
   closes its connection after it completes. Thus, the change has no effect on other queries.
 * Roles are set with `SET ROLE` in the session of the connection. Roles also apply to `INSERT`.
-* `QuerySummary` contains the progress that the server sent before the first block
-  (or all progress, if `wait_end_of_query = 1`).
+* `QuerySummary` contains the progress and the [profile events] of the query, for example
+  `summary.get("ReadCompressedBytes")` or `summary.get("SelectedRows")`. Before the cursor reads
+  all rows, it has the values that the server sent before the first block (or all values, if
+  `wait_end_of_query = 1`). After the cursor reads all rows, it has the final values.
 * `Dynamic` and `AggregateFunction` columns are not supported. To read `JSON` columns,
   set `output_format_binary_write_json_as_string = 1`, as with the HTTP interface.
 * The server compresses data with `network_compression_method` (LZ4 by default, ZSTD since ClickHouse 26.9).
@@ -318,6 +320,7 @@ These items are different from the HTTP interface:
 The native protocol is tested with ClickHouse 22.8 and newer. Query parameters require ClickHouse 22.8 or newer.
 
 [native-protocol]: https://clickhouse.com/docs/native-protocol/basics
+[profile events]: https://clickhouse.com/docs/operations/system-tables/events
 
 ## Data Types
 

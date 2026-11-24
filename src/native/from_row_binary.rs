@@ -5,14 +5,14 @@
 //! with the column types that the server sent for the target table.
 
 use crate::error::Error;
-use crate::native::reader::{VARIANT_NULL_DISCRIMINATOR, wire_type};
+use crate::native::reader::{VARIANT_NULL_DISCRIMINATOR, lc_dict_type, variant_counts, wire_type};
 use crate::native::string::MaybeUtf8;
 use crate::native::utils::type_fixed_width;
 use crate::native::varuint::ParseVarUInt;
 use crate::native::{Block, Column, Layout, LayoutKind, LayoutLowCardinality};
 use bytes::BytesMut;
 use clickhouse_types::DataTypeNode;
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::ops::ControlFlow;
 
 type Step = Result<ControlFlow<()>, Error>;
@@ -21,9 +21,10 @@ type Step = Result<ControlFlow<()>, Error>;
 const INCOMPLETE: Step = Ok(ControlFlow::Break(()));
 const DONE: Step = Ok(ControlFlow::Continue(()));
 
+/// Get the value of a `ControlFlow`, or return `INCOMPLETE`.
 macro_rules! try_step {
     ($step:expr) => {
-        match $step? {
+        match $step {
             ControlFlow::Continue(value) => value,
             ControlFlow::Break(()) => return INCOMPLETE,
         }
@@ -38,8 +39,9 @@ pub(crate) struct RowBinaryColumns {
 
 struct ColumnBuilder {
     name: MaybeUtf8,
-    /// The type of the column as it is sent to the server.
     data_type: DataTypeNode,
+    /// The type as the server wrote it.
+    type_name: Option<MaybeUtf8>,
     builder: Builder,
 }
 
@@ -89,10 +91,7 @@ struct LowCardinalityBuilder {
 
 impl LowCardinalityBuilder {
     fn new(inner: &DataTypeNode) -> Result<Self, String> {
-        let (dict_type, nullable) = match inner {
-            DataTypeNode::Nullable(inner) => (&**inner, true),
-            other => (other, false),
-        };
+        let (dict_type, nullable) = lc_dict_type(inner);
 
         let mut builder = Self {
             keys: Vec::new(),
@@ -116,7 +115,7 @@ impl LowCardinalityBuilder {
 
     fn read(&mut self, input: &mut &[u8]) -> Step {
         if self.nullable {
-            match try_step!(Ok::<_, Error>(read_u8(input))) {
+            match try_step!(read_u8(input)) {
                 0 => {}
                 1 => {
                     self.keys.push(0);
@@ -131,7 +130,7 @@ impl LowCardinalityBuilder {
         }
 
         let before = *input;
-        try_step!(self.dict.read(input));
+        try_step!(self.dict.read(input)?);
 
         let encoded = before.get(..before.len() - input.len()).unwrap_or_default();
         let new_key = self.dict.len() - 1;
@@ -182,6 +181,7 @@ impl RowBinaryColumns {
                 Ok(ColumnBuilder {
                     name: column.name.clone(),
                     data_type,
+                    type_name: column.type_name.clone(),
                     builder,
                 })
             })
@@ -247,7 +247,7 @@ impl RowBinaryColumns {
             .map(|column| {
                 Ok(Column {
                     name: column.name.clone(),
-                    type_name: MaybeUtf8::from_string(column.data_type.to_string()),
+                    type_name: column.type_name.clone(),
                     data_type: column.data_type.clone(),
                     layout: column.builder.take(num_rows)?,
                 })
@@ -350,17 +350,17 @@ impl Builder {
         match self {
             Builder::Nothing { len } => *len += 1,
             Builder::Fixed { width, data } => {
-                data.extend_from_slice(try_step!(Ok::<_, Error>(take(input, *width))));
+                data.extend_from_slice(try_step!(take(input, *width)));
             }
             Builder::Strings { end_offsets, data } => {
-                let len = try_step!(read_len(input));
-                data.extend_from_slice(try_step!(Ok::<_, Error>(take(input, len))));
+                let len = try_step!(read_len(input)?);
+                data.extend_from_slice(try_step!(take(input, len)));
                 end_offsets.push(data.len());
             }
-            Builder::Nullable { nulls, inner } => match try_step!(Ok::<_, Error>(read_u8(input))) {
+            Builder::Nullable { nulls, inner } => match try_step!(read_u8(input)) {
                 0 => {
                     nulls.push(0);
-                    try_step!(inner.read(input));
+                    try_step!(inner.read(input)?);
                 }
                 1 => {
                     nulls.push(1);
@@ -373,17 +373,17 @@ impl Builder {
                 }
             },
             Builder::Array { end_indices, elem } => {
-                let len = try_step!(read_len(input));
+                let len = try_step!(read_len(input)?);
 
                 for _ in 0..len {
-                    try_step!(elem.read(input));
+                    try_step!(elem.read(input)?);
                 }
 
                 end_indices.push(elem.len());
             }
             Builder::Tuple(elements) => {
                 for element in elements {
-                    try_step!(element.read(input));
+                    try_step!(element.read(input)?);
                 }
             }
             Builder::Map {
@@ -391,11 +391,11 @@ impl Builder {
                 key,
                 value,
             } => {
-                let len = try_step!(read_len(input));
+                let len = try_step!(read_len(input)?);
 
                 for _ in 0..len {
-                    try_step!(key.read(input));
-                    try_step!(value.read(input));
+                    try_step!(key.read(input)?);
+                    try_step!(value.read(input)?);
                 }
 
                 end_indices.push(key.len());
@@ -404,7 +404,7 @@ impl Builder {
                 discriminators,
                 variants,
             } => {
-                let discriminator = try_step!(Ok::<_, Error>(read_u8(input)));
+                let discriminator = try_step!(read_u8(input));
 
                 if discriminator != VARIANT_NULL_DISCRIMINATOR {
                     let variant =
@@ -418,13 +418,13 @@ impl Builder {
                                     .into(),
                                 )
                             })?;
-                    try_step!(variant.read(input));
+                    try_step!(variant.read(input)?);
                 }
 
                 discriminators.push(discriminator);
             }
             Builder::LowCardinality(lc) => {
-                try_step!(lc.read(input));
+                try_step!(lc.read(input)?);
             }
         }
 
@@ -508,12 +508,11 @@ impl Builder {
             } => {
                 discriminators.truncate(len);
 
-                for (index, variant) in variants.iter_mut().enumerate() {
-                    let count = discriminators
-                        .iter()
-                        .filter(|&&discriminator| usize::from(discriminator) == index)
-                        .count();
-                    variant.truncate(count);
+                // The discriminators were checked when they were read.
+                if let Ok(counts) = variant_counts(discriminators, variants.len()) {
+                    for (variant, count) in variants.iter_mut().zip(counts) {
+                        variant.truncate(count);
+                    }
                 }
             }
             // Values that only removed rows use stay in the dictionary, which is valid.

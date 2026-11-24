@@ -11,6 +11,9 @@ use bytes::{BufMut, BytesMut};
 /// This revision is below `DBMS_MIN_REVISION_WITH_SPARSE_SERIALIZATION`,
 /// so new servers send all columns with the default serialization.
 pub(crate) const CLIENT_REVISION: u64 = 54460;
+/// [`CLIENT_REVISION`] as written in packets.
+#[allow(clippy::cast_possible_truncation)] // the value fits
+pub(crate) const CLIENT_REVISION_VARUINT: usize = CLIENT_REVISION as usize;
 
 pub(crate) const REVISION_WITH_CLIENT_INFO: u64 = 54032;
 pub(crate) const REVISION_WITH_SERVER_TIMEZONE: u64 = 54058;
@@ -31,10 +34,10 @@ pub(crate) const REVISION_WITH_SERVER_QUERY_TIME_IN_PROGRESS: u64 = 54460;
 
 /// Packets that the client sends.
 pub(crate) mod client {
-    pub(crate) const HELLO: u64 = 0;
-    pub(crate) const QUERY: u64 = 1;
-    pub(crate) const DATA: u64 = 2;
-    pub(crate) const CANCEL: u64 = 3;
+    pub(crate) const HELLO: usize = 0;
+    pub(crate) const QUERY: usize = 1;
+    pub(crate) const DATA: usize = 2;
+    pub(crate) const CANCEL: usize = 3;
 }
 
 /// Packets that the server sends.
@@ -56,7 +59,7 @@ pub(crate) mod server {
 }
 
 /// `QueryProcessingStage::Complete`
-pub(crate) const STAGE_COMPLETE: u64 = 2;
+pub(crate) const STAGE_COMPLETE: usize = 2;
 
 /// `ClientInfo::QueryKind::INITIAL_QUERY`
 const QUERY_KIND_INITIAL: u8 = 1;
@@ -70,18 +73,8 @@ const INTERFACE_TCP: u8 = 1;
 /// a user-defined setting (`custom_*`), and rejects unknown settings, like the HTTP interface.
 const FLAG_CUSTOM: usize = 0x02;
 
-pub(crate) fn write_varuint(out: &mut BytesMut, value: usize) {
-    varuint::write(out, value);
-}
-
 pub(crate) fn write_str(out: &mut BytesMut, value: impl AsRef<[u8]>) {
-    let value = value.as_ref();
-    varuint::write(&mut *out, value.len());
-    out.put_slice(value);
-}
-
-pub(crate) fn revision_varuint(revision: u64) -> usize {
-    usize::try_from(revision).unwrap_or(usize::MAX)
+    varuint::write_bytes(out, value.as_ref());
 }
 
 /// Fields of `ClientInfo` that this client sends.
@@ -120,20 +113,20 @@ impl ClientInfo<'_> {
         write_str(out, "");
         write_str(out, "");
         write_str(out, self.client_name);
-        write_varuint(out, crate_version().0);
-        write_varuint(out, crate_version().1);
-        write_varuint(out, revision_varuint(CLIENT_REVISION));
+        varuint::write(&mut *out, crate_version().0);
+        varuint::write(&mut *out, crate_version().1);
+        varuint::write(&mut *out, CLIENT_REVISION_VARUINT);
 
         if revision >= REVISION_WITH_QUOTA_KEY_IN_CLIENT_INFO {
             write_str(out, self.quota_key);
         }
 
         if revision >= REVISION_WITH_DISTRIBUTED_DEPTH {
-            write_varuint(out, 0);
+            varuint::write(&mut *out, 0);
         }
 
         if revision >= REVISION_WITH_VERSION_PATCH {
-            write_varuint(out, crate_version().2);
+            varuint::write(&mut *out, crate_version().2);
         }
 
         if revision >= REVISION_WITH_OPENTELEMETRY {
@@ -157,9 +150,9 @@ impl ClientInfo<'_> {
 
         if revision >= REVISION_WITH_PARALLEL_REPLICAS {
             // collaborate_with_initiator, count_participating_replicas, number_of_current_replica
-            write_varuint(out, 0);
-            write_varuint(out, 0);
-            write_varuint(out, 0);
+            varuint::write(&mut *out, 0);
+            varuint::write(&mut *out, 0);
+            varuint::write(&mut *out, 0);
         }
     }
 }
@@ -182,7 +175,7 @@ pub(crate) fn write_settings<'a>(
 ) {
     for (name, value) in settings {
         write_str(out, name);
-        write_varuint(out, FLAG_CUSTOM);
+        varuint::write(&mut *out, FLAG_CUSTOM);
         write_str(out, quote(value));
     }
 

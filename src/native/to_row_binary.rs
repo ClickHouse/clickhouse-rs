@@ -4,7 +4,7 @@
 //! The row cursors of this crate read `RowBinary`, so the blocks are converted row by row.
 
 use crate::error::Error;
-use crate::native::reader::{VARIANT_NULL_DISCRIMINATOR, wire_type};
+use crate::native::reader::{VARIANT_NULL_DISCRIMINATOR, lc_dict_type, wire_type};
 use crate::native::varuint;
 use crate::native::{Block, Layout, LayoutKind};
 use bytes::{BufMut, BytesMut};
@@ -19,12 +19,12 @@ pub(crate) fn write_names_and_types(
     varuint::write(&mut *out, block.columns.len());
 
     for column in &block.columns {
-        write_bytes(column.name.as_bytes(), out);
+        varuint::write_bytes(&mut *out, column.name.as_bytes());
     }
 
     if with_types {
         for column in &block.columns {
-            write_bytes(column.type_name.as_bytes(), out);
+            varuint::write_bytes(&mut *out, &column.type_name());
         }
     }
 
@@ -64,11 +64,6 @@ pub(crate) fn write_rows(block: &Block, out: &mut BytesMut) -> Result<(), Error>
     }
 
     Ok(())
-}
-
-fn write_bytes(bytes: &[u8], out: &mut impl BufMut) {
-    varuint::write(&mut *out, bytes.len());
-    out.put_slice(bytes);
 }
 
 /// A view of a column prepared for row-wise access.
@@ -152,10 +147,7 @@ impl<'a> Node<'a> {
                 LayoutKind::Variable { end_offsets, data },
             ) => Node::Strings { end_offsets, data },
             (DataTypeNode::LowCardinality(inner), LayoutKind::LowCardinality(lc)) => {
-                let (dict_type, nullable) = match &**inner {
-                    DataTypeNode::Nullable(inner) => (&**inner, true),
-                    inner => (inner, false),
-                };
+                let (dict_type, nullable) = lc_dict_type(inner);
 
                 Node::LowCardinality {
                     keys: &lc.keys,
@@ -255,7 +247,7 @@ impl<'a> Node<'a> {
                 let value = data
                     .get(start..end)
                     .ok_or_else(|| corrupted("string is out of range"))?;
-                write_bytes(value, out);
+                varuint::write_bytes(&mut *out, value);
             }
             Node::Nullable { nulls, inner } => {
                 let is_null = *nulls

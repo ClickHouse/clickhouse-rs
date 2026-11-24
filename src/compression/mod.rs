@@ -123,11 +123,15 @@ pub(crate) mod native_framing {
     #[cfg(feature = "tcp")]
     const MAX_FRAME_SIZE: usize = 1 << 30;
 
-    /// The total size of the frame that starts with `meta` (the checksum and the header).
+    /// The total size of the frame at the start of `data`, or `None` if `data` does not contain
+    /// the checksum and the header of the frame yet.
     #[cfg(feature = "tcp")]
-    pub(crate) fn frame_size(meta: &[u8; META_SIZE]) -> Result<usize, Error> {
-        let [.., c0, c1, c2, c3, _, _, _, _] = *meta;
-        let compressed_size = u32::from_le_bytes([c0, c1, c2, c3]) as usize;
+    pub(crate) fn frame_len(data: &[u8]) -> Result<Option<usize>, Error> {
+        let Some((_, [_, c0, c1, c2, c3, ..])) = data.split_first_chunk::<CHECKSUM_SIZE>() else {
+            return Ok(None);
+        };
+
+        let compressed_size = u32::from_le_bytes([*c0, *c1, *c2, *c3]) as usize;
 
         if !(HEADER_SIZE..=MAX_FRAME_SIZE).contains(&compressed_size) {
             return Err(Error::decompression(format!(
@@ -135,7 +139,7 @@ pub(crate) mod native_framing {
             )));
         }
 
-        Ok(CHECKSUM_SIZE + compressed_size)
+        Ok(Some(CHECKSUM_SIZE + compressed_size))
     }
 
     /// Verify the checksum of a complete frame and decompress it.
@@ -144,32 +148,25 @@ pub(crate) mod native_framing {
         /// `CompressionMethodByte::NONE`
         const NONE_MAGIC: u8 = 0x02;
         #[cfg(feature = "lz4")]
-        const LZ4_MAGIC: u8 = 0x82;
+        use super::lz4::LZ4_MAGIC;
         #[cfg(feature = "zstd")]
-        const ZSTD_MAGIC: u8 = 0x90;
+        use super::zstd::ZSTD_MAGIC;
 
+        let too_short = || Error::decompression("compressed frame is too short");
         let (checksum, header_and_data) = frame
-            .split_at_checked(CHECKSUM_SIZE)
-            .ok_or_else(|| Error::decompression("compressed frame is too short"))?;
+            .split_first_chunk::<CHECKSUM_SIZE>()
+            .ok_or_else(too_short)?;
         let (header, data) = header_and_data
-            .split_at_checked(HEADER_SIZE)
-            .ok_or_else(|| Error::decompression("compressed frame is too short"))?;
+            .split_first_chunk::<HEADER_SIZE>()
+            .ok_or_else(too_short)?;
 
-        let expected = u128::from_le_bytes(
-            checksum
-                .try_into()
-                .map_err(|_| Error::decompression("compressed frame is too short"))?,
-        );
-
-        if calc_checksum(header_and_data) != expected {
+        if calc_checksum(header_and_data) != u128::from_le_bytes(*checksum) {
             return Err(Error::decompression(
                 "checksum mismatch in compressed frame",
             ));
         }
 
-        let [method, _, _, _, _, u0, u1, u2, u3] = header
-            .try_into()
-            .map_err(|_| Error::decompression("compressed frame is too short"))?;
+        let [method, _, _, _, _, u0, u1, u2, u3] = *header;
         let uncompressed_size = u32::from_le_bytes([u0, u1, u2, u3]) as usize;
 
         if uncompressed_size > MAX_FRAME_SIZE {

@@ -17,6 +17,7 @@ mod error_codes;
 mod insert;
 mod params;
 mod pool;
+mod profile_events;
 mod protocol;
 mod query;
 #[cfg(test)]
@@ -25,23 +26,12 @@ mod tls;
 
 pub(crate) use insert::spawn_insert;
 pub(crate) use pool::Pool;
-pub(crate) use query::query;
+pub(crate) use query::{BlocksFuture, query, query_blocks};
 
 /// The default port of the native protocol.
 const DEFAULT_PORT: u16 = 9000;
 /// The default port of the native protocol with TLS.
 const DEFAULT_SECURE_PORT: u16 = 9440;
-
-/// Returns `true` if `url` selects the native TCP transport.
-pub(crate) fn is_tcp_url(url: &str) -> bool {
-    scheme(url).is_some_and(|scheme| {
-        scheme.eq_ignore_ascii_case("tcp") || scheme.eq_ignore_ascii_case("tcps")
-    })
-}
-
-fn scheme(url: &str) -> Option<&str> {
-    url.split_once("://").map(|(scheme, _)| scheme)
-}
 
 /// The address of the server.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -273,21 +263,43 @@ fn leading_words(mut sql: &[u8], count: usize) -> Vec<&[u8]> {
 fn skip_whitespace_and_comments(mut sql: &[u8]) -> &[u8] {
     loop {
         let trimmed = sql.trim_ascii_start();
+        let comment = params::comment_len(trimmed);
 
-        sql = if let Some(rest) = trimmed
-            .strip_prefix(b"--")
-            .or_else(|| trimmed.strip_prefix(b"#"))
-        {
-            rest.iter()
-                .position(|&b| b == b'\n')
-                .map_or(&[][..], |end| &rest[end..])
-        } else if let Some(rest) = trimmed.strip_prefix(b"/*") {
-            rest.windows(2)
-                .position(|w| w == b"*/")
-                .map_or(&[][..], |end| &rest[end + 2..])
-        } else {
+        if comment == 0 {
             return trimmed;
-        };
+        }
+
+        sql = trimmed.get(comment..).unwrap_or_default();
+    }
+}
+
+/// A format that the native transport converts to and from blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowFormat {
+    RowBinary { names: bool, types: bool },
+    Native,
+}
+
+impl RowFormat {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        use crate::formats::{ROW_BINARY, ROW_BINARY_WITH_NAMES_AND_TYPES};
+
+        Some(match name {
+            ROW_BINARY => Self::RowBinary {
+                names: false,
+                types: false,
+            },
+            "RowBinaryWithNames" => Self::RowBinary {
+                names: true,
+                types: false,
+            },
+            ROW_BINARY_WITH_NAMES_AND_TYPES => Self::RowBinary {
+                names: true,
+                types: true,
+            },
+            "Native" => Self::Native,
+            _ => return None,
+        })
     }
 }
 
@@ -335,10 +347,10 @@ mod tests {
         assert_eq!(parse("http://localhost:8123"), None);
         assert_eq!(parse("tcp://"), None);
 
-        assert!(is_tcp_url("TCP://localhost"));
-        assert!(is_tcp_url("tcps://localhost"));
-        assert!(!is_tcp_url("http://localhost"));
-        assert!(!is_tcp_url("localhost:9000"));
+        assert!(crate::is_tcp_url("TCP://localhost"));
+        assert!(crate::is_tcp_url("tcps://localhost"));
+        assert!(!crate::is_tcp_url("http://localhost"));
+        assert!(!crate::is_tcp_url("localhost:9000"));
     }
 
     #[test]

@@ -1279,8 +1279,7 @@ async fn generated_corpus_matches_http() {
     for (index, data_type) in fuzz_types().await.into_iter().enumerate() {
         let structure = format!("id UInt32, c {data_type}");
         let sql = format!(
-            "SELECT * FROM generateRandom({}, {index}, 8, 4) LIMIT {}",
-            crate::tcp_quote(&structure),
+            "SELECT * FROM generateRandom(?, {index}, 8, 4) LIMIT {}",
             1 + index % 300
         );
         let block_size = (1 + index % 5 * 40).to_string();
@@ -1289,6 +1288,7 @@ async fn generated_corpus_matches_http() {
             let fetch = async |client: &Client| -> Result<Vec<u8>, Error> {
                 Ok(client
                     .query(&sql)
+                    .bind(&structure)
                     .with_setting("allow_suspicious_low_cardinality_types", "1")
                     .with_setting("max_block_size", &block_size)
                     // With several threads, `generateRandom` and `LIMIT` return different rows.
@@ -1346,21 +1346,24 @@ async fn generated_inserts_match_http() {
             query.execute().await
         };
 
-        let created =
-            async {
-                for table in ["expected", "actual"] {
-                    execute(&http, format!(
+        let created = async {
+            for table in ["expected", "actual"] {
+                execute(&http, format!(
                     "CREATE OR REPLACE TABLE {table} ({structure}) ENGINE = MergeTree ORDER BY id"
                 ))
                 .await?;
-                }
-                execute(&http, format!(
-                "INSERT INTO expected SELECT * FROM generateRandom({}, {index}, 8, 4) LIMIT {}",
-                crate::tcp_quote(&structure),
-                1 + index % 300
-            ))
-            .await
-            };
+            }
+            let mut insert_select = http
+                .query(&format!(
+                    "INSERT INTO expected SELECT * FROM generateRandom(?, {index}, 8, 4) LIMIT {}",
+                    1 + index % 300
+                ))
+                .bind(&structure);
+            for (name, value) in settings {
+                insert_select = insert_select.with_setting(name, value);
+            }
+            insert_select.execute().await
+        };
 
         if created.await.is_err() {
             continue;
@@ -1414,4 +1417,62 @@ async fn generated_inserts_match_http() {
 
     eprintln!("compared {compared} inserts");
     assert!(compared >= 300, "only {compared} inserts compared");
+}
+
+/// The summary has the profile events of the query, and its final values after the end of the
+/// result.
+#[tokio::test]
+async fn profile_events_in_summary() {
+    check_local_env!();
+
+    // The native protocol of servers before 21.11 has no profile events.
+    if server_version().await < 2200 {
+        eprintln!("Skipping test: the server does not send profile events");
+        return;
+    }
+
+    let admin = prepare_database!();
+    admin
+        .query("CREATE TABLE numbers (n UInt64) ENGINE = MergeTree ORDER BY n")
+        .execute()
+        .await
+        .unwrap();
+    admin
+        .query("INSERT INTO numbers SELECT number FROM system.numbers LIMIT 10000")
+        .execute()
+        .await
+        .unwrap();
+
+    let tcp = tcp_client().with_database(admin.database().unwrap());
+    let get = |summary: &clickhouse::QuerySummary, name: &str| {
+        summary
+            .get(name)
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or_else(|| panic!("no {name} in the summary: {summary:?}"))
+    };
+
+    // The summary is updated at the end of the result.
+    let mut cursor = tcp.query("SELECT n FROM numbers").fetch::<u64>().unwrap();
+    let mut rows = 0;
+    while cursor.next().await.unwrap().is_some() {
+        rows += 1;
+    }
+    assert_eq!(rows, 10000);
+
+    let summary = cursor.summary().unwrap();
+    assert_eq!(summary.read_rows(), Some(10000));
+    assert_eq!(get(summary, "SelectedRows"), 10000);
+    assert!(get(summary, "ReadCompressedBytes") > 0);
+
+    // With `wait_end_of_query = 1`, the summary is complete before the first row.
+    let mut cursor = tcp
+        .query("SELECT n FROM numbers")
+        .with_setting("wait_end_of_query", "1")
+        .fetch::<u64>()
+        .unwrap();
+    assert_eq!(cursor.next().await.unwrap(), Some(0));
+
+    let summary = cursor.summary().unwrap();
+    assert_eq!(summary.read_rows(), Some(10000));
+    assert_eq!(get(summary, "SelectedRows"), 10000);
 }
