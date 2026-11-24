@@ -47,5 +47,7 @@ async fn none() {
 #[tokio::test]
 async fn lz4() {
     let client = prepare_database!().with_compression(Compression::Lz4);
-    check(client, 3.7).await;
+    // The native protocol compresses columnar blocks, and its packets add some bytes.
+    let expected_ratio = if crate::uses_tcp() { 3.6 } else { 3.7 };
+    check(client, expected_ratio).await;
 }

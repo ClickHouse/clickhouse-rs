@@ -198,7 +198,14 @@ pub(crate) struct Chunk {
 // * Uses `Option<_>` to make this stream fused.
 // * Uses `Box<_>` in order to reduce the size of cursors.
 pub(crate) struct Chunks {
-    inner: Option<Box<DetectDbException<Decompress<IncomingStream>>>>,
+    inner: Option<ChunksInner>,
+}
+
+enum ChunksInner {
+    Http(Box<DetectDbException<Decompress<IncomingStream>>>),
+    /// Chunks converted from the blocks of the native TCP transport.
+    #[cfg(feature = "tcp")]
+    Tcp(tokio::sync::mpsc::Receiver<Result<Chunk>>),
 }
 
 impl Chunks {
@@ -214,8 +221,15 @@ impl Chunks {
             exception_tag,
         };
         Ok(Self {
-            inner: Some(Box::new(stream)),
+            inner: Some(ChunksInner::Http(Box::new(stream))),
         })
+    }
+
+    #[cfg(feature = "tcp")]
+    pub(crate) fn from_receiver(receiver: tokio::sync::mpsc::Receiver<Result<Chunk>>) -> Self {
+        Self {
+            inner: Some(ChunksInner::Tcp(receiver)),
+        }
     }
 
     pub(crate) fn empty() -> Self {
@@ -234,7 +248,11 @@ impl Stream for Chunks {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // We use `take()` to make the stream fused, including the case of panics.
         if let Some(mut stream) = self.inner.take() {
-            let res = Pin::new(&mut stream).poll_next(cx);
+            let res = match &mut stream {
+                ChunksInner::Http(stream) => Pin::new(stream).poll_next(cx),
+                #[cfg(feature = "tcp")]
+                ChunksInner::Tcp(receiver) => receiver.poll_recv(cx),
+            };
 
             if matches!(res, Poll::Pending | Poll::Ready(Some(Ok(_)))) {
                 self.inner = Some(stream);

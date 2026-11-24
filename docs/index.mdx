@@ -47,6 +47,7 @@ See also: [crates.io page](https://crates.io/crates/clickhouse).
 * `watch` — enables `client.watch` functionality. See the corresponding section for details.
 * `uuid` — adds `serde::uuid` to work with [uuid](https://docs.rs/uuid) crate.
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
+* `tcp` — supports urls with the `tcp` and `tcps` schemas, which use the [native TCP protocol](https://clickhouse.com/docs/native-protocol/basics) instead of HTTP. See [Native TCP connection](#native-tcp-connection).
 
 <Warning>
 When connecting to ClickHouse via an `HTTPS` url, either the `native-tls` or `rustls-tls` feature should be enabled.
@@ -112,6 +113,23 @@ let client = Client::default()
 
 See also:
 - [HTTPS with ClickHouse Cloud example](https://github.com/ClickHouse/clickhouse-rs/blob/main/examples/clickhouse_cloud.rs) in the client repo. This should be applicable to on-premise HTTPS connections as well.
+
+### Native TCP connection {#native-tcp-connection}
+
+With the `tcp` cargo feature, the client can use the native TCP protocol of ClickHouse.
+Set a `tcp://` URL (port `9000` by default), or a `tcps://` URL for TLS (port `9440` by default, requires `rustls-tls` or `native-tls`).
+The API does not change:
+
+```rust
+let client = Client::default()
+    .with_url("tcp://localhost:9000")
+    .with_user("name")
+    .with_password("123")
+    .with_database("test");
+```
+
+The native protocol returns data only as columnar blocks. Thus, `fetch_bytes()` supports only the `Native` and `RowBinary` formats.
+See [the README](https://github.com/ClickHouse/clickhouse-rs#native-tcp-protocol) for the other differences from the HTTP interface.
 
 ### Selecting rows {#selecting-rows}
 

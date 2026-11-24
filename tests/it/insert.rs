@@ -689,7 +689,7 @@ async fn insert_with_role() {
         .await
         .expect_err("user should not be able to insert into `foo`");
 
-    insert_foos(
+    let result = insert_foos(
         user_client
             .clone()
             .with_roles([&role])
@@ -697,17 +697,18 @@ async fn insert_with_role() {
             .await
             .unwrap(),
     )
-    .await
-    .expect_err("user should be able to insert into `foo` now");
+    .await;
+
+    crate::expect_role_insert(result);
 
     // Roles should not propagate back to the parent instance
     insert_foos(user_client.insert("foo").await.unwrap())
         .await
         .expect_err("user should not be able to insert into `foo`");
 
-    insert_foos(user_client.insert("foo").await.unwrap().with_roles([&role]))
-        .await
-        .expect_err("user should be able to insert into `foo` now");
+    crate::expect_role_insert(
+        insert_foos(user_client.insert("foo").await.unwrap().with_roles([&role])).await,
+    );
 
     // `with_default_roles` should clear the role
     insert_foos(

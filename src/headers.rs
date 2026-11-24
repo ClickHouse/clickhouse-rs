@@ -4,7 +4,10 @@ use hyper::http::request::Builder;
 use std::collections::HashMap;
 use std::env::consts::OS;
 
-fn get_user_agent(app_product_info: &[ProductInfo], stack_product_info: &[ProductInfo]) -> String {
+pub(crate) fn get_user_agent(
+    app_product_info: &[ProductInfo],
+    stack_product_info: &[ProductInfo],
+) -> String {
     use std::fmt::Write;
 
     // See https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates

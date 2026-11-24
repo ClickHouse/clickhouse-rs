@@ -57,10 +57,17 @@ async fn assert_queries_user_agents(client: &Client, table_name: &str, expected_
 
     flush_query_log(client).await;
 
+    // The native protocol sends the user agent as the client name.
+    let column = if crate::uses_tcp() {
+        "client_name"
+    } else {
+        "http_user_agent"
+    };
+
     let recorded_user_agents = client
         .query(&format!(
             "
-            SELECT http_user_agent
+            SELECT {column}
             FROM system.query_log
             WHERE type = 'QueryFinish'
             AND (

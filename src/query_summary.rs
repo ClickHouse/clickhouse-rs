@@ -71,6 +71,11 @@ impl QuerySummary {
     /// Returns `None` if the value is not valid JSON or not an object with
     /// string values. This matches ClickHouse's encoding, where all values
     /// are JSON strings (e.g. `"1000"` instead of `1000`).
+    #[cfg(feature = "tcp")]
+    pub(crate) fn from_fields(fields: HashMap<String, String>) -> Self {
+        Self { fields }
+    }
+
     pub(crate) fn from_header(raw: &str) -> Option<Self> {
         let fields: HashMap<String, String> = serde_json::from_str(raw).ok()?;
         Some(Self { fields })

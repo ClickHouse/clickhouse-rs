@@ -65,6 +65,10 @@ name = "inserter"
 required-features = ["inserter"]
 
 [[example]]
+name = "native_tcp"
+required-features = ["tcp"]
+
+[[example]]
 name = "mock"
 required-features = ["test-util"]
 
@@ -105,9 +109,13 @@ zstd = ["dep:zstd", "dep:cityhash-rs"]
 chrono = ["dep:chrono"]
 futures03 = []
 opentelemetry = ["dep:opentelemetry", "dep:opentelemetry-http"]
+# The native TCP protocol transport, selected by `tcp://` and `tcps://` URLs.
+tcp = ["tokio/net", "tokio/io-util", "tokio/sync", "tokio/time"]
 
 ##  TLS
-native-tls = ["dep:hyper-tls"]
+# `tokio-native-tls` and `tokio-rustls` are dependencies of `hyper-tls` and `hyper-rustls`,
+# used directly by the `tcp` feature for `tcps://` URLs.
+native-tls = ["dep:hyper-tls", "dep:tokio-native-tls"]
 # ext: native-tls-alpn
 # ext: native-tls-vendored
 
@@ -116,8 +124,16 @@ rustls-tls-aws-lc = [
     "dep:rustls",
     "dep:hyper-rustls",
     "hyper-rustls?/aws-lc-rs",
+    "dep:tokio-rustls",
+    "tokio-rustls?/aws-lc-rs",
 ]
-rustls-tls-ring = ["dep:rustls", "dep:hyper-rustls", "hyper-rustls?/ring"]
+rustls-tls-ring = [
+    "dep:rustls",
+    "dep:hyper-rustls",
+    "hyper-rustls?/ring",
+    "dep:tokio-rustls",
+    "tokio-rustls?/ring",
+]
 rustls-tls-webpki-roots = [
     "dep:rustls",
     "dep:hyper-rustls",
@@ -144,6 +160,8 @@ http-body-util = "0.1.2"
 hyper = "1.4"
 hyper-util = { version = "0.1.6", features = ["client-legacy", "http1"] }
 hyper-tls = { version = "0.6.0", optional = true }
+tokio-native-tls = { version = "0.3", optional = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"], optional = true }
 rustls = { version = "0.23", default-features = false, optional = true }
 hyper-rustls = { version = "0.27.3", default-features = false, features = [
     "http1",

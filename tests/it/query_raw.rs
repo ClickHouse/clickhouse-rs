@@ -96,16 +96,26 @@ async fn sql_arrives_verbatim() {
         .unwrap();
     assert_eq!(value, "a?b");
 
-    flush_query_log(&client).await;
+    // Some servers write the log entry after the end of the response.
+    let mut logged = None;
+    for _ in 0..50 {
+        flush_query_log(&client).await;
 
-    let logged = client
-        .query(
-            "SELECT query FROM system.query_log \
-             WHERE query_id = ? AND type = 'QueryFinish'",
-        )
-        .bind(&query_id)
-        .fetch_one::<String>()
-        .await
-        .unwrap();
-    assert_eq!(logged, SQL);
+        logged = client
+            .query(
+                "SELECT query FROM system.query_log \
+                 WHERE query_id = ? AND type = 'QueryFinish'",
+            )
+            .bind(&query_id)
+            .fetch_optional::<String>()
+            .await
+            .unwrap();
+
+        if logged.is_some() {
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(logged.as_deref(), Some(SQL));
 }

@@ -6,17 +6,58 @@ use crate::native::{Block, Column, Layout, LayoutKind, LayoutLowCardinality};
 use crate::response::Chunks;
 use bytes::{Buf, Bytes, BytesMut};
 use clickhouse_types::DataTypeNode;
-use futures_util::StreamExt;
+use std::borrow::Cow;
 use std::cmp;
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::ops::ControlFlow;
 
-pub(crate) struct BlockReader {
-    inner: ReaderInner,
+/// A source of byte chunks for [`BlockReader`].
+///
+/// A chunk may end at any position: the reader keeps the unused rest of a chunk
+/// and asks for more data only when it needs it.
+pub(crate) trait ChunkSource: Send {
+    /// Return the next chunk, or `None` at the end of data.
+    fn next_chunk(&mut self) -> impl Future<Output = Option<Result<Bytes, Error>>> + Send;
+}
+
+impl ChunkSource for Chunks {
+    async fn next_chunk(&mut self) -> Option<Result<Bytes, Error>> {
+        use futures_util::StreamExt;
+
+        self.next().await.map(|chunk| chunk.map(|chunk| chunk.data))
+    }
+}
+
+/// The first protocol revision that sends a serialization kind for each column.
+pub(crate) const REVISION_WITH_CUSTOM_SERIALIZATION: u64 = 54454;
+
+/// Details of the serialization of blocks that depend on the peer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WireFormat {
+    /// Native protocol revision of the stream, or `0` for the `Native` format.
+    ///
+    /// The native TCP protocol adds a `BlockInfo` header to each block and, since revision
+    /// [`REVISION_WITH_CUSTOM_SERIALIZATION`], the serialization kind of each column.
+    pub(crate) revision: u64,
+    /// `Variant` columns start with the serialization mode of discriminators (ClickHouse 24.7+).
+    pub(crate) variant_mode_prefix: bool,
+}
+
+impl WireFormat {
+    /// The `Native` format of current servers.
+    pub(crate) const NATIVE: Self = Self {
+        revision: 0,
+        variant_mode_prefix: true,
+    };
+}
+
+pub(crate) struct BlockReader<S = Chunks> {
+    inner: ReaderInner<S>,
     // Since versioned type encoding is split into a "prefix phase" and a "data phase"
     // we need to read state prefixes separately and remember what we've seen
     prefix_queue: VecDeque<StatePrefix>,
+    format: WireFormat,
 }
 
 /// Captures errors that may occur while decoding a [Native Format] block.
@@ -30,8 +71,8 @@ pub struct BlockReadError {
     source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 }
 
-struct ReaderInner {
-    chunks: Chunks,
+struct ReaderInner<S> {
+    chunks: S,
     last_chunk: Bytes,
 }
 
@@ -39,6 +80,43 @@ struct ReaderInner {
 enum StatePrefix {
     // LowCardinality state prefix is just `version = 1`, no state necessary
     LowCardinality,
+    /// `Variant` discriminators serialization mode.
+    Variant(VariantMode),
+    /// `JSON` serialized as one string per row.
+    JsonString,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum VariantMode {
+    /// One discriminator byte per row.
+    Basic,
+    /// Granules with either one discriminator byte per row or one discriminator for all rows.
+    Compact,
+}
+
+/// `ColumnVariant::NULL_DISCRIMINATOR`
+pub(crate) const VARIANT_NULL_DISCRIMINATOR: u8 = 255;
+
+/// The serialization kind of a column, sent by the native TCP protocol.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SerializationKind {
+    Default,
+    /// Only the non-default values are sent, with the offsets of their rows.
+    Sparse,
+    /// The kinds of the elements of a `Tuple`.
+    Tuple(Box<SerializationKind>, Vec<SerializationKind>),
+}
+
+impl SerializationKind {
+    fn is_default(&self) -> bool {
+        match self {
+            Self::Default => true,
+            Self::Sparse => false,
+            Self::Tuple(own, elements) => {
+                own.is_default() && elements.iter().all(SerializationKind::is_default)
+            }
+        }
+    }
 }
 
 #[repr(u64)]
@@ -69,12 +147,87 @@ const SAFE_ALLOCATION_LIMIT: usize = 1 << 32;
 
 impl BlockReader {
     pub(crate) fn new(chunks: Chunks) -> Self {
+        Self::with_format(chunks, WireFormat::NATIVE)
+    }
+}
+
+impl<S: ChunkSource> BlockReader<S> {
+    /// Create a reader for blocks in the given format.
+    pub(crate) fn with_format(chunks: S, format: WireFormat) -> Self {
         BlockReader {
             inner: ReaderInner {
                 chunks,
                 last_chunk: Bytes::new(),
             },
             prefix_queue: VecDeque::new(),
+            format,
+        }
+    }
+
+    /// Return the chunk source and the data that the reader received but did not use.
+    #[cfg(feature = "tcp")]
+    pub(crate) fn into_parts(self) -> (S, Bytes) {
+        (self.inner.chunks, self.inner.last_chunk)
+    }
+
+    /// Read one block of the native TCP protocol.
+    ///
+    /// Unlike [`Self::read_block()`], an empty block is a valid result:
+    /// the server sends blocks without rows to describe the columns of a result
+    /// and to mark the end of data.
+    ///
+    /// **NOT** cancel-safe.
+    #[cfg(feature = "tcp")]
+    pub(crate) async fn read_protocol_block(&mut self) -> Result<Block, Error> {
+        self.read_block_info().await?;
+
+        let num_columns = self.inner.read_varuint().await?;
+        let num_rows = self.inner.read_varuint().await?;
+
+        let num_columns = usize::try_from(num_columns)
+            .ok()
+            .filter(|&n| n <= SAFE_ALLOCATION_LIMIT)
+            .ok_or_else(|| {
+                read_error!("number of columns in block is out of range: {num_columns}")
+            })?;
+        let num_rows = usize::try_from(num_rows)
+            .ok()
+            .filter(|&n| n <= SAFE_ALLOCATION_LIMIT)
+            .ok_or_else(|| read_error!("number of rows in block is out of range: {num_rows}"))?;
+
+        let mut columns = Vec::with_capacity(cmp::min(num_columns, 1024));
+
+        for col in 0..num_columns {
+            columns.push(self.read_column(num_rows).await.inspect_err(|e| {
+                tracing::debug!(col, "error reading column: {e:?}");
+            })?);
+        }
+
+        Ok(Block::from_columns(columns, num_rows))
+    }
+
+    /// Skip the `BlockInfo` structure: a list of `(field number, value)` pairs ending with `0`.
+    #[cfg(feature = "tcp")]
+    async fn read_block_info(&mut self) -> Result<(), Error> {
+        if self.format.revision == 0 {
+            return Ok(());
+        }
+
+        loop {
+            match self.inner.read_varuint().await? {
+                0 => return Ok(()),
+                // `is_overflows: bool`
+                1 => {
+                    self.inner.read_bytes_fixed::<1>().await?;
+                }
+                // `bucket_num: Int32`
+                2 => {
+                    self.inner.read_bytes_fixed::<4>().await?;
+                }
+                other => {
+                    return Err(read_error!("unknown BlockInfo field number: {other}").into());
+                }
+            }
         }
     }
 
@@ -116,10 +269,10 @@ impl BlockReader {
 
     async fn read_column(&mut self, num_rows: usize) -> Result<Column, Error> {
         let name = self.inner.read_string().await?;
-        let data_type = self.inner.read_string().await?;
+        let type_name = self.inner.read_string().await?;
 
-        let data_type = data_type.as_str().ok_or_else(|| {
-            read_error!("invalid data type {data_type:?}").with_column(&name, None)
+        let data_type = type_name.as_str().ok_or_else(|| {
+            read_error!("invalid data type {type_name:?}").with_column(&name, None)
         })?;
 
         let data_type = DataTypeNode::new(data_type).map_err(|e| {
@@ -128,6 +281,20 @@ impl BlockReader {
                 .with_source(e)
         })?;
 
+        let kind = if self.format.revision >= REVISION_WITH_CUSTOM_SERIALIZATION {
+            let [has_custom] = self.inner.read_bytes_fixed::<1>().await?;
+
+            if has_custom != 0 {
+                self.read_serialization_kind(&data_type)
+                    .await
+                    .err_with_column(&name, Some(&data_type))?
+            } else {
+                SerializationKind::Default
+            }
+        } else {
+            SerializationKind::Default
+        };
+
         if num_rows != 0 {
             self.read_state_prefix(&name, &data_type)
                 .await
@@ -135,14 +302,19 @@ impl BlockReader {
                 .err_with_column(&name, Some(&data_type))?;
         }
 
-        let layout = self
-            .read_data(&name, &data_type, num_rows, num_rows != 0)
-            .await
-            .err_with_column(&name, Some(&data_type))?;
+        let layout = if kind.is_default() {
+            self.read_data(&name, &data_type, num_rows, num_rows != 0)
+                .await
+        } else {
+            self.read_data_with_kind(&name, &data_type, &kind, num_rows)
+                .await
+        }
+        .err_with_column(&name, Some(&data_type))?;
 
         Ok(Column {
             name,
             data_type,
+            type_name,
             layout,
         })
     }
@@ -152,7 +324,9 @@ impl BlockReader {
         column_name: &MaybeUtf8,
         data_type: &DataTypeNode,
     ) -> Result<(), Error> {
-        match data_type {
+        let data_type = wire_type(data_type);
+
+        match &*data_type {
             DataTypeNode::LowCardinality(_) => {
                 let prefix = self.inner.read_int64().await?;
 
@@ -168,7 +342,7 @@ impl BlockReader {
                 self.prefix_queue.push_back(StatePrefix::LowCardinality);
             }
             // State prefix for composite types needs to be read _before_ the composite type layout
-            DataTypeNode::Array(inner_type) => {
+            DataTypeNode::Array(inner_type) | DataTypeNode::Nullable(inner_type) => {
                 Box::pin(self.read_state_prefix(column_name, inner_type)).await?;
             }
             DataTypeNode::Tuple(types) => {
@@ -180,10 +354,46 @@ impl BlockReader {
                 Box::pin(self.read_state_prefix(column_name, key_ty)).await?;
                 Box::pin(self.read_state_prefix(column_name, val_ty)).await?;
             }
-            DataTypeNode::JSON
-            | DataTypeNode::JsonWithHint(_)
-            | DataTypeNode::Variant(_)
-            | DataTypeNode::Dynamic => {
+            DataTypeNode::Variant(types) => {
+                let mode = if !self.format.variant_mode_prefix {
+                    VariantMode::Basic
+                } else {
+                    match self.inner.read_uint64().await? {
+                        0 => VariantMode::Basic,
+                        1 => VariantMode::Compact,
+                        other => {
+                            return Err(read_error!(
+                                "unknown discriminators serialization mode of Variant: {other}"
+                            )
+                            .into());
+                        }
+                    }
+                };
+
+                self.prefix_queue.push_back(StatePrefix::Variant(mode));
+
+                for ty in types {
+                    Box::pin(self.read_state_prefix(column_name, ty)).await?;
+                }
+            }
+            DataTypeNode::JSON | DataTypeNode::JsonWithHint(_) => {
+                /// `SerializationObject::SerializationVersion::STRING`
+                const JSON_AS_STRING: u64 = 1;
+
+                let version = self.inner.read_uint64().await?;
+
+                if version != JSON_AS_STRING {
+                    return Err(read_error!(
+                        "unsupported serialization version of JSON: {version}; \
+                         only JSON serialized as strings is supported \
+                         (setting `output_format_native_write_json_as_string = 1`)"
+                    )
+                    .into());
+                }
+
+                self.prefix_queue.push_back(StatePrefix::JsonString);
+            }
+            DataTypeNode::Dynamic | DataTypeNode::AggregateFunction(..) => {
                 return Err(
                     read_error!("unimplemented deserialization of (sub)type {data_type}").into(),
                 );
@@ -192,6 +402,190 @@ impl BlockReader {
         }
 
         Ok(())
+    }
+
+    async fn read_serialization_kind(
+        &mut self,
+        data_type: &DataTypeNode,
+    ) -> Result<SerializationKind, Error> {
+        let [kind] = self.inner.read_bytes_fixed::<1>().await?;
+
+        let kind = match kind {
+            0 => SerializationKind::Default,
+            1 => SerializationKind::Sparse,
+            other => {
+                return Err(read_error!("unsupported serialization kind: {other}").into());
+            }
+        };
+
+        if let DataTypeNode::Tuple(types) = &*wire_type(data_type) {
+            let mut elements = Vec::with_capacity(types.len());
+
+            for ty in types {
+                elements.push(Box::pin(self.read_serialization_kind(ty)).await?);
+            }
+
+            return Ok(SerializationKind::Tuple(Box::new(kind), elements));
+        }
+
+        Ok(kind)
+    }
+
+    /// Read a column that has a serialization kind other than the default.
+    ///
+    /// Only revisions below `DBMS_MIN_REVISION_WITH_SPARSE_SERIALIZATION` are used, so the server
+    /// sends sparse columns only if it is older than this revision (ClickHouse 22.x and 23.x).
+    async fn read_data_with_kind(
+        &mut self,
+        column_name: &MaybeUtf8,
+        data_type: &DataTypeNode,
+        kind: &SerializationKind,
+        num_values: usize,
+    ) -> Result<Layout, Error> {
+        let block_nonempty = num_values != 0;
+
+        match kind {
+            SerializationKind::Default => {
+                self.read_data(column_name, data_type, num_values, block_nonempty)
+                    .await
+            }
+            SerializationKind::Sparse => {
+                self.read_sparse_data(column_name, data_type, num_values)
+                    .await
+            }
+            SerializationKind::Tuple(own, elements) => {
+                let wire = wire_type(data_type);
+
+                let (DataTypeNode::Tuple(types), SerializationKind::Default) = (&*wire, &**own)
+                else {
+                    return Err(read_error!(
+                        "unsupported serialization kind {kind:?} for type {data_type}"
+                    )
+                    .into());
+                };
+
+                let mut layouts = Vec::with_capacity(types.len());
+
+                for (ty, kind) in types.iter().zip(elements) {
+                    layouts.push(
+                        Box::pin(self.read_data_with_kind(column_name, ty, kind, num_values))
+                            .await?,
+                    );
+                }
+
+                Ok(Layout {
+                    kind: LayoutKind::Tuple {
+                        layouts: layouts.into(),
+                    },
+                    nulls: None,
+                    num_values,
+                })
+            }
+        }
+    }
+
+    /// Read a sparse column and expand it to the usual layout.
+    ///
+    /// The server sends the offsets of non-default rows, then the non-default values.
+    async fn read_sparse_data(
+        &mut self,
+        column_name: &MaybeUtf8,
+        data_type: &DataTypeNode,
+        num_values: usize,
+    ) -> Result<Layout, Error> {
+        /// `SerializationSparse`: the group with this flag holds the trailing default rows.
+        const END_OF_GRANULE_FLAG: u64 = 1 << 62;
+
+        let mut value_rows = Vec::new();
+        let mut row = 0usize;
+
+        if num_values != 0 {
+            loop {
+                let group = self.inner.read_varuint().await?;
+                let defaults = usize::try_from(group & !END_OF_GRANULE_FLAG)
+                    .map_err(|_| read_error!("sparse offset is out of range: {group}"))?;
+
+                row = row
+                    .checked_add(defaults)
+                    .filter(|&row| row <= num_values)
+                    .ok_or_else(|| read_error!("sparse offsets exceed the number of rows"))?;
+
+                if group & END_OF_GRANULE_FLAG != 0 {
+                    break;
+                }
+
+                if row >= num_values {
+                    return Err(read_error!("sparse offsets exceed the number of rows").into());
+                }
+
+                value_rows.push(row);
+                row += 1;
+            }
+        }
+
+        if row != num_values {
+            return Err(read_error!(
+                "sparse offsets cover {row} rows, but the block has {num_values} rows"
+            )
+            .into());
+        }
+
+        let values = self
+            .read_data(column_name, data_type, value_rows.len(), num_values != 0)
+            .await?;
+
+        let kind = match values.kind {
+            LayoutKind::Fixed { type_width, data } if values.nulls.is_none() && type_width > 0 => {
+                let total_bytes = type_width.checked_mul(num_values).ok_or_else(|| {
+                    read_error!("data size is too large: {num_values} rows X {type_width} bytes")
+                })?;
+                let mut dense = vec![0u8; total_bytes];
+
+                // `row < num_values`, so the products cannot overflow
+                for (chunk, &row) in data.chunks_exact(type_width).zip(&value_rows) {
+                    let start = row * type_width;
+                    if let Some(dst) = dense.get_mut(start..start + type_width) {
+                        dst.copy_from_slice(chunk);
+                    }
+                }
+
+                LayoutKind::Fixed {
+                    type_width,
+                    data: dense.into(),
+                }
+            }
+            LayoutKind::Variable { end_offsets, data } if values.nulls.is_none() => {
+                let mut dense_offsets = Vec::with_capacity(num_values);
+                let mut next_value = value_rows.iter().zip(end_offsets.iter()).peekable();
+                let mut end = 0;
+
+                for row in 0..num_values {
+                    if let Some((_, &value_end)) =
+                        next_value.next_if(|&(&value_row, _)| value_row == row)
+                    {
+                        end = value_end;
+                    }
+                    dense_offsets.push(end);
+                }
+
+                LayoutKind::Variable {
+                    end_offsets: dense_offsets.into(),
+                    data,
+                }
+            }
+            _ => {
+                return Err(read_error!(
+                    "sparse serialization of type {data_type} is not supported"
+                )
+                .into());
+            }
+        };
+
+        Ok(Layout {
+            kind,
+            nulls: None,
+            num_values,
+        })
     }
 
     async fn read_data(
@@ -210,11 +604,13 @@ impl BlockReader {
             .into());
         }
 
-        let (data_type, nulls) = if let DataTypeNode::Nullable(inner) = data_type {
+        let wire = wire_type(data_type);
+
+        let (data_type, nulls) = if let DataTypeNode::Nullable(inner) = &*wire {
             // Read off the null bitmap
             (&**inner, Some(self.inner.read_bytes(num_values).await?))
         } else {
-            (data_type, None)
+            (&*wire, None)
         };
 
         if let Some(type_width) = type_fixed_width(data_type) {
@@ -233,25 +629,78 @@ impl BlockReader {
         }
 
         match data_type.remove_simple_aggregate_function() {
-            DataTypeNode::String => {
-                // Assume default growth strategy is fine
-                let mut data = BytesMut::new();
-                let mut end_offsets = Vec::with_capacity(num_values);
-
-                for row in 0..num_values {
-                    let len = self.inner.read_varuint().await?;
-
-                    let len = usize::try_from(len)
-                        .map_err(|_| read_error!("string #{row} length {len} is out of range"))?;
-
-                    self.inner.read_bytes_into(len, &mut data).await?;
-                    end_offsets.push(data.len());
+            DataTypeNode::String => Ok(Layout {
+                kind: self.inner.read_strings(num_values).await?,
+                nulls,
+                num_values,
+            }),
+            DataTypeNode::JSON | DataTypeNode::JsonWithHint(_) => {
+                if block_nonempty {
+                    match self.prefix_queue.pop_front() {
+                        Some(StatePrefix::JsonString) => (),
+                        other => {
+                            return Err(read_error!(
+                                "error reading (sub)type {data_type}: \
+                                 expected JSON state prefix, got {other:?}"
+                            )
+                            .into());
+                        }
+                    }
                 }
 
                 Ok(Layout {
-                    kind: LayoutKind::Variable {
-                        data: data.freeze(),
-                        end_offsets: end_offsets.into(),
+                    kind: self.inner.read_strings(num_values).await?,
+                    nulls,
+                    num_values,
+                })
+            }
+            DataTypeNode::Variant(types) => {
+                let mode = if block_nonempty {
+                    match self.prefix_queue.pop_front() {
+                        Some(StatePrefix::Variant(mode)) => mode,
+                        other => {
+                            return Err(read_error!(
+                                "error reading (sub)type {data_type}: \
+                                 expected Variant state prefix, got {other:?}"
+                            )
+                            .into());
+                        }
+                    }
+                } else {
+                    VariantMode::Basic
+                };
+
+                let discriminators = self.read_variant_discriminators(mode, num_values).await?;
+
+                let mut counts = vec![0usize; types.len()];
+
+                for &discriminator in discriminators.iter() {
+                    if discriminator == VARIANT_NULL_DISCRIMINATOR {
+                        continue;
+                    }
+
+                    let count = counts.get_mut(usize::from(discriminator)).ok_or_else(|| {
+                        read_error!(
+                            "Variant discriminator {discriminator} is out of range \
+                             for {} variant types",
+                            types.len()
+                        )
+                    })?;
+                    *count += 1;
+                }
+
+                let mut variants = Vec::with_capacity(types.len());
+
+                for (ty, count) in types.iter().zip(counts) {
+                    variants.push(
+                        Box::pin(self.read_data(column_name, ty, count, block_nonempty)).await?,
+                    );
+                }
+
+                Ok(Layout {
+                    kind: LayoutKind::Variant {
+                        discriminators,
+                        variants: variants.into(),
                     },
                     nulls,
                     num_values,
@@ -346,6 +795,37 @@ impl BlockReader {
                 })
             }
             _ => Err(read_error!("data type {data_type:?} not implemented").into()),
+        }
+    }
+
+    async fn read_variant_discriminators(
+        &mut self,
+        mode: VariantMode,
+        num_values: usize,
+    ) -> Result<Bytes, Error> {
+        if mode == VariantMode::Basic || num_values == 0 {
+            return self.inner.read_bytes(num_values).await;
+        }
+
+        // Compact mode: the native format writes the whole column as one granule.
+        let granule_rows = self.inner.read_varuint().await?;
+
+        if usize::try_from(granule_rows).ok() != Some(num_values) {
+            return Err(read_error!(
+                "Variant granule has {granule_rows} rows, but {num_values} rows were expected"
+            )
+            .into());
+        }
+
+        match self.inner.read_bytes_fixed::<1>().await? {
+            // `CompactDiscriminatorsGranuleFormat::PLAIN`
+            [0] => self.inner.read_bytes(num_values).await,
+            // `CompactDiscriminatorsGranuleFormat::COMPACT`: one discriminator for all rows
+            [1] => {
+                let [discriminator] = self.inner.read_bytes_fixed::<1>().await?;
+                Ok(Bytes::from(vec![discriminator; num_values]))
+            }
+            [other] => Err(read_error!("unknown Variant granule format: {other}").into()),
         }
     }
 
@@ -446,7 +926,85 @@ impl BlockReader {
     }
 }
 
-impl ReaderInner {
+impl<S: ChunkSource> ReaderInner<S> {
+    /// Read `num_values` strings, each one prefixed with its length as a `VarUInt`.
+    async fn read_strings(&mut self, num_values: usize) -> Result<LayoutKind, Error> {
+        // Assume default growth strategy is fine
+        let mut data = BytesMut::new();
+        let mut end_offsets = Vec::with_capacity(cmp::min(num_values, 1 << 20));
+
+        let mut row = 0;
+
+        while row < num_values {
+            // Fast path: read the strings that are complete in the current chunk.
+            row += self.read_buffered_strings(num_values - row, &mut data, &mut end_offsets)?;
+
+            if row == num_values {
+                break;
+            }
+
+            let len = self.read_varuint().await?;
+
+            let len = usize::try_from(len)
+                .map_err(|_| read_error!("string #{row} length {len} is out of range"))?;
+
+            self.read_bytes_into(len, &mut data).await?;
+            end_offsets.push(data.len());
+            row += 1;
+        }
+
+        Ok(LayoutKind::Variable {
+            data: data.freeze(),
+            end_offsets: end_offsets.into(),
+        })
+    }
+
+    /// Read up to `max` strings that are complete in the current chunk, and return the number.
+    fn read_buffered_strings(
+        &mut self,
+        max: usize,
+        data: &mut BytesMut,
+        end_offsets: &mut Vec<usize>,
+    ) -> Result<usize, Error> {
+        let mut input = &self.last_chunk[..];
+        let mut count = 0;
+
+        while count < max {
+            let mut rest = input;
+
+            let ControlFlow::Break(len) = ParseVarUInt::default()
+                .feed(&mut rest)
+                .map_err(|e| read_error!("error parsing VarUInt").with_source(e))?
+            else {
+                break;
+            };
+
+            let Some((value, rest)) = usize::try_from(len)
+                .ok()
+                .and_then(|len| rest.split_at_checked(len))
+            else {
+                break;
+            };
+
+            if data.len().saturating_add(value.len()) > SAFE_ALLOCATION_LIMIT {
+                return Err(read_error!(
+                    "safe allocation limit exceeded: {} vs {SAFE_ALLOCATION_LIMIT}",
+                    data.len().saturating_add(value.len())
+                )
+                .into());
+            }
+
+            data.extend_from_slice(value);
+            end_offsets.push(data.len());
+            input = rest;
+            count += 1;
+        }
+
+        let consumed = self.last_chunk.len() - input.len();
+        self.consume(consumed);
+        Ok(count)
+    }
+
     async fn read_string(&mut self) -> Result<MaybeUtf8, Error> {
         let len = self.read_varuint().await?;
 
@@ -608,11 +1166,11 @@ impl ReaderInner {
 
     async fn try_read_chunk(&mut self) -> Result<bool, Error> {
         if self.last_chunk.is_empty() {
-            let Some(chunk) = self.chunks.next().await else {
+            let Some(chunk) = self.chunks.next_chunk().await else {
                 return Ok(false);
             };
 
-            self.last_chunk = chunk?.data;
+            self.last_chunk = chunk?;
         }
 
         Ok(true)
@@ -654,6 +1212,37 @@ impl LcKeyType {
             LcKeyType::UInt64 => 8,
         }
     }
+}
+
+/// The type that describes how a column of `data_type` is serialized.
+///
+/// Removes wrappers that do not change the serialization and replaces geo types
+/// with their equivalents.
+pub(crate) fn wire_type(data_type: &DataTypeNode) -> Cow<'_, DataTypeNode> {
+    match data_type {
+        DataTypeNode::SimpleAggregateFunction(_, inner) => wire_type(inner),
+        other => geo_equivalent(other).map_or(Cow::Borrowed(other), Cow::Owned),
+    }
+}
+
+/// The serialization of geo types is the same as the serialization of these types:
+/// <https://clickhouse.com/docs/sql-reference/data-types/geo>
+pub(crate) fn geo_equivalent(data_type: &DataTypeNode) -> Option<DataTypeNode> {
+    fn point() -> DataTypeNode {
+        DataTypeNode::Tuple(vec![DataTypeNode::Float64, DataTypeNode::Float64])
+    }
+
+    fn array(inner: DataTypeNode) -> DataTypeNode {
+        DataTypeNode::Array(Box::new(inner))
+    }
+
+    Some(match data_type {
+        DataTypeNode::Point => point(),
+        DataTypeNode::Ring | DataTypeNode::LineString => array(point()),
+        DataTypeNode::Polygon | DataTypeNode::MultiLineString => array(array(point())),
+        DataTypeNode::MultiPolygon => array(array(array(point()))),
+        _ => return None,
+    })
 }
 
 impl Display for BlockReadError {

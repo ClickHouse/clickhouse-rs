@@ -222,6 +222,7 @@ impl BlockBuilder {
             .drain(..)
             .map(|col| Column {
                 name: col.name,
+                type_name: MaybeUtf8::from_string(col.data_type.to_string()),
                 data_type: col.data_type,
                 layout: col.layout.into_layout(),
             })

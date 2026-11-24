@@ -139,6 +139,11 @@ impl WriteGuard<'_> {
                     "inserting LowCardinality data not yet implemented".into(),
                 ));
             }
+            LayoutKind::Variant { .. } => {
+                return Err(Error::Other(
+                    "inserting Variant data not yet implemented".into(),
+                ));
+            }
             LayoutKind::Array {
                 end_indices,
                 elem_layout,

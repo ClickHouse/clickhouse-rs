@@ -209,7 +209,9 @@ impl Query {
         }
 
         // FIXME: use HTTP body compression instead of block-level compression
-        self.client = self.client.with_compression(Compression::None);
+        if !self.client.uses_tcp() {
+            self.client = self.client.with_compression(Compression::None);
+        }
 
         let response = self.do_execute(Some("Native"))?;
 
@@ -248,6 +250,14 @@ impl Query {
 
     pub(crate) fn do_execute(self, default_format: Option<&str>) -> Result<Response> {
         let query = self.sql.finish()?;
+
+        self.client.check_transport()?;
+
+        #[cfg(feature = "tcp")]
+        if self.client.uses_tcp() {
+            return crate::tcp::query(&self.client, query, default_format)
+                .inspect_err(|err| err.record_in_current_span("error executing query"));
+        }
 
         let mut url =
             Url::parse(&self.client.url).map_err(|err| Error::InvalidParams(Box::new(err)))?;

@@ -21,8 +21,15 @@ pub mod encode;
 pub(crate) mod reader;
 pub(crate) mod string;
 mod utils;
-mod varuint;
+pub(crate) mod varuint;
 pub(crate) mod writer;
+
+#[cfg(feature = "tcp")]
+pub(crate) mod block_encoder;
+#[cfg(feature = "tcp")]
+pub(crate) mod from_row_binary;
+#[cfg(feature = "tcp")]
+pub(crate) mod to_row_binary;
 
 #[cfg(test)]
 mod tests;
@@ -35,6 +42,29 @@ pub struct Block {
 }
 
 impl Block {
+    /// A block without rows with columns of the given names and types, for tests.
+    #[cfg(all(test, feature = "tcp"))]
+    pub(crate) fn header(columns: &[(&str, &str)]) -> Self {
+        let columns = columns
+            .iter()
+            .map(|&(name, type_name)| Column {
+                name: MaybeUtf8::from_string(name.to_owned()),
+                data_type: DataTypeNode::new(type_name).expect("invalid type"),
+                type_name: MaybeUtf8::from_string(type_name.to_owned()),
+                layout: Layout {
+                    kind: LayoutKind::Fixed {
+                        type_width: 0,
+                        data: Bytes::new(),
+                    },
+                    nulls: None,
+                    num_values: 0,
+                },
+            })
+            .collect();
+
+        Self::from_columns(columns, 0)
+    }
+
     fn from_columns(columns: Vec<Column>, num_rows: usize) -> Self {
         Self {
             column_names: columns
@@ -102,6 +132,9 @@ impl Index<usize> for Block {
 pub struct Column {
     name: MaybeUtf8,
     data_type: DataTypeNode,
+    /// The data type as the server wrote it.
+    #[cfg_attr(not(feature = "tcp"), allow(dead_code))]
+    type_name: MaybeUtf8,
     layout: Layout,
 }
 
@@ -143,6 +176,13 @@ enum LayoutKind {
     Map {
         key_val_layouts: Box<[Layout; 2]>,
         end_indices: Box<[usize]>,
+    },
+    /// `Variant` data: one discriminator per value (`0xFF` is `NULL`), and the values of each
+    /// variant type in the order of rows.
+    #[cfg_attr(not(feature = "tcp"), allow(dead_code))]
+    Variant {
+        discriminators: Bytes,
+        variants: Box<[Layout]>,
     },
 }
 

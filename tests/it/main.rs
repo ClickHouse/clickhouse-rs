@@ -127,11 +127,53 @@ macro_rules! check_cloud_test_env {
     };
 }
 
+/// The URL of the local server: `CLICKHOUSE_TEST_URL`, `http://localhost:8123` by default.
+///
+/// Set it to a `tcp://` URL to run the tests with the native TCP transport
+/// (requires the `tcp` feature).
+pub(crate) fn local_url() -> String {
+    std::env::var("CLICKHOUSE_TEST_URL").unwrap_or_else(|_| "http://localhost:8123".to_owned())
+}
+
+/// Returns `true` if the tests use the native TCP transport.
+pub(crate) fn uses_tcp() -> bool {
+    test_env() == TestEnv::Local && local_url().starts_with("tcp")
+}
+
+/// Skip a test that checks behavior specific to the HTTP transport.
+macro_rules! skip_if_tcp {
+    ($reason:literal) => {
+        if crate::uses_tcp() {
+            eprintln!("Skipping test with the native TCP transport: {}", $reason);
+            return;
+        }
+    };
+}
+
+/// Check the result of an `INSERT` with a role that has the `INSERT` grant.
+///
+/// The HTTP transport does not send the roles of an `INSERT`, so the `INSERT` fails.
+/// The native TCP transport sets the roles, so the `INSERT` succeeds.
+#[track_caller]
+pub(crate) fn expect_role_insert<T: std::fmt::Debug, E: std::fmt::Debug>(result: Result<T, E>) {
+    if uses_tcp() {
+        result.expect("the INSERT with the role should succeed over the native TCP transport");
+    } else {
+        result.expect_err("the HTTP transport does not send the roles of an INSERT");
+    }
+}
+
+/// Quote a string literal for SQL.
+#[cfg(feature = "tcp")]
+pub(crate) fn tcp_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
 pub(crate) fn get_client() -> Client {
     let client = Client::default();
 
     match test_env() {
-        TestEnv::Local => client.with_url("http://localhost:8123"),
+        TestEnv::Local => client.with_url(local_url()),
         TestEnv::Cloud => client
             .with_url(get_cloud_url())
             .with_user("default")
@@ -286,6 +328,8 @@ mod query_syntax;
 mod rbwnat_header;
 mod rbwnat_smoke;
 mod rbwnat_validation;
+#[cfg(feature = "tcp")]
+mod tcp;
 mod time;
 mod user_agent;
 mod uuid;
