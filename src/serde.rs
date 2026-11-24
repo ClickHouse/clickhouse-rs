@@ -43,6 +43,93 @@ macro_rules! option {
     };
 }
 
+/// Generates a `vec` submodule that ser/de `Vec<T>` to/from `Array(_)`,
+/// reusing the parent module's `serialize` and `deserialize` for each element.
+#[cfg(any(feature = "chrono", feature = "time"))]
+macro_rules! array {
+    ($name:ident, $doc:literal) => {
+        #[doc = $doc]
+        pub mod vec {
+            use super::*;
+
+            struct Elem<'a>(&'a super::$name);
+
+            impl Serialize for Elem<'_> {
+                fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    super::serialize(self.0, serializer)
+                }
+            }
+
+            struct ElemOwned(super::$name);
+
+            impl<'de> Deserialize<'de> for ElemOwned {
+                fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                    super::deserialize(deserializer).map(ElemOwned)
+                }
+            }
+
+            pub fn serialize<S>(v: &[super::$name], serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                serializer.collect_seq(v.iter().map(Elem))
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<super::$name>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let v: Vec<ElemOwned> = Deserialize::deserialize(deserializer)?;
+                Ok(v.into_iter().map(|e| e.0).collect())
+            }
+
+            /// Ser/de `Vec<Option<_>>` to/from `Array(Nullable(_))`, using the
+            /// same element type as the parent module.
+            pub mod option {
+                use super::*;
+
+                struct Elem<'a>(&'a Option<super::super::$name>);
+
+                impl Serialize for Elem<'_> {
+                    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                        super::super::option::serialize(self.0, serializer)
+                    }
+                }
+
+                struct ElemOwned(Option<super::super::$name>);
+
+                impl<'de> Deserialize<'de> for ElemOwned {
+                    fn deserialize<D: Deserializer<'de>>(
+                        deserializer: D,
+                    ) -> Result<Self, D::Error> {
+                        super::super::option::deserialize(deserializer).map(ElemOwned)
+                    }
+                }
+
+                pub fn serialize<S>(
+                    v: &[Option<super::super::$name>],
+                    serializer: S,
+                ) -> Result<S::Ok, S::Error>
+                where
+                    S: Serializer,
+                {
+                    serializer.collect_seq(v.iter().map(Elem))
+                }
+
+                pub fn deserialize<'de, D>(
+                    deserializer: D,
+                ) -> Result<Vec<Option<super::super::$name>>, D::Error>
+                where
+                    D: Deserializer<'de>,
+                {
+                    let v: Vec<ElemOwned> = Deserialize::deserialize(deserializer)?;
+                    Ok(v.into_iter().map(|e| e.0).collect())
+                }
+            }
+        }
+    };
+}
+
 /// Ser/de [`std::net::Ipv4Addr`] to/from `IPv4`.
 pub mod ipv4 {
     use std::net::Ipv4Addr;
@@ -180,6 +267,10 @@ pub mod chrono {
             DateTimeUtc,
             "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime)`."
         );
+        array!(
+            DateTimeUtc,
+            "Ser/de `Vec<DateTime<Utc>>` to/from `Array(DateTime)`."
+        );
 
         pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -216,6 +307,10 @@ pub mod chrono {
                 DateTimeUtc,
                 "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(0))`."
             );
+            array!(
+                DateTimeUtc,
+                "Ser/de `Vec<DateTime<Utc>>` to/from `Array(DateTime64(0))`."
+            );
 
             pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -243,6 +338,10 @@ pub mod chrono {
             option!(
                 DateTimeUtc,
                 "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(3))`."
+            );
+            array!(
+                DateTimeUtc,
+                "Ser/de `Vec<DateTime<Utc>>` to/from `Array(DateTime64(3))`."
             );
 
             pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
@@ -272,6 +371,10 @@ pub mod chrono {
                 DateTimeUtc,
                 "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(6))`."
             );
+            array!(
+                DateTimeUtc,
+                "Ser/de `Vec<DateTime<Utc>>` to/from `Array(DateTime64(6))`."
+            );
 
             pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -299,6 +402,10 @@ pub mod chrono {
             option!(
                 DateTimeUtc,
                 "Ser/de `Option<DateTime<Utc>>` to/from `Nullable(DateTime64(9))`."
+            );
+            array!(
+                DateTimeUtc,
+                "Ser/de `Vec<DateTime<Utc>>` to/from `Array(DateTime64(9))`."
             );
 
             pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
@@ -330,6 +437,7 @@ pub mod chrono {
             NaiveDate,
             "Ser/de `Option<NaiveDate>` to/from `Nullable(Date)`."
         );
+        array!(NaiveDate, "Ser/de `Vec<NaiveDate>` to/from `Array(Date)`.");
 
         const ORIGIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1970, 1);
 
@@ -369,6 +477,10 @@ pub mod chrono {
         option!(
             NaiveDate,
             "Ser/de `Option<NaiveDate>` to/from `Nullable(Date32)`."
+        );
+        array!(
+            NaiveDate,
+            "Ser/de `Vec<NaiveDate>` to/from `Array(Date32)`."
         );
 
         const ORIGIN: Option<NaiveDate> = NaiveDate::from_yo_opt(1970, 1);
@@ -415,6 +527,7 @@ pub mod chrono {
             Duration,
             "Ser/de `Option<Duration>` to/from `Nullable(Time)`."
         );
+        array!(Duration, "Ser/de `Vec<Duration>` to/from `Array(Time)`.");
 
         pub fn serialize<S>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -447,6 +560,10 @@ pub mod chrono {
                 Duration,
                 "Ser/de `Option<Duration>` to/from `Nullable(Time64(0))`."
             );
+            array!(
+                Duration,
+                "Ser/de `Vec<Duration>` to/from `Array(Time64(0))`."
+            );
 
             pub fn serialize<S>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -473,6 +590,10 @@ pub mod chrono {
                 Duration,
                 "Ser/de `Option<Duration>` to/from `Nullable(Time64(3))`."
             );
+            array!(
+                Duration,
+                "Ser/de `Vec<Duration>` to/from `Array(Time64(3))`."
+            );
 
             pub fn serialize<S>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -498,6 +619,10 @@ pub mod chrono {
             option!(
                 Duration,
                 "Ser/de `Option<Duration>` to/from `Nullable(Time64(6))`."
+            );
+            array!(
+                Duration,
+                "Ser/de `Vec<Duration>` to/from `Array(Time64(6))`."
             );
 
             pub fn serialize<S>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error>
@@ -527,6 +652,10 @@ pub mod chrono {
             option!(
                 Duration,
                 "Ser/de `Option<Duration>` to/from `Nullable(Time64(9))`."
+            );
+            array!(
+                Duration,
+                "Ser/de `Vec<Duration>` to/from `Array(Time64(9))`."
             );
 
             pub fn serialize<S>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error>
@@ -568,6 +697,10 @@ pub mod time {
             OffsetDateTime,
             "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime)`."
         );
+        array!(
+            OffsetDateTime,
+            "Ser/de `Vec<OffsetDateTime>` to/from `Array(DateTime)`."
+        );
 
         pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -601,6 +734,10 @@ pub mod time {
                 OffsetDateTime,
                 "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(0))`."
             );
+            array!(
+                OffsetDateTime,
+                "Ser/de `Vec<OffsetDateTime>` to/from `Array(DateTime64(0))`."
+            );
 
             pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -624,6 +761,10 @@ pub mod time {
             option!(
                 OffsetDateTime,
                 "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(3))`."
+            );
+            array!(
+                OffsetDateTime,
+                "Ser/de `Vec<OffsetDateTime>` to/from `Array(DateTime64(3))`."
             );
 
             pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
@@ -649,6 +790,10 @@ pub mod time {
                 OffsetDateTime,
                 "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(6))`."
             );
+            array!(
+                OffsetDateTime,
+                "Ser/de `Vec<OffsetDateTime>` to/from `Array(DateTime64(6))`."
+            );
 
             pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -672,6 +817,10 @@ pub mod time {
             option!(
                 OffsetDateTime,
                 "Ser/de `Option<OffsetDateTime>` to/from `Nullable(DateTime64(9))`."
+            );
+            array!(
+                OffsetDateTime,
+                "Ser/de `Vec<OffsetDateTime>` to/from `Array(DateTime64(9))`."
             );
 
             pub fn serialize<S>(dt: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
@@ -718,6 +867,7 @@ pub mod time {
             Date,
             "Ser/de `Option<time::Date>` to/from `Nullable(Date)`."
         );
+        array!(Date, "Ser/de `Vec<time::Date>` to/from `Array(Date)`.");
 
         const ORIGIN: Result<Date, ComponentRange> = Date::from_ordinal_date(1970, 1);
 
@@ -756,6 +906,7 @@ pub mod time {
             Date,
             "Ser/de `Option<time::Date>` to/from `Nullable(Date32)`."
         );
+        array!(Date, "Ser/de `Vec<time::Date>` to/from `Array(Date32)`.");
 
         const ORIGIN: Result<Date, ComponentRange> = Date::from_ordinal_date(1970, 1);
 
@@ -802,6 +953,10 @@ pub mod time {
             Duration,
             "Ser/de `Option<time::Duration>` to/from `Nullable(Time)`."
         );
+        array!(
+            Duration,
+            "Ser/de `Vec<time::Duration>` to/from `Array(Time)`."
+        );
 
         pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -834,6 +989,10 @@ pub mod time {
                 Duration,
                 "Ser/de `Option<Duration>` to/from `Nullable(Time64(0))`."
             );
+            array!(
+                Duration,
+                "Ser/de `Vec<Duration>` to/from `Array(Time64(0))`."
+            );
 
             pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -858,6 +1017,10 @@ pub mod time {
             option!(
                 Duration,
                 "Ser/de `Option<Duration>` to/from `Nullable(Time64(3))`."
+            );
+            array!(
+                Duration,
+                "Ser/de `Vec<Duration>` to/from `Array(Time64(3))`."
             );
 
             pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
@@ -890,6 +1053,10 @@ pub mod time {
                 Duration,
                 "Ser/de `Option<Duration>` to/from `Nullable(Time64(6))`."
             );
+            array!(
+                Duration,
+                "Ser/de `Vec<Duration>` to/from `Array(Time64(6))`."
+            );
 
             pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -920,6 +1087,10 @@ pub mod time {
             option!(
                 Duration,
                 "Ser/de `Option<Duration>` to/from `Nullable(Time64(9))`."
+            );
+            array!(
+                Duration,
+                "Ser/de `Vec<Duration>` to/from `Array(Time64(9))`."
             );
 
             pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
