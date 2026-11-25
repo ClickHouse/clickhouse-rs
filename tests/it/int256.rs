@@ -4,6 +4,86 @@ use clickhouse::Row;
 use clickhouse::types::{Int256, UInt256};
 
 #[tokio::test]
+async fn reads_decimal256_as_signed_int256() {
+    #[derive(Debug, Row, Deserialize)]
+    struct Data {
+        value: Int256,
+        marker: u32,
+    }
+
+    let client = super::get_client();
+    let row = client
+        .query(
+            "SELECT toDecimal256('-3402823669209384634633746074317682114.56', 2) AS value,
+                    17::UInt32 AS marker",
+        )
+        .fetch_one::<Data>()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        row.value.to_string(),
+        "-340282366920938463463374607431768211456"
+    );
+    assert_eq!(row.marker, 17);
+
+    #[derive(Debug, Row, Deserialize)]
+    struct Unsigned {
+        #[serde(rename = "value")]
+        _value: UInt256,
+    }
+
+    assert!(matches!(
+        client
+            .query("SELECT toDecimal256('-1', 2) AS value")
+            .fetch_one::<Unsigned>()
+            .await,
+        Err(clickhouse::error::Error::SchemaMismatch(_))
+    ));
+}
+
+#[tokio::test]
+async fn writes_signed_int256_as_decimal256() {
+    #[derive(Row, Serialize)]
+    struct Data {
+        value: Int256,
+        marker: u32,
+    }
+
+    let client = prepare_database!();
+    client
+        .query("CREATE TABLE test (value Decimal(76, 2), marker UInt32) ENGINE = MergeTree ORDER BY marker")
+        .execute()
+        .await
+        .unwrap();
+
+    let mut bytes = [0; 32];
+    bytes[0] = 2;
+    bytes[16] = 1; // The unscaled integer is 2^128 + 2.
+
+    let mut insert = client.insert::<Data>("test").await.unwrap();
+    insert
+        .write(&Data {
+            value: Int256::from_le_bytes(bytes),
+            marker: 19,
+        })
+        .await
+        .unwrap();
+    insert.end().await.unwrap();
+
+    let actual = client
+        .query("SELECT toString(value), marker FROM test")
+        .fetch_one::<(String, u32)>()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        actual,
+        ("3402823669209384634633746074317682114.58".into(), 19)
+    );
+}
+
+#[tokio::test]
 async fn uint_256() {
     let client = prepare_database!();
 

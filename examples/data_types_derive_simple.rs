@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
                 decimal32_9_4        Decimal(9, 4),
                 decimal64_18_8       Decimal(18, 8),
                 decimal128_38_12     Decimal(38, 12),
-                -- decimal256_76_20           Decimal(76, 20),
+                decimal256_76_20     Decimal(76, 20),
 
                 time_date              Date,
                 time_date32            Date32,
@@ -141,6 +141,7 @@ pub struct MyRow {
     pub decimal32_9_4: Decimal32,
     pub decimal64_18_8: Decimal64,
     pub decimal128_38_12: Decimal128,
+    pub decimal256_76_20: Int256,
 
     #[serde(with = "clickhouse::serde::time::date")]
     pub time_date: Date,
@@ -241,6 +242,8 @@ impl MyRow {
             decimal64_18_8: Decimal64::from_str("9999999999.99999999").unwrap(),
             decimal128_38_12: Decimal128::from_str("99999999999999999999999999.999999999999")
                 .unwrap(),
+            // Int256 stores the unscaled integer. At scale 20 this is 1.23456789012345678901.
+            decimal256_76_20: Int256::from(123_456_789_012_345_678_901i128),
 
             // `Int256` and `UInt256` are intended for input and output only,
             // so they don't support `rand` directly.

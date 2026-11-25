@@ -630,13 +630,22 @@ fn validate_impl<'serde, 'caller, R: Row>(
             DataTypeNode::String | DataTypeNode::JSON => Ok(None),
             _ => root.err_on_schema_mismatch(data_type, serde_type, is_inner),
         },
-        // allows to work with BLOB strings as well
-        SerdeType::Bytes(_) | SerdeType::ByteBuf(_) if data_type == &DataTypeNode::String => {
+        SerdeType::Bytes(_) | SerdeType::ByteBuf(_) | SerdeType::I256
+            if data_type == &DataTypeNode::String =>
+        {
             Ok(None)
         }
-        // Serde's data model doesn't have `(u)int256` so instead we just try to deserialize `[u8; 32]`
-        SerdeType::Bytes(int256::BYTE_LEN)
+        // The RowBinary codec represents 256-bit types by fixed bytes.
+        SerdeType::Bytes(int256::BYTE_LEN) | SerdeType::I256
             if data_type == &DataTypeNode::Int256 || data_type == &DataTypeNode::UInt256 =>
+        {
+            Ok(None)
+        }
+        SerdeType::I256
+            if matches!(
+                data_type,
+                DataTypeNode::Decimal(_, _, DecimalType::Decimal256)
+            ) =>
         {
             Ok(None)
         }
@@ -809,6 +818,7 @@ pub(crate) enum SerdeType {
     I32,
     I64,
     I128,
+    I256,
     U8,
     U16,
     U32,
@@ -825,14 +835,6 @@ pub(crate) enum SerdeType {
     Tuple(usize),
     Seq(usize),
     Map(usize),
-    // Identifier,
-    // Char,
-    // Unit,
-    // Struct,
-    // NewtypeStruct,
-    // TupleStruct,
-    // UnitStruct,
-    // IgnoredAny,
 }
 
 impl Display for SerdeType {
@@ -844,6 +846,7 @@ impl Display for SerdeType {
             SerdeType::I32 => write!(f, "i32"),
             SerdeType::I64 => write!(f, "i64"),
             SerdeType::I128 => write!(f, "i128"),
+            SerdeType::I256 => write!(f, "Int256"),
             SerdeType::U8 => write!(f, "u8"),
             SerdeType::U16 => write!(f, "u16"),
             SerdeType::U32 => write!(f, "u32"),
@@ -860,14 +863,6 @@ impl Display for SerdeType {
             SerdeType::Seq(_len) => write!(f, "Vec<T>"),
             SerdeType::Tuple(len) => write!(f, "a tuple or sequence with length {len}"),
             SerdeType::Map(_len) => write!(f, "Map<K, V>"),
-            // SerdeType::Identifier => "identifier",
-            // SerdeType::Char => "char",
-            // SerdeType::Unit => "()",
-            // SerdeType::Struct => "struct",
-            // SerdeType::NewtypeStruct => "newtype struct",
-            // SerdeType::TupleStruct => "tuple struct",
-            // SerdeType::UnitStruct => "unit struct",
-            // SerdeType::IgnoredAny => "ignored any",
         }
     }
 }

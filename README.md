@@ -278,7 +278,7 @@ Usage of all mentioned data types are covered in the following examples:
 * `(U)Int(8|16|32|64|128)` maps to/from corresponding `(u|i)(8|16|32|64|128)` types or newtypes around them.
 * `(U)Int256` are supported with convenience wrappers over `[u8; 32]`: `clickhouse::types::Int256` and `clickhouse::types::UInt256`. See the [derive example](./examples/data_types_derive_simple.rs).
 * `Float(32|64)` maps to/from corresponding `f(32|64)` or newtypes around them.
-* `Decimal(32|64|128)` maps to/from corresponding `i(32|64|128)` or newtypes around them. It's more convenient to use [fixnum](https://github.com/loyd/fixnum) or another implementation of signed fixed-point numbers.
+* `Decimal(32|64|128)` maps to the corresponding `i(32|64|128)` or newtypes like [fixnum](https://github.com/loyd/fixnum). For `Decimal256`, `clickhouse::types::Int256` holds the unscaled integer.
 * `Boolean` maps to/from `bool` or newtypes around it.
 * `String` maps to/from any string or bytes types, e.g. `&str`, `&[u8]`, `String`, `Vec<u8>` or [`SmartString`](https://docs.rs/smartstring/latest/smartstring/struct.SmartString.html). Newtypes are also supported. To store bytes, consider using [serde_bytes](https://docs.rs/serde_bytes/latest/serde_bytes/), because it's more efficient.
     <details>
