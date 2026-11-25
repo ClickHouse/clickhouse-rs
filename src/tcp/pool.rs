@@ -13,11 +13,58 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 
-/// The maximum number of idle connections for each server and user.
-const MAX_IDLE_CONNECTIONS: usize = 32;
+/// Options of the connection pool of the native TCP transport.
+///
+/// Use with [`Client::with_tcp_pool()`](crate::Client::with_tcp_pool).
+///
+/// # Example
+/// ```
+/// # use clickhouse::{Client, TcpPoolOptions};
+/// # use std::time::Duration;
+/// let client = Client::default()
+///     .with_url("tcp://localhost:9000")
+///     .with_tcp_pool(
+///         TcpPoolOptions::default()
+///             .with_max_idle_connections(128)
+///             .with_idle_timeout(Duration::from_secs(30)),
+///     );
+/// ```
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct TcpPoolOptions {
+    /// The maximum number of idle connections for each server and user. Connections that are
+    /// released when this number is reached are closed. Default: `32`.
+    pub max_idle_connections: usize,
+    /// Idle connections are closed after this time. Default: 60 seconds.
+    pub idle_timeout: Duration,
+}
 
-/// Idle connections older than this are closed.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+impl Default for TcpPoolOptions {
+    fn default() -> Self {
+        Self {
+            max_idle_connections: 32,
+            idle_timeout: Duration::from_secs(60),
+        }
+    }
+}
+
+impl TcpPoolOptions {
+    /// Set [`Self::max_idle_connections`].
+    ///
+    /// Set it to the number of concurrent queries to reuse a connection for each query.
+    #[must_use]
+    pub fn with_max_idle_connections(mut self, max_idle_connections: usize) -> Self {
+        self.max_idle_connections = max_idle_connections;
+        self
+    }
+
+    /// Set [`Self::idle_timeout`].
+    #[must_use]
+    pub fn with_idle_timeout(mut self, idle_timeout: Duration) -> Self {
+        self.idle_timeout = idle_timeout;
+        self
+    }
+}
 
 /// The default value of the `session_timeout` setting of the HTTP interface.
 pub(crate) const DEFAULT_SESSION_TIMEOUT: Duration = Duration::from_secs(60);
@@ -41,6 +88,7 @@ pub(crate) enum KeyAuth {
 
 #[derive(Default)]
 pub(crate) struct Pool {
+    options: TcpPoolOptions,
     state: Mutex<PoolState>,
 }
 
@@ -85,6 +133,13 @@ pub(crate) struct PooledConnection {
 }
 
 impl Pool {
+    pub(crate) fn new(options: TcpPoolOptions) -> Self {
+        Self {
+            options,
+            state: Mutex::default(),
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, PoolState> {
         // The state stays consistent if a thread panics while holding the lock.
         self.state
@@ -124,7 +179,8 @@ impl Pool {
         let idle = state.idle.get_mut(key)?;
 
         while let Some(mut idle_conn) = idle.pop() {
-            if idle_conn.since.elapsed() < IDLE_TIMEOUT && idle_conn.conn.is_reusable() {
+            if idle_conn.since.elapsed() < self.options.idle_timeout && idle_conn.conn.is_reusable()
+            {
                 return Some(idle_conn.conn);
             }
         }
@@ -251,10 +307,11 @@ impl PooledConnection {
                 }
             }
             None if reusable => {
+                let options = &self.pool.options;
                 let idle = state.idle.entry(self.key.clone()).or_default();
-                idle.retain(|idle_conn| idle_conn.since.elapsed() < IDLE_TIMEOUT);
+                idle.retain(|idle_conn| idle_conn.since.elapsed() < options.idle_timeout);
 
-                if idle.len() < MAX_IDLE_CONNECTIONS {
+                if idle.len() < options.max_idle_connections {
                     idle.push(IdleConnection {
                         conn,
                         since: Instant::now(),
@@ -277,5 +334,95 @@ impl Drop for PooledConnection {
                     .remove(&(self.key.clone(), session.id));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tcp::protocol::CLIENT_REVISION;
+    use crate::tcp::server_tests::connect;
+
+    fn key() -> PoolKey {
+        PoolKey {
+            address: Address {
+                host: "localhost".into(),
+                port: 9000,
+                secure: false,
+            },
+            database: String::new(),
+            auth: KeyAuth::Password {
+                user: "default".into(),
+                password: String::new(),
+            },
+            quota_key: String::new(),
+            client_name: String::new(),
+        }
+    }
+
+    /// Release `count` connections to `pool`, keeping the scripted servers open.
+    async fn release(pool: &Arc<Pool>, count: usize) -> Vec<impl Sized> {
+        let mut servers = Vec::new();
+
+        for _ in 0..count {
+            let (conn, server) = connect(CLIENT_REVISION).await;
+            servers.push(server);
+
+            PooledConnection {
+                conn: Some(conn),
+                pool: pool.clone(),
+                key: key(),
+                session: None,
+            }
+            .release(true);
+        }
+
+        servers
+    }
+
+    fn idle_count(pool: &Pool) -> usize {
+        pool.lock().idle.get(&key()).map_or(0, Vec::len)
+    }
+
+    #[tokio::test]
+    async fn keeps_at_most_max_idle_connections() {
+        for max in [0, 1, 3] {
+            let pool = Arc::new(Pool::new(
+                TcpPoolOptions::default().with_max_idle_connections(max),
+            ));
+            let _servers = release(&pool, 5).await;
+            assert_eq!(idle_count(&pool), max);
+
+            // Every idle connection is reused, then the pool is empty.
+            for _ in 0..max {
+                assert!(pool.take_idle(&key()).is_some());
+            }
+            assert!(pool.take_idle(&key()).is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn default_options() {
+        let pool = Arc::new(Pool::default());
+        let _servers = release(&pool, 40).await;
+        assert_eq!(idle_count(&pool), 32);
+    }
+
+    #[tokio::test]
+    async fn closes_expired_connections() {
+        let pool = Arc::new(Pool::new(
+            TcpPoolOptions::default().with_idle_timeout(Duration::ZERO),
+        ));
+        let _servers = release(&pool, 2).await;
+        assert!(pool.take_idle(&key()).is_none());
+        assert_eq!(idle_count(&pool), 0);
+    }
+
+    #[tokio::test]
+    async fn closed_connections_are_not_reused() {
+        let pool = Arc::new(Pool::default());
+        let servers = release(&pool, 2).await;
+        drop(servers);
+        assert!(pool.take_idle(&key()).is_none());
     }
 }

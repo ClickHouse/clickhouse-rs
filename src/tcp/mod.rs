@@ -26,6 +26,7 @@ mod tls;
 
 pub(crate) use insert::spawn_insert;
 pub(crate) use pool::Pool;
+pub use pool::TcpPoolOptions;
 pub(crate) use query::{BlocksFuture, query, query_blocks};
 
 /// The default port of the native protocol.

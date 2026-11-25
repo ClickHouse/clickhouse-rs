@@ -1,6 +1,8 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(feature = "tcp")]
+pub use self::tcp::TcpPoolOptions;
 pub use self::{
     compression::Compression,
     query_summary::QuerySummary,
@@ -725,6 +727,17 @@ impl Client {
     /// Cancel-safe.
     pub async fn clear_cached_metadata(&self) {
         self.insert_metadata_cache.0.write().await.clear();
+    }
+
+    /// Use a new connection pool with `options` for the native TCP transport (`tcp://` and
+    /// `tcps://` URLs).
+    ///
+    /// Clones of the client share the pool, like the HTTP transport. Clients created before
+    /// this call keep the previous pool. See [`TcpPoolOptions`] for an example.
+    #[cfg(feature = "tcp")]
+    pub fn with_tcp_pool(mut self, options: TcpPoolOptions) -> Self {
+        self.tcp = Arc::new(tcp::Pool::new(options));
+        self
     }
 
     /// Returns `true` if the URL selects the native TCP transport (`tcp://` or `tcps://`).

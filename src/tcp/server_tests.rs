@@ -10,7 +10,7 @@ use crate::tcp::protocol::{self, CLIENT_REVISION, ClientInfo};
 use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
-struct Server {
+pub(super) struct Server {
     stream: DuplexStream,
 }
 
@@ -86,7 +86,7 @@ fn encode(block: &Block, revision: u64) -> Vec<u8> {
 }
 
 /// Connect to a scripted server that sends `Hello` with `server_revision`.
-async fn connect(server_revision: u64) -> (Connection, Server) {
+pub(super) async fn connect(server_revision: u64) -> (Connection, Server) {
     let (client, server) = tokio::io::duplex(1);
     let mut server = Server { stream: server };
 

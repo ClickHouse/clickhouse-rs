@@ -290,6 +290,9 @@ let count: u64 = client.query("SELECT count() FROM some").fetch_one().await?;
 ```
 
 The client keeps a pool of connections, which clones of the client share.
+By default, it keeps up to 32 idle connections for each server and user, for 60 seconds.
+To change this, use `Client::with_tcp_pool()`, e.g. set `TcpPoolOptions::with_max_idle_connections()`
+to the number of concurrent queries of the application.
 The server sends data as columnar blocks. The client converts them to the format that the cursor reads.
 For `INSERT`, the client converts rows to blocks with the column types of the table.
 

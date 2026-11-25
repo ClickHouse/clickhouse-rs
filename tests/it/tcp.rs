@@ -1476,3 +1476,57 @@ async fn profile_events_in_summary() {
     assert_eq!(summary.read_rows(), Some(10000));
     assert_eq!(get(summary, "SelectedRows"), 10000);
 }
+
+/// `TcpPoolOptions::max_idle_connections` limits the connections that are reused.
+#[tokio::test]
+async fn pool_max_idle_connections() {
+    check_local_env!();
+
+    async fn distinct_ports(max_idle: usize) -> u64 {
+        let tag = format!("chrs_tcp_pool_{max_idle}_{:x}", rand::random::<u64>());
+        let client = tcp_client().with_tcp_pool(
+            clickhouse::TcpPoolOptions::default().with_max_idle_connections(max_idle),
+        );
+
+        // Two rounds of 8 concurrent queries: each round needs 8 connections.
+        for _ in 0..2 {
+            let queries = (0..8).map(|_| {
+                client
+                    .query("SELECT sleep(0.2)")
+                    .with_setting("log_comment", &tag)
+                    .execute()
+            });
+            for result in futures_util::future::join_all(queries).await {
+                result.unwrap();
+            }
+        }
+
+        let client = http_client();
+        for _ in 0..50 {
+            crate::flush_query_log(&client).await;
+
+            let (queries, ports): (u64, u64) = client
+                .query(
+                    "SELECT count(), uniqExact(port) FROM system.query_log \
+                     WHERE log_comment = ? AND type = 'QueryFinish'",
+                )
+                .bind(&tag)
+                .fetch_one()
+                .await
+                .unwrap();
+
+            if queries == 16 {
+                return ports;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        panic!("the queries of {tag} are not in the query log");
+    }
+
+    // All connections of the first round are reused.
+    assert_eq!(distinct_ports(8).await, 8);
+    // Two connections are kept, the second round opens six new ones.
+    assert_eq!(distinct_ports(2).await, 14);
+}
