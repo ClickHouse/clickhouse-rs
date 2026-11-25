@@ -164,6 +164,7 @@ impl DataTypeNode {
             str if str.starts_with("Array") => parse_array(str),
             str if str.starts_with("Enum") => parse_enum(str),
             str if str.starts_with("Map") => parse_map(str),
+            "Tuple()" => Ok(Self::Tuple(Vec::new())),
             str if str.starts_with("Tuple") => parse_tuple(str),
             str if str.starts_with("Variant") => parse_variant(str),
 
@@ -1127,8 +1128,7 @@ mod tests {
 
     #[test]
     fn test_tuple_display() {
-        let empty = DataTypeNode::Tuple(vec![]);
-        assert_eq!(empty.to_string(), "Tuple()");
+        assert_eq!(DataTypeNode::new("Tuple()").unwrap().to_string(), "Tuple()");
 
         let single = DataTypeNode::Tuple(vec![DataTypeNode::String]);
         assert_eq!(single.to_string(), "Tuple(String)");
@@ -1836,8 +1836,8 @@ mod tests {
             DataTypeNode::Tuple(vec![DataTypeNode::String, DataTypeNode::Int32])
         );
         assert_eq!(
-            DataTypeNode::new("Tuple(Bool,Int32)").unwrap(),
-            DataTypeNode::Tuple(vec![DataTypeNode::Bool, DataTypeNode::Int32])
+            DataTypeNode::new("Tuple(Bool,Tuple())").unwrap(),
+            DataTypeNode::Tuple(vec![DataTypeNode::Bool, DataTypeNode::Tuple(vec![])])
         );
         assert_eq!(
             DataTypeNode::new(
@@ -1864,7 +1864,6 @@ mod tests {
         );
         assert!(DataTypeNode::new("Tuple").is_err());
         assert!(DataTypeNode::new("Tuple(").is_err());
-        assert!(DataTypeNode::new("Tuple()").is_err());
         assert!(DataTypeNode::new("Tuple(,)").is_err());
         assert!(DataTypeNode::new("Tuple(X)").is_err());
         assert!(DataTypeNode::new("Tuple(Int32, X)").is_err());

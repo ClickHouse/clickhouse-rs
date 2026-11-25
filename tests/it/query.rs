@@ -5,6 +5,30 @@ use clickhouse::sql::Identifier;
 use clickhouse::{Row, error::Error};
 
 #[tokio::test]
+async fn fetch_validated_rows_with_empty_tuple() {
+    #[derive(Debug, Deserialize, PartialEq, Row)]
+    struct MixedRow {
+        t: [u8; 0],
+        id: u8,
+    }
+
+    let rows = crate::get_client()
+        .with_validation(true)
+        .query("SELECT tuple() AS t, toUInt8(number + 5) AS id FROM numbers(3)")
+        .fetch_all::<MixedRow>()
+        .await
+        .unwrap();
+    assert_eq!(
+        rows,
+        [
+            MixedRow { t: [], id: 5 },
+            MixedRow { t: [], id: 6 },
+            MixedRow { t: [], id: 7 },
+        ]
+    );
+}
+
+#[tokio::test]
 async fn smoke() {
     let client = prepare_database!();
 
