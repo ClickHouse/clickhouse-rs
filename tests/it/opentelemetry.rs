@@ -129,27 +129,37 @@ async fn insert_with_opentelemetry() {
     assert_eq!(query_id, span_query_id);
 }
 
-// FIXME: this test is far too flaky to be useful
-// https://github.com/ClickHouse/clickhouse-rs/issues/463
-#[ignore]
 #[tokio::test]
 async fn error_sets_span_status() {
+    // With one Dispatch, tracing-core uses the current thread's subscriber to cache interest.
+    // Keep a second registered Dispatch alive so an untraced test cannot cache "never".
+    let _interest_cache_guard = tracing::Dispatch::new(
+        tracing_subscriber::registry().with(tracing::level_filters::LevelFilter::OFF),
+    );
     let tracer = get_tracer();
 
     let _guard = tracing_subscriber::registry()
         .with(tracing_opentelemetry::layer().with_tracer(tracer))
         .set_default();
 
-    let res = get_client()
-        .query("SELECT throwif(true, 'test error')")
+    let err = get_client()
+        .query("SELECT throwIf(true, 'test error')")
         .execute()
-        .await;
-
-    let _err = res.unwrap_err();
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            clickhouse::error::Error::BadResponse(ref message)
+                if message.starts_with("Code: 395.") && message.contains("test error")
+        ),
+        "expected the server's throwIf error, got {err:?}"
+    );
 
     // `opentelemetry` doesn't give us any way to look up the status of a live span,
     // so we instead install a middleware that stores its data in a thread-local.
     let span_data = LAST_SPAN_DATA.take().expect("expected last span data");
+    assert_eq!(span_data.name, "clickhouse.query");
 
     assert!(
         matches!(span_data.status, Status::Error { .. }),
