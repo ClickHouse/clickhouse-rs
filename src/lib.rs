@@ -760,7 +760,7 @@ impl Client {
     /// Builds the internal `DESCRIBE TABLE` query used to fetch the schema before an insert.
     fn insert_metadata_query(&self, raw_table_name: &str) -> query::Query {
         let mut query = self
-            .query(&_priv::row_insert_metadata_query(raw_table_name))
+            .query_raw(&_priv::row_insert_metadata_query(raw_table_name))
             .with_setting("describe_include_subcolumns", "0");
 
         // Link the schema lookup to the INSERT without reusing its query id.
