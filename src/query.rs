@@ -497,6 +497,27 @@ mod tests {
             assert_eq!(query.client.get_setting(settings::QUERY_ID), query_id);
         }
     }
+
+    #[test]
+    fn insert_metadata_query_preserves_question_marks() {
+        #[derive(clickhouse_macros::Row, serde::Deserialize)]
+        #[clickhouse(crate = "crate")]
+        #[expect(dead_code)]
+        struct SampleRow {
+            id: u32,
+        }
+
+        let client = Client::default().with_url("http://localhost:8123");
+
+        for raw_table in ["`t?q`", "`t?fields`", "`t??x`"] {
+            let mut query = client.insert_metadata_query(raw_table);
+            query.sql.bind_fields::<SampleRow>();
+            assert_eq!(
+                query.sql.finish().unwrap(),
+                format!("DESCRIBE TABLE {raw_table}")
+            );
+        }
+    }
 }
 
 const MULTIPART_BOUNDARY_PREFIX: &str = "clickhouse-rs-boundary-";

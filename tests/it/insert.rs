@@ -861,3 +861,47 @@ async fn insert_unvalidated() {
 
     insert.end().await.unwrap_err();
 }
+
+#[tokio::test]
+async fn insert_table_name_with_question_mark() {
+    let client = prepare_database!();
+
+    for table in ["t?q", "t?fields", "t??x"] {
+        create_simple_table(&client, table).await;
+
+        let expected = [
+            SimpleRow::new(1, "insert"),
+            SimpleRow::new(2, "unescaped"),
+            #[cfg(feature = "inserter")]
+            SimpleRow::new(3, "inserter"),
+        ];
+
+        let mut insert = client.insert::<SimpleRow>(table).await.unwrap();
+        insert.write(&expected[0]).await.unwrap();
+        insert.end().await.unwrap();
+
+        let mut escaped = String::new();
+        clickhouse::_priv::sql_escape_identifier(table, &mut escaped).unwrap();
+        let mut insert_unescaped = client
+            .insert_unescaped::<SimpleRow>(&escaped)
+            .await
+            .unwrap();
+        insert_unescaped.write(&expected[1]).await.unwrap();
+        insert_unescaped.end().await.unwrap();
+
+        #[cfg(feature = "inserter")]
+        {
+            let mut inserter = client.inserter::<SimpleRow>(table);
+            inserter.write(&expected[2]).await.unwrap();
+            inserter.end().await.unwrap();
+        }
+
+        let rows = client
+            .query("SELECT ?fields FROM ? ORDER BY id")
+            .bind(Identifier(table))
+            .fetch_all::<SimpleRow>()
+            .await
+            .unwrap();
+        assert_eq!(rows, expected);
+    }
+}
