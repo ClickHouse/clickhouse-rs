@@ -1,0 +1,26 @@
+[package]
+name = "clickhouse-test-runner"
+version = "0.0.0"
+description = "Runs the ClickHouse core SQL tests through clickhouse-rs"
+edition = "2024"
+rust-version = "1.89.0"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# This package is not a member of the root workspace: it has its own lock file
+# and target directory, and the CI and coverage of the client do not build it.
+[workspace]
+
+[lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
+[dependencies]
+clickhouse = { path = "../..", features = ["uuid"] }
+tokio = { version = "1", features = ["rt", "macros"] }
+uuid = "1"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono-tz = "0.10"
