@@ -175,16 +175,17 @@ impl AsyncRead for BytesCursor {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<IoResult<()>> {
-        while buf.remaining() > 0 {
-            if self.bytes.is_empty() && !ready!(self.poll_refill(cx)?) {
-                break;
-            }
-
-            let len = self.bytes.len().min(buf.remaining());
-            let bytes = self.bytes.slice(..len);
-            buf.put_slice(&bytes[0..len]);
-            self.bytes.advance(len);
+        if buf.remaining() == 0 {
+            return Poll::Ready(Ok(()));
         }
+
+        if self.bytes.is_empty() && !ready!(self.poll_refill(cx)?) {
+            return Poll::Ready(Ok(()));
+        }
+
+        let len = self.bytes.len().min(buf.remaining());
+        buf.put_slice(&self.bytes[..len]);
+        self.bytes.advance(len);
 
         Poll::Ready(Ok(()))
     }
@@ -275,5 +276,94 @@ impl futures_util::stream::FusedStream for BytesCursor {
     #[inline]
     fn is_terminated(&self) -> bool {
         self.bytes.is_empty() && self.raw.is_terminated()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Client, Compression};
+    use std::time::Duration;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    async fn spawn_chunked_server(chunks: &'static [&'static [u8]]) -> std::net::SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut req_buf = [0_u8; 1024];
+                    let _ = socket.read(&mut req_buf).await;
+                    let header =
+                        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+                    if socket.write_all(header).await.is_err() {
+                        return;
+                    }
+                    for chunk in chunks {
+                        let frame = format!("{:x}\r\n", chunk.len());
+                        if socket.write_all(frame.as_bytes()).await.is_err()
+                            || socket.write_all(chunk).await.is_err()
+                            || socket.write_all(b"\r\n").await.is_err()
+                            || socket.flush().await.is_err()
+                        {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    let _ = socket.write_all(b"0\r\n\r\n").await;
+                    let _ = socket.flush().await;
+                });
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn async_read_preserves_chunks_across_pending_refills() {
+        let chunks: &'static [&'static [u8]] = &[b"hello ", b"world", b"!\n"];
+        let addr = spawn_chunked_server(chunks).await;
+        let client = Client::default()
+            .with_url(format!("http://{addr}"))
+            .with_compression(Compression::None);
+
+        let mut copy_cursor = client.query("SELECT 1").fetch_bytes("CSV").unwrap();
+        let mut copied = Vec::new();
+        let n = tokio::io::copy(&mut copy_cursor, &mut copied)
+            .await
+            .unwrap();
+        assert_eq!(n, 13);
+        assert_eq!(copied, b"hello world!\n");
+
+        let mut loop_cursor = client.query("SELECT 1").fetch_bytes("CSV").unwrap();
+        assert_eq!(loop_cursor.read(&mut []).await.unwrap(), 0);
+        let mut read_out = Vec::new();
+        let mut buf = [0_u8; 64];
+        loop {
+            let read_len = loop_cursor.read(&mut buf).await.unwrap();
+            if read_len == 0 {
+                break;
+            }
+            read_out.extend_from_slice(&buf[..read_len]);
+        }
+        assert_eq!(read_out, b"hello world!\n");
+
+        let mut end_cursor = client.query("SELECT 1").fetch_bytes("CSV").unwrap();
+        let mut end_out = Vec::new();
+        let end_len = end_cursor.read_to_end(&mut end_out).await.unwrap();
+        assert_eq!(end_len, 13);
+        assert_eq!(end_out, b"hello world!\n");
+
+        #[cfg(feature = "futures03")]
+        {
+            let mut fut_cursor = client.query("SELECT 1").fetch_bytes("CSV").unwrap();
+            let mut fut_out = Vec::new();
+            let fut_len = futures_util::io::copy(&mut fut_cursor, &mut fut_out)
+                .await
+                .unwrap();
+            assert_eq!(fut_len, 13);
+            assert_eq!(fut_out, b"hello world!\n");
+        }
     }
 }

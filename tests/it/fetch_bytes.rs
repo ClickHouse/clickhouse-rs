@@ -139,3 +139,58 @@ async fn async_read() {
     assert_eq!(cursor.decoded_bytes(), expected.len() as u64);
     assert_eq!(actual, expected);
 }
+
+#[tokio::test]
+async fn async_read_copy_and_read_to_end() {
+    let client = prepare_database!();
+    let limit = 200;
+
+    #[allow(clippy::format_collect)]
+    let expected = (0..limit)
+        .map(|n| format!("{n}\n"))
+        .collect::<String>()
+        .into_bytes();
+
+    let query = "SELECT number FROM system.numbers LIMIT {limit: Int32}";
+
+    let mut copy_cursor = client
+        .query(query)
+        .param("limit", limit)
+        .with_setting("max_block_size", "1")
+        .fetch_bytes("CSV")
+        .unwrap();
+    let mut copied = Vec::new();
+    let copied_len = tokio::io::copy(&mut copy_cursor, &mut copied)
+        .await
+        .unwrap();
+    assert_eq!(copied_len, expected.len() as u64);
+    assert_eq!(copied, expected);
+
+    let mut read_cursor = client
+        .query(query)
+        .param("limit", limit)
+        .with_setting("max_block_size", "1")
+        .fetch_bytes("CSV")
+        .unwrap();
+    let mut read_out = Vec::new();
+    let mut chunk = [0_u8; 64];
+    loop {
+        let n = read_cursor.read(&mut chunk).await.unwrap();
+        if n == 0 {
+            break;
+        }
+        read_out.extend_from_slice(&chunk[..n]);
+    }
+    assert_eq!(read_out, expected);
+
+    let mut end_cursor = client
+        .query(query)
+        .param("limit", limit)
+        .with_setting("max_block_size", "1")
+        .fetch_bytes("CSV")
+        .unwrap();
+    let mut end_out = Vec::new();
+    let end_len = end_cursor.read_to_end(&mut end_out).await.unwrap();
+    assert_eq!(end_len, expected.len());
+    assert_eq!(end_out, expected);
+}
