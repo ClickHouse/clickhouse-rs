@@ -212,6 +212,7 @@ impl Chunks {
         let stream = DetectDbException {
             stream,
             exception_tag,
+            pending_error: None,
         };
         Ok(Self {
             inner: Some(Box::new(stream)),
@@ -354,6 +355,7 @@ where
 struct DetectDbException<S> {
     stream: S,
     exception_tag: Option<Box<[u8]>>,
+    pending_error: Option<Error>,
 }
 
 impl<S> Stream for DetectDbException<S>
@@ -363,36 +365,79 @@ where
     type Item = Result<Chunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(err) = self.pending_error.take() {
+            return Poll::Ready(Some(Err(err)));
+        }
+
         let res = Pin::new(&mut self.stream).poll_next(cx);
 
         if let Poll::Ready(Some(Ok(chunk))) = &res
-            && let Some(err) = extract_exception(&chunk.data, self.exception_tag.as_deref())
+            && let Some((data_len, err)) =
+                extract_exception(&chunk.data, self.exception_tag.as_deref())
         {
             err.record_in_current_span("response error");
-            return Poll::Ready(Some(Err(err)));
+
+            if data_len == 0 {
+                return Poll::Ready(Some(Err(err)));
+            }
+
+            // A chunk can hold the complete rows the server had not flushed yet followed by the
+            // exception text. Emit those rows first, then fail on the next poll.
+            self.pending_error = Some(err);
+            return Poll::Ready(Some(Ok(Chunk {
+                data: chunk.data.slice(..data_len),
+                net_size: data_len,
+            })));
         }
 
         res
     }
 }
 
-fn extract_exception(chunk: &[u8], tag: Option<&[u8]>) -> Option<Error> {
+/// Returns the length of the data prefix and the error, if the chunk ends with an exception.
+///
+/// The prefix holds complete rows the server had not flushed before appending the exception
+/// text, so it must still be handed to the caller instead of being dropped with the exception.
+fn extract_exception(chunk: &[u8], tag: Option<&[u8]>) -> Option<(usize, Error)> {
     // 25.11 introduced a new exception tagging format that's incompatible with the previous
     // https://github.com/ClickHouse/clickhouse-rs/issues/359
     if let Some(tag) = tag {
         // A server that sent a tag writes exceptions only in the new format, so text in the data
         // that merely looks like an old exception must not end the stream.
-        chunk
-            .ends_with(b"__exception__\r\n")
-            .then(|| extract_exception_new(chunk, tag))
-            .flatten()
-    } else if chunk.ends_with(b"))\n") {
-        // `))\n` is very rare in real data, so it's fast dirty check.
-        // In random data, it occurs with a probability of ~6*10^-8 only.
-        extract_exception_old(chunk)
+        if !chunk.ends_with(b"__exception__\r\n") {
+            return None;
+        }
+
+        let data_len = tagged_exception_start(chunk).unwrap_or(0);
+        extract_exception_new(chunk, tag).map(|err| (data_len, err))
     } else {
-        None
+        // Old-format exceptions end with the server version in parentheses:
+        // `... (version 25.12.1.649 (official build))`, optionally followed by a final newline.
+        // Requiring both closing parentheses instead of just the last one keeps an ordinary chunk
+        // that merely ends with `)` out of the exception parser: `))` occurs in random data with
+        // a probability of ~1.5*10^-5, which is still rare enough for a fast dirty check.
+        //
+        // The final `\n` may be missing when the exception is appended to unflushed data
+        // (https://github.com/ClickHouse/clickhouse-rs/issues/538), hence the suffix is checked
+        // without it.
+        let without_newline = chunk.strip_suffix(b"\n").unwrap_or(chunk);
+        if !without_newline.ends_with(b"))") {
+            return None;
+        }
+
+        extract_exception_old(chunk)
     }
+}
+
+/// Start of the `\r\n__exception__\r\n` frame when the chunk holds data followed by a
+/// tagged exception. The marker at the very end of the chunk is the trailer of the exception
+/// itself, so it is not considered a frame start.
+fn tagged_exception_start(chunk: &[u8]) -> Option<usize> {
+    const MARKER: &[u8] = b"\r\n__exception__\r\n";
+    let search_end = chunk.len().checked_sub(MARKER.len())?;
+    chunk[..search_end]
+        .windows(MARKER.len())
+        .position(|window| window == MARKER)
 }
 
 // Format:
@@ -401,15 +446,48 @@ fn extract_exception(chunk: &[u8], tag: Option<&[u8]>) -> Option<Error> {
 // ```
 #[cold]
 #[inline(never)]
-fn extract_exception_old(chunk: &[u8]) -> Option<Error> {
-    let index = chunk.rfind(b"Code:")?;
+fn extract_exception_old(chunk: &[u8]) -> Option<(usize, Error)> {
+    let index = old_exception_start(chunk)?;
 
     if !(chunk[index..].contains_str(b"DB::") && chunk[index..].contains_str(b"Exception:")) {
         return None;
     }
 
-    let exception = String::from_utf8_lossy(&chunk[index..chunk.len() - 1]);
-    Some(Error::BadResponse(exception.into()))
+    // Older servers terminate the message with `))\n`; the final `\n` can be missing when the
+    // exception shares the chunk with data (https://github.com/ClickHouse/clickhouse-rs/issues/538).
+    let end = chunk.len() - usize::from(chunk.ends_with(b"\n"));
+    let exception = String::from_utf8_lossy(&chunk[index..end]);
+    Some((index, Error::BadResponse(exception.into())))
+}
+
+/// Position of the last `Code: <number>.` marker that can start an old-format exception.
+///
+/// The marker is validated structurally rather than by a plain `Code:` search, so text in a
+/// successful response that merely mentions `Code:` is not mistaken for an exception.
+#[cold]
+#[inline(never)]
+fn old_exception_start(chunk: &[u8]) -> Option<usize> {
+    let mut end = chunk.len();
+    while let Some(index) = chunk[..end].rfind(b"Code:") {
+        if is_exception_code_prefix(&chunk[index..]) {
+            return Some(index);
+        }
+
+        end = index;
+    }
+
+    None
+}
+
+/// Whether `bytes` starts with the `Code: <number>.` prefix of a ClickHouse exception message.
+fn is_exception_code_prefix(bytes: &[u8]) -> bool {
+    let Some(rest) = bytes.strip_prefix(b"Code:") else {
+        return false;
+    };
+
+    let rest = rest.strip_prefix(b" ").unwrap_or(rest);
+    let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
+    digits > 0 && rest[digits..].starts_with(b".")
 }
 
 // https://github.com/ClickHouse/ClickHouse/blob/4eaa92852bac117e95f28abe61237b0257d939d6/src/Server/HTTP/WriteBufferFromHTTPServerResponse.cpp#L347-L357
@@ -481,7 +559,8 @@ fn it_extracts_exception_old() {
 
     for error in errors {
         let chunk = format!("{error}\n");
-        let err = extract_exception(chunk.as_bytes(), None).expect("failed to extract exception");
+        let (_, err) =
+            extract_exception(chunk.as_bytes(), None).expect("failed to extract exception");
         assert_eq!(err.to_string(), format!("bad response: {error}"));
     }
 }
@@ -492,7 +571,7 @@ fn it_extracts_exception_new() {
     let chunk = b"\r\n__exception__\r\nrnywyenlaeqynhmu\r\nCode: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))\n142 rnywyenlaeqynhmu\r\n__exception__\r\n";
     let error = "Code: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))";
 
-    let err = extract_exception(chunk, Some(tag)).expect("failed to extract exception");
+    let (_, err) = extract_exception(chunk, Some(tag)).expect("failed to extract exception");
     assert_eq!(err.to_string(), format!("bad response: {error}"));
 }
 
@@ -503,4 +582,178 @@ fn it_ignores_old_exception_text_when_tagged() {
 
     assert!(extract_exception(chunk, Some(b"rnywyenlaeqynhmu")).is_none());
     assert!(extract_exception(chunk, None).is_some());
+}
+
+#[test]
+fn it_keeps_data_sharing_a_chunk_with_an_old_exception() {
+    let error = "Code: 159. DB::Exception: Timeout exceeded: elapsed 1.2 seconds, maximum: 0.1. (TIMEOUT_EXCEEDED) (version 24.10.1.2812 (official build))";
+    let data = b"\x05hello\x06world";
+    let mut chunk = data.to_vec();
+    chunk.extend_from_slice(error.as_bytes());
+    chunk.push(b'\n');
+
+    let (data_len, err) = extract_exception(&chunk, None).expect("failed to extract exception");
+    assert_eq!(data_len, data.len());
+    assert_eq!(err.to_string(), format!("bad response: {error}"));
+}
+
+#[test]
+fn it_extracts_an_old_exception_without_a_trailing_newline() {
+    // The server may append the exception to unflushed data without a final newline (#538).
+    let error = "Code: 159. DB::Exception: Timeout exceeded: elapsed 1.2 seconds, maximum: 0.1. (TIMEOUT_EXCEEDED) (version 24.10.1.2812 (official build))";
+    let data = b"\x05hello";
+    let mut chunk = data.to_vec();
+    chunk.extend_from_slice(error.as_bytes());
+
+    let (data_len, err) = extract_exception(&chunk, None).expect("failed to extract exception");
+    assert_eq!(data_len, data.len());
+    assert_eq!(err.to_string(), format!("bad response: {error}"));
+}
+
+#[test]
+fn it_keeps_data_sharing_a_chunk_with_a_tagged_exception() {
+    let tag = b"rnywyenlaeqynhmu";
+    let frame = b"\r\n__exception__\r\nrnywyenlaeqynhmu\r\nCode: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))\n142 rnywyenlaeqynhmu\r\n__exception__\r\n";
+    let error = "Code: 159. DB::Exception: Timeout exceeded: elapsed 126.147987 ms, maximum: 100 ms. (TIMEOUT_EXCEEDED) (version 25.12.1.649 (official build))";
+    let data = b"\x05hello\x06world";
+    let mut chunk = data.to_vec();
+    chunk.extend_from_slice(frame);
+
+    let (data_len, err) =
+        extract_exception(&chunk, Some(tag)).expect("failed to extract exception");
+    assert_eq!(data_len, data.len());
+    assert_eq!(err.to_string(), format!("bad response: {error}"));
+}
+
+#[test]
+fn detect_db_exception_streams_data_before_the_error() {
+    use futures_util::StreamExt as _;
+
+    let error = "Code: 159. DB::Exception: Timeout exceeded: elapsed 1.2 seconds, maximum: 0.1. (TIMEOUT_EXCEEDED) (version 24.10.1.2812 (official build))";
+    let mut bytes = b"\x05hello\x06world".to_vec();
+    bytes.extend_from_slice(error.as_bytes());
+    bytes.push(b'\n');
+    let net_size = bytes.len();
+
+    let stream = DetectDbException {
+        stream: stream::iter(vec![Ok(Chunk {
+            data: Bytes::from(bytes),
+            net_size,
+        })]),
+        exception_tag: None,
+        pending_error: None,
+    };
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("failed to build the runtime");
+    rt.block_on(async {
+        let mut stream = Box::pin(stream);
+
+        let data = match stream.next().await {
+            Some(Ok(data)) => data,
+            _ => panic!("expected the data that shares the chunk with the exception"),
+        };
+        assert_eq!(&data.data[..], b"\x05hello\x06world");
+
+        let err = match stream.next().await {
+            Some(Err(err)) => err,
+            _ => panic!("expected the exception"),
+        };
+        assert_eq!(err.to_string(), format!("bad response: {error}"));
+
+        assert!(stream.next().await.is_none());
+    });
+}
+
+#[test]
+fn it_ignores_data_ending_with_a_single_parenthesis() {
+    // An untagged chunk that ends with a single `)` is not an exception candidate, even when it
+    // contains text shaped like an old-format exception (#541 review: overly broad suffix check).
+    let mut chunk = b"\x05hello".to_vec();
+    chunk.extend_from_slice(
+        b"Code: 202. DB::Exception: Too many simultaneous queries. (TOO_MANY_SIMULTANEOUS_QUERIES)",
+    );
+    assert!(extract_exception(&chunk, None).is_none());
+
+    // `))` alone is not enough either: the chunk must also contain a structured exception.
+    let mut chunk = b"\x05hello".to_vec();
+    chunk.extend_from_slice(b"\x06world))");
+    assert!(extract_exception(&chunk, None).is_none());
+}
+
+#[test]
+fn detect_db_exception_passes_through_data_ending_with_a_parenthesis() {
+    use futures_util::StreamExt as _;
+
+    // A successful response must not be truncated just because a chunk ends with `)` and
+    // happens to contain exception-looking text.
+    let bytes: &'static [u8] =
+        b"\x05helloCode: 202. DB::Exception: Too many simultaneous queries. (TOO_MANY_SIMULTANEOUS_QUERIES)";
+    let net_size = bytes.len();
+
+    let stream = DetectDbException {
+        stream: stream::iter(vec![Ok(Chunk {
+            data: Bytes::from_static(bytes),
+            net_size,
+        })]),
+        exception_tag: None,
+        pending_error: None,
+    };
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("failed to build the runtime");
+    rt.block_on(async {
+        let mut stream = Box::pin(stream);
+
+        let data = match stream.next().await {
+            Some(Ok(data)) => data,
+            _ => panic!("expected the data to be passed through unchanged"),
+        };
+        assert_eq!(&data.data[..], bytes);
+        assert_eq!(data.net_size, net_size);
+
+        assert!(stream.next().await.is_none());
+    });
+}
+
+#[test]
+fn detect_db_exception_streams_data_before_an_old_exception_without_a_newline() {
+    use futures_util::StreamExt as _;
+
+    let error = "Code: 159. DB::Exception: Timeout exceeded: elapsed 1.2 seconds, maximum: 0.1. (TIMEOUT_EXCEEDED) (version 24.10.1.2812 (official build))";
+    let mut bytes = b"\x05hello\x06world".to_vec();
+    bytes.extend_from_slice(error.as_bytes());
+    let net_size = bytes.len();
+
+    let stream = DetectDbException {
+        stream: stream::iter(vec![Ok(Chunk {
+            data: Bytes::from(bytes),
+            net_size,
+        })]),
+        exception_tag: None,
+        pending_error: None,
+    };
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("failed to build the runtime");
+    rt.block_on(async {
+        let mut stream = Box::pin(stream);
+
+        let data = match stream.next().await {
+            Some(Ok(data)) => data,
+            _ => panic!("expected the data that shares the chunk with the exception"),
+        };
+        assert_eq!(&data.data[..], b"\x05hello\x06world");
+
+        let err = match stream.next().await {
+            Some(Err(err)) => err,
+            _ => panic!("expected the exception"),
+        };
+        assert_eq!(err.to_string(), format!("bad response: {error}"));
+
+        assert!(stream.next().await.is_none());
+    });
 }
