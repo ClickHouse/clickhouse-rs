@@ -164,6 +164,7 @@ quanta = { version = "0.12", optional = true }
 rand = "0.9"
 
 hashbrown = "0.17.1"
+indexmap = "2.10.0"
 
 bnum = "0.13.0"
 
