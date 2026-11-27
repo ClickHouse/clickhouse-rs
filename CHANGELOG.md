@@ -8,13 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+* `#[derive(Row)]` supports different column names for serialization and deserialization, e.g.
+  `#[serde(rename(serialize = "a", deserialize = "b"))]`: `INSERT` uses the serialize names, while
+  fetching rows and `?fields` use the deserialize names. ([#360])
+
 ### Fixed
 
+* `#[derive(Row)]` applies the serialize and deserialize rules of `#[serde(rename_all(serialize = "..",
+  deserialize = ".."))]` to their respective sides. As before, the rule is also applied to a name set with
+  `#[serde(rename)]`. ([#360])
 * A value that ends like an old-format exception (`Code: … DB::Exception: …))\n`) no longer fails the query on
   servers that send an exception tag (25.11+). ([#503])
 * A unit-variant enum passed to `Query::param` is sent as the bare value instead of a quoted SQL literal,
   so server-side `{name:Type}` parameters receive it correctly and `Enum8` parameters parse. ([#520])
 
+[#360]: https://github.com/ClickHouse/clickhouse-rs/issues/360
 [#503]: https://github.com/ClickHouse/clickhouse-rs/pull/503
 [#520]: https://github.com/ClickHouse/clickhouse-rs/pull/520
 
