@@ -116,8 +116,6 @@ impl<T> RowCursor<T> {
             debug_assert!(self.row_metadata.is_some());
         }
 
-        let _span = self.span.enter();
-
         loop {
             if self.bytes.remaining() > 0 {
                 // SAFETY: we take an immutable borrow to `self.bytes` for this scope so that
@@ -165,12 +163,15 @@ impl<T> RowCursor<T> {
                     }
                     Err(Error::NotEnoughData) => {}
                     Err(err) => {
+                        let _span = self.span.enter();
                         tracing::debug!(error=?err, "error deserializing row");
                         return Poll::Ready(Err(err));
                     }
                 }
             }
 
+            // Keep the query span active during I/O and error reporting.
+            let _span = self.span.enter();
             match ready!(self.raw.poll_next(cx)) {
                 Ok(Some(chunk)) => self.bytes.extend(chunk),
                 Ok(None) => {
@@ -296,5 +297,47 @@ where
 
         self.cursor = Some(cursor);
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::response::Chunks;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering::Relaxed},
+    };
+    use tracing_subscriber::{Layer, filter::LevelFilter, layer, prelude::*};
+
+    struct CountEntries(Arc<AtomicUsize>);
+
+    impl<S: tracing::Subscriber> Layer<S> for CountEntries {
+        fn on_enter(&self, _: &tracing::span::Id, _: layer::Context<'_, S>) {
+            self.0.fetch_add(1, Relaxed);
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_rows_do_not_enter_the_query_span() {
+        let entries = Arc::new(AtomicUsize::new(0));
+        let _subscriber = tracing_subscriber::registry()
+            .with(LevelFilter::INFO)
+            .with(CountEntries(entries.clone()))
+            .set_default();
+        let span = tracing::info_span!("clickhouse.query");
+        let span_enabled = !span.is_disabled();
+        let response = Response::Waiting(Box::pin(std::future::ready(Ok((Chunks::empty(), None)))));
+        let mut cursor = RowCursor::<u8>::new(response, false, span);
+        cursor.bytes.extend(bytes::Bytes::from_static(&[1, 2]));
+
+        assert_eq!(cursor.next().await.unwrap(), Some(1));
+        assert_eq!(cursor.next().await.unwrap(), Some(2));
+        assert_eq!(entries.load(Relaxed), 0);
+
+        assert_eq!(cursor.next().await.unwrap(), None);
+        if span_enabled {
+            assert!(entries.load(Relaxed) > 0, "expected a span entry on refill");
+        }
     }
 }
