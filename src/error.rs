@@ -169,9 +169,46 @@ impl Error {
 
         tracing::debug!(error=%self, "{msg}");
     }
+
+    /// Returns the numeric [ClickHouse error code](https://github.com/ClickHouse/ClickHouse/blob/master/src/Common/ErrorCodes.cpp)
+    /// reported by the server, if this error represents a genuine exception
+    /// returned by ClickHouse (as opposed to e.g. a transport-level
+    /// failure).
+    ///
+    /// The client already parses this out of the `X-ClickHouse-Exception-Code`
+    /// header (or the response body, for exceptions that occur mid-stream)
+    /// internally; this exposes it so callers implementing retry or
+    /// circuit-breaker logic can distinguish transient, server-side
+    /// conditions (e.g. `TOO_MANY_SIMULTANEOUS_QUERIES` = 202,
+    /// `MEMORY_LIMIT_EXCEEDED` = 241) from fatal ones (e.g. a syntax error)
+    /// without re-parsing [`Error::BadResponse`]'s message text themselves.
+    ///
+    /// Returns `None` for any other [`Error`] variant, and for a
+    /// [`Error::BadResponse`] that doesn't carry a recognizable code (e.g.
+    /// a plain HTTP status line, when the server closed the connection
+    /// before a proper ClickHouse exception could be read).
+    ///
+    /// # Examples
+    /// ```
+    /// # use clickhouse::error::Error;
+    /// let err = Error::BadResponse("Code: 241. DB::Exception: Memory limit exceeded".into());
+    /// assert_eq!(err.code(), Some(241));
+    ///
+    /// assert_eq!(Error::TimedOut.code(), None);
+    /// ```
+    #[must_use]
+    pub fn code(&self) -> Option<u16> {
+        let Error::BadResponse(message) = self else {
+            return None;
+        };
+
+        let rest = message.strip_prefix("Code: ")?;
+        let end = rest.find(['.', ' '])?;
+        rest[..end].parse().ok()
+    }
 }
 
-#[cfg(tests)]
+#[cfg(test)]
 mod tests {
     use crate::error::Error;
     use std::io;
@@ -196,5 +233,26 @@ mod tests {
         fn assert_traits<T: std::error::Error + Send + Sync>() {}
 
         assert_traits::<Error>();
+    }
+
+    #[test]
+    fn code_parses_from_bad_response() {
+        let err = Error::BadResponse("Code: 241. DB::Exception: Memory limit exceeded".into());
+        assert_eq!(err.code(), Some(241));
+
+        let err = Error::BadResponse("Code: 62. Syntax error".into());
+        assert_eq!(err.code(), Some(62));
+    }
+
+    #[test]
+    fn code_is_none_without_a_recognizable_prefix() {
+        let err = Error::BadResponse("502 Bad Gateway".into());
+        assert_eq!(err.code(), None);
+    }
+
+    #[test]
+    fn code_is_none_for_other_variants() {
+        assert_eq!(Error::TimedOut.code(), None);
+        assert_eq!(Error::RowNotFound.code(), None);
     }
 }
