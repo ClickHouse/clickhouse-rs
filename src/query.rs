@@ -17,7 +17,7 @@ use crate::{
     formats,
     headers::with_request_headers,
     request_body::RequestBody,
-    response::Response,
+    response::{ExpectedFormat, Response},
     row::{Row, RowOwned, RowRead},
     sql::{Bind, SqlBuilder, ser},
 };
@@ -80,7 +80,7 @@ impl Query {
 
         async {
             let mut response = self
-                .do_execute(None)
+                .do_execute(None, None)
                 .inspect_err(|e| e.record_in_current_span("error executing query"))?;
 
             response
@@ -126,7 +126,13 @@ impl Query {
         self.sql.bind_fields::<T>();
 
         let response = self
-            .do_execute(Some(format))
+            .do_execute(
+                Some(format),
+                Some(ExpectedFormat {
+                    method: "fetch()",
+                    format,
+                }),
+            )
             .inspect_err(|e| e.record_in_current_span("error executing fetch"))?;
 
         Ok(RowCursor::new(response, validation, span.exit()))
@@ -183,7 +189,7 @@ impl Query {
 
         let span = self.make_span(Some(format)).entered();
 
-        let response = self.do_execute(Some(format))?;
+        let response = self.do_execute(Some(format), None)?;
         Ok(BytesCursor::new(response, span.exit()))
     }
 
@@ -211,7 +217,13 @@ impl Query {
         // FIXME: use HTTP body compression instead of block-level compression
         self.client = self.client.with_compression(Compression::None);
 
-        let response = self.do_execute(Some("Native"))?;
+        let response = self.do_execute(
+            Some("Native"),
+            Some(ExpectedFormat {
+                method: "fetch_native()",
+                format: "Native",
+            }),
+        )?;
 
         Ok(NativeCursor::new(response, span.exit()))
     }
@@ -246,7 +258,13 @@ impl Query {
         )
     }
 
-    pub(crate) fn do_execute(self, default_format: Option<&str>) -> Result<Response> {
+    /// If `expected_format` is set, the response fails when the server sends the data
+    /// in another format.
+    pub(crate) fn do_execute(
+        self,
+        default_format: Option<&str>,
+        expected_format: Option<ExpectedFormat>,
+    ) -> Result<Response> {
         let query = self.sql.finish()?;
 
         let mut url =
@@ -329,7 +347,7 @@ impl Query {
         })?;
 
         let future = self.client.http.request(request);
-        Ok(Response::new(future))
+        Ok(Response::new(future, expected_format))
     }
 
     /// Configure the [roles] to use when executing this query.
