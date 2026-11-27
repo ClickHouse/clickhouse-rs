@@ -13,12 +13,25 @@ use std::{future::Future, marker::PhantomData, time::Duration};
 
 // The desired max frame size.
 const BUFFER_SIZE: usize = 256 * 1024;
-// Threshold to send a chunk. Should be slightly less than `BUFFER_SIZE`
+// A chunk is sent once the buffer has less than this much space left,
 // to avoid extra reallocations in case of a big last row.
-const MIN_CHUNK_SIZE: usize = const {
+const CHUNK_SLACK: usize = 2048;
+
+// Threshold to send a chunk. Slightly less than the buffer size, see `CHUNK_SLACK`.
+// Small buffers keep at least 7/8 of their size usable.
+const fn min_chunk_size(buffer_size: usize) -> usize {
+    let slack = if buffer_size / 8 < CHUNK_SLACK {
+        buffer_size / 8
+    } else {
+        CHUNK_SLACK
+    };
+    buffer_size - slack
+}
+
+const _: () = {
     // to use the whole buffer's capacity
     assert!(BUFFER_SIZE.is_power_of_two());
-    BUFFER_SIZE - 2048
+    assert!(min_chunk_size(BUFFER_SIZE) == BUFFER_SIZE - 2048);
 };
 
 /// Performs one `INSERT`.
@@ -42,6 +55,7 @@ pub struct Insert<T> {
     insert: BufInsertFormatted,
     row_metadata: Option<RowMetadata>,
     sent_rows: Saturating<u64>,
+    min_chunk_size: usize,
     _marker: PhantomData<fn() -> T>, // TODO: test contravariance.
 }
 
@@ -65,6 +79,7 @@ impl<T> Insert<T> {
                 .buffered_with_capacity(BUFFER_SIZE),
             row_metadata,
             sent_rows: Saturating(0),
+            min_chunk_size: min_chunk_size(BUFFER_SIZE),
             _marker: PhantomData,
         }
     }
@@ -90,6 +105,33 @@ impl<T> Insert<T> {
     ) -> Self {
         self.set_timeouts(send_timeout, end_timeout);
         self
+    }
+
+    /// Sets the size of the buffer rows are serialized into, in bytes.
+    ///
+    /// See [`Insert::set_buffer_size`].
+    pub fn with_buffer_size(mut self, size: usize) -> Self {
+        self.set_buffer_size(size);
+        self
+    }
+
+    /// Sets the size of the buffer rows are serialized into, in bytes.
+    ///
+    /// The buffer is sent to the server as one chunk when it is nearly full,
+    /// so this also sets the size of the chunks (before compression).
+    /// Larger chunks mean fewer chunks to compress and send;
+    /// smaller chunks reduce memory usage and send rows sooner.
+    ///
+    /// The default is 256 KiB. If `size` is `0`, every row is sent as a separate chunk.
+    ///
+    /// A row bigger than the buffer is still written whole: the buffer grows
+    /// to fit it and is sent right after.
+    ///
+    /// May be called after rows were written; the new size applies from the next row.
+    /// The buffer is reallocated only if it is empty, otherwise it is only grown if needed.
+    pub fn set_buffer_size(&mut self, size: usize) {
+        self.insert.set_nominal_capacity(size);
+        self.min_chunk_size = min_chunk_size(size);
     }
 
     /// Configure the [roles] to use when executing `INSERT` statements.
@@ -183,7 +225,7 @@ impl<T> Insert<T> {
 
         async move {
             result?;
-            if self.insert.buf_len() >= MIN_CHUNK_SIZE {
+            if self.insert.buf_len() >= self.min_chunk_size {
                 self.insert.flush().await?;
             }
 
@@ -250,5 +292,59 @@ impl<T> Insert<T> {
 
     fn abort(&mut self) {
         self.insert.abort();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BUFFER_SIZE, Insert, min_chunk_size};
+    use crate::_priv::RowKind;
+    use crate::{Client, Row};
+
+    struct TestRow;
+
+    impl Row for TestRow {
+        const NAME: &'static str = "TestRow";
+        const KIND: RowKind = RowKind::Struct;
+        const COLUMN_COUNT: usize = 1;
+        const COLUMN_NAMES: &'static [&'static str] = &["x"];
+        type Value<'a> = TestRow;
+    }
+
+    #[test]
+    fn test_min_chunk_size() {
+        assert_eq!(min_chunk_size(BUFFER_SIZE), BUFFER_SIZE - 2048);
+        assert_eq!(min_chunk_size(1024 * 1024), 1024 * 1024 - 2048);
+        assert_eq!(min_chunk_size(16 * 1024), 16 * 1024 - 2048);
+        assert_eq!(min_chunk_size(1024), 896);
+        assert_eq!(min_chunk_size(8), 7);
+        assert_eq!(min_chunk_size(7), 7);
+        assert_eq!(min_chunk_size(1), 1);
+        assert_eq!(min_chunk_size(0), 0);
+    }
+
+    #[test]
+    fn test_with_buffer_size() {
+        let client = Client::default();
+
+        let insert = Insert::<TestRow>::new(&client, "foo", None);
+        assert_eq!(insert.insert.nominal_capacity(), BUFFER_SIZE);
+        assert_eq!(insert.min_chunk_size, BUFFER_SIZE - 2048);
+
+        let insert = insert.with_buffer_size(4 * 1024 * 1024);
+        assert_eq!(insert.insert.nominal_capacity(), 4 * 1024 * 1024);
+        assert!(insert.insert.capacity() >= 4 * 1024 * 1024);
+        assert_eq!(insert.min_chunk_size, 4 * 1024 * 1024 - 2048);
+
+        // Shrinking an empty buffer releases the old allocation.
+        let mut insert = insert;
+        insert.set_buffer_size(1024);
+        assert_eq!(insert.insert.nominal_capacity(), 1024);
+        assert!(insert.insert.capacity() < 4 * 1024 * 1024);
+        assert_eq!(insert.min_chunk_size, 896);
+
+        insert.set_buffer_size(0);
+        assert_eq!(insert.insert.nominal_capacity(), 0);
+        assert_eq!(insert.min_chunk_size, 0);
     }
 }

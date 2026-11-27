@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+* `Insert::with_buffer_size()` and `Insert::set_buffer_size()` set the size of the buffer rows are serialized into,
+  and so the size of the chunks sent to the server. The default is still 256 KiB. ([#389])
+
 ### Fixed
 
 * A value that ends like an old-format exception (`Code: … DB::Exception: …))\n`) no longer fails the query on
@@ -15,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * A unit-variant enum passed to `Query::param` is sent as the bare value instead of a quoted SQL literal,
   so server-side `{name:Type}` parameters receive it correctly and `Enum8` parameters parse. ([#520])
 
+[#389]: https://github.com/ClickHouse/clickhouse-rs/issues/389
 [#503]: https://github.com/ClickHouse/clickhouse-rs/pull/503
 [#520]: https://github.com/ClickHouse/clickhouse-rs/pull/520
 
