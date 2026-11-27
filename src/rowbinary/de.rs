@@ -1,10 +1,8 @@
 use crate::Row;
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
-use crate::rowbinary::utils::{ensure_size, get_unsigned_leb128};
+use crate::rowbinary::utils::{ensure_size, fixed_newtype, get_unsigned_leb128};
 use crate::rowbinary::validation::{DataTypeValidator, NullEncoding, SchemaValidator, SerdeType};
-use crate::types::bf16;
-use crate::types::int256;
 use bytes::Buf;
 use core::mem::size_of;
 use serde::de::MapAccess;
@@ -318,17 +316,9 @@ where
         name: &str,
         visitor: V,
     ) -> Result<V::Value> {
-        const FIXED_BYTES: &[(&str, usize)] = &[
-            (int256::MODULE_PATH, int256::BYTE_LEN),
-            (bf16::MODULE_PATH, bf16::BYTE_LEN),
-        ];
-
-        match FIXED_BYTES
-            .iter()
-            .find(|(prefix, _)| name.starts_with(prefix))
-        {
-            Some(&(_, len)) => {
-                self.validator.validate(SerdeType::Bytes(len))?;
+        match fixed_newtype(name) {
+            Some((len, serde_type)) => {
+                self.validator.validate(serde_type)?;
                 let slice = self.read_slice(len)?;
                 BytesDeserializer::new(slice).deserialize_bytes(visitor)
             }

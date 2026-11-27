@@ -1,5 +1,19 @@
 use crate::error::Error;
+use crate::rowbinary::validation::SerdeType;
+use crate::types::{bf16, int256};
 use bytes::Buf;
+
+pub(crate) fn fixed_newtype(name: &str) -> Option<(usize, SerdeType)> {
+    if name == int256::Int256::SERDE_NAME {
+        Some((int256::BYTE_LEN, SerdeType::I256))
+    } else if name.starts_with(int256::MODULE_PATH) {
+        Some((int256::BYTE_LEN, SerdeType::Bytes(int256::BYTE_LEN)))
+    } else if name.starts_with(bf16::MODULE_PATH) {
+        Some((bf16::BYTE_LEN, SerdeType::Bytes(bf16::BYTE_LEN)))
+    } else {
+        None
+    }
+}
 
 /// TODO: it is theoretically possible to ensure size in chunks,
 ///  at least for some types, given that we have the database schema.

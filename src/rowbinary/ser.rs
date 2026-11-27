@@ -2,9 +2,8 @@ use crate::Row;
 use crate::error::Error::SequenceMustHaveLength;
 use crate::error::{Error, Result};
 use crate::row_metadata::RowMetadata;
+use crate::rowbinary::utils::fixed_newtype;
 use crate::rowbinary::validation::{DataTypeValidator, SchemaValidator, SerdeType};
-use crate::types::bf16;
-use crate::types::int256;
 use bytes::BufMut;
 use clickhouse_types::put_leb128;
 use serde::ser::SerializeMap;
@@ -184,17 +183,9 @@ impl<'ser, B: BufMut, R: Row, V: SchemaValidator<R>> Serializer
         name: &'static str,
         value: &T,
     ) -> Result<()> {
-        const FIXED_BYTES: &[(&str, usize)] = &[
-            (int256::MODULE_PATH, int256::BYTE_LEN),
-            (bf16::MODULE_PATH, bf16::BYTE_LEN),
-        ];
-
-        match FIXED_BYTES
-            .iter()
-            .find(|(prefix, _)| name.starts_with(prefix))
-        {
-            Some(&(_, len)) => {
-                self.validator.validate(SerdeType::Bytes(len))?;
+        match fixed_newtype(name) {
+            Some((_, serde_type)) => {
+                self.validator.validate(serde_type)?;
                 value.serialize(WithoutLenPrefix {
                     buffer: &mut self.buffer,
                 })
