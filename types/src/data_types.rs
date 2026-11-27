@@ -995,21 +995,38 @@ fn escape_enum_name(name: &str) -> String {
     escaped
 }
 
+/// Decodes the name with the same rules as the server uses for a string literal.
+/// See `parseComplexEscapeSequence` in `src/IO/ReadHelpers.cpp` of ClickHouse.
 fn unescape_enum_name(input: &[u8], source: &str) -> Result<String, TypesError> {
     let mut name = Vec::with_capacity(input.len());
     let mut char_escaped = false;
+    let mut bytes = input.iter().copied().peekable();
 
-    for &byte in input {
+    while let Some(byte) = bytes.next() {
         if char_escaped {
             match byte {
                 b'0' => name.push(b'\0'),
+                b'a' => name.push(0x07),
                 b'b' => name.push(0x08),
+                b'e' => name.push(0x1b),
                 b'f' => name.push(0x0c),
                 b'n' => name.push(b'\n'),
                 b'r' => name.push(b'\r'),
                 b't' => name.push(b'\t'),
-                b'\\' => name.push(b'\\'),
-                b'\'' => name.push(b'\''),
+                b'v' => name.push(0x0b),
+                b'N' => {}
+                b'x' => {
+                    let mut hex_digit =
+                        || bytes.next().and_then(|digit| (digit as char).to_digit(16));
+                    let (Some(high), Some(low)) = (hex_digit(), hex_digit()) else {
+                        return Err(TypesError::TypeParsingError(format!(
+                            "Invalid Enum name, expected two hex digits after \\x, got {source}"
+                        )));
+                    };
+                    name.push(((high << 4) | low) as u8);
+                }
+                b'\\' | b'\'' | b'"' | b'`' | b'/' | b'=' | 0x00..=0x1f => name.push(byte),
+                // The server keeps the backslash before all other characters, so `\z` stays `\z`
                 _ => {
                     name.push(b'\\');
                     name.push(byte);
@@ -1019,6 +1036,10 @@ fn unescape_enum_name(input: &[u8], source: &str) -> Result<String, TypesError> 
         } else if byte == b'\\' {
             char_escaped = true;
         } else {
+            if byte == b'\'' {
+                // `''` is one tick
+                bytes.next_if_eq(&b'\'');
+            }
             name.push(byte);
         }
     }
@@ -1045,6 +1066,9 @@ fn parse_enum_values_map(input: &str) -> Result<HashMap<i16, String>, TypesError
                 char_escaped = false;
             } else if input_bytes[i] == b'\\' {
                 char_escaped = true;
+            } else if input_bytes[i] == b'\'' && input_bytes.get(i + 1) == Some(&b'\'') {
+                // `''` is one tick in the name, skip both
+                i += 1;
             } else if input_bytes[i] == b'\'' {
                 // non-escaped closing tick - push the name
                 let name_bytes = &input_bytes[start_index..i];
@@ -1922,6 +1946,65 @@ mod tests {
         assert!(DataTypeNode::new("Enum32('A' = 1, 'B' =)").is_err());
         assert!(DataTypeNode::new("Enum32('A' = 1, 'B' = )").is_err());
         assert!(DataTypeNode::new("Enum32('A'= 1,'B' =)").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_enum_with_escapes() {
+        // Each name is the one that the server gives for the same literal
+        let cases = [
+            (r"a''b", "a'b"),
+            (r#"a""b"#, r#"a""b"#),
+            (r"\a\b\e\f\n\r\t\v\0", "\x07\x08\x1b\x0c\n\r\t\x0b\0"),
+            (r#"\\\'\"\`\/\="#, r#"\'"`/="#),
+            (r"a\Nb", "ab"),
+            (r"\N", ""),
+            (r"\xC3\xA9", "é"),
+            (r"\xc3\xa9", "é"),
+            (r"\xC3\N\xA9", "é"),
+            ("a\\\tb", "a\tb"),
+            ("a\\\nb", "a\nb"),
+            ("a\\\0b", "a\0b"),
+            ("a\\\x1fb", "a\x1fb"),
+            ("a\\\x7fb", "a\\\x7fb"),
+            (r"a\ b", r"a\ b"),
+            (r"a\zb", r"a\zb"),
+            (r"a\%b", r"a\%b"),
+            (r"a\éb", r"a\éb"),
+            (r"\012", concat!("\0", "12")),
+            (r"a\\", r"a\"),
+        ];
+        for (literal, name) in cases {
+            let type_str = format!("Enum8('{literal}' = 1)");
+            let parsed = DataTypeNode::new(&type_str).unwrap();
+            assert_eq!(
+                parsed,
+                DataTypeNode::Enum(EnumType::Enum8, HashMap::from([(1, name.to_string())])),
+                "{type_str:?}"
+            );
+            assert_eq!(DataTypeNode::new(&parsed.to_string()).unwrap(), parsed);
+        }
+
+        // An escaped backslash or a doubled tick at the end does not hide the closing tick
+        assert_eq!(
+            DataTypeNode::new(r"Tuple(Enum8('a\\' = 1, '\\' = 2, 'b''' = 3), String)").unwrap(),
+            DataTypeNode::Tuple(vec![
+                DataTypeNode::Enum(
+                    EnumType::Enum8,
+                    HashMap::from([
+                        (1, r"a\".to_string()),
+                        (2, r"\".to_string()),
+                        (3, "b'".to_string()),
+                    ])
+                ),
+                DataTypeNode::String,
+            ])
+        );
+
+        // `\x` without two hex digits, and a name that is not valid UTF-8
+        for literal in [r"\x4", r"a\x", r"\xZZ", r"\xC3"] {
+            let type_str = format!("Enum8('{literal}' = 1)");
+            assert!(DataTypeNode::new(&type_str).is_err(), "{type_str}");
+        }
     }
 
     #[test]
