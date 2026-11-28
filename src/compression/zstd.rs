@@ -15,21 +15,24 @@ const ZSTD_MAGIC: u8 = 0x90;
 
 pub(crate) fn compress(uncompressed: &[u8], level: Option<i32>) -> Result<Bytes> {
     let level = level.unwrap_or(zstd::DEFAULT_COMPRESSION_LEVEL);
-    let max_compressed_size = zstd::zstd_safe::compress_bound(uncompressed.len());
-
     let mut buffer = BytesMut::new();
-    buffer.resize(native_framing::META_SIZE + max_compressed_size, 0);
 
-    let compressed_data_size = zstd::zstd_safe::compress(
-        &mut buffer[native_framing::META_SIZE..],
-        uncompressed,
-        level,
-    )
-    .map_err(|code| Error::Compression(zstd::zstd_safe::get_error_name(code).into()))?;
+    for frame in native_framing::frames(uncompressed) {
+        let start = buffer.len();
+        let max_compressed_size = zstd::zstd_safe::compress_bound(frame.len());
+        buffer.resize(start + native_framing::META_SIZE + max_compressed_size, 0);
 
-    buffer.truncate(native_framing::META_SIZE + compressed_data_size);
+        let compressed_data_size = zstd::zstd_safe::compress(
+            &mut buffer[start + native_framing::META_SIZE..],
+            frame,
+            level,
+        )
+        .map_err(|code| Error::Compression(zstd::zstd_safe::get_error_name(code).into()))?;
 
-    native_framing::write_meta(&mut buffer, ZSTD_MAGIC, uncompressed.len())?;
+        buffer.truncate(start + native_framing::META_SIZE + compressed_data_size);
+
+        native_framing::write_meta(&mut buffer[start..], ZSTD_MAGIC, frame.len())?;
+    }
 
     Ok(buffer.freeze())
 }
@@ -288,6 +291,28 @@ mod tests {
         // Verify decompression of the payload.
         let decompressed =
             zstd::bulk::decompress(&compressed[native_framing::META_SIZE..], source.len()).unwrap();
+        assert_eq!(decompressed, source);
+    }
+
+    #[test]
+    fn it_compresses_into_frames_of_max_size() {
+        use crate::compression::native_framing::MAX_FRAME_SIZE;
+        use crate::compression::test_util::split_frames;
+
+        let source: Vec<u8> = (0..2 * MAX_FRAME_SIZE + 100)
+            .map(|i| (i % 251) as u8)
+            .collect();
+
+        let compressed = compress(&source, None).unwrap();
+        let frames = split_frames(&compressed, ZSTD_MAGIC);
+
+        let sizes: Vec<usize> = frames.iter().map(|(size, _)| *size).collect();
+        assert_eq!(sizes, [MAX_FRAME_SIZE, MAX_FRAME_SIZE, 100]);
+
+        let mut decompressed = Vec::new();
+        for (size, payload) in frames {
+            decompressed.extend(zstd::bulk::decompress(payload, size).unwrap());
+        }
         assert_eq!(decompressed, source);
     }
 }

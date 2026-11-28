@@ -69,18 +69,21 @@ where
 const LZ4_MAGIC: u8 = 0x82;
 
 pub(crate) fn compress(uncompressed: &[u8]) -> Result<Bytes> {
-    let max_compressed_size = block::get_maximum_output_size(uncompressed.len());
-
     let mut buffer = BytesMut::new();
-    buffer.resize(native_framing::META_SIZE + max_compressed_size, 0);
 
-    let compressed_data_size =
-        block::compress_into(uncompressed, &mut buffer[native_framing::META_SIZE..])
-            .map_err(|err| Error::Compression(err.into()))?;
+    for frame in native_framing::frames(uncompressed) {
+        let start = buffer.len();
+        let max_compressed_size = block::get_maximum_output_size(frame.len());
+        buffer.resize(start + native_framing::META_SIZE + max_compressed_size, 0);
 
-    buffer.truncate(native_framing::META_SIZE + compressed_data_size);
+        let compressed_data_size =
+            block::compress_into(frame, &mut buffer[start + native_framing::META_SIZE..])
+                .map_err(|err| Error::Compression(err.into()))?;
 
-    native_framing::write_meta(&mut buffer, LZ4_MAGIC, uncompressed.len())?;
+        buffer.truncate(start + native_framing::META_SIZE + compressed_data_size);
+
+        native_framing::write_meta(&mut buffer[start..], LZ4_MAGIC, frame.len())?;
+    }
 
     Ok(buffer.freeze())
 }
@@ -321,5 +324,27 @@ mod tests {
 
         let actual = compress(&source).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn it_compresses_into_frames_of_max_size() {
+        use crate::compression::native_framing::MAX_FRAME_SIZE;
+        use crate::compression::test_util::split_frames;
+
+        let source: Vec<u8> = (0..2 * MAX_FRAME_SIZE + 100)
+            .map(|i| (i % 251) as u8)
+            .collect();
+
+        let compressed = compress(&source).unwrap();
+        let frames = split_frames(&compressed, super::LZ4_MAGIC);
+
+        let sizes: Vec<usize> = frames.iter().map(|(size, _)| *size).collect();
+        assert_eq!(sizes, [MAX_FRAME_SIZE, MAX_FRAME_SIZE, 100]);
+
+        let mut decompressed = Vec::new();
+        for (size, payload) in frames {
+            decompressed.extend(lz4_flex::block::decompress(payload, size).unwrap());
+        }
+        assert_eq!(decompressed, source);
     }
 }
