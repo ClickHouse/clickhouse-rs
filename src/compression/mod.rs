@@ -79,6 +79,17 @@ mod native_framing {
     pub(crate) const HEADER_SIZE: usize = 9;
     pub(crate) const META_SIZE: usize = CHECKSUM_SIZE + HEADER_SIZE;
 
+    /// The maximum uncompressed size of one frame, the default `max_compress_block_size`
+    /// that `clickhouse-client` also uses. The server rejects a frame above 256 MiB uncompressed.
+    pub(crate) const MAX_FRAME_SIZE: usize = 1024 * 1024;
+
+    /// Splits `uncompressed` into the parts compressed as separate frames:
+    /// at most `MAX_FRAME_SIZE` bytes each, or one empty part if `uncompressed` is empty.
+    pub(crate) fn frames(uncompressed: &[u8]) -> impl Iterator<Item = &[u8]> {
+        let empty = uncompressed.is_empty().then_some(uncompressed);
+        uncompressed.chunks(MAX_FRAME_SIZE).chain(empty)
+    }
+
     pub(crate) fn write_meta(
         buffer: &mut [u8],
         magic_byte: u8,
@@ -139,6 +150,24 @@ mod test_util {
         fn with_stream<S>(stream: S) -> Self::Stream<S>
         where
             S: Stream<Item = Result<Bytes, Error>> + Unpin;
+    }
+
+    /// Splits ClickHouse's native compression framing into `(uncompressed size, payload)` per frame.
+    #[cfg(any(feature = "lz4", feature = "zstd"))]
+    pub(super) fn split_frames(mut compressed: &[u8], magic_byte: u8) -> Vec<(usize, &[u8])> {
+        use super::native_framing::{CHECKSUM_SIZE, META_SIZE};
+
+        let mut frames = Vec::new();
+        while !compressed.is_empty() {
+            assert_eq!(compressed[CHECKSUM_SIZE], magic_byte);
+            let size = |offset: usize| {
+                u32::from_le_bytes(compressed[offset..offset + 4].try_into().unwrap()) as usize
+            };
+            let frame_end = CHECKSUM_SIZE + size(CHECKSUM_SIZE + 1);
+            frames.push((size(CHECKSUM_SIZE + 5), &compressed[META_SIZE..frame_end]));
+            compressed = &compressed[frame_end..];
+        }
+        frames
     }
 
     pub(super) fn test_decoder<D: TestDecoder>(compressed: Bytes, uncompressed: &[u8]) {
