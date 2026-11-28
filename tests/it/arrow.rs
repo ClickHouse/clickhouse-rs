@@ -13,6 +13,7 @@ use crate::user_agent::{PKG_VER, RUST_VER};
 
 #[tokio::test]
 async fn basic_query() {
+    skip_if_tcp!("the native protocol does not return data in the ArrowStream format");
     // `record_batch!()` sets all columns to be nullable
     let expected = RecordBatch::try_new(
         Schema::new(vec![
@@ -57,6 +58,7 @@ async fn basic_query() {
 
 #[tokio::test]
 async fn insert() {
+    skip_if_tcp!("the native protocol does not return data in the ArrowStream format");
     let client = prepare_database!();
 
     client
@@ -147,6 +149,7 @@ async fn insert() {
 
 #[tokio::test]
 async fn insert_custom() {
+    skip_if_tcp!("the native protocol does not return data in the ArrowStream format");
     let client = prepare_database!();
 
     client
@@ -238,6 +241,7 @@ async fn insert_custom() {
 
 #[tokio::test]
 async fn query_empty_response() {
+    skip_if_tcp!("the native protocol does not return data in the ArrowStream format");
     let client = get_client();
 
     // Don't error if the response doesn't return anything
@@ -250,6 +254,7 @@ async fn query_empty_response() {
 
 #[tokio::test]
 async fn ext_arrow_adds_user_agent() {
+    skip_if_tcp!("the native protocol does not return data in the ArrowStream format");
     let client = prepare_database!()
         // Ensure the product info added by `clickhouse-ext-arrow` is at the right place;
         // it shouldn't end up ahead of our end-user's product info here.
@@ -338,6 +343,7 @@ async fn schema_mismatch_throws_error() {
 
 #[tokio::test]
 async fn query_non_utf8() {
+    skip_if_tcp!("the native protocol does not return data in the ArrowStream format");
     let client = get_client();
 
     let mut cursor = client

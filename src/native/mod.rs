@@ -4,6 +4,7 @@
 use crate::error::Error;
 use crate::native::string::MaybeUtf8;
 use bytes::Bytes;
+use std::borrow::Cow;
 use std::ops::Index;
 
 use hashbrown::HashMap;
@@ -21,8 +22,14 @@ pub mod encode;
 pub(crate) mod reader;
 pub(crate) mod string;
 mod utils;
-mod varuint;
+pub(crate) mod varuint;
 pub(crate) mod writer;
+
+pub(crate) mod block_encoder;
+#[cfg(feature = "tcp")]
+pub(crate) mod from_row_binary;
+#[cfg(feature = "tcp")]
+pub(crate) mod to_row_binary;
 
 #[cfg(test)]
 mod tests;
@@ -35,6 +42,29 @@ pub struct Block {
 }
 
 impl Block {
+    /// A block without rows with columns of the given names and types, for tests.
+    #[cfg(all(test, feature = "tcp"))]
+    pub(crate) fn header(columns: &[(&str, &str)]) -> Self {
+        let columns = columns
+            .iter()
+            .map(|&(name, type_name)| Column {
+                name: MaybeUtf8::from_string(name.to_owned()),
+                data_type: DataTypeNode::new(type_name).expect("invalid type"),
+                type_name: Some(MaybeUtf8::from_string(type_name.to_owned())),
+                layout: Layout {
+                    kind: LayoutKind::Fixed {
+                        type_width: 0,
+                        data: Bytes::new(),
+                    },
+                    nulls: None,
+                    num_values: 0,
+                },
+            })
+            .collect();
+
+        Self::from_columns(columns, 0)
+    }
+
     fn from_columns(columns: Vec<Column>, num_rows: usize) -> Self {
         Self {
             column_names: columns
@@ -102,6 +132,8 @@ impl Index<usize> for Block {
 pub struct Column {
     name: MaybeUtf8,
     data_type: DataTypeNode,
+    /// The data type as the server wrote it, if the column was read.
+    type_name: Option<MaybeUtf8>,
     layout: Layout,
 }
 
@@ -144,6 +176,12 @@ enum LayoutKind {
         key_val_layouts: Box<[Layout; 2]>,
         end_indices: Box<[usize]>,
     },
+    /// `Variant` data: one discriminator per value (`0xFF` is `NULL`), and the values of each
+    /// variant type in the order of rows.
+    Variant {
+        discriminators: Bytes,
+        variants: Box<[Layout]>,
+    },
 }
 
 struct LayoutLowCardinality {
@@ -176,6 +214,23 @@ impl Column {
     /// Get the parsed data type of this column.
     pub fn data_type(&self) -> &DataTypeNode {
         &self.data_type
+    }
+
+    /// The width and the data of a fixed-width column without `NULL` values.
+    #[cfg(feature = "tcp")]
+    pub(crate) fn fixed_data(&self) -> Option<(usize, &[u8])> {
+        match (&self.layout.kind, &self.layout.nulls) {
+            (LayoutKind::Fixed { type_width, data }, None) => Some((*type_width, data)),
+            _ => None,
+        }
+    }
+
+    /// The data type as the server wrote it, or as [`DataTypeNode`] formats it.
+    pub(crate) fn type_name(&self) -> Cow<'_, [u8]> {
+        match &self.type_name {
+            Some(name) => Cow::Borrowed(name.as_bytes()),
+            None => Cow::Owned(self.data_type.to_string().into_bytes()),
+        }
     }
 
     /// Decode the data of this column as the given type.

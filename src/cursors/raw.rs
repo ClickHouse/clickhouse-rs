@@ -45,7 +45,15 @@ impl RawCursor {
                     state.data_size += chunk.data.len() as u64;
                     Ok(Some(chunk.data))
                 }
-                None => Ok(None),
+                None => {
+                    // The native TCP transport sends the summary at the end of the response.
+                    #[cfg(feature = "tcp")]
+                    if let Some(summary) = state.chunks.take_final_summary() {
+                        state.summary = Some(summary);
+                    }
+
+                    Ok(None)
+                }
             })
         } else {
             ready!(self.poll_resolve(cx)?);

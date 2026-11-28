@@ -208,6 +208,14 @@ impl Query {
             ).into()));
         }
 
+        // The native TCP transport gives the blocks to the cursor without encoding them.
+        #[cfg(feature = "tcp")]
+        if self.client.uses_tcp() {
+            let sql = self.sql.finish()?;
+            let blocks = crate::tcp::query_blocks(&self.client, sql)?;
+            return Ok(NativeCursor::from_blocks(blocks, span.exit()));
+        }
+
         // FIXME: use HTTP body compression instead of block-level compression
         self.client = self.client.with_compression(Compression::None);
 
@@ -248,6 +256,14 @@ impl Query {
 
     pub(crate) fn do_execute(self, default_format: Option<&str>) -> Result<Response> {
         let query = self.sql.finish()?;
+
+        self.client.check_transport()?;
+
+        #[cfg(feature = "tcp")]
+        if self.client.uses_tcp() {
+            return crate::tcp::query(&self.client, query, default_format)
+                .inspect_err(|err| err.record_in_current_span("error executing query"));
+        }
 
         let mut url =
             Url::parse(&self.client.url).map_err(|err| Error::InvalidParams(Box::new(err)))?;

@@ -69,9 +69,9 @@ impl Compression {
     }
 }
 
-/// Utils for writing ClickHouse's native compression framing (`compress=1`/`decompress=1`).
+/// Utils for ClickHouse's native compression framing (`compress=1`/`decompress=1`).
 #[cfg(any(feature = "lz4", feature = "zstd"))]
-mod native_framing {
+pub(crate) mod native_framing {
     use crate::error::Error;
     use bytes::BufMut;
 
@@ -117,6 +117,100 @@ mod native_framing {
     fn calc_checksum(buffer: &[u8]) -> u128 {
         let hash = cityhash_rs::cityhash_102_128(buffer);
         hash.rotate_right(64)
+    }
+
+    /// The maximum size of a frame, the same as `DBMS_MAX_COMPRESSED_SIZE` of ClickHouse.
+    #[cfg(feature = "tcp")]
+    const MAX_FRAME_SIZE: usize = 1 << 30;
+
+    /// The total size of the frame at the start of `data`, or `None` if `data` does not contain
+    /// the checksum and the header of the frame yet.
+    #[cfg(feature = "tcp")]
+    pub(crate) fn frame_len(data: &[u8]) -> Result<Option<usize>, Error> {
+        let Some((_, [_, c0, c1, c2, c3, ..])) = data.split_first_chunk::<CHECKSUM_SIZE>() else {
+            return Ok(None);
+        };
+
+        let compressed_size = u32::from_le_bytes([*c0, *c1, *c2, *c3]) as usize;
+
+        if !(HEADER_SIZE..=MAX_FRAME_SIZE).contains(&compressed_size) {
+            return Err(Error::decompression(format!(
+                "invalid size of compressed frame: {compressed_size}"
+            )));
+        }
+
+        Ok(Some(CHECKSUM_SIZE + compressed_size))
+    }
+
+    /// Verify the checksum of a complete frame and decompress it.
+    #[cfg(feature = "tcp")]
+    pub(crate) fn decompress_frame(frame: &[u8]) -> Result<bytes::Bytes, Error> {
+        /// `CompressionMethodByte::NONE`
+        const NONE_MAGIC: u8 = 0x02;
+        #[cfg(feature = "lz4")]
+        use super::lz4::LZ4_MAGIC;
+        #[cfg(feature = "zstd")]
+        use super::zstd::ZSTD_MAGIC;
+
+        let too_short = || Error::decompression("compressed frame is too short");
+        let (checksum, header_and_data) = frame
+            .split_first_chunk::<CHECKSUM_SIZE>()
+            .ok_or_else(too_short)?;
+        let (header, data) = header_and_data
+            .split_first_chunk::<HEADER_SIZE>()
+            .ok_or_else(too_short)?;
+
+        if calc_checksum(header_and_data) != u128::from_le_bytes(*checksum) {
+            return Err(Error::decompression(
+                "checksum mismatch in compressed frame",
+            ));
+        }
+
+        let [method, _, _, _, _, u0, u1, u2, u3] = *header;
+        let uncompressed_size = u32::from_le_bytes([u0, u1, u2, u3]) as usize;
+
+        if uncompressed_size > MAX_FRAME_SIZE {
+            return Err(Error::decompression(format!(
+                "invalid uncompressed size of frame: {uncompressed_size}"
+            )));
+        }
+
+        match method {
+            NONE_MAGIC if data.len() == uncompressed_size => {
+                Ok(bytes::Bytes::copy_from_slice(data))
+            }
+            #[cfg(feature = "lz4")]
+            LZ4_MAGIC => {
+                let mut output = vec![0; uncompressed_size];
+                let written = lz4_flex::block::decompress_into(data, &mut output)
+                    .map_err(Error::decompression)?;
+
+                if written != uncompressed_size {
+                    return Err(Error::decompression(format!(
+                        "LZ4 frame decompressed to {written} bytes, expected {uncompressed_size}"
+                    )));
+                }
+
+                Ok(output.into())
+            }
+            #[cfg(feature = "zstd")]
+            ZSTD_MAGIC => {
+                let output = ::zstd::bulk::decompress(data, uncompressed_size)
+                    .map_err(Error::decompression)?;
+
+                if output.len() != uncompressed_size {
+                    return Err(Error::decompression(format!(
+                        "ZSTD frame decompressed to {} bytes, expected {uncompressed_size}",
+                        output.len()
+                    )));
+                }
+
+                Ok(output.into())
+            }
+            other => Err(Error::decompression(format!(
+                "unsupported compression method in frame: {other:#04x}"
+            ))),
+        }
     }
 }
 

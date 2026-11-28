@@ -11,7 +11,7 @@ use zstd::stream::raw::Operation;
 const OUTPUT_BUFFER_SIZE: usize = 64 * 1024;
 
 // ClickHouse native compression framing.
-const ZSTD_MAGIC: u8 = 0x90;
+pub(crate) const ZSTD_MAGIC: u8 = 0x90;
 
 pub(crate) fn compress(uncompressed: &[u8], level: Option<i32>) -> Result<Bytes> {
     let level = level.unwrap_or(zstd::DEFAULT_COMPRESSION_LEVEL);

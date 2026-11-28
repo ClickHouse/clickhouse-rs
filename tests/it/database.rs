@@ -8,7 +8,7 @@ use clickhouse::Client;
 fn client_with_url_query(query: &str) -> Client {
     match crate::test_env() {
         crate::TestEnv::Local => {
-            Client::default().with_url(format!("http://localhost:8123?{query}"))
+            Client::default().with_url(format!("{}?{query}", crate::local_url()))
         }
         crate::TestEnv::Cloud => Client::default()
             .with_url(format!("{}?{query}", crate::get_cloud_url()))

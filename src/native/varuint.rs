@@ -3,7 +3,7 @@ use std::ops::ControlFlow;
 
 /// Write a `usize` as a native `VarUInt`
 #[allow(clippy::cast_possible_truncation)] // truncation is intentional here
-pub(super) fn write(mut buf: impl BufMut, mut uint: usize) {
+pub(crate) fn write(mut buf: impl BufMut, mut uint: usize) {
     while uint > 0x7F {
         let b = (uint as u8) | 0x80;
         buf.put_u8(b);
@@ -13,8 +13,14 @@ pub(super) fn write(mut buf: impl BufMut, mut uint: usize) {
     buf.put_u8(uint as u8);
 }
 
+/// Write `bytes` prefixed with their length as a `VarUInt` (the binary encoding of `String`).
+pub(crate) fn write_bytes(mut buf: impl BufMut, bytes: &[u8]) {
+    write(&mut buf, bytes.len());
+    buf.put_slice(bytes);
+}
+
 #[derive(Default)]
-pub(super) struct ParseVarUInt {
+pub(crate) struct ParseVarUInt {
     accumulator: u64,
     shift: u32,
 }
@@ -22,13 +28,13 @@ pub(super) struct ParseVarUInt {
 #[derive(Debug, thiserror::Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[error("VarUInt repr overflowed: {accumulator:#x} byte: {byte:#02x}")]
-pub(super) struct VarUIntOverflowError {
+pub(crate) struct VarUIntOverflowError {
     accumulator: u64,
     byte: u8,
 }
 
 impl ParseVarUInt {
-    pub(super) fn feed(
+    pub(crate) fn feed(
         &mut self,
         mut buf: impl Buf,
     ) -> Result<ControlFlow<u64>, VarUIntOverflowError> {

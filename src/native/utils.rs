@@ -132,6 +132,8 @@ pub(super) fn type_fixed_width(data_type: &DataTypeNode) -> Option<usize> {
         DataTypeNode::MultiLineString => None,
         DataTypeNode::Polygon => None,
         DataTypeNode::MultiPolygon => None,
+        // One placeholder byte per value
+        DataTypeNode::Nothing => Some(1),
         _ => None,
     }
 }

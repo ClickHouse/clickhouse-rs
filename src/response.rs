@@ -198,7 +198,20 @@ pub(crate) struct Chunk {
 // * Uses `Option<_>` to make this stream fused.
 // * Uses `Box<_>` in order to reduce the size of cursors.
 pub(crate) struct Chunks {
-    inner: Option<Box<DetectDbException<Decompress<IncomingStream>>>>,
+    inner: Option<ChunksInner>,
+    /// The summary at the end of the response of the native TCP transport.
+    #[cfg(feature = "tcp")]
+    final_summary: Option<Box<QuerySummary>>,
+}
+
+enum ChunksInner {
+    Http(Box<DetectDbException<Decompress<IncomingStream>>>),
+    /// Chunks converted from the blocks of the native TCP transport.
+    #[cfg(feature = "tcp")]
+    Tcp {
+        receiver: tokio::sync::mpsc::Receiver<Result<Chunk>>,
+        final_summary: tokio::sync::oneshot::Receiver<QuerySummary>,
+    },
 }
 
 impl Chunks {
@@ -214,12 +227,38 @@ impl Chunks {
             exception_tag,
         };
         Ok(Self {
-            inner: Some(Box::new(stream)),
+            inner: Some(ChunksInner::Http(Box::new(stream))),
+            #[cfg(feature = "tcp")]
+            final_summary: None,
         })
     }
 
+    #[cfg(feature = "tcp")]
+    pub(crate) fn from_receiver(
+        receiver: tokio::sync::mpsc::Receiver<Result<Chunk>>,
+        final_summary: tokio::sync::oneshot::Receiver<QuerySummary>,
+    ) -> Self {
+        Self {
+            inner: Some(ChunksInner::Tcp {
+                receiver,
+                final_summary,
+            }),
+            final_summary: None,
+        }
+    }
+
+    /// The summary at the end of the response, once the response is read.
+    #[cfg(feature = "tcp")]
+    pub(crate) fn take_final_summary(&mut self) -> Option<Box<QuerySummary>> {
+        self.final_summary.take()
+    }
+
     pub(crate) fn empty() -> Self {
-        Self { inner: None }
+        Self {
+            inner: None,
+            #[cfg(feature = "tcp")]
+            final_summary: None,
+        }
     }
 
     #[cfg(feature = "futures03")]
@@ -234,7 +273,23 @@ impl Stream for Chunks {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // We use `take()` to make the stream fused, including the case of panics.
         if let Some(mut stream) = self.inner.take() {
-            let res = Pin::new(&mut stream).poll_next(cx);
+            let res = match &mut stream {
+                ChunksInner::Http(stream) => Pin::new(stream).poll_next(cx),
+                #[cfg(feature = "tcp")]
+                ChunksInner::Tcp {
+                    receiver,
+                    final_summary,
+                } => {
+                    let res = receiver.poll_recv(cx);
+
+                    if let Poll::Ready(None) = res {
+                        // Sent before the end of the data.
+                        self.final_summary = final_summary.try_recv().ok().map(Box::new);
+                    }
+
+                    res
+                }
+            };
 
             if matches!(res, Poll::Pending | Poll::Ready(Some(Ok(_)))) {
                 self.inner = Some(stream);

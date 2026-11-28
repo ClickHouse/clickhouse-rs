@@ -237,6 +237,7 @@ async fn example(client: clickhouse::Client) -> clickhouse::error::Result<()> {
 * `time` — adds `serde::time` to work with [time](https://docs.rs/time) crate.
 * `chrono` — adds `serde::chrono` to work with [chrono](https://docs.rs/chrono) crate.
 * `opentelemetry` — [propagate OpenTelemetry context][otel-context] to [ClickHouse server][otel-in-ch].
+* `tcp` — enables the native TCP protocol for `tcp://` and `tcps://` URLs. See [Native TCP Protocol](#native-tcp-protocol).
 
 [otel-context]: https://opentelemetry.io/docs/concepts/context-propagation/
 [otel-in-ch]: https://clickhouse.com/docs/operations/opentelemetry
@@ -259,10 +260,70 @@ How to choose between all these features? Here are some considerations:
 * To be more environment-agnostic, prefer `rustls-tls` over `native-tls`.
 * Enable `rustls-tls-native-roots` or `native-tls` if you want to use self-signed certificates.
 
+The TLS features also apply to `tcps://` URLs of the `tcp` feature.
+
 [native-tls]: https://docs.rs/native-tls
 [rustls]: https://docs.rs/rustls
 [webpki-roots]: https://docs.rs/webpki-roots
 [rustls-native-certs]: https://docs.rs/rustls-native-certs
+
+## Native TCP Protocol
+
+By default, the client uses the HTTP interface of ClickHouse.
+With the `tcp` feature, the client can also use the [native TCP protocol][native-protocol].
+To use it, set a `tcp://` URL (port `9000` by default) or a `tcps://` URL (TLS, port `9440` by default).
+The API does not change:
+
+```rust,no_run
+# #[cfg(feature = "tcp")]
+# async fn example() -> clickhouse::error::Result<()> {
+use clickhouse::Client;
+
+let client = Client::default()
+    .with_url("tcp://localhost:9000")
+    .with_user("name")
+    .with_password("123")
+    .with_database("test");
+
+let count: u64 = client.query("SELECT count() FROM some").fetch_one().await?;
+# Ok(()) }
+```
+
+The client keeps a pool of connections, which clones of the client share.
+By default, it keeps up to 32 idle connections for each server and user, for 60 seconds.
+To change this, use `Client::with_tcp_pool()`, e.g. set `TcpPoolOptions::with_max_idle_connections()`
+to the number of concurrent queries of the application.
+The server sends data as columnar blocks. The client converts them to the format that the cursor reads.
+For `INSERT`, the client converts rows to blocks with the column types of the table.
+
+These items are different from the HTTP interface:
+* `Query::fetch_bytes()` supports only the `Native`, `RowBinary`, `RowBinaryWithNames` and
+  `RowBinaryWithNamesAndTypes` formats. The server does not format data for the native protocol.
+  Other formats return `Error::Unsupported`. Thus, `clickhouse-ext-arrow` cannot read data.
+* `InsertFormatted` streams data in the `RowBinary` formats and `Native`. For other formats, the client
+  keeps all data in memory and sends it after the query text when `end()` is called (maximum 1 GiB).
+* Headers (`Client::with_header()`) and custom HTTP clients have no effect.
+* The `session_id` setting reserves a connection for the session. The `session_timeout`,
+  `session_check` and `close_session` settings work as with the HTTP interface.
+* Without a session, a statement that changes the session (`SET`, `USE`, temporary tables, transactions)
+  closes its connection after it completes. Thus, the change has no effect on other queries.
+* Roles are set with `SET ROLE` in the session of the connection. Roles also apply to `INSERT`.
+* `QuerySummary` contains the progress and the [profile events] of the query, for example
+  `summary.get("ReadCompressedBytes")` or `summary.get("SelectedRows")`. Before the cursor reads
+  all rows, it has the values that the server sent before the first block (or all values, if
+  `wait_end_of_query = 1`). After the cursor reads all rows, it has the final values.
+* `Dynamic` and `AggregateFunction` columns are not supported. To read `JSON` columns,
+  set `output_format_binary_write_json_as_string = 1`, as with the HTTP interface.
+* The server compresses data with `network_compression_method` (LZ4 by default, ZSTD since ClickHouse 26.9).
+  If the method of `Compression` is different, the client requests it. A user with `readonly = 1` cannot
+  change settings: then the client uses the method of the server if the client can decompress it,
+  else it does not use compression.
+* `test::Mock` uses HTTP.
+
+The native protocol is tested with ClickHouse 22.8 and newer. Query parameters require ClickHouse 22.8 or newer.
+
+[native-protocol]: https://clickhouse.com/docs/native-protocol/basics
+[profile events]: https://clickhouse.com/docs/operations/system-tables/events
 
 ## Data Types
 

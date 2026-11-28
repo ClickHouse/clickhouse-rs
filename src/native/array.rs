@@ -37,6 +37,10 @@ pub struct TupleIter<'a> {
 }
 
 enum IterKind<'a> {
+    /// Data that cannot be decoded: yields a single error.
+    Unsupported {
+        reported: bool,
+    },
     Fixed(slice::ChunksExact<'a, u8>),
     Variable {
         next_start: usize,
@@ -176,6 +180,10 @@ impl<'a> ArrayData<'a> {
                     keys: lc.keys[self.indices.clone()].iter(),
                     lc,
                 },
+                // No Rust type decodes `Variant` yet; `Decode::compatible()` rejects it first.
+                LayoutKind::Variant { .. } => IterKind::Unsupported {
+                    reported: self.indices.is_empty(),
+                },
             },
             nulls: self
                 .layout
@@ -208,6 +216,16 @@ where
         }
 
         match &mut self.kind {
+            IterKind::Unsupported { reported } => {
+                if std::mem::replace(reported, true) {
+                    return None;
+                }
+
+                Some(Err(Error::SchemaMismatch(format!(
+                    "decoding data type {} is not supported",
+                    self.elem_type
+                ))))
+            }
             IterKind::Fixed(iter) => {
                 let native_bytes = iter.next()?;
 
@@ -353,6 +371,9 @@ where
             IterKind::Tuple { elem_indices, .. } => elem_indices.size_hint(),
             IterKind::Map { end_indices, .. } => end_indices.size_hint(),
             IterKind::LowCardinality { keys, .. } => keys.size_hint(),
+            IterKind::Unsupported { reported } => {
+                (usize::from(!reported), Some(usize::from(!reported)))
+            }
         }
     }
 }

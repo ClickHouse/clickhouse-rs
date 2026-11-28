@@ -1,6 +1,8 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(feature = "tcp")]
+pub use self::tcp::TcpPoolOptions;
 pub use self::{
     compression::Compression,
     query_summary::QuerySummary,
@@ -45,6 +47,8 @@ mod response;
 mod row;
 mod row_metadata;
 mod rowbinary;
+#[cfg(feature = "tcp")]
+mod tcp;
 #[cfg(feature = "inserter")]
 mod ticks;
 
@@ -72,6 +76,9 @@ pub struct Client {
     stack_product_info: Vec<ProductInfo>,
     validation: bool,
     insert_metadata_cache: Arc<InsertMetadataCache>,
+    /// Connections of the native TCP transport, shared by clones like the HTTP transport.
+    #[cfg(feature = "tcp")]
+    tcp: Arc<tcp::Pool>,
 
     #[cfg(feature = "test-util")]
     mocked: bool,
@@ -167,6 +174,8 @@ impl Client {
             stack_product_info: Vec::default(),
             validation: true,
             insert_metadata_cache: Arc::new(InsertMetadataCache::default()),
+            #[cfg(feature = "tcp")]
+            tcp: Arc::default(),
             #[cfg(feature = "test-util")]
             mocked: false,
         }
@@ -720,6 +729,33 @@ impl Client {
         self.insert_metadata_cache.0.write().await.clear();
     }
 
+    /// Use a new connection pool with `options` for the native TCP transport (`tcp://` and
+    /// `tcps://` URLs).
+    ///
+    /// Clones of the client share the pool, like the HTTP transport. Clients created before
+    /// this call keep the previous pool. See [`TcpPoolOptions`] for an example.
+    #[cfg(feature = "tcp")]
+    pub fn with_tcp_pool(mut self, options: TcpPoolOptions) -> Self {
+        self.tcp = Arc::new(tcp::Pool::new(options));
+        self
+    }
+
+    /// Returns `true` if the URL selects the native TCP transport (`tcp://` or `tcps://`).
+    pub(crate) fn uses_tcp(&self) -> bool {
+        cfg!(feature = "tcp") && is_tcp_url(&self.url)
+    }
+
+    /// Return an error if the URL selects the native TCP transport but it is not enabled.
+    pub(crate) fn check_transport(&self) -> Result<()> {
+        if !cfg!(feature = "tcp") && is_tcp_url(&self.url) {
+            return Err(Error::Unsupported(
+                "`tcp://` and `tcps://` URLs require the `tcp` feature".into(),
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Used internally to check if the validation mode is enabled,
     /// as it takes into account the `test-util` feature flag.
     #[inline]
@@ -835,6 +871,13 @@ impl Client {
         write_lock.insert(raw_table_name.to_string(), metadata.clone());
         Ok(metadata)
     }
+}
+
+/// Returns `true` if `url` selects the native TCP transport: `tcp://` or `tcps://`.
+fn is_tcp_url(url: &str) -> bool {
+    url.split_once("://").is_some_and(|(scheme, _)| {
+        scheme.eq_ignore_ascii_case("tcp") || scheme.eq_ignore_ascii_case("tcps")
+    })
 }
 
 /// Extracts the last non-empty `database` query parameter from the URL, if any.

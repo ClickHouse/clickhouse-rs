@@ -222,6 +222,7 @@ impl BlockBuilder {
             .drain(..)
             .map(|col| Column {
                 name: col.name,
+                type_name: None,
                 data_type: col.data_type,
                 layout: col.layout.into_layout(),
             })

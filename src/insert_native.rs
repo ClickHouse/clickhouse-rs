@@ -28,13 +28,16 @@ impl InsertNative {
 
         sql.push_str(" FORMAT Native");
 
+        // FIXME: use HTTP body compression instead of block-level compression
+        // The native TCP transport compresses the blocks that it sends.
+        let client = if client.uses_tcp() {
+            client.clone()
+        } else {
+            client.clone().with_compression(Compression::None)
+        };
+
         Self {
-            writer: BlockWriter::new(InsertFormatted::new(
-                // FIXME: use HTTP body compression instead of block-level compression
-                &client.clone().with_compression(Compression::None),
-                sql,
-                Some(table_name),
-            )),
+            writer: BlockWriter::new(InsertFormatted::new(&client, sql, Some(table_name))),
         }
     }
 

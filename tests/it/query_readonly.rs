@@ -188,6 +188,20 @@ async fn run_fetch(query: Query) -> SystemSettingsRow {
 }
 
 async fn run_fetch_bytes(query: Query) -> Vec<u8> {
+    if crate::uses_tcp() {
+        // The native protocol cannot return `LineAsString`: read the `String` from `RowBinary`
+        // and convert it to the same bytes.
+        let bytes = query
+            .fetch_bytes("RowBinary")
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let (&len, value) = bytes.split_first().expect("empty RowBinary response");
+        assert_eq!(usize::from(len), value.len(), "expected one short string");
+        return [value, b"\n"].concat();
+    }
+
     let bytes = query
         .fetch_bytes("LineAsString")
         .unwrap()

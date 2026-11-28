@@ -42,6 +42,9 @@ const BUFFER_SIZE: usize = 256 * 1024;
 #[must_use]
 pub struct InsertFormatted {
     state: InsertState,
+    /// The native TCP transport compresses the data itself, so chunks are sent uncompressed.
+    #[cfg(feature = "tcp")]
+    tcp: bool,
     #[cfg(any(feature = "lz4", feature = "zstd"))]
     compression: Compression,
     send_timeout: Option<Timeout>,
@@ -172,6 +175,8 @@ impl InsertFormatted {
                 clickhouse.request.sent_bytes = tracing::field::Empty,
                 clickhouse.request.encoded_bytes = tracing::field::Empty,
             ),
+            #[cfg(feature = "tcp")]
+            tcp: client.uses_tcp(),
             state: InsertState::NotStarted {
                 client: Box::new(client.clone()),
                 sql,
@@ -345,7 +350,7 @@ impl InsertFormatted {
         let original_size = to_u64_saturating(data.len());
 
         #[cfg(any(feature = "lz4", feature = "zstd"))]
-        let data = if self.compression.is_enabled() {
+        let data = if self.compresses_chunks() {
             CompressedData::new(&data, self.compression)?.compressed
         } else {
             data
@@ -492,6 +497,22 @@ impl InsertFormatted {
 
         tracing::trace!("beginning insert");
 
+        client.check_transport()?;
+
+        #[cfg(feature = "tcp")]
+        if self.tcp {
+            let (sender, body) = RequestBody::chunked();
+            let handle = crate::tcp::spawn_insert(client, sql.to_owned(), body)?;
+
+            self.state = InsertState::Active {
+                handle,
+                sender,
+                sent_bytes: 0,
+                encoded_bytes: 0,
+            };
+            return Ok(());
+        }
+
         let mut url = Url::parse(&client.url).map_err(|err| Error::InvalidParams(err.into()))?;
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -544,6 +565,17 @@ impl InsertFormatted {
             encoded_bytes: 0,
         };
         Ok(())
+    }
+
+    /// Returns `true` if the chunks sent to the server must be compressed.
+    #[cfg(any(feature = "lz4", feature = "zstd"))]
+    fn compresses_chunks(&self) -> bool {
+        #[cfg(feature = "tcp")]
+        if self.tcp {
+            return false;
+        }
+
+        self.compression.is_enabled()
     }
 
     pub(crate) fn abort(&mut self) {
@@ -703,7 +735,7 @@ impl BufInsertFormatted {
         let original_size: u64 = data.len().try_into().unwrap_or(u64::MAX);
 
         #[cfg(any(feature = "lz4", feature = "zstd"))]
-        let data = if self.insert.compression.is_enabled() {
+        let data = if self.insert.compresses_chunks() {
             CompressedData::new(&data, self.insert.compression)?.compressed
         } else {
             data
@@ -921,7 +953,40 @@ mod compression {
                 ));
             }
 
+            #[cfg(feature = "tcp")]
+            if self.tcp {
+                let data_size = data.original_size;
+                return self
+                    .send_inner(
+                        decompress_frames(
+                            &data.compressed,
+                            usize::try_from(data_size).unwrap_or(0),
+                        )?,
+                        data_size,
+                    )
+                    .await;
+            }
+
             self.send_inner(data.compressed, data.original_size).await
         }
+    }
+
+    /// Decompress concatenated frames of ClickHouse's native compression.
+    #[cfg(feature = "tcp")]
+    fn decompress_frames(mut data: &[u8], original_size: usize) -> Result<Bytes> {
+        use crate::compression::native_framing::{decompress_frame, frame_len};
+
+        let mut decompressed = bytes::BytesMut::with_capacity(original_size);
+
+        while !data.is_empty() {
+            let (frame, rest) = frame_len(data)?
+                .and_then(|len| data.split_at_checked(len))
+                .ok_or_else(|| Error::decompression("compressed frame is too short"))?;
+
+            decompressed.extend_from_slice(&decompress_frame(frame)?);
+            data = rest;
+        }
+
+        Ok(decompressed.freeze())
     }
 }

@@ -109,6 +109,8 @@ pub enum DataTypeNode {
     MultiLineString,
     Polygon,
     MultiPolygon,
+    /// The type of `NULL` without another type, e.g. `Nullable(Nothing)` or `Array(Nothing)`.
+    Nothing,
 }
 
 impl DataTypeNode {
@@ -147,6 +149,7 @@ impl DataTypeNode {
             "MultiLineString" => Ok(Self::MultiLineString),
             "Polygon" => Ok(Self::Polygon),
             "MultiPolygon" => Ok(Self::MultiPolygon),
+            "Nothing" => Ok(Self::Nothing),
 
             str if str.starts_with("JSON(") => parse_json(str),
 
@@ -165,6 +168,7 @@ impl DataTypeNode {
             str if str.starts_with("Enum") => parse_enum(str),
             str if str.starts_with("Map") => parse_map(str),
             str if str.starts_with("Tuple") => parse_tuple(str),
+            str if str.starts_with("Nested(") => parse_nested(str),
             str if str.starts_with("Variant") => parse_variant(str),
 
             str if str.starts_with("SimpleAggregateFunction(") => {
@@ -254,6 +258,7 @@ impl DataTypeNode {
             MultiLineString => "MultiLineString",
             Polygon => "Polygon",
             MultiPolygon => "MultiPolygon",
+            Nothing => "Nothing",
             _ => return None,
         })
     }
@@ -371,6 +376,7 @@ impl Display for DataTypeNode {
             MultiLineString => write!(f, "MultiLineString"),
             Polygon => write!(f, "Polygon"),
             MultiPolygon => write!(f, "MultiPolygon"),
+            Nothing => write!(f, "Nothing"),
             JsonWithHint(json) => format_json_with_hint(json, f),
         }
     }
@@ -868,7 +874,7 @@ fn remove_json_header(input: &str) -> Result<&str, TypesError> {
 fn parse_tuple(input: &str) -> Result<DataTypeNode, TypesError> {
     if input.len() > 7 {
         let inner_types_str = &input[6..input.len() - 1];
-        let inner_types = parse_inner_types(inner_types_str)?;
+        let inner_types = parse_inner_types_with(inner_types_str, parse_tuple_element)?;
         if inner_types.is_empty() {
             return Err(TypesError::TypeParsingError(format!(
                 "Expected at least one inner element in a Tuple from input {input}"
@@ -899,6 +905,61 @@ fn parse_variant(input: &str) -> Result<DataTypeNode, TypesError> {
 ///  let input2 = "Tuple(Enum8('(' = 1))";       // the result is  `(`
 /// ```
 fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, TypesError> {
+    parse_inner_types_with(input, DataTypeNode::new)
+}
+
+/// `Nested(a T, b U)` is `Array(Tuple(a T, b U))`.
+fn parse_nested(input: &str) -> Result<DataTypeNode, TypesError> {
+    let inner = input
+        .strip_prefix("Nested(")
+        .and_then(|inner| inner.strip_suffix(')'))
+        .filter(|inner| !inner.is_empty())
+        .ok_or_else(|| {
+            TypesError::TypeParsingError(format!(
+                "Invalid Nested format, expected Nested(name1 Type1, ...), got {input}"
+            ))
+        })?;
+
+    Ok(DataTypeNode::Array(Box::new(parse_tuple(&format!(
+        "Tuple({inner})"
+    ))?)))
+}
+
+/// An element of a `Tuple`, which can have a name: `a UInt8` or `\`a b\` UInt8`.
+fn parse_tuple_element(input: &str) -> Result<DataTypeNode, TypesError> {
+    let error = match DataTypeNode::new(input) {
+        Ok(data_type) => return Ok(data_type),
+        Err(error) => error,
+    };
+
+    let name_len = if input.starts_with('`') {
+        // A quoted name ends with an unescaped backquote.
+        let mut escaped = false;
+        input
+            .char_indices()
+            .skip(1)
+            .find(|&(_, c)| {
+                let end = !escaped && c == '`';
+                escaped = !escaped && c == '\\';
+                end
+            })
+            .map(|(index, _)| index + 1)
+    } else {
+        input
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .filter(|&len| len > 0)
+    };
+
+    match name_len.and_then(|len| input[len..].strip_prefix(' ')) {
+        Some(data_type) => DataTypeNode::new(data_type),
+        None => Err(error),
+    }
+}
+
+fn parse_inner_types_with(
+    input: &str,
+    parse_element: fn(&str) -> Result<DataTypeNode, TypesError>,
+) -> Result<Vec<DataTypeNode>, TypesError> {
     let mut inner_types: Vec<DataTypeNode> = Vec::new();
 
     let input_bytes = input.as_bytes();
@@ -929,7 +990,7 @@ fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, TypesError> {
                             &input[last_element_index..]
                         ))
                     })?;
-                let data_type = DataTypeNode::new(&data_type_str)?;
+                let data_type = parse_element(&data_type_str)?;
                 inner_types.push(data_type);
                 // Skip ', ' (comma and space)
                 if i + 2 <= input_bytes.len() && input_bytes[i + 1] == b' ' {
@@ -953,7 +1014,7 @@ fn parse_inner_types(input: &str) -> Result<Vec<DataTypeNode>, TypesError> {
                     &input[last_element_index..]
                 ))
             })?;
-        let data_type = DataTypeNode::new(&data_type_str)?;
+        let data_type = parse_element(&data_type_str)?;
         inner_types.push(data_type);
     }
 
@@ -1823,6 +1884,55 @@ mod tests {
             ])
         );
         assert!(DataTypeNode::new("Variant").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_named_tuple() {
+        assert_eq!(
+            DataTypeNode::new("Tuple(a UInt8, b String)").unwrap(),
+            DataTypeNode::Tuple(vec![DataTypeNode::UInt8, DataTypeNode::String])
+        );
+        assert_eq!(
+            DataTypeNode::new("Tuple(`a b` Nullable(String), `c\\`d` Array(Tuple(x UInt8)))")
+                .unwrap(),
+            DataTypeNode::Tuple(vec![
+                DataTypeNode::Nullable(Box::new(DataTypeNode::String)),
+                DataTypeNode::Array(Box::new(DataTypeNode::Tuple(vec![DataTypeNode::UInt8]))),
+            ])
+        );
+        assert_eq!(
+            DataTypeNode::new("Tuple(e Enum8('a b' = 1), d DateTime('UTC'))").unwrap(),
+            DataTypeNode::Tuple(vec![
+                DataTypeNode::Enum(EnumType::Enum8, HashMap::from([(1, "a b".to_string())])),
+                DataTypeNode::DateTime(Some("UTC".to_string())),
+            ])
+        );
+        // A name without a type, or an unknown type, is still an error.
+        assert!(DataTypeNode::new("Tuple(a)").is_err());
+        assert!(DataTypeNode::new("Tuple(a Foo)").is_err());
+        assert!(DataTypeNode::new("Tuple(`a UInt8)").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_nested() {
+        assert_eq!(
+            DataTypeNode::new("Nested(id UInt32, value String)").unwrap(),
+            DataTypeNode::Array(Box::new(DataTypeNode::Tuple(vec![
+                DataTypeNode::UInt32,
+                DataTypeNode::String
+            ])))
+        );
+        assert!(DataTypeNode::new("Nested()").is_err());
+    }
+
+    #[test]
+    fn test_data_type_new_nothing() {
+        assert_eq!(DataTypeNode::new("Nothing").unwrap(), DataTypeNode::Nothing);
+        assert_eq!(
+            DataTypeNode::new("Nullable(Nothing)").unwrap(),
+            DataTypeNode::Nullable(Box::new(DataTypeNode::Nothing))
+        );
+        assert_eq!(DataTypeNode::Nothing.to_string(), "Nothing");
     }
 
     #[test]
